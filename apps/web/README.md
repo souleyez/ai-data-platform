@@ -45,7 +45,7 @@ http://localhost:3000
 
 ## 下一步建议
 
-1. 拆分组件（Sidebar / ChatPanel / InsightPanel）
-2. 接入 ECharts
-3. 对接真实后端接口
-4. 抽离统一类型定义
+1. 对接真实后端接口
+2. 抽离统一类型定义 / schema 校验
+3. 引入真实数据源 mock server
+4. 开始接 apps/api
