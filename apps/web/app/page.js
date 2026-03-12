@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import ChatPanel from './components/ChatPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
+import { buildApiUrl } from './lib/config';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
 export default function HomePage() {
@@ -23,7 +24,7 @@ export default function HomePage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch(buildApiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: text }),

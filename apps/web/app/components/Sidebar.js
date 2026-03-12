@@ -13,9 +13,12 @@ export default function Sidebar({ sourceItems = [] }) {
 
       <nav className="nav-section">
         <div className="nav-title">工作台</div>
-        {NAV_ITEMS.map((item, index) => (
-          <a key={item} className={`nav-item ${index === 0 ? 'active' : ''}`}>{item}</a>
-        ))}
+        {NAV_ITEMS.map((item, index) => {
+          const href = item === '文档中心' ? '/documents' : '#';
+          return (
+            <a key={item} href={href} className={`nav-item ${index === 0 ? 'active' : ''}`}>{item}</a>
+          );
+        })}
       </nav>
 
       <section className="side-card">

@@ -33,8 +33,9 @@ http://localhost:3000
 - 指标卡片
 - 趋势图占位
 - 风险合同表格
-- `/api/chat` mock 接口
-- 前端通过 fetch 调用 mock API
+- 前端通过 fetch 调用独立 `apps/api`
+- 首页调用 `POST /api/chat`
+- 文档中心调用 `GET /api/documents`
 
 ## 当前 mock 接口
 
