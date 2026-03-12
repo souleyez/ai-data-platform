@@ -1,0 +1,11 @@
+{
+  "name": "ai-data-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10",
+  "scripts": {
+    "dev": "echo 'TODO: wire web/api/worker dev orchestration'",
+    "build": "echo 'TODO: build all apps'",
+    "lint": "echo 'TODO: add lint config'"
+  }
+}
