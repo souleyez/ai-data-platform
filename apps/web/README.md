@@ -33,10 +33,19 @@ http://localhost:3000
 - 指标卡片
 - 趋势图占位
 - 风险合同表格
+- `/api/chat` mock 接口
+- 前端通过 fetch 调用 mock API
+
+## 当前 mock 接口
+
+- 路径：`/api/chat`
+- 方法：`POST`
+- 入参：`{ prompt: string }`
+- 返回：`scenario + message + panel`
 
 ## 下一步建议
 
 1. 拆分组件（Sidebar / ChatPanel / InsightPanel）
-2. 接入 mock chat API
-3. 接入 ECharts
-4. 对接真实后端接口
+2. 接入 ECharts
+3. 对接真实后端接口
+4. 抽离统一类型定义
