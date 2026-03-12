@@ -37,6 +37,9 @@ export default function DocumentDetailPage({ params }) {
         {error ? <p>{error}</p> : null}
         {data ? (
           <section className="documents-layout">
+            <div className="topbar-actions">
+              <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
+            </div>
             <section className="card table-card">
               <div className="panel-header"><div><h3>{data.name}</h3><p>{data.path}</p></div></div>
               <table>
@@ -46,6 +49,7 @@ export default function DocumentDetailPage({ params }) {
                   <tr><th>解析状态</th><td>{data.parseStatus}</td></tr>
                   <tr><th>提取字符数</th><td>{data.extractedChars}</td></tr>
                   <tr><th>摘要</th><td className="summary-cell">{data.summary}</td></tr>
+                  <tr><th>原文摘录</th><td className="summary-cell">{data.excerpt}</td></tr>
                 </tbody>
               </table>
             </section>

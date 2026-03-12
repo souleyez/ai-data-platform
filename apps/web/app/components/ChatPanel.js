@@ -27,10 +27,21 @@ export default function ChatPanel({
               <p>{message.content}</p>
               {message.meta ? <div className="message-meta">{message.meta}</div> : null}
               {message.references?.length ? (
-                <div className="message-refs">
-                  {message.references.map((ref) => (
-                    <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
-                  ))}
+                <div className="message-ref-block">
+                  <div className="message-ref-title">引用文档</div>
+                  <div className="message-refs">
+                    {message.references.map((ref) => (
+                      <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
+                    ))}
+                  </div>
+                  <div className="message-ref-list">
+                    {message.references.map((ref) => (
+                      <div key={`${ref.id}-summary`} className="message-ref-item">
+                        <strong>{ref.name}</strong>
+                        <span>{ref.summary}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>

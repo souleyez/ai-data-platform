@@ -90,7 +90,11 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 }
 .user-bubble { background: #2463eb; color: white; border: 0; }
 .message-meta { margin-top: 8px; color: var(--subtle); font-size: 12px; }
-.message-refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.message-ref-block { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #dbe7f5; }
+.message-ref-title { font-size: 12px; color: var(--subtle); margin-bottom: 8px; font-weight: 600; }
+.message-refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.message-ref-list { display: grid; gap: 8px; margin-top: 10px; }
+.message-ref-item { display: grid; gap: 4px; font-size: 12px; color: var(--subtle); }
 .ref-chip {
   display: inline-flex;
   align-items: center;
@@ -101,6 +105,7 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   font-size: 12px;
   text-decoration: none;
 }
+.back-link { text-decoration: none; display: inline-flex; align-items: center; }
 .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; margin-bottom: 14px; }
 .quick-actions button { background: #eef4ff; color: #1d4ed8; }
 .chat-input-row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; align-items: end; }

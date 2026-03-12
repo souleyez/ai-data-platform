@@ -9,6 +9,7 @@ export type ParsedDocument = {
   category: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   summary: string;
+  excerpt: string;
   extractedChars: number;
 };
 
@@ -20,10 +21,20 @@ export function detectCategory(filePath: string) {
   return 'general';
 }
 
+function normalizeText(text: string) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 function summarize(text: string, fallback: string) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeText(text);
   if (!normalized) return fallback;
   return normalized.slice(0, 140) + (normalized.length > 140 ? '…' : '');
+}
+
+function excerpt(text: string, fallback: string) {
+  const normalized = normalizeText(text);
+  if (!normalized) return fallback;
+  return normalized.slice(0, 360) + (normalized.length > 360 ? '…' : '');
 }
 
 async function extractText(filePath: string, ext: string) {
@@ -56,6 +67,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
         category,
         parseStatus: 'unsupported',
         summary: '当前版本尚未支持该文件类型的内容提取。',
+        excerpt: '当前版本尚未支持该文件类型的内容提取。',
         extractedChars: 0,
       };
     }
@@ -67,6 +79,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
       category,
       parseStatus: 'parsed',
       summary: summarize(text, '文档内容为空或暂未提取到文本。'),
+      excerpt: excerpt(text, '文档内容为空或暂未提取到文本。'),
       extractedChars: text.length,
     };
   } catch {
@@ -77,6 +90,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
       category,
       parseStatus: 'error',
       summary: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
+      excerpt: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
       extractedChars: 0,
     };
   }
