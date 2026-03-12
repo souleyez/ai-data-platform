@@ -123,10 +123,10 @@ textarea {
 .stat-trend.warning { color: var(--warning); }
 .stat-trend.neutral { color: var(--subtle); }
 .chart-card, .table-card { padding: 18px; }
-.fake-chart { height: 260px; display: flex; align-items: end; gap: 14px; padding: 14px 8px 6px; }
-.bar { flex: 1; background: linear-gradient(180deg, #9cc2ff, #3b82f6); border-radius: 16px 16px 10px 10px; min-height: 40px; position: relative; }
-.bar.active { background: linear-gradient(180deg, #60a5fa, #1d4ed8); }
-.bar span { position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--subtle); }
+.echarts-canvas {
+  width: 100%;
+  height: 320px;
+}
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--subtle); font-weight: 600; }

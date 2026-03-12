@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import TrendChart from './components/TrendChart';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
 export default function HomePage() {
@@ -35,7 +36,7 @@ export default function HomePage() {
       const data = await response.json();
       setActiveScenario(data.scenario || 'default');
       setMessages((prev) => [...prev, data.message]);
-    } catch (error) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -175,13 +176,7 @@ export default function HomePage() {
                   <p>{panel.chartSubtitle}</p>
                 </div>
               </div>
-              <div className="fake-chart bars">
-                {panel.chartBars.map((bar) => (
-                  <div key={bar.month} className={`bar${bar.active ? ' active' : ''}`} style={{ height: bar.height }}>
-                    <span>{bar.month}</span>
-                  </div>
-                ))}
-              </div>
+              <TrendChart bars={panel.chartBars} title={panel.chartTitle} />
             </section>
 
             <section className="card table-card">
