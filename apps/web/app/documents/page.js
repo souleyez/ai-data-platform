@@ -155,7 +155,7 @@ export default function DocumentsPage() {
                   <tr>
                     <th>文件名</th>
                     <th>分类</th>
-                    <th>扩展名</th>
+                    <th>业务结果</th>
                     <th>解析状态</th>
                     <th>摘要</th>
                   </tr>
@@ -165,7 +165,7 @@ export default function DocumentsPage() {
                     <tr key={item.path}>
                       <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
                       <td>{item.category}</td>
-                      <td>{item.ext}</td>
+                      <td className="summary-cell">{item.category === 'contract' ? `风险等级：${item.riskLevel || 'unknown'}` : item.category === 'technical' ? `主题：${(item.topicTags || []).join('、') || '未识别'}` : item.ext}</td>
                       <td>{item.parseStatus}</td>
                       <td className="summary-cell">{item.summary}</td>
                     </tr>

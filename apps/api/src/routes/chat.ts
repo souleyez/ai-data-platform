@@ -18,7 +18,14 @@ export async function registerChatRoutes(app: FastifyInstance) {
 
     const docContext = matchedDocs.length
       ? `\n\n文档相关摘要：${matchedDocs
-          .map((item, index) => `${index + 1}. ${item.name}：${item.summary}`)
+          .map((item, index) => {
+            const extra = item.category === 'contract'
+              ? `（风险等级：${item.riskLevel || 'unknown'}）`
+              : item.category === 'technical'
+                ? `（主题：${(item.topicTags || []).join('、') || '未识别'}）`
+                : '';
+            return `${index + 1}. ${item.name}${extra}：${item.summary}`;
+          })
           .join(' ')}`
       : '';
 
@@ -33,6 +40,9 @@ export async function registerChatRoutes(app: FastifyInstance) {
           id: Buffer.from(item.path).toString('base64url'),
           name: item.name,
           summary: item.summary,
+          category: item.category,
+          riskLevel: item.riskLevel,
+          topicTags: item.topicTags,
         })),
       },
       panel: scenario,

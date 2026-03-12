@@ -39,6 +39,13 @@ export default function ChatPanel({
                       <div key={`${ref.id}-summary`} className="message-ref-item">
                         <strong>{ref.name}</strong>
                         <span>{ref.summary}</span>
+                        <em>
+                          {ref.category === 'contract'
+                            ? `合同风险：${ref.riskLevel || 'unknown'}`
+                            : ref.category === 'technical'
+                              ? `技术主题：${(ref.topicTags || []).join('、') || '未识别'}`
+                              : ref.category}
+                        </em>
                       </div>
                     ))}
                   </div>

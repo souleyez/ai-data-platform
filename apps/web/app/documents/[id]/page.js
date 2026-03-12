@@ -48,6 +48,12 @@ export default function DocumentDetailPage({ params }) {
                   <tr><th>扩展名</th><td>{data.ext}</td></tr>
                   <tr><th>解析状态</th><td>{data.parseStatus}</td></tr>
                   <tr><th>提取字符数</th><td>{data.extractedChars}</td></tr>
+                  <tr><th>风险等级</th><td>{data.riskLevel || '-'}</td></tr>
+                  <tr><th>主题标签</th><td>{data.topicTags?.join('、') || '-'}</td></tr>
+                  <tr><th>合同编号</th><td>{data.contractFields?.contractNo || '-'}</td></tr>
+                  <tr><th>合同金额</th><td>{data.contractFields?.amount || '-'}</td></tr>
+                  <tr><th>付款条款</th><td>{data.contractFields?.paymentTerms || '-'}</td></tr>
+                  <tr><th>期限</th><td>{data.contractFields?.duration || '-'}</td></tr>
                   <tr><th>摘要</th><td className="summary-cell">{data.summary}</td></tr>
                   <tr><th>原文摘录</th><td className="summary-cell">{data.excerpt}</td></tr>
                 </tbody>
