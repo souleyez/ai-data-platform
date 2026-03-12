@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { matchDocumentsByPrompt, loadParsedDocuments } from '../lib/document-store.js';
 import { resolveScenario, scenarios } from '../lib/mock-data.js';
 
 export async function registerChatRoutes(app: FastifyInstance) {
@@ -12,17 +13,28 @@ export async function registerChatRoutes(app: FastifyInstance) {
 
     const scenarioKey = resolveScenario(prompt);
     const scenario = scenarios[scenarioKey];
+    const { items } = await loadParsedDocuments();
+    const matchedDocs = matchDocumentsByPrompt(items, prompt);
+
+    const docContext = matchedDocs.length
+      ? `\n\n文档相关摘要：${matchedDocs
+          .map((item, index) => `${index + 1}. ${item.name}：${item.summary}`)
+          .join(' ')}`
+      : '';
 
     return {
       scenario: scenarioKey,
       traceId: `trace_${Date.now()}`,
       message: {
         role: 'assistant',
-        content: scenario.reply,
+        content: `${scenario.reply}${docContext}`,
         meta: scenario.source,
       },
       panel: scenario,
-      sources: scenario.sources,
+      sources: [
+        ...scenario.sources,
+        ...matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+      ],
       permissions: {
         mode: 'read-only',
       },

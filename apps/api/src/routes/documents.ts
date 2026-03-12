@@ -1,34 +1,9 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { parseDocument } from '../lib/document-parser.js';
-
-const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || path.resolve(process.cwd(), '../../storage/files');
-
-async function listFilesRecursive(dir: string): Promise<string[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) return listFilesRecursive(fullPath);
-      return [fullPath];
-    }),
-  );
-  return nested.flat();
-}
+import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
 
 export async function registerDocumentRoutes(app: FastifyInstance) {
   app.get('/documents', async () => {
-    let files: string[] = [];
-    let exists = true;
-
-    try {
-      files = await listFilesRecursive(DEFAULT_SCAN_DIR);
-    } catch {
-      exists = false;
-    }
-
-    const items = await Promise.all(files.slice(0, 200).map((filePath) => parseDocument(filePath)));
+    const { exists, files, items } = await loadParsedDocuments();
 
     const byExtension = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.ext] = (acc[item.ext] || 0) + 1;
@@ -53,21 +28,32 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       byExtension,
       byCategory,
       byStatus,
-      items,
+      items: items.map((item) => ({ ...item, id: buildDocumentId(item.path) })),
       capabilities: ['scan', 'summarize', 'classify'],
       lastScanAt: new Date().toISOString(),
     };
   });
 
-  app.post('/documents/scan', async () => {
-    let files: string[] = [];
-    let exists = true;
+  app.get('/documents/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { items } = await loadParsedDocuments();
+    const found = items.find((item) => buildDocumentId(item.path) === id);
 
-    try {
-      files = await listFilesRecursive(DEFAULT_SCAN_DIR);
-    } catch {
-      exists = false;
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
     }
+
+    return {
+      mode: 'read-only',
+      item: {
+        ...found,
+        id,
+      },
+    };
+  });
+
+  app.post('/documents/scan', async () => {
+    const { exists, files } = await loadParsedDocuments();
 
     return {
       status: exists ? 'completed' : 'missing-directory',

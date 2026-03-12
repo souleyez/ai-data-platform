@@ -163,7 +163,7 @@ export default function DocumentsPage() {
                 <tbody>
                   {data.items.map((item) => (
                     <tr key={item.path}>
-                      <td>{item.name}</td>
+                      <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
                       <td>{item.category}</td>
                       <td>{item.ext}</td>
                       <td>{item.parseStatus}</td>
