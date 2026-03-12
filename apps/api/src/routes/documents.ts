@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { parseDocument } from '../lib/document-parser.js';
 
 const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || path.resolve(process.cwd(), '../../storage/files');
 
@@ -16,14 +17,6 @@ async function listFilesRecursive(dir: string): Promise<string[]> {
   return nested.flat();
 }
 
-function detectCategory(filePath: string) {
-  const lower = filePath.toLowerCase();
-  if (lower.includes('contract') || lower.includes('合同')) return 'contract';
-  if (lower.includes('tech') || lower.includes('技术')) return 'technical';
-  if (lower.includes('paper') || lower.includes('论文')) return 'paper';
-  return 'general';
-}
-
 export async function registerDocumentRoutes(app: FastifyInstance) {
   app.get('/documents', async () => {
     let files: string[] = [];
@@ -35,20 +28,20 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       exists = false;
     }
 
-    const normalized = files.map((filePath) => ({
-      path: filePath,
-      name: path.basename(filePath),
-      ext: path.extname(filePath).toLowerCase() || 'unknown',
-      category: detectCategory(filePath),
-    }));
+    const items = await Promise.all(files.slice(0, 200).map((filePath) => parseDocument(filePath)));
 
-    const byExtension = normalized.reduce<Record<string, number>>((acc, item) => {
+    const byExtension = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.ext] = (acc[item.ext] || 0) + 1;
       return acc;
     }, {});
 
-    const byCategory = normalized.reduce<Record<string, number>>((acc, item) => {
+    const byCategory = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.category] = (acc[item.category] || 0) + 1;
+      return acc;
+    }, {});
+
+    const byStatus = items.reduce<Record<string, number>>((acc, item) => {
+      acc[item.parseStatus] = (acc[item.parseStatus] || 0) + 1;
       return acc;
     }, {});
 
@@ -56,10 +49,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       mode: 'read-only',
       scanRoot: DEFAULT_SCAN_DIR,
       exists,
-      totalFiles: normalized.length,
+      totalFiles: files.length,
       byExtension,
       byCategory,
-      items: normalized.slice(0, 200),
+      byStatus,
+      items,
       capabilities: ['scan', 'summarize', 'classify'],
       lastScanAt: new Date().toISOString(),
     };
@@ -83,7 +77,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
       message: exists
-        ? '文档扫描任务已完成（当前为文件系统扫描骨架，尚未进入解析/索引阶段）。'
+        ? '文档扫描任务已完成，并已进行第一版文本提取（txt / md / pdf）。'
         : '扫描目录不存在，请先创建目录或配置 DOCUMENT_SCAN_DIR。',
     };
   });

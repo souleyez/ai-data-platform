@@ -44,9 +44,7 @@ export default function DocumentsPage() {
     try {
       setScanLoading(true);
       setScanMessage('');
-      const response = await fetch(buildApiUrl('/api/documents/scan'), {
-        method: 'POST',
-      });
+      const response = await fetch(buildApiUrl('/api/documents/scan'), { method: 'POST' });
       if (!response.ok) throw new Error('scan failed');
       const json = await response.json();
       setScanMessage(json.message || '扫描完成');
@@ -58,15 +56,9 @@ export default function DocumentsPage() {
     }
   };
 
-  const categorySummary = useMemo(() => {
-    if (!data?.byCategory) return [];
-    return Object.entries(data.byCategory);
-  }, [data]);
-
-  const extensionSummary = useMemo(() => {
-    if (!data?.byExtension) return [];
-    return Object.entries(data.byExtension);
-  }, [data]);
+  const categorySummary = useMemo(() => (data?.byCategory ? Object.entries(data.byCategory) : []), [data]);
+  const extensionSummary = useMemo(() => (data?.byExtension ? Object.entries(data.byExtension) : []), [data]);
+  const statusSummary = useMemo(() => (data?.byStatus ? Object.entries(data.byStatus) : []), [data]);
 
   return (
     <div className="app-shell">
@@ -95,10 +87,10 @@ export default function DocumentsPage() {
             <section className="card stats-grid">
               <StatCard label="扫描目录" value={data.scanRoot} subtle={data.exists ? '目录可访问' : '目录不存在'} />
               <StatCard label="总文件数" value={String(data.totalFiles)} subtle="只读扫描" />
-              <StatCard label="最近扫描" value={new Date(data.lastScanAt).toLocaleString()} subtle="骨架阶段" />
+              <StatCard label="最近扫描" value={new Date(data.lastScanAt).toLocaleString()} subtle="解析第一版" />
             </section>
 
-            <section className="documents-grid">
+            <section className="documents-grid three-columns">
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
@@ -120,11 +112,28 @@ export default function DocumentsPage() {
                 <div className="panel-header">
                   <div>
                     <h3>扩展名统计</h3>
-                    <p>后续这里可以接入 PDF / Word / Excel 解析链路</p>
+                    <p>当前已尝试接入 txt / md / pdf</p>
                   </div>
                 </div>
                 <div className="summary-grid">
                   {extensionSummary.map(([key, value]) => (
+                    <div key={key} className="summary-item">
+                      <div className="summary-key">{key}</div>
+                      <div className="summary-value">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>解析状态</h3>
+                    <p>观察当前解析成功 / 不支持 / 失败情况</p>
+                  </div>
+                </div>
+                <div className="summary-grid">
+                  {statusSummary.map(([key, value]) => (
                     <div key={key} className="summary-item">
                       <div className="summary-key">{key}</div>
                       <div className="summary-value">{value}</div>
@@ -138,7 +147,7 @@ export default function DocumentsPage() {
               <div className="panel-header">
                 <div>
                   <h3>文件列表</h3>
-                  <p>当前展示前 200 条扫描结果，后续将接摘要、标签、向量索引状态</p>
+                  <p>当前展示前 200 条扫描结果，已包含基础摘要与解析状态</p>
                 </div>
               </div>
               <table>
@@ -147,7 +156,8 @@ export default function DocumentsPage() {
                     <th>文件名</th>
                     <th>分类</th>
                     <th>扩展名</th>
-                    <th>路径</th>
+                    <th>解析状态</th>
+                    <th>摘要</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -156,7 +166,8 @@ export default function DocumentsPage() {
                       <td>{item.name}</td>
                       <td>{item.category}</td>
                       <td>{item.ext}</td>
-                      <td className="path-cell">{item.path}</td>
+                      <td>{item.parseStatus}</td>
+                      <td className="summary-cell">{item.summary}</td>
                     </tr>
                   ))}
                 </tbody>
