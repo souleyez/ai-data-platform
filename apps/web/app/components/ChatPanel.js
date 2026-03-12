@@ -26,6 +26,13 @@ export default function ChatPanel({
               {message.title ? <strong>{message.title}</strong> : null}
               <p>{message.content}</p>
               {message.meta ? <div className="message-meta">{message.meta}</div> : null}
+              {message.references?.length ? (
+                <div className="message-refs">
+                  {message.references.map((ref) => (
+                    <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
+                  ))}
+                </div>
+              ) : null}
             </div>
             {message.role === 'user' && <div className="avatar user-avatar">U</div>}
           </div>

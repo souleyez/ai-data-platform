@@ -29,6 +29,11 @@ export async function registerChatRoutes(app: FastifyInstance) {
         role: 'assistant',
         content: `${scenario.reply}${docContext}`,
         meta: scenario.source,
+        references: matchedDocs.map((item) => ({
+          id: Buffer.from(item.path).toString('base64url'),
+          name: item.name,
+          summary: item.summary,
+        })),
       },
       panel: scenario,
       sources: [

@@ -3,7 +3,7 @@ import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/d
 
 export async function registerDocumentRoutes(app: FastifyInstance) {
   app.get('/documents', async () => {
-    const { exists, files, items } = await loadParsedDocuments();
+    const { exists, files, items, cacheHit } = await loadParsedDocuments();
 
     const byExtension = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.ext] = (acc[item.ext] || 0) + 1;
@@ -30,6 +30,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       byStatus,
       items: items.map((item) => ({ ...item, id: buildDocumentId(item.path) })),
       capabilities: ['scan', 'summarize', 'classify'],
+      cacheHit,
       lastScanAt: new Date().toISOString(),
     };
   });
@@ -53,7 +54,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/scan', async () => {
-    const { exists, files } = await loadParsedDocuments();
+    const { exists, files } = await loadParsedDocuments(200, true);
 
     return {
       status: exists ? 'completed' : 'missing-directory',

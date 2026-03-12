@@ -3,6 +3,15 @@ import path from 'node:path';
 import { parseDocument, type ParsedDocument } from './document-parser.js';
 
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || path.resolve(process.cwd(), '../../storage/files');
+const CACHE_DIR = path.resolve(process.cwd(), '../../storage/cache');
+const CACHE_FILE = path.join(CACHE_DIR, 'documents-cache.json');
+
+type CachePayload = {
+  generatedAt: string;
+  scanRoot: string;
+  totalFiles: number;
+  items: ParsedDocument[];
+};
 
 export async function listFilesRecursive(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -16,7 +25,25 @@ export async function listFilesRecursive(dir: string): Promise<string[]> {
   return nested.flat();
 }
 
-export async function loadParsedDocuments(limit = 200): Promise<{ exists: boolean; files: string[]; items: ParsedDocument[] }> {
+async function ensureCacheDir() {
+  await fs.mkdir(CACHE_DIR, { recursive: true });
+}
+
+async function readCache(): Promise<CachePayload | null> {
+  try {
+    const raw = await fs.readFile(CACHE_FILE, 'utf8');
+    return JSON.parse(raw) as CachePayload;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCache(payload: CachePayload) {
+  await ensureCacheDir();
+  await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<{ exists: boolean; files: string[]; items: ParsedDocument[]; cacheHit: boolean }> {
   let files: string[] = [];
   let exists = true;
 
@@ -26,8 +53,26 @@ export async function loadParsedDocuments(limit = 200): Promise<{ exists: boolea
     exists = false;
   }
 
+  if (!exists) {
+    return { exists, files, items: [], cacheHit: false };
+  }
+
+  if (!forceRefresh) {
+    const cache = await readCache();
+    if (cache && cache.scanRoot === DEFAULT_SCAN_DIR && cache.totalFiles === files.length) {
+      return { exists, files, items: cache.items.slice(0, limit), cacheHit: true };
+    }
+  }
+
   const items = await Promise.all(files.slice(0, limit).map((filePath) => parseDocument(filePath)));
-  return { exists, files, items };
+  await writeCache({
+    generatedAt: new Date().toISOString(),
+    scanRoot: DEFAULT_SCAN_DIR,
+    totalFiles: files.length,
+    items,
+  });
+
+  return { exists, files, items, cacheHit: false };
 }
 
 export function buildDocumentId(filePath: string) {
