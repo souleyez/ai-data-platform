@@ -10,7 +10,15 @@ type CachePayload = {
   generatedAt: string;
   scanRoot: string;
   totalFiles: number;
+  scanSignature: string;
   items: ParsedDocument[];
+};
+
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  contract: ['合同', '付款', '回款', '违约', '条款', '风险'],
+  technical: ['技术', '文档', '论文', '接入', '部署', '接口', '告警', '采集', '边缘', 'api'],
+  paper: ['论文', '研究', '实验', '方法'],
+  general: ['文档', '资料'],
 };
 
 export async function listFilesRecursive(dir: string): Promise<string[]> {
@@ -43,6 +51,16 @@ async function writeCache(payload: CachePayload) {
   await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+async function buildScanSignature(files: string[]) {
+  const stats = await Promise.all(
+    files.map(async (filePath) => {
+      const stat = await fs.stat(filePath);
+      return `${filePath}:${stat.size}:${Math.floor(stat.mtimeMs)}`;
+    }),
+  );
+  return stats.sort().join('|');
+}
+
 export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<{ exists: boolean; files: string[]; items: ParsedDocument[]; cacheHit: boolean }> {
   let files: string[] = [];
   let exists = true;
@@ -57,9 +75,16 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
     return { exists, files, items: [], cacheHit: false };
   }
 
+  const scanSignature = await buildScanSignature(files);
+
   if (!forceRefresh) {
     const cache = await readCache();
-    if (cache && cache.scanRoot === DEFAULT_SCAN_DIR && cache.totalFiles === files.length) {
+    if (
+      cache
+      && cache.scanRoot === DEFAULT_SCAN_DIR
+      && cache.totalFiles === files.length
+      && cache.scanSignature === scanSignature
+    ) {
       return { exists, files, items: cache.items.slice(0, limit), cacheHit: true };
     }
   }
@@ -69,6 +94,7 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
     generatedAt: new Date().toISOString(),
     scanRoot: DEFAULT_SCAN_DIR,
     totalFiles: files.length,
+    scanSignature,
     items,
   });
 
@@ -79,15 +105,62 @@ export function buildDocumentId(filePath: string) {
   return Buffer.from(filePath).toString('base64url');
 }
 
+function extractPromptKeywords(prompt: string) {
+  const normalized = prompt.toLowerCase();
+  const asciiTokens = normalized.match(/[a-z0-9][a-z0-9-]{1,}/g) ?? [];
+  const chineseTokens = normalized.match(/[\u4e00-\u9fff]{2,}/g) ?? [];
+  const keywordSet = new Set<string>();
+
+  for (const token of [...asciiTokens, ...chineseTokens]) {
+    keywordSet.add(token);
+    if (token.length >= 4) {
+      for (let i = 0; i <= token.length - 2; i += 1) keywordSet.add(token.slice(i, i + 2));
+      for (let i = 0; i <= token.length - 3; i += 1) keywordSet.add(token.slice(i, i + 3));
+    }
+  }
+
+  return [...keywordSet];
+}
+
+function scoreDocumentMatch(item: ParsedDocument, keywords: string[]) {
+  const haystack = [
+    item.name,
+    item.category,
+    item.summary,
+    item.excerpt,
+    item.riskLevel,
+    item.topicTags?.join(' '),
+    item.contractFields?.contractNo,
+    item.contractFields?.paymentTerms,
+    item.contractFields?.duration,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  let score = 0;
+  for (const keyword of keywords) {
+    if (!haystack.includes(keyword)) continue;
+    if (keyword.length >= 4) score += 3;
+    else if (keyword.length === 3) score += 2;
+    else score += 1;
+  }
+
+  for (const keyword of CATEGORY_KEYWORDS[item.category] ?? []) {
+    if (keywords.includes(keyword)) {
+      score += 2;
+    }
+  }
+
+  return score;
+}
+
 export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string) {
-  const text = prompt.toLowerCase();
-  const keywords = text.split(/\s+/).filter(Boolean);
+  const keywords = extractPromptKeywords(prompt);
+  if (!keywords.length) return [];
+
   return items
-    .map((item) => {
-      const haystack = `${item.name} ${item.category} ${item.summary}`.toLowerCase();
-      const score = keywords.reduce((acc, keyword) => (haystack.includes(keyword) ? acc + 1 : acc), 0);
-      return { item, score };
-    })
+    .map((item) => ({ item, score: scoreDocumentMatch(item, keywords) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)

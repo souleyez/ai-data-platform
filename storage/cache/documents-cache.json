@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-03-13T22:00:48.221Z",
+  "scanRoot": "/home/soulzyn/.openclaw/workspace/ai-data-platform/storage/files",
+  "totalFiles": 2,
+  "scanSignature": "/home/soulzyn/.openclaw/workspace/ai-data-platform/storage/files/contracts/sample-contract.txt:324:1773439117180|/home/soulzyn/.openclaw/workspace/ai-data-platform/storage/files/tech-docs/sample-tech-doc.txt:229:1773439117183",
+  "items": [
+    {
+      "path": "/home/soulzyn/.openclaw/workspace/ai-data-platform/storage/files/contracts/sample-contract.txt",
+      "name": "sample-contract.txt",
+      "ext": ".txt",
+      "category": "contract",
+      "parseStatus": "parsed",
+      "summary": "合同编号：HT-2026-018 合同金额：￥580,000 付款条款：验收后 90 天内支付 70%，剩余 30% 于质保期结束后支付。 合同期：12个月 违约责任：若甲方延期付款，条款未明确约定违约金计算方式。 备注：付款节点定义不够清晰，存在回款周期过长风险。",
+      "excerpt": "合同编号：HT-2026-018 合同金额：￥580,000 付款条款：验收后 90 天内支付 70%，剩余 30% 于质保期结束后支付。 合同期：12个月 违约责任：若甲方延期付款，条款未明确约定违约金计算方式。 备注：付款节点定义不够清晰，存在回款周期过长风险。",
+      "extractedChars": 134,
+      "riskLevel": "high",
+      "topicTags": [],
+      "contractFields": {
+        "contractNo": "HT-2026-018",
+        "amount": "￥580,000",
+        "paymentTerms": "验收后 90 天内支付 70%，剩余 30% 于质保期结束后支付",
+        "duration": "12个月 违约责任：若甲方延期付款，条款未明确约定违约金计算方式"
+      }
+    },
+    {
+      "path": "/home/soulzyn/.openclaw/workspace/ai-data-platform/storage/files/tech-docs/sample-tech-doc.txt",
+      "name": "sample-tech-doc.txt",
+      "ext": ".txt",
+      "category": "technical",
+      "parseStatus": "parsed",
+      "summary": "本技术文档描述设备接入协议、边缘计算网关部署、数据采集链路与告警联动流程。 文档重点包括 API 接口设计、设备注册、采集任务下发、异常告警推送与安装部署规范。",
+      "excerpt": "本技术文档描述设备接入协议、边缘计算网关部署、数据采集链路与告警联动流程。 文档重点包括 API 接口设计、设备注册、采集任务下发、异常告警推送与安装部署规范。",
+      "extractedChars": 81,
+      "topicTags": [
+        "设备接入",
+        "边缘计算",
+        "数据采集",
+        "告警联动",
+        "部署规范",
+        "接口设计"
+      ]
+    }
+  ]
+}
