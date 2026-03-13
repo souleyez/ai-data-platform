@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import ChatPanel from './components/ChatPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
@@ -11,9 +11,8 @@ export default function HomePage() {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [activeScenario, setActiveScenario] = useState('order');
+  const [panel, setPanel] = useState(scenarios.order);
   const [isLoading, setIsLoading] = useState(false);
-
-  const panel = useMemo(() => scenarios[activeScenario], [activeScenario]);
 
   const submitQuestion = async (value) => {
     const text = value.trim();
@@ -33,7 +32,9 @@ export default function HomePage() {
       if (!response.ok) throw new Error('mock api failed');
 
       const data = await response.json();
-      setActiveScenario(data.scenario || 'default');
+      const nextScenario = data.scenario || 'default';
+      setActiveScenario(nextScenario);
+      setPanel(data.panel || scenarios[nextScenario] || scenarios.default);
       setMessages((prev) => [...prev, data.message]);
     } catch {
       setMessages((prev) => [
@@ -52,6 +53,7 @@ export default function HomePage() {
   const resetConversation = () => {
     setMessages(initialMessages);
     setActiveScenario('order');
+    setPanel(scenarios.order);
     setInput('');
   };
 

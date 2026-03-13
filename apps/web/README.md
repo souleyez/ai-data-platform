@@ -37,16 +37,17 @@ http://localhost:3000
 - 首页调用 `POST /api/chat`
 - 文档中心调用 `GET /api/documents`
 
-## 当前 mock 接口
+## 当前接口
 
 - 路径：`/api/chat`
 - 方法：`POST`
 - 入参：`{ prompt: string }`
 - 返回：`scenario + message + panel`
+- 首页当前已直接消费 `apps/api` 返回的真实 `panel` 数据，而不是仅靠前端本地 mock 场景切换。
 
 ## 下一步建议
 
-1. 对接真实后端接口
-2. 抽离统一类型定义 / schema 校验
-3. 引入真实数据源 mock server
-4. 开始接 apps/api
+1. 抽离统一类型定义 / schema 校验
+2. 继续收紧文档匹配与面板映射
+3. 引入真实数据源 mock server / 示例数据集
+4. 完善文档中心与详情页联动
