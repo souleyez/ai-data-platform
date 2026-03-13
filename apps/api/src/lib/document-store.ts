@@ -15,9 +15,9 @@ type CachePayload = {
 };
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  contract: ['合同', '付款', '回款', '违约', '条款', '风险'],
-  technical: ['技术', '文档', '论文', '接入', '部署', '接口', '告警', '采集', '边缘', 'api'],
-  paper: ['论文', '研究', '实验', '方法'],
+  contract: ['合同', '付款', '回款', '违约', '条款', '风险', '审查', '法务'],
+  technical: ['技术', '文档', '论文', '接入', '部署', '接口', '告警', '采集', '边缘', 'api', '知识库', '摘要'],
+  paper: ['论文', '研究', '实验', '方法', '文献'],
   general: ['文档', '资料'],
 };
 
@@ -122,7 +122,18 @@ function extractPromptKeywords(prompt: string) {
   return [...keywordSet];
 }
 
-function scoreDocumentMatch(item: ParsedDocument, keywords: string[]) {
+function detectPromptIntent(keywords: string[]) {
+  const joined = keywords.join(' ');
+  const contractIntent = CATEGORY_KEYWORDS.contract.some((keyword) => joined.includes(keyword));
+  const technicalIntent = [...CATEGORY_KEYWORDS.technical, ...CATEGORY_KEYWORDS.paper].some((keyword) => joined.includes(keyword));
+
+  if (contractIntent && !technicalIntent) return 'contract';
+  if (technicalIntent && !contractIntent) return 'technical';
+  if (technicalIntent) return 'technical';
+  return 'mixed';
+}
+
+function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptIntent: 'contract' | 'technical' | 'mixed') {
   const haystack = [
     item.name,
     item.category,
@@ -152,15 +163,26 @@ function scoreDocumentMatch(item: ParsedDocument, keywords: string[]) {
     }
   }
 
+  if (promptIntent === 'contract') {
+    if (item.category === 'contract') score += 8;
+    else if (item.category === 'technical' || item.category === 'paper') score -= 4;
+  }
+
+  if (promptIntent === 'technical') {
+    if (item.category === 'technical' || item.category === 'paper') score += 8;
+    else if (item.category === 'contract') score -= 4;
+  }
+
   return score;
 }
 
 export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string) {
   const keywords = extractPromptKeywords(prompt);
   if (!keywords.length) return [];
+  const promptIntent = detectPromptIntent(keywords);
 
   return items
-    .map((item) => ({ item, score: scoreDocumentMatch(item, keywords) }))
+    .map((item) => ({ item, score: scoreDocumentMatch(item, keywords, promptIntent) }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)

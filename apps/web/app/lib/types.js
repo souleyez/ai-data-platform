@@ -6,3 +6,10 @@ export const QUICK_ACTIONS = [
   { label: '技术文档汇总', prompt: '请汇总技术文档主题' },
   { label: '生成周报', prompt: '请生成本周经营周报' },
 ];
+
+export function formatDocumentBusinessResult(item) {
+  if (!item) return '-';
+  if (item.category === 'contract') return `风险等级：${item.riskLevel || 'unknown'}`;
+  if (item.category === 'technical' || item.category === 'paper') return `主题：${(item.topicTags || []).join('、') || '未识别'}`;
+  return item.ext || '-';
+}

@@ -44,3 +44,15 @@ test('matches contract document for Chinese risk prompt', () => {
   assert.equal(matches[0]?.category, 'contract');
   assert.equal(matches[0]?.contractFields?.contractNo, 'HT-2026-018');
 });
+
+test('contract intent should prioritize contract docs over technical docs', () => {
+  const matches = matchDocumentsByPrompt(docs, '请审查这个合同的付款条款和违约风险');
+  assert.equal(matches[0]?.category, 'contract');
+  assert.ok(matches.every((item, index) => index === 0 || item.category !== 'technical'));
+});
+
+test('technical intent should prioritize technical docs over contract docs', () => {
+  const matches = matchDocumentsByPrompt(docs, '请基于论文和技术文档做摘要');
+  assert.equal(matches[0]?.category, 'technical');
+  assert.ok(matches.every((item, index) => index === 0 || item.category !== 'contract'));
+});

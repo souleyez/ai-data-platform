@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
+import { formatDocumentBusinessResult } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
 function StatCard({ label, value, subtle }) {
@@ -165,7 +166,7 @@ export default function DocumentsPage() {
                     <tr key={item.path}>
                       <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
                       <td>{item.category}</td>
-                      <td className="summary-cell">{item.category === 'contract' ? `风险等级：${item.riskLevel || 'unknown'}` : item.category === 'technical' ? `主题：${(item.topicTags || []).join('、') || '未识别'}` : item.ext}</td>
+                      <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                       <td>{item.parseStatus}</td>
                       <td className="summary-cell">{item.summary}</td>
                     </tr>
