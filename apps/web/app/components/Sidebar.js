@@ -5,7 +5,7 @@ const NAV_LINKS = {
   文档中心: '/documents',
   数据源管理: '/datasources',
   报表中心: '/reports',
-  审计日志: '#',
+  审计日志: '/audit',
 };
 
 export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
