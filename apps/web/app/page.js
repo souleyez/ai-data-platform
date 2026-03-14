@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ChatPanel from './components/ChatPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
 import { buildApiUrl } from './lib/config';
-import { normalizeChatResponse } from './lib/types';
+import { normalizeChatResponse, normalizeDatasourceResponse } from './lib/types';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
 export default function HomePage() {
@@ -13,7 +13,23 @@ export default function HomePage() {
   const [input, setInput] = useState('');
   const [activeScenario, setActiveScenario] = useState('order');
   const [panel, setPanel] = useState(scenarios.order);
+  const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    async function loadDatasources() {
+      try {
+        const response = await fetch(buildApiUrl('/api/datasources'));
+        if (!response.ok) throw new Error('load datasources failed');
+        const json = await response.json();
+        const normalized = normalizeDatasourceResponse(json);
+        if (normalized.items.length) setSidebarSources(normalized.items);
+      } catch {
+        // keep local fallback
+      }
+    }
+    loadDatasources();
+  }, []);
 
   const submitQuestion = async (value) => {
     const text = value.trim();
@@ -60,7 +76,7 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
-      <Sidebar sourceItems={sourceItems} />
+      <Sidebar sourceItems={sidebarSources} />
 
       <main className="main-panel">
         <header className="topbar">

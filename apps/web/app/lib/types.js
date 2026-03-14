@@ -48,3 +48,53 @@ export function normalizeChatResponse(data, fallbackPanel) {
     orchestration: message.orchestration,
   };
 }
+
+export function normalizeDatasourceResponse(data) {
+  return {
+    mode: data?.mode || 'read-only',
+    total: data?.total || 0,
+    items: Array.isArray(data?.items)
+      ? data.items.map((item) => ({
+          name: item.name || item.id || 'unknown',
+          status: item.status === 'connected' ? 'success' : item.status || 'idle',
+          type: item.type || 'unknown',
+          mode: item.mode || 'read-only',
+        }))
+      : [],
+    meta: data?.meta || null,
+  };
+}
+
+export function normalizeDocumentsResponse(data) {
+  return {
+    mode: data?.mode || 'read-only',
+    scanRoot: data?.scanRoot || '-',
+    exists: Boolean(data?.exists),
+    totalFiles: data?.totalFiles || 0,
+    byExtension: data?.byExtension || {},
+    byCategory: data?.byCategory || {},
+    byStatus: data?.byStatus || {},
+    items: Array.isArray(data?.items) ? data.items : [],
+    capabilities: Array.isArray(data?.capabilities) ? data.capabilities : [],
+    cacheHit: Boolean(data?.cacheHit),
+    lastScanAt: data?.lastScanAt || new Date().toISOString(),
+    meta: data?.meta || null,
+  };
+}
+
+export function normalizeDocumentDetailResponse(data) {
+  return {
+    mode: data?.mode || 'read-only',
+    item: data?.item || null,
+    meta: data?.meta || null,
+  };
+}
+
+export function normalizeReportsResponse(data) {
+  return {
+    mode: data?.mode || 'read-only',
+    total: data?.total || 0,
+    items: Array.isArray(data?.items) ? data.items : [],
+    meta: data?.meta || null,
+  };
+}

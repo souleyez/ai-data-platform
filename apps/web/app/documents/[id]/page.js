@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react';
 import Sidebar from '../../components/Sidebar';
 import { buildApiUrl } from '../../lib/config';
+import { normalizeDatasourceResponse, normalizeDocumentDetailResponse } from '../../lib/types';
 import { sourceItems } from '../../lib/mock-data';
 
 export default function DocumentDetailPage({ params }) {
   const [data, setData] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -15,17 +18,33 @@ export default function DocumentDetailPage({ params }) {
         const response = await fetch(buildApiUrl(`/api/documents/${params.id}`));
         if (!response.ok) throw new Error('load detail failed');
         const json = await response.json();
-        setData(json.item);
+        const normalized = normalizeDocumentDetailResponse(json);
+        setData(normalized.item);
+        setMeta(normalized.meta);
       } catch {
         setError('文档详情加载失败');
       }
     }
+
+    async function loadDatasources() {
+      try {
+        const response = await fetch(buildApiUrl('/api/datasources'));
+        if (!response.ok) throw new Error('load datasources failed');
+        const json = await response.json();
+        const normalized = normalizeDatasourceResponse(json);
+        if (normalized.items.length) setSidebarSources(normalized.items);
+      } catch {
+        // keep local fallback
+      }
+    }
+
     load();
+    loadDatasources();
   }, [params.id]);
 
   return (
     <div className="app-shell">
-      <Sidebar sourceItems={sourceItems} />
+      <Sidebar sourceItems={sidebarSources} />
       <main className="main-panel">
         <header className="topbar">
           <div>
@@ -42,6 +61,12 @@ export default function DocumentDetailPage({ params }) {
             </div>
             <section className="card table-card">
               <div className="panel-header"><div><h3>{data.name}</h3><p>{data.path}</p></div></div>
+              {meta ? (
+                <div className="message-refs" style={{ marginBottom: '12px' }}>
+                  <span className="source-chip">category: {meta.category}</span>
+                  <span className="source-chip">parseStatus: {meta.parseStatus}</span>
+                </div>
+              ) : null}
               <table>
                 <tbody>
                   <tr><th>分类</th><td>{data.category}</td></tr>

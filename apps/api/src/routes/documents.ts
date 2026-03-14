@@ -32,6 +32,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       capabilities: ['scan', 'summarize', 'classify'],
       cacheHit,
       lastScanAt: new Date().toISOString(),
+      meta: {
+        parsed: byStatus.parsed || 0,
+        unsupported: byStatus.unsupported || 0,
+        error: byStatus.error || 0,
+      },
     };
   });
 
@@ -49,6 +54,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       item: {
         ...found,
         id,
+      },
+      meta: {
+        category: found.category,
+        parseStatus: found.parseStatus,
       },
     };
   });

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
-import { formatDocumentBusinessResult } from '../lib/types';
+import { formatDocumentBusinessResult, normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
 function StatCard({ label, value, subtle }) {
@@ -22,6 +22,7 @@ export default function DocumentsPage() {
   const [scanLoading, setScanLoading] = useState(false);
   const [error, setError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
+  const [sidebarSources, setSidebarSources] = useState(sourceItems);
 
   const loadDocuments = async () => {
     try {
@@ -29,7 +30,7 @@ export default function DocumentsPage() {
       const response = await fetch(buildApiUrl('/api/documents'));
       if (!response.ok) throw new Error('load documents failed');
       const json = await response.json();
-      setData(json);
+      setData(normalizeDocumentsResponse(json));
     } catch {
       setError('文档接口暂时不可用');
     } finally {
@@ -39,6 +40,20 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     loadDocuments();
+
+    async function loadDatasources() {
+      try {
+        const response = await fetch(buildApiUrl('/api/datasources'));
+        if (!response.ok) throw new Error('load datasources failed');
+        const json = await response.json();
+        const normalized = normalizeDatasourceResponse(json);
+        if (normalized.items.length) setSidebarSources(normalized.items);
+      } catch {
+        // keep local fallback
+      }
+    }
+
+    loadDatasources();
   }, []);
 
   const triggerScan = async () => {
@@ -63,7 +78,7 @@ export default function DocumentsPage() {
 
   return (
     <div className="app-shell">
-      <Sidebar sourceItems={sourceItems} />
+      <Sidebar sourceItems={sidebarSources} />
 
       <main className="main-panel">
         <header className="topbar">
