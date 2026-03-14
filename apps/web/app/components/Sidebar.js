@@ -1,6 +1,14 @@
 import { NAV_ITEMS } from '../lib/types';
 
-export default function Sidebar({ sourceItems = [] }) {
+const NAV_LINKS = {
+  智能问答: '/',
+  文档中心: '/documents',
+  数据源管理: '/datasources',
+  报表中心: '/reports',
+  审计日志: '#',
+};
+
+export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -13,10 +21,11 @@ export default function Sidebar({ sourceItems = [] }) {
 
       <nav className="nav-section">
         <div className="nav-title">工作台</div>
-        {NAV_ITEMS.map((item, index) => {
-          const href = item === '文档中心' ? '/documents' : '#';
+        {NAV_ITEMS.map((item) => {
+          const href = NAV_LINKS[item] || '#';
+          const active = href !== '#' && currentPath === href;
           return (
-            <a key={item} href={href} className={`nav-item ${index === 0 ? 'active' : ''}`}>{item}</a>
+            <a key={item} href={href} className={`nav-item ${active ? 'active' : ''}`}>{item}</a>
           );
         })}
       </nav>

@@ -76,7 +76,7 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
-      <Sidebar sourceItems={sidebarSources} />
+      <Sidebar sourceItems={sidebarSources} currentPath="/" />
 
       <main className="main-panel">
         <header className="topbar">
