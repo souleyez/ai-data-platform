@@ -15,6 +15,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return acc;
     }, {});
 
+    const byBizCategory = items.reduce<Record<string, number>>((acc, item) => {
+      acc[item.bizCategory] = (acc[item.bizCategory] || 0) + 1;
+      return acc;
+    }, {});
+
     const byStatus = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.parseStatus] = (acc[item.parseStatus] || 0) + 1;
       return acc;
@@ -27,6 +32,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       totalFiles: files.length,
       byExtension,
       byCategory,
+      byBizCategory,
       byStatus,
       items: items.map((item) => ({ ...item, id: buildDocumentId(item.path) })),
       capabilities: ['scan', 'summarize', 'classify'],
@@ -36,6 +42,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         parsed: byStatus.parsed || 0,
         unsupported: byStatus.unsupported || 0,
         error: byStatus.error || 0,
+        bizCategories: byBizCategory,
       },
     };
   });

@@ -59,6 +59,20 @@ export function normalizeDatasourceResponse(data) {
           status: item.status === 'connected' ? 'success' : item.status || 'idle',
           type: item.type || 'unknown',
           mode: item.mode || 'read-only',
+          capability: item.type === 'documents'
+            ? '浏览 / 解析 / 问答引用'
+            : item.type === 'database'
+              ? '只读查询 / 报表支撑'
+              : item.type === 'web'
+                ? '采集占位 / 待接实'
+                : '待定义',
+          group: item.type === 'documents'
+            ? '文档型'
+            : item.type === 'database'
+              ? '数据库型'
+              : item.type === 'web'
+                ? 'Web采集型'
+                : '其他',
         }))
       : [],
     meta: data?.meta || null,
@@ -73,6 +87,7 @@ export function normalizeDocumentsResponse(data) {
     totalFiles: data?.totalFiles || 0,
     byExtension: data?.byExtension || {},
     byCategory: data?.byCategory || {},
+    byBizCategory: data?.byBizCategory || {},
     byStatus: data?.byStatus || {},
     items: Array.isArray(data?.items) ? data.items : [],
     capabilities: Array.isArray(data?.capabilities) ? data.capabilities : [],

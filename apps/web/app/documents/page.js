@@ -6,6 +6,14 @@ import { buildApiUrl } from '../lib/config';
 import { formatDocumentBusinessResult, normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
+const BIZ_CATEGORY_LABELS = {
+  technical: '技术类',
+  contract: '合同类',
+  report: '日报类',
+  paper: '论文类',
+  other: '其他类',
+};
+
 function StatCard({ label, value, subtle }) {
   return (
     <div className="stat-card">
@@ -23,6 +31,8 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
+  const [activeBizCategory, setActiveBizCategory] = useState('all');
+  const [keyword, setKeyword] = useState('');
 
   const loadDocuments = async () => {
     try {
@@ -72,9 +82,25 @@ export default function DocumentsPage() {
     }
   };
 
-  const categorySummary = useMemo(() => (data?.byCategory ? Object.entries(data.byCategory) : []), [data]);
   const extensionSummary = useMemo(() => (data?.byExtension ? Object.entries(data.byExtension) : []), [data]);
   const statusSummary = useMemo(() => (data?.byStatus ? Object.entries(data.byStatus) : []), [data]);
+  const bizCategorySummary = useMemo(() => {
+    const entries = data?.byBizCategory ? Object.entries(data.byBizCategory) : [];
+    return entries.map(([key, value]) => ({ key, label: BIZ_CATEGORY_LABELS[key] || key, value }));
+  }, [data]);
+
+  const filteredItems = useMemo(() => {
+    const items = data?.items || [];
+    return items.filter((item) => {
+      const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory;
+      const normalizedKeyword = keyword.trim().toLowerCase();
+      const keywordMatch = !normalizedKeyword
+        || item.name.toLowerCase().includes(normalizedKeyword)
+        || item.summary.toLowerCase().includes(normalizedKeyword)
+        || item.excerpt.toLowerCase().includes(normalizedKeyword);
+      return categoryMatch && keywordMatch;
+    });
+  }, [data, activeBizCategory, keyword]);
 
   return (
     <div className="app-shell">
@@ -84,7 +110,7 @@ export default function DocumentsPage() {
         <header className="topbar">
           <div>
             <h2>文档中心</h2>
-            <p>管理本地扫描目录、查看文件分类结果，并为后续摘要、问答、索引做好准备。</p>
+            <p>按业务分类浏览文档，优先面向技术类、合同类、日报类、论文类做结构化整理与后续问答。</p>
           </div>
           <div className="topbar-actions">
             <button className="ghost-btn" onClick={loadDocuments}>刷新</button>
@@ -106,24 +132,28 @@ export default function DocumentsPage() {
               <StatCard label="最近扫描" value={new Date(data.lastScanAt).toLocaleString()} subtle="解析第一版" />
             </section>
 
-            <section className="documents-grid three-columns">
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>分类统计</h3>
-                    <p>按文档类型快速了解当前目录构成</p>
-                  </div>
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>业务分类</h3>
+                  <p>先按业务视角组织：技术类、合同类、日报类、论文类、其他类。</p>
                 </div>
-                <div className="summary-grid">
-                  {categorySummary.map(([key, value]) => (
-                    <div key={key} className="summary-item">
-                      <div className="summary-key">{key}</div>
-                      <div className="summary-value">{value}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
+              </div>
+              <div className="summary-grid biz-summary-grid">
+                <button className={`summary-item filter-card ${activeBizCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory('all')}>
+                  <div className="summary-key">全部</div>
+                  <div className="summary-value">{data.totalFiles}</div>
+                </button>
+                {bizCategorySummary.map((item) => (
+                  <button key={item.key} className={`summary-item filter-card ${activeBizCategory === item.key ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory(item.key)}>
+                    <div className="summary-key">{item.label}</div>
+                    <div className="summary-value">{item.value}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
 
+            <section className="documents-grid three-columns">
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
@@ -157,29 +187,49 @@ export default function DocumentsPage() {
                   ))}
                 </div>
               </section>
+
+              <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>筛选</h3>
+                    <p>支持按业务分类和关键词快速查看。</p>
+                  </div>
+                </div>
+                <input
+                  className="filter-input"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="搜索文件名、摘要、摘录..."
+                />
+                <div className="page-note" style={{ marginTop: '12px', marginBottom: 0 }}>
+                  当前结果：{filteredItems.length} / {data.items.length}
+                </div>
+              </section>
             </section>
 
             <section className="card table-card">
               <div className="panel-header">
                 <div>
                   <h3>文件列表</h3>
-                  <p>当前展示前 200 条扫描结果，已包含基础摘要与解析状态</p>
+                  <p>当前展示基础摘要、业务分类与解析状态，后续会继续补标签、命中原因与结构化块。</p>
                 </div>
               </div>
               <table>
                 <thead>
                   <tr>
                     <th>文件名</th>
-                    <th>分类</th>
+                    <th>业务分类</th>
+                    <th>解析分类</th>
                     <th>业务结果</th>
                     <th>解析状态</th>
                     <th>摘要</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((item) => (
+                  {filteredItems.map((item) => (
                     <tr key={item.path}>
                       <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
+                      <td>{BIZ_CATEGORY_LABELS[item.bizCategory] || item.bizCategory}</td>
                       <td>{item.category}</td>
                       <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                       <td>{item.parseStatus}</td>

@@ -7,6 +7,7 @@ export type ParsedDocument = {
   name: string;
   ext: string;
   category: string;
+  bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'other';
   parseStatus: 'parsed' | 'unsupported' | 'error';
   summary: string;
   excerpt: string;
@@ -27,6 +28,15 @@ export function detectCategory(filePath: string) {
   if (lower.includes('tech') || lower.includes('技术')) return 'technical';
   if (lower.includes('paper') || lower.includes('论文')) return 'paper';
   return 'general';
+}
+
+export function detectBizCategory(filePath: string, category: string): 'technical' | 'contract' | 'report' | 'paper' | 'other' {
+  const lower = filePath.toLowerCase();
+  if (category === 'contract') return 'contract';
+  if (category === 'paper') return 'paper';
+  if (lower.includes('日报') || lower.includes('周报') || lower.includes('report')) return 'report';
+  if (category === 'technical') return 'technical';
+  return 'other';
 }
 
 function normalizeText(text: string) {
@@ -97,6 +107,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
   const ext = path.extname(filePath).toLowerCase() || 'unknown';
   const name = path.basename(filePath);
   const category = detectCategory(filePath);
+  const bizCategory = detectBizCategory(filePath, category);
 
   try {
     const { status, text } = await extractText(filePath, ext);
@@ -106,6 +117,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
         name,
         ext,
         category,
+        bizCategory,
         parseStatus: 'unsupported',
         summary: '当前版本尚未支持该文件类型的内容提取。',
         excerpt: '当前版本尚未支持该文件类型的内容提取。',
@@ -119,6 +131,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
       name,
       ext,
       category,
+      bizCategory,
       parseStatus: 'parsed',
       summary: summarize(text, '文档内容为空或暂未提取到文本。'),
       excerpt: excerpt(text, '文档内容为空或暂未提取到文本。'),
@@ -133,6 +146,7 @@ export async function parseDocument(filePath: string): Promise<ParsedDocument> {
       name,
       ext,
       category,
+      bizCategory,
       parseStatus: 'error',
       summary: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
       excerpt: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',

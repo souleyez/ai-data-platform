@@ -199,6 +199,26 @@ th { color: var(--subtle); font-weight: 600; }
 .documents-card { padding: 18px; }
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .summary-item { background: #f8fbff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; }
+.filter-card {
+  width: 100%;
+  text-align: left;
+  background: #f8fbff;
+  border: 1px solid #e2e8f0;
+}
+.active-filter {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.biz-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.filter-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff;
+}
 .summary-key { font-size: 13px; color: var(--subtle); text-transform: capitalize; }
 .summary-value { margin-top: 6px; font-size: 22px; font-weight: 700; }
 .page-note { margin-bottom: 16px; padding: 12px 14px; border-radius: 14px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }

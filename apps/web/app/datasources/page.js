@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
 import { normalizeDatasourceResponse } from '../lib/types';
@@ -37,6 +37,16 @@ export default function DatasourcesPage() {
     load();
   }, []);
 
+  const groupedItems = useMemo(() => {
+    const items = data?.items || [];
+    return items.reduce((acc, item) => {
+      const group = item.group || '其他';
+      acc[group] = acc[group] || [];
+      acc[group].push(item);
+      return acc;
+    }, {});
+  }, [data]);
+
   return (
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/datasources" />
@@ -44,7 +54,7 @@ export default function DatasourcesPage() {
         <header className="topbar">
           <div>
             <h2>数据源管理</h2>
-            <p>查看当前只读接入的数据源状态，为聊天、文档和报表页面提供统一数据底座。</p>
+            <p>按文档型、数据库型、Web采集型查看当前只读接入状态，并说明每类数据源当前可支撑的能力。</p>
           </div>
         </header>
 
@@ -57,18 +67,41 @@ export default function DatasourcesPage() {
               <StatCard label="告警/空闲" value={String((data.meta?.warning || 0) + (data.meta?.idle || 0))} subtle="warning + idle" />
             </section>
 
+            <section className="documents-grid three-columns">
+              {Object.entries(groupedItems).map(([group, items]) => (
+                <section key={group} className="card documents-card">
+                  <div className="panel-header">
+                    <div>
+                      <h3>{group}</h3>
+                      <p>{items.length} 个数据源</p>
+                    </div>
+                  </div>
+                  <div className="summary-grid">
+                    {items.map((item) => (
+                      <div key={`${item.name}-${item.type}`} className="summary-item">
+                        <div className="summary-key">{item.name}</div>
+                        <div className="summary-value" style={{ fontSize: '15px' }}>{item.capability}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </section>
+
             <section className="card table-card">
               <div className="panel-header">
                 <div>
                   <h3>数据源列表</h3>
-                  <p>统一展示后端返回的真实数据源，不再仅依赖前端 mock。</p>
+                  <p>当前是后端真实接口清单页；第一版重点把分组、能力说明、状态和模式先做清楚。</p>
                 </div>
               </div>
               <table>
                 <thead>
                   <tr>
                     <th>名称</th>
+                    <th>分组</th>
                     <th>类型</th>
+                    <th>能力</th>
                     <th>状态</th>
                     <th>模式</th>
                   </tr>
@@ -77,7 +110,9 @@ export default function DatasourcesPage() {
                   {data.items.map((item) => (
                     <tr key={`${item.name}-${item.type}`}>
                       <td>{item.name}</td>
+                      <td>{item.group}</td>
                       <td>{item.type}</td>
+                      <td className="summary-cell">{item.capability}</td>
                       <td><span className={`tag ${item.status === 'success' ? 'up-tag' : item.status === 'warning' ? 'warning' : 'neutral-tag'}`}>{item.status}</span></td>
                       <td>{item.mode}</td>
                     </tr>
