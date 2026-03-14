@@ -5,6 +5,7 @@ import ChatPanel from './components/ChatPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
 import { buildApiUrl } from './lib/config';
+import { normalizeChatResponse } from './lib/types';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
 export default function HomePage() {
@@ -32,10 +33,10 @@ export default function HomePage() {
       if (!response.ok) throw new Error('mock api failed');
 
       const data = await response.json();
-      const nextScenario = data.scenario || 'default';
-      setActiveScenario(nextScenario);
-      setPanel(data.panel || scenarios[nextScenario] || scenarios.default);
-      setMessages((prev) => [...prev, data.message]);
+      const normalized = normalizeChatResponse(data, scenarios.default);
+      setActiveScenario(normalized.scenario);
+      setPanel(normalized.panel || scenarios[normalized.scenario] || scenarios.default);
+      setMessages((prev) => [...prev, normalized.message]);
     } catch {
       setMessages((prev) => [
         ...prev,

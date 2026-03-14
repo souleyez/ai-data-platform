@@ -1,4 +1,4 @@
-import { QUICK_ACTIONS } from '../lib/types';
+import { QUICK_ACTIONS, formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
 export default function ChatPanel({
   messages,
@@ -49,6 +49,22 @@ export default function ChatPanel({
                       </div>
                     ))}
                   </div>
+                </div>
+              ) : null}
+              {message.sources?.length ? (
+                <div className="message-extra-block">
+                  <div className="message-ref-title">数据来源</div>
+                  <div className="message-refs">
+                    {message.sources.map((source, index) => (
+                      <span key={`${formatSourceLabel(source)}-${index}`} className="source-chip">{formatSourceLabel(source)}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {message.orchestration ? (
+                <div className="message-extra-block">
+                  <div className="message-ref-title">编排状态</div>
+                  <div className="orchestration-chip">{formatOrchestrationLabel(message.orchestration)}</div>
                 </div>
               ) : null}
             </div>

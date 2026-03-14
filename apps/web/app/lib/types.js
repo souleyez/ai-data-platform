@@ -13,3 +13,38 @@ export function formatDocumentBusinessResult(item) {
   if (item.category === 'technical' || item.category === 'paper') return `主题：${(item.topicTags || []).join('、') || '未识别'}`;
   return item.ext || '-';
 }
+
+export function formatSourceLabel(source) {
+  if (!source) return '-';
+  const type = source.type || 'source';
+  const name = source.name || source.table || 'unknown';
+  return `${type}: ${name}`;
+}
+
+export function formatOrchestrationLabel(orchestration) {
+  if (!orchestration) return '编排信息缺失';
+  const mode = orchestration.mode || 'unknown';
+  const matches = orchestration.docMatches ?? 0;
+  const gateway = orchestration.gatewayConfigured ? 'gateway:on' : 'gateway:off';
+  return `mode=${mode} · docMatches=${matches} · ${gateway}`;
+}
+
+export function normalizeChatResponse(data, fallbackPanel) {
+  const scenario = data?.scenario || 'default';
+  const message = {
+    role: data?.message?.role || 'assistant',
+    content: data?.message?.content || '暂无返回内容',
+    meta: data?.message?.meta || '',
+    references: Array.isArray(data?.message?.references) ? data.message.references : [],
+    sources: Array.isArray(data?.sources) ? data.sources : [],
+    orchestration: data?.orchestration || null,
+  };
+
+  return {
+    scenario,
+    panel: data?.panel || fallbackPanel,
+    message,
+    sources: message.sources,
+    orchestration: message.orchestration,
+  };
+}
