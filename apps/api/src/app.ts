@@ -4,6 +4,7 @@ import { registerDatasourceRoutes } from './routes/datasources.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerReportRoutes } from './routes/reports.js';
+import { registerWebCaptureRoutes } from './routes/web-captures.js';
 
 export function createApp() {
   const app = Fastify({ logger: true });
@@ -19,6 +20,7 @@ export function createApp() {
   app.register(registerDatasourceRoutes, { prefix: '/api' });
   app.register(registerDocumentRoutes, { prefix: '/api' });
   app.register(registerReportRoutes, { prefix: '/api' });
+  app.register(registerWebCaptureRoutes, { prefix: '/api' });
 
   return app;
 }
