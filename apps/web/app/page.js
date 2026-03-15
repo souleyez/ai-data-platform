@@ -79,8 +79,6 @@ export default function HomePage() {
 
       const data = await response.json();
       const normalized = normalizeChatResponse(data, scenarios.default);
-      setActiveScenario(normalized.scenario);
-      setPanel(normalized.panel || scenarios[normalized.scenario] || scenarios.default);
       setMessages((prev) => [...prev, normalized.message]);
     } catch {
       setMessages((prev) => [
