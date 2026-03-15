@@ -117,22 +117,135 @@ export const scenarios = {
   },
 };
 
+export const workbenchCategories = [
+  { key: 'doc', label: '技术文档' },
+  { key: 'contract', label: '合同协议' },
+  { key: 'daily', label: '工作日报' },
+  { key: 'invoice', label: '发票凭据' },
+  { key: 'order', label: '订单分析' },
+  { key: 'service', label: '客服采集' },
+  { key: 'inventory', label: '库存监控' },
+];
+
+scenarios.daily = {
+  reply:
+    '工作日报面板已切换：当前更适合看团队提交节奏、重点问题、跨部门事项和待办闭环情况。',
+  source: '来源：OA 日报库 / 项目协同记录 / 周计划摘要',
+  stats: [
+    { label: '今日日报', value: '26', trend: '已提交 21', tone: 'neutral' },
+    { label: '风险事项', value: '5', trend: '需跟进', tone: 'warning' },
+    { label: '延期任务', value: '8', trend: '较昨日 +2', tone: 'warning' },
+  ],
+  chartTitle: '日报提交与风险趋势',
+  chartSubtitle: '近 6 个工作日团队提交节奏与问题暴露情况',
+  chartBars: [
+    { month: '周一', height: '52%' },
+    { month: '周二', height: '68%' },
+    { month: '周三', height: '74%' },
+    { month: '周四', height: '63%' },
+    { month: '周五', height: '78%' },
+    { month: '今日', height: '58%', active: true },
+  ],
+  tableTitle: '重点日报事项',
+  tableSubtitle: '需要跨团队跟进的待办与异常',
+  rows: [
+    { code: 'DR-101', customer: '平台研发组', risk: '接口联调排期顺延', level: '跟进中', tone: 'warning' },
+    { code: 'DR-102', customer: '交付支持组', risk: '客户现场验收待确认', level: '待处理', tone: 'danger' },
+    { code: 'DR-103', customer: '产品运营组', risk: '需求评审材料未补齐', level: '提醒', tone: 'warning' },
+  ],
+};
+
+scenarios.invoice = {
+  reply:
+    '发票凭据面板已切换：当前重点看开票进度、异常凭据、待核销金额和高风险票据。',
+  source: '来源：财务票据目录 / OCR 票据索引 / 核销记录',
+  stats: [
+    { label: '本月票据', value: '312', trend: '已识别 287', tone: 'up' },
+    { label: '异常票据', value: '9', trend: '需复核', tone: 'warning' },
+    { label: '待核销金额', value: '¥ 86.4万', trend: '本周新增', tone: 'neutral' },
+  ],
+  chartTitle: '票据处理进度',
+  chartSubtitle: '近 6 周开票、入账与核销进度模拟图',
+  chartBars: [
+    { month: 'W1', height: '36%' },
+    { month: 'W2', height: '41%' },
+    { month: 'W3', height: '54%' },
+    { month: 'W4', height: '63%' },
+    { month: 'W5', height: '71%' },
+    { month: 'W6', height: '66%', active: true },
+  ],
+  tableTitle: '异常票据清单',
+  tableSubtitle: '按金额、抬头、税号和重复风险识别',
+  rows: [
+    { code: 'INV-021', customer: '某项目服务费', risk: '抬头与合同主体不一致', level: '高', tone: 'danger' },
+    { code: 'INV-037', customer: '设备采购票据', risk: '金额与入库单差异', level: '中', tone: 'warning' },
+    { code: 'INV-044', customer: '差旅报销凭据', risk: '重复提交风险', level: '中', tone: 'warning' },
+  ],
+};
+
+scenarios.service = {
+  reply:
+    '客服采集面板已切换：更适合看高频问题、投诉趋势、情绪波动和待回访事项。',
+  source: '来源：客服会话采集 / 工单系统 / 反馈摘要集',
+  stats: [
+    { label: '今日会话', value: '428', trend: '自动归类', tone: 'neutral' },
+    { label: '投诉升级', value: '12', trend: '较昨日 +3', tone: 'warning' },
+    { label: '待回访', value: '19', trend: '需闭环', tone: 'warning' },
+  ],
+  chartTitle: '客服问题趋势',
+  chartSubtitle: '近 6 天高频问题与升级工单趋势',
+  chartBars: [
+    { month: 'D1', height: '44%' },
+    { month: 'D2', height: '49%' },
+    { month: 'D3', height: '61%' },
+    { month: 'D4', height: '57%' },
+    { month: 'D5', height: '73%' },
+    { month: '今日', height: '69%', active: true },
+  ],
+  tableTitle: '高频客服主题',
+  tableSubtitle: '适合沉淀成 FAQ 或流程优化项',
+  rows: [
+    { code: 'CS-018', customer: '物流时效咨询', risk: '咨询量最高', level: '高', tone: 'danger' },
+    { code: 'CS-024', customer: '退款审核进度', risk: '升级频次高', level: '中', tone: 'warning' },
+    { code: 'CS-031', customer: '账号权限异常', risk: '跨系统问题', level: '中', tone: 'warning' },
+  ],
+};
+
+scenarios.inventory = {
+  reply:
+    '库存监控面板已切换：当前重点看低库存 SKU、周转变慢物料和异常出入库。',
+  source: '来源：库存台账 / 采购入库单 / 销售出库流水',
+  stats: [
+    { label: '低库存 SKU', value: '17', trend: '需补货', tone: 'warning' },
+    { label: '异常出入库', value: '6', trend: '待核查', tone: 'warning' },
+    { label: '库存周转天数', value: '34', trend: '较上周 +4', tone: 'neutral' },
+  ],
+  chartTitle: '库存健康度趋势',
+  chartSubtitle: '近 6 周低库存与异常波动情况',
+  chartBars: [
+    { month: 'W1', height: '51%' },
+    { month: 'W2', height: '47%' },
+    { month: 'W3', height: '53%' },
+    { month: 'W4', height: '61%' },
+    { month: 'W5', height: '72%' },
+    { month: 'W6', height: '76%', active: true },
+  ],
+  tableTitle: '重点库存风险',
+  tableSubtitle: '按低库存、异常波动和周转滞后识别',
+  rows: [
+    { code: 'ST-009', customer: '核心配件 A12', risk: '安全库存低于阈值', level: '高', tone: 'danger' },
+    { code: 'ST-014', customer: '包装耗材 B07', risk: '出库波动异常', level: '中', tone: 'warning' },
+    { code: 'ST-025', customer: '半成品 C31', risk: '周转天数偏高', level: '中', tone: 'warning' },
+  ],
+};
+
 export const initialMessages = [
   {
     role: 'assistant',
-    title: '今日概览',
+    title: '欢迎使用',
     content:
-      '本周订单金额较上周增长 12.4%，退款率下降 1.8%。合同库新增 16 份，其中 3 份存在付款节点风险。',
-    meta: '来源：ERP 订单库 / 合同文档库',
-  },
-  {
-    role: 'user',
-    content: '帮我总结一下本月订单趋势，并标出高风险合同。',
-  },
-  {
-    role: 'assistant',
-    content:
-      '我会从以下只读数据源汇总：ERP 订单明细表、商城订单统计表、合同文档目录（已结构化）。右侧将显示趋势图、风险合同列表和来源引用。',
+      '当前系统已接入聊天、文档、数据源与报表的基础框架。你可以直接提问，或先从左侧进入文档中心、数据源管理、报表中心查看当前可用能力。',
+    meta: '模式：read-only / 支持来源、引用与编排状态展示',
   },
 ];
 

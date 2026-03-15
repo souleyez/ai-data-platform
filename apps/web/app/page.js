@@ -6,7 +6,7 @@ import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
 import { buildApiUrl } from './lib/config';
 import { normalizeChatResponse, normalizeDatasourceResponse } from './lib/types';
-import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
+import { initialMessages, scenarios, sourceItems, workbenchCategories } from './lib/mock-data';
 
 const initialCaptureForm = {
   url: '',
@@ -26,6 +26,11 @@ export default function HomePage() {
   const [captureTasks, setCaptureTasks] = useState([]);
   const [captureStatus, setCaptureStatus] = useState('');
   const [captureLoading, setCaptureLoading] = useState(false);
+
+  const selectWorkbenchCategory = (categoryKey) => {
+    setActiveScenario(categoryKey);
+    setPanel(scenarios[categoryKey] || scenarios.default);
+  };
 
   async function loadDatasources() {
     try {
@@ -139,6 +144,21 @@ export default function HomePage() {
             <button className="primary-btn" disabled>生成日报（待接实）</button>
           </div>
         </header>
+
+        <section className="workbench-toolbar card">
+          <div className="workbench-toolbar-label">数据分类</div>
+          <div className="workbench-toolbar-tabs">
+            {workbenchCategories.map((item) => (
+              <button
+                key={item.key}
+                className={`workbench-tab ${activeScenario === item.key ? 'active' : ''}`}
+                onClick={() => selectWorkbenchCategory(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="homepage-grid">
           <section className="workspace-grid">

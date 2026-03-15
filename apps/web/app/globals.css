@@ -89,6 +89,40 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .workspace-grid { display: grid; grid-template-columns: 1.25fr 0.95fr; gap: 20px; }
 .homepage-grid { display: grid; gap: 20px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
+.workbench-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+}
+.workbench-toolbar-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--subtle);
+}
+.workbench-toolbar-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.workbench-tab {
+  background: #f8fbff;
+  border: 1px solid #dbe7f5;
+  color: #334155;
+  padding: 10px 14px;
+}
+.workbench-tab.active {
+  background: #eaf2ff;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
 .chat-panel { padding: 20px; display: flex; flex-direction: column; min-height: 760px; }
 .insight-panel { display: grid; gap: 20px; }
 .panel-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
@@ -253,4 +287,5 @@ th { color: var(--subtle); font-weight: 600; }
   .stats-grid { grid-template-columns: 1fr; }
   .chat-input-row { grid-template-columns: 1fr; }
   .capture-form-row { grid-template-columns: 1fr; }
+  .workbench-toolbar { align-items: flex-start; flex-direction: column; }
 }
