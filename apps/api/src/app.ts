@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerDatasourceRoutes } from './routes/datasources.js';
 import { registerDocumentRoutes } from './routes/documents.js';
@@ -8,6 +9,13 @@ import { registerWebCaptureRoutes } from './routes/web-captures.js';
 
 export function createApp() {
   const app = Fastify({ logger: true });
+
+  app.register(multipart, {
+    limits: {
+      files: 10,
+      fileSize: 30 * 1024 * 1024,
+    },
+  });
 
   app.get('/', async () => ({
     name: 'ai-data-platform-api',
