@@ -8,6 +8,58 @@ export type ChatRequestInput = {
   sessionUser?: string;
 };
 
+function trimSentence(text: string, limit = 220) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= limit) return normalized;
+
+  const sliced = normalized.slice(0, limit);
+  const cut = Math.max(
+    sliced.lastIndexOf('。'),
+    sliced.lastIndexOf('；'),
+    sliced.lastIndexOf('. '),
+    sliced.lastIndexOf('! '),
+    sliced.lastIndexOf('? '),
+  );
+
+  if (cut >= 40) return sliced.slice(0, cut + 1).trim();
+  return `${sliced}…`;
+}
+
+function extractPromptFocus(prompt: string) {
+  const text = prompt.toLowerCase();
+  if (text.includes('结论')) return '结论';
+  if (text.includes('实验对象') || text.includes('模型')) return '实验对象与模型';
+  if (text.includes('价值')) return '主要价值';
+  if (text.includes('适用场景')) return '适用场景';
+  if (text.includes('区别') || text.includes('对比')) return '主要差异';
+  if (text.includes('哪些') || text.includes('分类') || text.includes('分组') || text.includes('主题')) return '主题归纳';
+  return '核心内容';
+}
+
+function buildPrimaryConclusion(prompt: string, item: ParsedDocument) {
+  const focus = extractPromptFocus(prompt);
+  const signals = [
+    item.summary,
+    item.excerpt,
+    item.contractFields?.paymentTerms,
+    item.contractFields?.duration,
+  ].filter(Boolean).map((value) => trimSentence(String(value), 180));
+
+  const main = signals.find(Boolean) || '当前命中文档已返回，但摘要信息仍不足。';
+  return `围绕“${focus}”来看，${item.name} 当前最直接给出的信息是：${main}`;
+}
+
+function buildMultiDocTakeaway(prompt: string, items: ParsedDocument[]) {
+  const focus = extractPromptFocus(prompt);
+  const grouped = items.map((item) => {
+    const tags = item.topicTags?.slice(0, 3).join('、') || item.bizCategory;
+    return `${item.name}（${tags}）`;
+  });
+
+  return `围绕“${focus}”，当前命中的材料主要集中在：${grouped.join('；')}。更细的判断以下方证据为准。`;
+}
+
 function buildDocumentContext(items: ParsedDocument[]) {
   return items.map((item, index) => {
     const extras = [
@@ -39,7 +91,7 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   return parts.join(' / ');
 }
 
-function buildFallbackAnswer(_scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
+export function buildFallbackAnswer(prompt: string, _scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
   if (!matchedDocs.length) {
     return [
       '当前没有命中足够相关的文档证据。',
@@ -47,8 +99,9 @@ function buildFallbackAnswer(_scenarioKey: ScenarioKey, matchedDocs: ParsedDocum
     ].join('\n');
   }
 
-  const primary = matchedDocs[0];
-  const conclusion = primary.summary || primary.excerpt || '当前命中文档已返回，但摘要信息仍不足。';
+  const conclusion = matchedDocs.length === 1
+    ? buildPrimaryConclusion(prompt, matchedDocs[0])
+    : buildMultiDocTakeaway(prompt, matchedDocs);
 
   const evidenceList = matchedDocs
     .map((item, index) => {
@@ -59,7 +112,7 @@ function buildFallbackAnswer(_scenarioKey: ScenarioKey, matchedDocs: ParsedDocum
         item.topicTags?.length ? `主题：${item.topicTags.join('、')}` : '',
       ].filter(Boolean).join('；');
 
-      return `${index + 1}. ${item.name}${labels ? `（${labels}）` : ''}\n- 摘要：${item.summary}\n- 证据摘录：${item.excerpt}`;
+      return `${index + 1}. ${item.name}${labels ? `（${labels}）` : ''}\n- 摘要：${trimSentence(item.summary, 160)}\n- 证据摘录：${trimSentence(item.excerpt, 220)}`;
     })
     .join('\n');
 
@@ -105,10 +158,10 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       answer = result.content;
       orchestrationMode = 'openclaw';
     } catch {
-      answer = buildFallbackAnswer(scenarioKey, matchedDocs);
+      answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs);
     }
   } else {
-    answer = buildFallbackAnswer(scenarioKey, matchedDocs);
+    answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs);
   }
 
   return {
