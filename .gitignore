@@ -6,3 +6,9 @@ coverage/
 .env.*
 !.env.example
 !**/.env.example
+
+# local runtime/cache artifacts
+storage/cache/
+storage/files/
+storage/web-captures/
+*.tgz

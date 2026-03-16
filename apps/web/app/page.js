@@ -33,6 +33,7 @@ export default function HomePage() {
   const [captureLoading, setCaptureLoading] = useState(false);
   const [uploadForm, setUploadForm] = useState(initialUploadForm);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [documentSnapshot, setDocumentSnapshot] = useState({ totalFiles: 0, parsed: 0, scanRoot: '' });
 
   const selectWorkbenchCategory = (categoryKey) => {
     setActiveScenario(categoryKey);
@@ -62,9 +63,25 @@ export default function HomePage() {
     }
   }
 
+  async function loadDocumentSnapshot() {
+    try {
+      const response = await fetch(buildApiUrl('/api/documents'));
+      if (!response.ok) throw new Error('load documents failed');
+      const json = await response.json();
+      setDocumentSnapshot({
+        totalFiles: json?.totalFiles || 0,
+        parsed: json?.meta?.parsed || 0,
+        scanRoot: json?.scanRoot || '',
+      });
+    } catch {
+      setDocumentSnapshot({ totalFiles: 0, parsed: 0, scanRoot: '' });
+    }
+  }
+
   useEffect(() => {
     loadDatasources();
     loadCaptureTasks();
+    loadDocumentSnapshot();
   }, []);
 
   const submitQuestion = async (value) => {
@@ -152,9 +169,10 @@ export default function HomePage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'document upload failed');
 
-      setUploadStatus(json?.message || `已上传 ${uploadForm.files.length} 个文件。`);
+      const uploadedCount = json?.uploadedCount || uploadForm.files.length;
+      await Promise.all([loadDatasources(), loadCaptureTasks(), loadDocumentSnapshot()]);
+      setUploadStatus(`${json?.message || `已上传 ${uploadedCount} 个文件。`} 现在可前往文档中心查看。`);
       setUploadForm(initialUploadForm);
-      await Promise.all([loadDatasources(), loadCaptureTasks()]);
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : '文档上传失败');
     }
@@ -203,6 +221,12 @@ export default function HomePage() {
                 <span className="badge">本地文件 → 待入库</span>
               </div>
             </div>
+            <div className="intake-summary-bar">
+              <span className="source-chip">当前文档总数：{documentSnapshot.totalFiles}</span>
+              <span className="source-chip">已解析：{documentSnapshot.parsed}</span>
+              {documentSnapshot.scanRoot ? <span className="source-chip">扫描目录：{documentSnapshot.scanRoot}</span> : null}
+              <a href="/documents" className="ref-chip">前往文档中心</a>
+            </div>
 
             <section className="documents-grid home-top-grid intake-grid">
               <section className="summary-item intake-pane">
@@ -220,13 +244,7 @@ export default function HomePage() {
                     value={captureForm.url}
                     onChange={(event) => setCaptureForm((prev) => ({ ...prev, url: event.target.value }))}
                   />
-                  <input
-                    className="filter-input"
-                    placeholder="指定想采集的内容，比如：论文摘要、更新日志、技术参数"
-                    value={captureForm.focus}
-                    onChange={(event) => setCaptureForm((prev) => ({ ...prev, focus: event.target.value }))}
-                  />
-                  <div className="capture-form-row">
+                  <div className="capture-form-row compact-row">
                     <select
                       className="filter-input"
                       value={captureForm.frequency}
@@ -236,16 +254,10 @@ export default function HomePage() {
                       <option value="daily">每日</option>
                       <option value="weekly">每周</option>
                     </select>
-                    <input
-                      className="filter-input"
-                      placeholder="补充说明（可选）"
-                      value={captureForm.note}
-                      onChange={(event) => setCaptureForm((prev) => ({ ...prev, note: event.target.value }))}
-                    />
+                    <button className="primary-btn" type="submit" disabled={captureLoading}>
+                      {captureLoading ? '采集中...' : '开始采集并入库'}
+                    </button>
                   </div>
-                  <button className="primary-btn" type="submit" disabled={captureLoading}>
-                    {captureLoading ? '采集中...' : '开始采集并入库'}
-                  </button>
                 </form>
 
                 {captureStatus ? <div className="page-note" style={{ marginTop: 14 }}>{captureStatus}</div> : null}
@@ -260,29 +272,21 @@ export default function HomePage() {
                 </div>
 
                 <form className="capture-form" onSubmit={submitDocumentUpload}>
-                  <label className="upload-dropzone">
+                  <label className="upload-dropzone minimal-dropzone">
                     <input
                       type="file"
                       multiple
                       onChange={(event) => setUploadForm((prev) => ({ ...prev, files: Array.from(event.target.files || []) }))}
                       style={{ display: 'none' }}
                     />
-                    <strong>点击选择文件或拖入此区域</strong>
-                    <span>建议优先上传 PDF、技术白皮书、需求说明、论文等文档。</span>
-                    <span className="upload-hint">当前已选：{uploadForm.files.length} 个文件</span>
+                    <span className="upload-hint">已选 {uploadForm.files.length} 个文件</span>
                   </label>
-                  <input
-                    className="filter-input"
-                    placeholder="补充说明（可选），例如：优先解析摘要、方法、结论"
-                    value={uploadForm.note}
-                    onChange={(event) => setUploadForm((prev) => ({ ...prev, note: event.target.value }))}
-                  />
                   <button className="primary-btn" type="submit" disabled={!uploadForm.files.length}>
                     上传并加入文档库
                   </button>
                 </form>
 
-                {uploadStatus ? <div className="page-note" style={{ marginTop: 14 }}>{uploadStatus}</div> : null}
+                {uploadStatus ? <div className="page-note" style={{ marginTop: 14 }}>{uploadStatus} <a href="/documents" style={{ marginLeft: 8, fontWeight: 700 }}>立即查看</a></div> : null}
               </section>
             </section>
           </section>

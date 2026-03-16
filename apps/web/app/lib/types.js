@@ -93,6 +93,7 @@ export function normalizeDocumentsResponse(data) {
     capabilities: Array.isArray(data?.capabilities) ? data.capabilities : [],
     cacheHit: Boolean(data?.cacheHit),
     lastScanAt: data?.lastScanAt || new Date().toISOString(),
+    config: data?.config || null,
     meta: data?.meta || null,
   };
 }
