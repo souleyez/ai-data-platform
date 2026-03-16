@@ -39,30 +39,37 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   return parts.join(' / ');
 }
 
-function buildFallbackAnswer(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
-  const scenario = scenarios[scenarioKey];
+function buildFallbackAnswer(_scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
   if (!matchedDocs.length) {
-    return `${scenario.reply}\n\n当前没有命中足够相关的文档证据；如果你愿意，我下一步可以先帮你重扫文档库或调整分类绑定。`;
+    return [
+      '当前没有命中足够相关的文档证据。',
+      '如果你愿意，我下一步可以先帮你重扫文档库、调整分类绑定，或换一种提问方式再试。',
+    ].join('\n');
   }
 
-  const docSummary = matchedDocs
+  const primary = matchedDocs[0];
+  const conclusion = primary.summary || primary.excerpt || '当前命中文档已返回，但摘要信息仍不足。';
+
+  const evidenceList = matchedDocs
     .map((item, index) => {
-      const extra = item.category === 'contract'
-        ? `风险等级：${item.riskLevel || 'unknown'}`
-        : item.category === 'technical' || item.category === 'paper'
-          ? `主题：${(item.topicTags || []).join('、') || '未识别'}`
-          : `分类：${item.category}`;
-      return `${index + 1}. ${item.name}（${extra}）\n- 摘要：${item.summary}\n- 证据摘录：${item.excerpt}`;
+      const labels = [
+        `业务分类：${item.bizCategory}`,
+        `解析分类：${item.category}`,
+        item.riskLevel ? `风险等级：${item.riskLevel}` : '',
+        item.topicTags?.length ? `主题：${item.topicTags.join('、')}` : '',
+      ].filter(Boolean).join('；');
+
+      return `${index + 1}. ${item.name}${labels ? `（${labels}）` : ''}\n- 摘要：${item.summary}\n- 证据摘录：${item.excerpt}`;
     })
     .join('\n');
 
   return [
     '以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。',
     '',
-    scenario.reply,
+    `结论：${conclusion}`,
     '',
-    '命中文档与证据：',
-    docSummary,
+    '依据：',
+    evidenceList,
   ].join('\n');
 }
 

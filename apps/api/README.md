@@ -41,8 +41,23 @@ corepack pnpm dev
 
 注意：OpenClaw Gateway 的 `/v1/chat/completions` 端点默认可能未启用；若请求返回 `404 Not Found`，需要在 Gateway 配置中开启 `gateway.http.endpoints.chatCompletions.enabled=true`。
 
+## 真实材料回归验证
+
+当前已补一个可重复执行的验证脚本，用于跑 `au20260316` 这批论文/白皮书材料：
+
+```bash
+DOCUMENT_SCAN_DIR=/mnt/c/Users/soulzyn/Desktop/au20260316 corepack pnpm --filter api validate:au20260316
+```
+
+输出位置：
+
+- `docs/validation-reports/AU20260316-2026-03-17.json`
+- `docs/validation-reports/AU20260316-2026-03-17.md`
+
+这一步的目标不是替代人工判断，而是把“当前命中文档 / 是否含关键术语 / references/sources 是否返回”固化成一轮可复跑的基线。
+
 ## 当前定位
 
 - 已进入 `mock + orchestration adapter` 阶段
 - 文档检索、引用拼装、OpenClaw adapter 已拆分
-- 下一步可继续把论文/技术文档结构化与真实面板结果接进来
+- 当前主线已切到：真实材料回归验证 + 论文/技术文档问答可信度收紧

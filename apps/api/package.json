@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts",
+    "validate:au20260316": "tsx src/scripts/validate-au20260316.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^9.4.0",

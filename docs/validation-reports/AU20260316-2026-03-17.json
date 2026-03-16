@@ -1,0 +1,258 @@
+{
+  "generatedAt": "2026-03-16T20:47:55.463Z",
+  "scanDir": "/mnt/c/Users/soulzyn/Desktop/au20260316",
+  "documents": {
+    "totalFiles": 13,
+    "byBizCategory": {
+      "paper": 7,
+      "other": 5,
+      "technical": 1
+    },
+    "byStatus": {
+      "parsed": 8,
+      "unsupported": 5
+    }
+  },
+  "summary": {
+    "pass": 8,
+    "partial": 0,
+    "fail": 0,
+    "total": 8
+  },
+  "results": [
+    {
+      "id": "Q01",
+      "group": "summary",
+      "prompt": "请概括这批资料主要覆盖哪些健康主题？",
+      "expectedDocs": [],
+      "matchedDocs": [
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf",
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "20 IBS FOS.pdf"
+      ],
+      "expectedDocHits": [],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "减脂",
+        "肠道",
+        "过敏",
+        "脑"
+      ],
+      "missingExpectedTerms": [
+        "后生元"
+      ],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：nutrients Article Administration ofBifidobacterium breveImproves the Brain Function of Aβ 1-42 -Treated Mice via the Modulation of the Gut M…\n\n依据：\n1. （2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q02",
+      "group": "classification",
+      "prompt": "这批资料里哪些更像论文研究，哪些更像行业白皮书或业务资料？",
+      "expectedDocs": [
+        "后生元白皮书.pdf"
+      ],
+      "matchedDocs": [
+        "后生元白皮书.pdf",
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "20 IBS FOS.pdf"
+      ],
+      "expectedDocHits": [
+        "后生元白皮书.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "白皮书"
+      ],
+      "missingExpectedTerms": [
+        "论文"
+      ],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：共建全链创新生态 共享成果转化价值 2025年8月 后生元白皮书 POSTBIOTICS WHITE BOOK 国家乳业技术创新中心科技攻关项目 后生元白皮书 POSTBIOTICS WHITE BOOK 学术顾问 任发政 国家乳业技术创新中心技术咨询委员会主任，中国工程院院士 …\n\n依据：\n1. 后生元白皮书.pdf（业务分类：paper；解析分类：technical；主题：数据采集、接口设计、肠道健康、过敏免疫、脑健康、运动代谢、白皮书、随机对照）\n- 摘要：共建全链创新生…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q03",
+      "group": "single-doc",
+      "prompt": "请总结《后生元白皮书》的核心内容、主要价值和适用场景。",
+      "expectedDocs": [
+        "后生元白皮书.pdf"
+      ],
+      "matchedDocs": [
+        "后生元白皮书.pdf",
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "20 IBS FOS.pdf"
+      ],
+      "expectedDocHits": [
+        "后生元白皮书.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "白皮书",
+        "后生元"
+      ],
+      "missingExpectedTerms": [],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：共建全链创新生态 共享成果转化价值 2025年8月 后生元白皮书 POSTBIOTICS WHITE BOOK 国家乳业技术创新中心科技攻关项目 后生元白皮书 POSTBIOTICS WHITE BOOK 学术顾问 任发政 国家乳业技术创新中心技术咨询委员会主任，中国工程院院士 …\n\n依据：\n1. 后生元白皮书.pdf（业务分类：paper；解析分类：technical；主题：数据采集、接口设计、肠道健康、过敏免疫、脑健康、运动代谢、白皮书、随机对照）\n- 摘要：共建全链创新生…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q04",
+      "group": "single-doc",
+      "prompt": "关于 Olympic Women's Weightlifting Gold Medalist 那篇研究，主要结论是什么？",
+      "expectedDocs": [
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf"
+      ],
+      "matchedDocs": [
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf",
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf"
+      ],
+      "expectedDocHits": [
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "weight loss",
+        "exercise performance",
+        "mouse"
+      ],
+      "missingExpectedTerms": [],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：Citation:Lin, W.-Y.; Kuo, Y.-W.; Lin, J.-H.; Lin, C.-H.; Chen, J.-F.; Tsai, S.-Y.; Lee, M.-C.; Hsu, Y.-J.; Huang, C.-C.; Tsou, Y.-A.; et al.…\n\n依据：\n1. (2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist I…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q05",
+      "group": "single-doc",
+      "prompt": "20 IBS FOS 这篇资料主要研究什么问题？结论是什么？",
+      "expectedDocs": [
+        "20 IBS FOS.pdf"
+      ],
+      "matchedDocs": [
+        "20 IBS FOS.pdf",
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "（2014 抗敏）MP137 Evaluation of the Effect of Lactobacillus paracasei (HF.A00232) in Children (6-13） with Perennial Allergic Rhinitis.pdf"
+      ],
+      "expectedDocHits": [
+        "20 IBS FOS.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "IBS",
+        "FOS"
+      ],
+      "missingExpectedTerms": [],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：Neurogastroenterology & Motility 2016; 1–8 wileyonlinelibrary.com/journal/nmo© 2016 The Authors. Neurogastroenterology & ­Motility Published…\n\n依据：\n1. 20 IBS FOS.pdf（业务分类：paper；解析分类：paper；主题：边缘计算、肠道健康、脑健康、随机对照）\n- 摘要：Neurogastroenterology & Mo…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q06",
+      "group": "single-doc",
+      "prompt": "Bifidobacterium breve 改善脑功能那篇文献，实验对象和核心发现是什么？",
+      "expectedDocs": [
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf"
+      ],
+      "matchedDocs": [
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf",
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf",
+        "（2014 抗敏）MP137 Evaluation of the Effect of Lactobacillus paracasei (HF.A00232) in Children (6-13） with Perennial Allergic Rhinitis.pdf"
+      ],
+      "expectedDocHits": [
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "Aβ",
+        "mice",
+        "brain"
+      ],
+      "missingExpectedTerms": [],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：nutrients Article Administration ofBifidobacterium breveImproves the Brain Function of Aβ 1-42 -Treated Mice via the Modulation of the Gut M…\n\n依据：\n1. （2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-…",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q07",
+      "group": "single-doc",
+      "prompt": "BL-99 调节肠道炎症和功能那篇资料里，用的是什么模型？主要结果是什么？",
+      "expectedDocs": [
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf"
+      ],
+      "matchedDocs": [
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf",
+        "20 IBS FOS.pdf",
+        "（2014 抗敏）MP137 Evaluation of the Effect of Lactobacillus paracasei (HF.A00232) in Children (6-13） with Perennial Allergic Rhinitis.pdf"
+      ],
+      "expectedDocHits": [
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf"
+      ],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "zebrafish",
+        "intestinal"
+      ],
+      "missingExpectedTerms": [],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：RESEARCHARTICLE BifidobacteriumlactisBL-99modulates intestinalinflammationandfunctionsin zebrafishmodels MengChen 1,2 , ChinfengLiu 1,2 , Mi…\n\n依据：\n1. （调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in …",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    },
+    {
+      "id": "Q08",
+      "group": "comparison",
+      "prompt": "这批资料里，哪些更偏减脂/运动，哪些更偏抗敏，哪些更偏肠道炎症或脑健康？",
+      "expectedDocs": [],
+      "matchedDocs": [
+        "（调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in zebrafish models.pdf",
+        "(2022减脂、运动)Probiotic Strains Isolated from an Olympic Women's Weightlifting Gold Medalist Increase Weight Loss and Exercise Performance in a Mouse Model.pdf",
+        "（2021）（脑部健康）Administration of Bifidobacterium breve Improves the Brain Function of Aβ 1-42-Treated Mice via the Modulation of the Gut Microbiome.pdf"
+      ],
+      "expectedDocHits": [],
+      "missingExpectedDocs": [],
+      "forbiddenDocHits": [],
+      "expectedTermHits": [
+        "减脂",
+        "肠道",
+        "脑"
+      ],
+      "missingExpectedTerms": [
+        "抗敏"
+      ],
+      "answerPreview": "以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。\n\n结论：RESEARCHARTICLE BifidobacteriumlactisBL-99modulates intestinalinflammationandfunctionsin zebrafishmodels MengChen 1,2 , ChinfengLiu 1,2 , Mi…\n\n依据：\n1. （调节肠道炎症和功能）Bifidobacterium lactis BL-99 modulates intestinal inflammation and functions in …",
+      "referencesCount": 3,
+      "sourcesCount": 4,
+      "status": "PASS",
+      "notes": [],
+      "orchestrationMode": "fallback"
+    }
+  ]
+}
