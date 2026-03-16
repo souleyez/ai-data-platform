@@ -30,6 +30,8 @@ const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', stri
   report: ['report', '日报', '周报', '月报', '复盘'],
 };
 
+type KeywordRule = string | RegExp;
+
 function normalizeText(text: string) {
   return text.replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -52,8 +54,22 @@ function buildEvidence(filePath: string, text = '') {
   return `${filePath} ${name} ${normalizedText}`.toLowerCase();
 }
 
+function escapeRegex(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesKeyword(text: string, rule: KeywordRule) {
+  if (!text) return false;
+  if (rule instanceof RegExp) return rule.test(text);
+
+  const normalizedRule = rule.toLowerCase();
+  if (!/[a-z]/.test(normalizedRule)) return text.includes(normalizedRule);
+
+  return new RegExp(`\\b${escapeRegex(normalizedRule)}\\b`, 'i').test(text);
+}
+
 function scoreHints(evidence: string, hints: string[]) {
-  return hints.reduce((score, hint) => score + (evidence.includes(hint.toLowerCase()) ? (hint.length >= 6 ? 3 : 2) : 0), 0);
+  return hints.reduce((score, hint) => score + (matchesKeyword(evidence, hint) ? (hint.length >= 6 ? 3 : 2) : 0), 0);
 }
 
 export function detectCategory(filePath: string, text = '') {
@@ -103,21 +119,21 @@ function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'hi
 function detectTopicTags(text: string, category: string, bizCategory: ParsedDocument['bizCategory']) {
   if (category !== 'technical' && category !== 'paper' && bizCategory !== 'technical' && bizCategory !== 'paper') return [];
   const normalized = text.toLowerCase();
-  const tagRules: Array<[string, string[]]> = [
-    ['设备接入', ['接入', 'device', '协议']],
-    ['边缘计算', ['边缘', 'edge']],
-    ['数据采集', ['采集', 'collector']],
+  const tagRules: Array<[string, KeywordRule[]]> = [
+    ['设备接入', ['接入', /\bdevice\b/i, '协议']],
+    ['边缘计算', ['边缘', /\bedge\b/i]],
+    ['数据采集', ['采集', /\bcollector\b/i]],
     ['告警联动', ['告警', '报警']],
-    ['部署规范', ['部署', 'install']],
-    ['接口设计', ['接口', 'api']],
-    ['肠道健康', ['gut', 'intestinal', '肠道', 'ibs', 'flora']],
-    ['过敏免疫', ['allergic', 'rhinitis', '过敏', '鼻炎', 'immune']],
-    ['脑健康', ['brain', 'microbiome', '脑', '认知']],
-    ['运动代谢', ['exercise', 'weight loss', '减脂', '运动', 'metabolism']],
-    ['白皮书', ['white book', '白皮书']],
-    ['随机对照', ['randomized', 'placebo', 'double-blind', '双盲', '随机']],
+    ['部署规范', ['部署', /\binstall\b/i]],
+    ['接口设计', ['接口', /\bapi\b/i]],
+    ['肠道健康', [/\bgut\b/i, /\bintestinal\b/i, '肠道', /\bibs\b/i, /\bflora\b/i]],
+    ['过敏免疫', [/\ballergic\b/i, /\brhinitis\b/i, '过敏', '鼻炎', /\bimmune\b/i]],
+    ['脑健康', [/\bbrain\b/i, '脑', '认知', /\balzheimer/i, /aβ/i]],
+    ['运动代谢', [/\bexercise\b/i, '减脂', '运动', /\bmetabolism\b/i, /weight loss/i]],
+    ['白皮书', [/white\s*book/i, '白皮书']],
+    ['随机对照', [/\brandomized\b/i, /\bplacebo\b/i, /double-blind/i, '双盲', '随机']],
   ];
-  const tags = tagRules.filter(([, keywords]) => keywords.some((keyword) => normalized.includes(keyword)));
+  const tags = tagRules.filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword)));
   return tags.map(([label]) => label);
 }
 

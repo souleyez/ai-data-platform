@@ -12,7 +12,8 @@ function buildDocumentContext(items: ParsedDocument[]) {
   return items.map((item, index) => {
     const extras = [
       `文档名：${item.name}`,
-      `分类：${item.category}`,
+      `业务分类：${item.bizCategory}`,
+      `解析分类：${item.category}`,
       `解析状态：${item.parseStatus}`,
       item.riskLevel ? `风险等级：${item.riskLevel}` : '',
       item.topicTags?.length ? `主题标签：${item.topicTags.join('、')}` : '',
@@ -21,7 +22,7 @@ function buildDocumentContext(items: ParsedDocument[]) {
       item.contractFields?.paymentTerms ? `付款条款：${item.contractFields.paymentTerms}` : '',
       item.contractFields?.duration ? `期限：${item.contractFields.duration}` : '',
       `摘要：${item.summary}`,
-      `摘录：${item.excerpt}`,
+      `证据摘录：${item.excerpt}`,
     ].filter(Boolean);
 
     return `资料 ${index + 1}\n${extras.join('\n')}`;
@@ -40,7 +41,9 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
 
 function buildFallbackAnswer(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
   const scenario = scenarios[scenarioKey];
-  if (!matchedDocs.length) return scenario.reply;
+  if (!matchedDocs.length) {
+    return `${scenario.reply}\n\n当前没有命中足够相关的文档证据；如果你愿意，我下一步可以先帮你重扫文档库或调整分类绑定。`;
+  }
 
   const docSummary = matchedDocs
     .map((item, index) => {
@@ -49,11 +52,18 @@ function buildFallbackAnswer(scenarioKey: ScenarioKey, matchedDocs: ParsedDocume
         : item.category === 'technical' || item.category === 'paper'
           ? `主题：${(item.topicTags || []).join('、') || '未识别'}`
           : `分类：${item.category}`;
-      return `${index + 1}. ${item.name}（${extra}）—— ${item.summary}`;
+      return `${index + 1}. ${item.name}（${extra}）\n- 摘要：${item.summary}\n- 证据摘录：${item.excerpt}`;
     })
     .join('\n');
 
-  return `${scenario.reply}\n\n相关文档：\n${docSummary}`;
+  return [
+    '以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。',
+    '',
+    scenario.reply,
+    '',
+    '命中文档与证据：',
+    docSummary,
+  ].join('\n');
 }
 
 function chooseScenario(prompt: string, matchedDocs: ParsedDocument[]): ScenarioKey {

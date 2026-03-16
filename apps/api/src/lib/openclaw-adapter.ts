@@ -36,7 +36,7 @@ function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
       role: 'system',
       content:
         input.systemPrompt ||
-        '你是企业只读分析助手。请仅基于提供的上下文回答，优先输出中文，结论要简洁可信；若证据不足要明确说明；不要编造不存在的数据。',
+        '你是企业只读分析助手。请仅基于提供的上下文回答，优先输出中文。先给结论，再列出依据；若证据不足要明确说明“不足以判断”或“材料未覆盖”；不要编造不存在的数据。若引用材料，优先点名具体文档名并结合证据摘录来回答。',
     },
     {
       role: 'user',
