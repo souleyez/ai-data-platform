@@ -211,16 +211,6 @@ export default function HomePage() {
 
         <section className="homepage-grid">
           <section className="card documents-card intake-card">
-            <div className="panel-header intake-header">
-              <div>
-                <h3>资料接入区</h3>
-                <p>把网页采集和文档上传统一收口到首页上方，先接入资料，再进入对话分析和结果查看，会更像一个完整工作台。</p>
-              </div>
-              <div className="message-refs" style={{ marginTop: 0 }}>
-                <span className="badge">网页 → 文档库</span>
-                <span className="badge">本地文件 → 待入库</span>
-              </div>
-            </div>
             <div className="intake-summary-bar">
               <span className="source-chip">当前文档总数：{documentSnapshot.totalFiles}</span>
               <span className="source-chip">已解析：{documentSnapshot.parsed}</span>
@@ -229,11 +219,10 @@ export default function HomePage() {
             </div>
 
             <section className="documents-grid home-top-grid intake-grid">
-              <section className="summary-item intake-pane">
-                <div className="panel-header">
+              <section className="summary-item intake-pane compact-intake-pane">
+                <div className="panel-header compact-pane-header">
                   <div>
                     <h3>指定网页采集</h3>
-                    <p>录入目标网站、关注内容和频次，系统会按配置抓取并进入后续文档链路。</p>
                   </div>
                 </div>
 
@@ -263,11 +252,10 @@ export default function HomePage() {
                 {captureStatus ? <div className="page-note" style={{ marginTop: 14 }}>{captureStatus}</div> : null}
               </section>
 
-              <section className="summary-item intake-pane">
-                <div className="panel-header">
+              <section className="summary-item intake-pane compact-intake-pane">
+                <div className="panel-header compact-pane-header">
                   <div>
                     <h3>文档上传入口</h3>
-                    <p>支持先把论文、白皮书、技术说明等文件拖进工作台；当前先完成入口布局，后续再把上传入库接口接实。</p>
                   </div>
                 </div>
 
