@@ -184,7 +184,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
           errorMessage: '文件已保存，但本次自动重扫后未找到对应解析结果。',
         };
       }
-      return buildPreviewItemFromDocument(parsed, 'file');
+      return buildPreviewItemFromDocument(parsed, 'file', file.name);
     });
 
     return {

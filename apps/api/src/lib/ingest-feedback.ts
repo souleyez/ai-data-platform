@@ -52,11 +52,11 @@ function buildReason(doc: ParsedDocument) {
   return '当前依据文件名、提取摘要和正文特征做了初步推荐，建议作为首轮归档分类。';
 }
 
-export function buildPreviewItemFromDocument(doc: ParsedDocument, sourceType: 'file' | 'url' = 'file'): IngestPreviewItem {
+export function buildPreviewItemFromDocument(doc: ParsedDocument, sourceType: 'file' | 'url' = 'file', sourceName?: string): IngestPreviewItem {
   return {
     id: Buffer.from(doc.path).toString('base64url'),
     sourceType,
-    sourceName: doc.name,
+    sourceName: sourceName || doc.name,
     status: 'success',
     preview: {
       title: doc.title || path.parse(doc.name).name,
