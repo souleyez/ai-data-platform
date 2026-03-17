@@ -49,13 +49,22 @@ function excerpt(text: string, fallback: string) {
   return normalized.slice(0, 360) + (normalized.length > 360 ? '…' : '');
 }
 
+function cleanTitleCandidate(line: string) {
+  return line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+[.)、]\s*/, '')
+    .replace(/^[（(][^)）]{1,12}[)）]\s*/, '')
+    .trim();
+}
+
 function inferTitle(text: string, fallbackName: string) {
   const lines = text
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => cleanTitleCandidate(line.trim()))
     .filter(Boolean);
 
-  const picked = lines.find((line) => line.length >= 6 && line.length <= 160 && !/^[\d\W_]+$/.test(line));
+  const picked = lines.find((line) => line.length >= 4 && line.length <= 160 && !/^[\d\W_]+$/.test(line));
   if (picked) return picked;
 
   return path.parse(fallbackName).name;
