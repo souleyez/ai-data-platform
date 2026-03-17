@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { loadDocumentCategoryConfig, saveDocumentCategoryConfig } from '../lib/document-config.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
+import { buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
 
 function sanitizeFileName(fileName: string) {
   return fileName.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || `upload-${Date.now()}`;
@@ -170,7 +171,21 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'no files uploaded' });
     }
 
-    const { files } = await loadParsedDocuments(200, true);
+    const { files, items } = await loadParsedDocuments(200, true);
+    const itemMap = new Map(items.map((item) => [item.path, item]));
+    const ingestItems = savedFiles.map((file) => {
+      const parsed = itemMap.get(file.path);
+      if (!parsed) {
+        return {
+          id: Buffer.from(file.path).toString('base64url'),
+          sourceType: 'file' as const,
+          sourceName: file.name,
+          status: 'failed' as const,
+          errorMessage: '文件已保存，但本次自动重扫后未找到对应解析结果。',
+        };
+      }
+      return buildPreviewItemFromDocument(parsed, 'file');
+    });
 
     return {
       status: 'uploaded',
@@ -181,7 +196,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       uploadedCount: savedFiles.length,
       uploadedFiles: savedFiles,
       totalFiles: files.length,
-      message: `已上传 ${savedFiles.length} 个文件，并已自动重扫文档库。`,
+      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动重扫。`,
+      summary: {
+        total: ingestItems.length,
+        successCount: ingestItems.filter((item) => item.status === 'success').length,
+        failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+      },
+      ingestItems,
     };
   });
 }

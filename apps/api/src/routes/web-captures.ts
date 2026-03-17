@@ -1,5 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { createAndRunWebCaptureTask, listWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
+import { loadDocumentCategoryConfig } from '../lib/document-config.js';
+import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
+import { parseDocument } from '../lib/document-parser.js';
+import { buildFailedPreviewItem, buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
 
 export async function registerWebCaptureRoutes(app: FastifyInstance) {
   app.get('/web-captures', async () => {
@@ -36,12 +40,33 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       note: String(body.note || '').trim(),
     });
 
+    let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
+
+    if (task.lastStatus === 'success' && task.documentPath) {
+      const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+      const parsed = await parseDocument(task.documentPath, config);
+      ingestItems = [buildPreviewItemFromDocument(parsed, 'url')];
+    } else {
+      ingestItems = [buildFailedPreviewItem({
+        id: task.id,
+        sourceType: 'url',
+        sourceName: task.title || task.url,
+        errorMessage: task.lastSummary || '网页抓取失败',
+      })];
+    }
+
     return {
       status: task.lastStatus === 'success' ? 'captured' : 'failed',
       task,
       message: task.lastStatus === 'success'
         ? '网页已抓取、生成总结，并写入文档库。'
         : `网页任务已创建，但本次抓取失败：${task.lastSummary}`,
+      summary: {
+        total: ingestItems.length,
+        successCount: ingestItems.filter((item) => item.status === 'success').length,
+        failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+      },
+      ingestItems,
     };
   });
 }

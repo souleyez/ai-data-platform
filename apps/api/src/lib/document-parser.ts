@@ -7,6 +7,7 @@ export type ParsedDocument = {
   path: string;
   name: string;
   ext: string;
+  title: string;
   category: string;
   bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'other';
   parseStatus: 'parsed' | 'unsupported' | 'error';
@@ -46,6 +47,18 @@ function excerpt(text: string, fallback: string) {
   const normalized = normalizeText(text);
   if (!normalized) return fallback;
   return normalized.slice(0, 360) + (normalized.length > 360 ? '…' : '');
+}
+
+function inferTitle(text: string, fallbackName: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const picked = lines.find((line) => line.length >= 6 && line.length <= 160 && !/^[\d\W_]+$/.test(line));
+  if (picked) return picked;
+
+  return path.parse(fallbackName).name;
 }
 
 function buildEvidence(filePath: string, text = '') {
@@ -177,6 +190,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
         path: filePath,
         name,
         ext,
+        title: path.parse(name).name,
         category,
         bizCategory,
         parseStatus: 'unsupported',
@@ -191,6 +205,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       path: filePath,
       name,
       ext,
+      title: inferTitle(text, name),
       category,
       bizCategory,
       parseStatus: 'parsed',
@@ -208,6 +223,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       path: filePath,
       name,
       ext,
+      title: path.parse(name).name,
       category,
       bizCategory,
       parseStatus: 'error',

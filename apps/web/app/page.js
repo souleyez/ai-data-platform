@@ -20,6 +20,46 @@ const initialUploadForm = {
   note: '优先解析论文、技术白皮书、需求说明等资料',
 };
 
+function renderIngestFeedback(status, fallbackLink = true) {
+  if (!status) return null;
+
+  if (typeof status === 'string') {
+    return <div className="page-note" style={{ marginTop: 14 }}>{status}</div>;
+  }
+
+  const items = Array.isArray(status.ingestItems) ? status.ingestItems : [];
+  return (
+    <div className="page-note" style={{ marginTop: 14 }}>
+      <div>{status.message}</div>
+      {status.summary ? (
+        <div style={{ marginTop: 6 }}>
+          共 {status.summary.total} 项，成功 {status.summary.successCount} 项，失败 {status.summary.failedCount} 项。
+        </div>
+      ) : null}
+      {items.length ? (
+        <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+          {items.map((item) => (
+            <div key={item.id} style={{ padding: '10px 12px', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 10, background: 'rgba(15,23,42,0.18)' }}>
+              <div style={{ fontWeight: 700 }}>{item.sourceName}</div>
+              {item.status === 'success' ? (
+                <>
+                  <div style={{ marginTop: 6 }}>识别标题：{item.preview?.title || '-'}</div>
+                  <div style={{ marginTop: 4 }}>预解析：{item.preview?.summary || '-'}</div>
+                  <div style={{ marginTop: 4 }}>推荐分类：{item.recommendation?.category || item.preview?.docType || '-'}</div>
+                  <div style={{ marginTop: 4 }}>推荐理由：{item.recommendation?.reason || '-'}</div>
+                </>
+              ) : (
+                <div style={{ marginTop: 6 }}>处理失败：{item.errorMessage || '未知错误'}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {fallbackLink ? <a href="/documents" style={{ display: 'inline-block', marginTop: 10, fontWeight: 700 }}>立即查看</a> : null}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
@@ -141,7 +181,11 @@ export default function HomePage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'create web capture failed');
 
-      setCaptureStatus(json?.message || '网页采集任务已创建。');
+      setCaptureStatus({
+        message: json?.message || '网页采集任务已创建。',
+        summary: json?.summary,
+        ingestItems: json?.ingestItems || [],
+      });
       setCaptureForm(initialCaptureForm);
       await Promise.all([loadCaptureTasks(), loadDatasources()]);
     } catch (error) {
@@ -169,9 +213,12 @@ export default function HomePage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'document upload failed');
 
-      const uploadedCount = json?.uploadedCount || uploadForm.files.length;
       await Promise.all([loadDatasources(), loadCaptureTasks(), loadDocumentSnapshot()]);
-      setUploadStatus(`${json?.message || `已上传 ${uploadedCount} 个文件。`} 现在可前往文档中心查看。`);
+      setUploadStatus({
+        message: json?.message || `已上传 ${json?.uploadedCount || uploadForm.files.length} 个文件。`,
+        summary: json?.summary,
+        ingestItems: json?.ingestItems || [],
+      });
       setUploadForm(initialUploadForm);
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : '文档上传失败');
@@ -249,7 +296,7 @@ export default function HomePage() {
                   </div>
                 </form>
 
-                {captureStatus ? <div className="page-note" style={{ marginTop: 14 }}>{captureStatus}</div> : null}
+                {renderIngestFeedback(captureStatus, false)}
               </section>
 
               <section className="summary-item intake-pane compact-intake-pane">
@@ -274,7 +321,7 @@ export default function HomePage() {
                   </button>
                 </form>
 
-                {uploadStatus ? <div className="page-note" style={{ marginTop: 14 }}>{uploadStatus} <a href="/documents" style={{ marginLeft: 8, fontWeight: 700 }}>立即查看</a></div> : null}
+                {renderIngestFeedback(uploadStatus, true)}
               </section>
             </section>
           </section>
