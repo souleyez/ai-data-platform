@@ -22,11 +22,10 @@ export function formatSourceLabel(source) {
 }
 
 export function formatOrchestrationLabel(orchestration) {
-  if (!orchestration) return '编排信息缺失';
-  const mode = orchestration.mode || 'unknown';
+  if (!orchestration) return '分析信息缺失';
   const matches = orchestration.docMatches ?? 0;
-  const gateway = orchestration.gatewayConfigured ? 'gateway:on' : 'gateway:off';
-  return `mode=${mode} · docMatches=${matches} · ${gateway}`;
+  const modeLabel = orchestration.mode === 'openclaw' ? '增强分析' : '标准分析';
+  return `${modeLabel} · 命中资料 ${matches} 项`;
 }
 
 export function normalizeChatResponse(data, fallbackPanel) {

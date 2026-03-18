@@ -87,7 +87,7 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   if (matchedDocs.length) {
     parts.push(`命中文档 ${matchedDocs.length} 篇`);
   }
-  parts.push(mode === 'openclaw' ? '编排：OpenClaw' : '编排：fallback mock');
+  parts.push(mode === 'openclaw' ? '分析链路：增强模式' : '分析链路：标准模式');
   return parts.join(' / ');
 }
 

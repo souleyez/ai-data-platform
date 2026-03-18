@@ -15,7 +15,7 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
         <div className="brand-logo">AI</div>
         <div>
           <h1>数据分析中台</h1>
-          <p>OpenClaw 定制版</p>
+          <p>企业智能分析工作台</p>
         </div>
       </div>
 

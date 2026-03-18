@@ -63,7 +63,7 @@ export default function ChatPanel({
               ) : null}
               {message.orchestration ? (
                 <div className="message-extra-block">
-                  <div className="message-ref-title">编排状态</div>
+                  <div className="message-ref-title">分析状态</div>
                   <div className="orchestration-chip">{formatOrchestrationLabel(message.orchestration)}</div>
                 </div>
               ) : null}
