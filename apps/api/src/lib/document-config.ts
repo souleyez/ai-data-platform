@@ -33,7 +33,13 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
       general: { label: '通用资料', folders: ['general', '资料', '文档'] },
       other: { label: '其他类', folders: [] },
     },
-    customCategories: [],
+    customCategories: [
+      { key: 'daily', label: '工作日报', parent: 'report', keywords: ['日报', '周报', '工作日报'], createdAt: new Date().toISOString() },
+      { key: 'invoice', label: '发票凭据', parent: 'general', keywords: ['发票', '票据', '凭据'], createdAt: new Date().toISOString() },
+      { key: 'order', label: '订单分析', parent: 'general', keywords: ['订单', '回款', '销售'], createdAt: new Date().toISOString() },
+      { key: 'service', label: '客服采集', parent: 'general', keywords: ['客服', '工单', '投诉'], createdAt: new Date().toISOString() },
+      { key: 'inventory', label: '库存监控', parent: 'general', keywords: ['库存', 'SKU', '出入库'], createdAt: new Date().toISOString() },
+    ],
   };
 }
 
