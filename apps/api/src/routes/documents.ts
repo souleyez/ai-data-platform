@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory } from '../lib/document-config.js';
-import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
+import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths } from '../lib/document-store.js';
 import { buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
 import { saveDocumentOverride } from '../lib/document-overrides.js';
 
@@ -154,25 +154,30 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const { items } = await loadParsedDocuments(200, false);
     const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
 
-    const results = [] as Array<{ id: string; bizCategory: BizCategory; sourceName: string }>;
+    const results = [] as Array<{ id: string; bizCategory: BizCategory; sourceName: string; confirmedAt: string }>;
 
     for (const update of updates) {
       const found = update.id ? byId.get(update.id) : null;
       if (!found || !update.bizCategory || !validCategories.includes(update.bizCategory)) continue;
-      await saveDocumentOverride(found.path, update.bizCategory);
+      const saved = await saveDocumentOverride(found.path, update.bizCategory);
       results.push({
         id: update.id as string,
         bizCategory: update.bizCategory,
         sourceName: found.name,
+        confirmedAt: saved.confirmedAt,
       });
     }
 
-    const refreshed = await loadParsedDocuments(200, true);
-    const refreshedById = new Map(refreshed.items.map((item) => [buildDocumentId(item.path), item]));
-    const ingestItems = results
-      .map((result) => refreshedById.get(result.id))
-      .filter(Boolean)
-      .map((item) => buildPreviewItemFromDocument(item!, 'file'));
+    const ingestItems = results.reduce<ReturnType<typeof buildPreviewItemFromDocument>[]>((acc, result) => {
+      const found = byId.get(result.id);
+      if (!found) return acc;
+      acc.push(buildPreviewItemFromDocument({
+        ...found,
+        confirmedBizCategory: result.bizCategory,
+        categoryConfirmedAt: result.confirmedAt,
+      }, 'file'));
+      return acc;
+    }, []);
 
     return {
       status: 'confirmed',
@@ -214,7 +219,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'no files uploaded' });
     }
 
-    const { files, items } = await loadParsedDocuments(200, true);
+    const { files, items } = await mergeParsedDocumentsForPaths(savedFiles.map((file) => file.path), 200);
     const itemMap = new Map(items.map((item) => [item.path, item]));
     const ingestItems = savedFiles.map((file) => {
       const parsed = itemMap.get(file.path);
@@ -239,7 +244,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       uploadedCount: savedFiles.length,
       uploadedFiles: savedFiles,
       totalFiles: files.length,
-      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动重扫。`,
+      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动解析与索引更新。`,
       summary: {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,

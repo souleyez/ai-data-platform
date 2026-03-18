@@ -16,6 +16,13 @@ type CachePayload = {
   items: ParsedDocument[];
 };
 
+type LoadParsedDocumentsResult = {
+  exists: boolean;
+  files: string[];
+  items: ParsedDocument[];
+  cacheHit: boolean;
+};
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   contract: ['合同', '付款', '回款', '违约', '条款', '风险', '审查', '法务'],
   technical: ['技术', '文档', '接入', '部署', '接口', '告警', '采集', '边缘', 'api', '知识库', '摘要', '白皮书', '需求', '方案'],
@@ -64,15 +71,24 @@ async function buildScanSignature(files: string[]) {
   return stats.sort().join('|');
 }
 
-export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<{ exists: boolean; files: string[]; items: ParsedDocument[]; cacheHit: boolean }> {
-  let files: string[] = [];
-  let exists = true;
-
+async function getCurrentFiles(): Promise<{ exists: boolean; files: string[] }> {
   try {
-    files = await listFilesRecursive(DEFAULT_SCAN_DIR);
+    const files = await listFilesRecursive(DEFAULT_SCAN_DIR);
+    return { exists: true, files };
   } catch {
-    exists = false;
+    return { exists: false, files: [] };
   }
+}
+
+async function parseFiles(filePaths: string[]) {
+  const categoryConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+  const overrides = await loadDocumentOverrides();
+  const parsedItems = await Promise.all(filePaths.map((filePath) => parseDocument(filePath, categoryConfig)));
+  return applyDocumentOverrides(parsedItems, overrides);
+}
+
+export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<LoadParsedDocumentsResult> {
+  const { exists, files } = await getCurrentFiles();
 
   if (!exists) {
     return { exists, files, items: [], cacheHit: false };
@@ -92,10 +108,46 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
     }
   }
 
-  const categoryConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-  const overrides = await loadDocumentOverrides();
-  const parsedItems = await Promise.all(files.slice(0, limit).map((filePath) => parseDocument(filePath, categoryConfig)));
-  const items = applyDocumentOverrides(parsedItems, overrides);
+  const items = await parseFiles(files.slice(0, limit));
+  await writeCache({
+    generatedAt: new Date().toISOString(),
+    scanRoot: DEFAULT_SCAN_DIR,
+    totalFiles: files.length,
+    scanSignature,
+    items,
+  });
+
+  return { exists, files, items, cacheHit: false };
+}
+
+export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 200): Promise<LoadParsedDocumentsResult> {
+  const { exists, files } = await getCurrentFiles();
+
+  if (!exists) {
+    return { exists, files, items: [], cacheHit: false };
+  }
+
+  const normalizedPaths = [...new Set(filePaths)];
+  const targetPaths = files.slice(0, limit);
+  const cache = await readCache();
+
+  if (!cache || cache.scanRoot !== DEFAULT_SCAN_DIR) {
+    return loadParsedDocuments(limit, true);
+  }
+
+  const cachedByPath = new Map(cache.items.map((item) => [item.path, item]));
+  const missingTargetPath = targetPaths.some((filePath) => !normalizedPaths.includes(filePath) && !cachedByPath.has(filePath));
+  if (missingTargetPath) {
+    return loadParsedDocuments(limit, true);
+  }
+
+  const reparsedItems = await parseFiles(normalizedPaths.filter((filePath) => targetPaths.includes(filePath)));
+  const reparsedByPath = new Map(reparsedItems.map((item) => [item.path, item]));
+  const items = targetPaths
+    .map((filePath) => reparsedByPath.get(filePath) || cachedByPath.get(filePath))
+    .filter(Boolean) as ParsedDocument[];
+
+  const scanSignature = await buildScanSignature(files);
   await writeCache({
     generatedAt: new Date().toISOString(),
     scanRoot: DEFAULT_SCAN_DIR,
