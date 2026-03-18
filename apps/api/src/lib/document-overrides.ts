@@ -38,7 +38,6 @@ export function applyDocumentOverrides(items: ParsedDocument[], overrides: Recor
     if (!matched) return item;
     return {
       ...item,
-      bizCategory: matched.bizCategory,
       confirmedBizCategory: matched.bizCategory,
       categoryConfirmedAt: matched.confirmedAt,
     };
