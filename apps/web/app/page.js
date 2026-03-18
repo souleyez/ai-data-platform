@@ -22,7 +22,7 @@ const initialUploadForm = {
   note: '优先解析论文、技术白皮书、需求说明等资料',
 };
 
-function renderIngestFeedback(status, onChangeClassification, onConfirmClassification, fallbackLink = true) {
+function renderIngestFeedback(status, onChangeClassification, onConfirmClassification, onAcceptCategorySuggestion, fallbackLink = true) {
   if (!status) return null;
 
   if (typeof status === 'string') {
@@ -53,6 +53,14 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
                     <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 10, background: 'rgba(59,130,246,0.08)', color: '#1e3a8a' }}>
                       <div style={{ fontWeight: 700 }}>项目分类建议：{item.categorySuggestion.suggestedName}</div>
                       <div style={{ marginTop: 4 }}>{item.categorySuggestion.basis}</div>
+                      {item.categorySuggestion.action === 'consider_new_category' ? (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <button className="ghost-btn" type="button" onClick={() => onAcceptCategorySuggestion?.(item.id)} disabled={item.categorySuggestion.accepted}>
+                            {item.categorySuggestion.accepted ? '已加入项目分类' : '接纳为项目分类'}
+                          </button>
+                          <span style={{ opacity: 0.8 }}>归属大类：{item.categorySuggestion.parentCategoryKey}</span>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                   {item.classification ? (
@@ -103,6 +111,7 @@ export default function HomePage() {
   const [uploadForm, setUploadForm] = useState(initialUploadForm);
   const [uploadStatus, setUploadStatus] = useState('');
   const [classificationSaving, setClassificationSaving] = useState(false);
+  const [suggestionSaving, setSuggestionSaving] = useState(false);
   const [documentSnapshot, setDocumentSnapshot] = useState({ totalFiles: 0, parsed: 0, scanRoot: '' });
 
   const selectWorkbenchCategory = (categoryKey) => {
@@ -351,6 +360,61 @@ export default function HomePage() {
     }
   };
 
+  const acceptUploadCategorySuggestion = async (itemId) => {
+    if (suggestionSaving) return;
+    const current = typeof uploadStatus === 'object'
+      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
+      : null;
+    const suggestion = current?.categorySuggestion;
+    if (!suggestion?.suggestedName) return;
+
+    setSuggestionSaving(true);
+    try {
+      const response = await fetch(buildApiUrl('/api/documents/category-suggestions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: itemId, suggestedName: suggestion.suggestedName, parentCategoryKey: suggestion.parentCategoryKey }] }),
+      });
+      const raw = await response.text();
+      let json = {};
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = {};
+      }
+      if (!response.ok) throw new Error(json?.error || raw || 'accept category suggestion failed');
+
+      setUploadStatus((prev) => {
+        if (!prev || typeof prev === 'string') return prev;
+        return {
+          ...prev,
+          message: json?.message || prev.message,
+          ingestItems: (prev.ingestItems || []).map((item) => item.id === itemId
+            ? {
+                ...item,
+                categorySuggestion: item.categorySuggestion
+                  ? { ...item.categorySuggestion, accepted: true }
+                  : item.categorySuggestion,
+              }
+            : item),
+        };
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '已接纳新增分类建议',
+          content: `已将“${suggestion.suggestedName}”加入项目分类，归属大类为 ${suggestion.parentCategoryKey}。`,
+          meta: current?.sourceName || suggestion.suggestedName,
+        },
+      ]);
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : '接纳分类建议失败');
+    } finally {
+      setSuggestionSaving(false);
+    }
+  };
+
   const submitDocumentUpload = async (event) => {
     event.preventDefault();
     if (!uploadForm.files.length) return;
@@ -473,7 +537,7 @@ export default function HomePage() {
                   </div>
                 </form>
 
-                {renderIngestFeedback(captureStatus, null, null, false)}
+                {renderIngestFeedback(captureStatus, null, null, null, false)}
               </section>
 
               <section className="summary-item intake-pane compact-intake-pane">
@@ -508,7 +572,7 @@ export default function HomePage() {
                   </button>
                 </form>
 
-                {renderIngestFeedback(uploadStatus, updateUploadClassificationSelection, confirmUploadClassification, true)}
+                {renderIngestFeedback(uploadStatus, updateUploadClassificationSelection, confirmUploadClassification, acceptUploadCategorySuggestion, true)}
               </section>
             </section>
           </section>

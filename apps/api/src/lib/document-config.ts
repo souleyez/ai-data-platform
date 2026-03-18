@@ -3,9 +3,18 @@ import path from 'node:path';
 
 export type BizCategory = 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
 
+export type ProjectCustomCategory = {
+  key: string;
+  label: string;
+  parent: BizCategory;
+  keywords: string[];
+  createdAt: string;
+};
+
 export type DocumentCategoryConfig = {
   scanRoot: string;
   categories: Record<BizCategory, { label: string; folders: string[] }>;
+  customCategories: ProjectCustomCategory[];
   updatedAt: string;
 };
 
@@ -24,21 +33,24 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
       general: { label: '通用资料', folders: ['general', '资料', '文档'] },
       other: { label: '其他类', folders: [] },
     },
+    customCategories: [],
   };
 }
 
 export async function loadDocumentCategoryConfig(scanRoot: string) {
   try {
     const raw = await fs.readFile(CONFIG_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as DocumentCategoryConfig;
+    const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
     return {
+      ...buildDefault(scanRoot),
       ...parsed,
       scanRoot,
       categories: {
         ...buildDefault(scanRoot).categories,
-        ...parsed.categories,
+        ...(parsed.categories || {}),
       },
-    };
+      customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : [],
+    } satisfies DocumentCategoryConfig;
   } catch {
     return buildDefault(scanRoot);
   }
@@ -53,6 +65,7 @@ export async function saveDocumentCategoryConfig(scanRoot: string, input: Partia
       ...current.categories,
       ...(input.categories || {}),
     },
+    customCategories: input.customCategories || current.customCategories || [],
   };
 
   await fs.mkdir(CONFIG_DIR, { recursive: true });

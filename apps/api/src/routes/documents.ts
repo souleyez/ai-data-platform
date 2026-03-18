@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
-import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory } from '../lib/document-config.js';
+import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory, type ProjectCustomCategory } from '../lib/document-config.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths } from '../lib/document-store.js';
 import { buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
 import { saveDocumentOverride } from '../lib/document-overrides.js';
@@ -186,6 +186,53 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         ? `已确认 ${ingestItems.length} 项分类。`
         : '没有可更新的分类项。',
       ingestItems,
+    };
+  });
+
+  app.post('/documents/category-suggestions', async (request, reply) => {
+    const body = (request.body || {}) as { items?: Array<{ id?: string; suggestedName?: string; parentCategoryKey?: BizCategory }> };
+    const updates = Array.isArray(body.items) ? body.items : [];
+
+    if (!updates.length) {
+      return reply.code(400).send({ error: 'category suggestion items are required' });
+    }
+
+    const { items } = await loadParsedDocuments(200, false);
+    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
+    const currentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const customCategories = [...(currentConfig.customCategories || [])];
+    const accepted = [] as ProjectCustomCategory[];
+
+    for (const update of updates) {
+      const found = update.id ? byId.get(update.id) : null;
+      const suggestedName = String(update.suggestedName || '').trim();
+      const parentCategoryKey = update.parentCategoryKey || found?.bizCategory || 'other';
+      if (!found || !suggestedName) continue;
+
+      const key = suggestedName.toLowerCase().replace(/\s+/g, '-');
+      const exists = customCategories.find((item) => item.key === key || item.label === suggestedName);
+      if (exists) {
+        accepted.push(exists);
+        continue;
+      }
+
+      const created = {
+        key,
+        label: suggestedName,
+        parent: parentCategoryKey,
+        keywords: [suggestedName, ...(found.topicTags || []).slice(0, 3)],
+        createdAt: new Date().toISOString(),
+      } as ProjectCustomCategory;
+      customCategories.push(created);
+      accepted.push(created);
+    }
+
+    const config = await saveDocumentCategoryConfig(DEFAULT_SCAN_DIR, { customCategories });
+    return {
+      status: 'accepted',
+      message: accepted.length ? `已接纳 ${accepted.length} 条新增分类建议。` : '没有可接纳的分类建议。',
+      accepted,
+      config,
     };
   });
 
