@@ -123,14 +123,23 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   color: #1d4ed8;
   border-color: #93c5fd;
 }
-.chat-panel { padding: 20px; display: flex; flex-direction: column; min-height: 760px; position: relative; }
+.chat-panel { padding: 20px; display: flex; flex-direction: column; min-height: 980px; position: relative; }
 .insight-panel { display: grid; gap: 20px; }
 .panel-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
 .panel-header h3 { margin: 0; }
 .panel-header p { margin: 6px 0 0; color: var(--subtle); font-size: 14px; }
 .badge { background: #e0edff; color: #2457d6; padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 
-.chat-messages { display: flex; flex-direction: column; gap: 16px; padding: 8px 4px 20px; min-height: 470px; }
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 4px 20px;
+  min-height: 470px;
+  max-height: 720px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .message { display: flex; gap: 12px; align-items: flex-start; }
 .message.user { justify-content: flex-end; }
 .avatar {

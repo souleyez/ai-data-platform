@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { QUICK_ACTIONS, formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
 export default function ChatPanel({
@@ -8,6 +9,14 @@ export default function ChatPanel({
   onSubmit,
   onQuickAction,
 }) {
+  const messagesRef = useRef(null);
+
+  useEffect(() => {
+    const node = messagesRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+  }, [messages, isLoading]);
+
   return (
     <div className="chat-panel card">
       <div className="panel-header">
@@ -18,7 +27,7 @@ export default function ChatPanel({
         <span className="badge">只读分析</span>
       </div>
 
-      <div className="chat-messages">
+      <div className="chat-messages" ref={messagesRef}>
         {messages.map((message, index) => (
           <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
             {message.role === 'assistant' && <div className="avatar">AI</div>}

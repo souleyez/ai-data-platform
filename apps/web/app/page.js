@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ChatPanel from './components/ChatPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
@@ -14,6 +14,8 @@ const initialCaptureForm = {
   frequency: 'daily',
   note: '',
 };
+
+const CHAT_STORAGE_KEY = 'aidp-home-chat-v1';
 
 const initialUploadForm = {
   files: [],
@@ -82,6 +84,7 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
 
 export default function HomePage() {
   const [messages, setMessages] = useState(initialMessages);
+  const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
   const [activeScenario, setActiveScenario] = useState('order');
   const [panel, setPanel] = useState(scenarios.order);
@@ -140,10 +143,30 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) {
+          setMessages(parsed);
+        }
+      }
+    } catch {
+      // ignore invalid local cache
+    }
+
     loadDatasources();
     loadCaptureTasks();
     loadDocumentSnapshot();
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-60)));
+    } catch {
+      // ignore persistence failure
+    }
+  }, [messages]);
 
   const submitQuestion = async (value) => {
     const text = value.trim();
@@ -184,6 +207,11 @@ export default function HomePage() {
     setActiveScenario('order');
     setPanel(scenarios.order);
     setInput('');
+    try {
+      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+    } catch {
+      // ignore clear failure
+    }
   };
 
   const submitWebCapture = async (event) => {
@@ -202,15 +230,35 @@ export default function HomePage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'create web capture failed');
 
-      setCaptureStatus({
+      const nextStatus = {
         message: json?.message || '网页采集任务已创建。',
         summary: json?.summary,
         ingestItems: json?.ingestItems || [],
-      });
+      };
+      setCaptureStatus(nextStatus);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '网页采集已加入队列',
+          content: `${nextStatus.message}${nextStatus.summary ? ` 共 ${nextStatus.summary.total} 项，成功 ${nextStatus.summary.successCount} 项。` : ''}`,
+          meta: captureForm.url,
+        },
+      ]);
       setCaptureForm(initialCaptureForm);
       await Promise.all([loadCaptureTasks(), loadDatasources()]);
     } catch (error) {
-      setCaptureStatus(error instanceof Error ? error.message : '网页采集任务创建失败');
+      const errorMessage = error instanceof Error ? error.message : '网页采集任务创建失败';
+      setCaptureStatus(errorMessage);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '网页采集失败',
+          content: errorMessage,
+          meta: captureForm.url,
+        },
+      ]);
     } finally {
       setCaptureLoading(false);
     }
@@ -265,6 +313,18 @@ export default function HomePage() {
           ingestItems: (prev.ingestItems || []).map((item) => refreshed.get(item.id) || item),
         };
       });
+      const confirmedItem = (json?.ingestItems || [])[0];
+      if (confirmedItem?.classification) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            title: '分类已确认',
+            content: `${confirmedItem.sourceName} 当前分类已确认为 ${confirmedItem.classification.selectedLabel}。系统推荐仍保留为 ${confirmedItem.recommendation?.category || '未识别'}。`,
+            meta: confirmedItem.preview?.title || confirmedItem.sourceName,
+          },
+        ]);
+      }
       await loadDocumentSnapshot();
     } catch (error) {
       setUploadStatus(error instanceof Error ? error.message : '分类确认失败');
@@ -292,14 +352,35 @@ export default function HomePage() {
       if (!response.ok) throw new Error(json?.error || 'document upload failed');
 
       await Promise.all([loadDatasources(), loadCaptureTasks(), loadDocumentSnapshot()]);
-      setUploadStatus({
+      const nextStatus = {
         message: json?.message || `已上传 ${json?.uploadedCount || uploadForm.files.length} 个文件。`,
         summary: json?.summary,
         ingestItems: json?.ingestItems || [],
-      });
+      };
+      setUploadStatus(nextStatus);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '文档已上传并进入解析',
+          content: `${nextStatus.message}${nextStatus.summary ? ` 共 ${nextStatus.summary.total} 项，成功 ${nextStatus.summary.successCount} 项，失败 ${nextStatus.summary.failedCount} 项。` : ''}`,
+          meta: uploadForm.files.map((file) => file.name).join('，'),
+        },
+      ]);
       setUploadForm(initialUploadForm);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
     } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : '文档上传失败');
+      const errorMessage = error instanceof Error ? error.message : '文档上传失败';
+      setUploadStatus(errorMessage);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '文档上传失败',
+          content: errorMessage,
+          meta: uploadForm.files.map((file) => file.name).join('，'),
+        },
+      ]);
     }
   };
 
@@ -385,15 +466,25 @@ export default function HomePage() {
                 </div>
 
                 <form className="capture-form" onSubmit={submitDocumentUpload}>
-                  <label className="upload-dropzone minimal-dropzone">
-                    <input
-                      type="file"
-                      multiple
-                      onChange={(event) => setUploadForm((prev) => ({ ...prev, files: Array.from(event.target.files || []) }))}
-                      style={{ display: 'none' }}
-                    />
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    multiple
+                    onChange={(event) => setUploadForm((prev) => ({ ...prev, files: Array.from(event.target.files || []) }))}
+                    style={{ display: 'none' }}
+                  />
+                  <div className="upload-dropzone minimal-dropzone" role="button" tabIndex={0} onClick={() => uploadInputRef.current?.click()} onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      uploadInputRef.current?.click();
+                    }
+                  }}>
                     <span className="upload-hint">已选 {uploadForm.files.length} 个文件</span>
-                  </label>
+                    <span style={{ fontSize: 13, color: '#475569' }}>点击选择文件，支持多选</span>
+                  </div>
+                  {!!uploadForm.files.length ? (
+                    <div className="capture-task-meta">{uploadForm.files.map((file) => file.name).join('，')}</div>
+                  ) : null}
                   <button className="primary-btn" type="submit" disabled={!uploadForm.files.length}>
                     上传并加入文档库
                   </button>
