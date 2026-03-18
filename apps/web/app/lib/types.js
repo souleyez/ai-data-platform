@@ -49,31 +49,37 @@ export function normalizeChatResponse(data, fallbackPanel) {
 }
 
 export function normalizeDatasourceResponse(data) {
+  const normalizeItem = (item) => ({
+    id: item.id || item.name || 'unknown',
+    name: item.name || item.id || 'unknown',
+    status: item.status === 'connected' ? 'success' : item.status || 'idle',
+    rawStatus: item.status || 'idle',
+    type: item.type || 'unknown',
+    mode: item.mode || 'read-only',
+    updateMode: item.updateMode || '手动更新',
+    capability: item.capability || (item.type === 'documents'
+      ? '浏览 / 解析 / 问答引用'
+      : item.type === 'database'
+        ? '只读查询 / 报表支撑'
+        : item.type === 'web'
+          ? '网页内容抓取 / 更新'
+          : '待定义'),
+    group: item.group || (item.type === 'documents'
+      ? '文档型'
+      : item.type === 'database'
+        ? '数据库型'
+        : item.type === 'web'
+          ? 'Web采集型'
+          : '其他'),
+    actions: Array.isArray(item.actions) ? item.actions : ['hide', 'delete'],
+    hidden: Boolean(item.hidden),
+  });
+
   return {
     mode: data?.mode || 'read-only',
     total: data?.total || 0,
-    items: Array.isArray(data?.items)
-      ? data.items.map((item) => ({
-          name: item.name || item.id || 'unknown',
-          status: item.status === 'connected' ? 'success' : item.status || 'idle',
-          type: item.type || 'unknown',
-          mode: item.mode || 'read-only',
-          capability: item.type === 'documents'
-            ? '浏览 / 解析 / 问答引用'
-            : item.type === 'database'
-              ? '只读查询 / 报表支撑'
-              : item.type === 'web'
-                ? '采集占位 / 待接实'
-                : '待定义',
-          group: item.type === 'documents'
-            ? '文档型'
-            : item.type === 'database'
-              ? '数据库型'
-              : item.type === 'web'
-                ? 'Web采集型'
-                : '其他',
-        }))
-      : [],
+    items: Array.isArray(data?.items) ? data.items.map(normalizeItem) : [],
+    activeItems: Array.isArray(data?.activeItems) ? data.activeItems.map(normalizeItem) : [],
     meta: data?.meta || null,
   };
 }
