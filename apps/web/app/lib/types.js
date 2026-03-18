@@ -94,6 +94,7 @@ export function normalizeDocumentsResponse(data) {
     lastScanAt: data?.lastScanAt || new Date().toISOString(),
     config: data?.config || null,
     meta: data?.meta || null,
+    customCategories: Array.isArray(data?.config?.customCategories) ? data.config.customCategories : [],
   };
 }
 

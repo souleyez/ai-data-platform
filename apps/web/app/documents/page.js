@@ -5,13 +5,15 @@ import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
 import { formatDocumentBusinessResult, normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
+import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES, PRIMARY_DOCUMENT_CATEGORIES, getPrimaryCategoryLabel } from '../lib/document-taxonomy';
 
 const BIZ_CATEGORY_LABELS = {
-  technical: '技术类',
-  contract: '合同类',
-  report: '日报类',
-  paper: '论文类',
-  other: '其他类',
+  technical: '技术文档',
+  contract: '合同协议',
+  report: '报告简报',
+  paper: '学术论文',
+  general: '通用资料',
+  other: '其他待整理',
 };
 
 function StatCard({ label, value, subtle }) {
@@ -33,6 +35,7 @@ export default function DocumentsPage() {
   const [scanMessage, setScanMessage] = useState('');
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [activeBizCategory, setActiveBizCategory] = useState('all');
+  const [activeCustomCategory, setActiveCustomCategory] = useState('all');
   const [keyword, setKeyword] = useState('');
   const [folderBindings, setFolderBindings] = useState({});
 
@@ -126,18 +129,44 @@ export default function DocumentsPage() {
     return entries.map(([key, value]) => ({ key, label: BIZ_CATEGORY_LABELS[key] || key, value }));
   }, [data]);
 
+  const customCategorySummary = useMemo(() => {
+    const configured = data?.customCategories?.length
+      ? data.customCategories
+      : DEFAULT_CUSTOM_DOCUMENT_CATEGORIES;
+    return configured.map((item) => {
+      const count = (data?.items || []).filter((doc) => {
+        const text = `${doc.name} ${doc.summary} ${doc.excerpt} ${(doc.topicTags || []).join(' ')}`.toLowerCase();
+        return (item.keywords || [item.label]).some((keyword) => text.includes(String(keyword).toLowerCase()));
+      }).length;
+      return {
+        key: item.key,
+        label: item.label,
+        parent: item.parent,
+        count,
+        keywords: item.keywords || [item.label],
+      };
+    });
+  }, [data]);
+
+  const waitingSuggestions = useMemo(() => {
+    return (data?.items || []).filter((item) => item.bizCategory === 'other' || item.confirmedBizCategory === 'other').slice(0, 6);
+  }, [data]);
+
   const filteredItems = useMemo(() => {
     const items = data?.items || [];
     return items.filter((item) => {
-      const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory;
+      const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory || item.confirmedBizCategory === activeBizCategory;
+      const customCategory = customCategorySummary.find((entry) => entry.key === activeCustomCategory);
+      const customMatch = activeCustomCategory === 'all'
+        || !!customCategory && customCategory.keywords.some((keyword) => `${item.name} ${item.summary} ${item.excerpt} ${(item.topicTags || []).join(' ')}`.toLowerCase().includes(String(keyword).toLowerCase()));
       const normalizedKeyword = keyword.trim().toLowerCase();
       const keywordMatch = !normalizedKeyword
         || item.name.toLowerCase().includes(normalizedKeyword)
         || item.summary.toLowerCase().includes(normalizedKeyword)
         || item.excerpt.toLowerCase().includes(normalizedKeyword);
-      return categoryMatch && keywordMatch;
+      return categoryMatch && customMatch && keywordMatch;
     });
-  }, [data, activeBizCategory, keyword]);
+  }, [data, activeBizCategory, activeCustomCategory, keyword, customCategorySummary]);
 
   return (
     <div className="app-shell">
@@ -202,19 +231,39 @@ export default function DocumentsPage() {
             <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>业务分类</h3>
-                  <p>当前统计优先按目录绑定生效，其次才回退到规则推断。</p>
+                  <h3>主分类</h3>
+                  <p>先按稳定的项目主分类筛选，再看二级扩展分类。</p>
                 </div>
               </div>
               <div className="summary-grid biz-summary-grid">
                 <button className={`summary-item filter-card ${activeBizCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory('all')}>
-                  <div className="summary-key">全部</div>
+                  <div className="summary-key">全部资料</div>
                   <div className="summary-value">{data.totalFiles}</div>
                 </button>
-                {bizCategorySummary.map((item) => (
-                  <button key={item.key} className={`summary-item filter-card ${activeBizCategory === item.key ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory(item.key)}>
-                    <div className="summary-key">{item.label}</div>
-                    <div className="summary-value">{item.value}</div>
+                {PRIMARY_DOCUMENT_CATEGORIES.map((category) => {
+                  const matched = bizCategorySummary.find((item) => item.key === category.key);
+                  return (
+                    <button key={category.key} className={`summary-item filter-card ${activeBizCategory === category.key ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory(category.key)}>
+                      <div className="summary-key">{category.label}</div>
+                      <div className="summary-value">{matched?.value || 0}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>扩展分类</h3>
+                  <p>这里展示默认业务分类和已接纳的新增项目分类，适合进一步细分查看。</p>
+                </div>
+              </div>
+              <div className="message-refs" style={{ gap: 10 }}>
+                <button className={`ref-chip ${activeCustomCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveCustomCategory('all')}>全部扩展分类</button>
+                {customCategorySummary.map((item) => (
+                  <button key={item.key} className={`ref-chip ${activeCustomCategory === item.key ? 'active-filter' : ''}`} onClick={() => setActiveCustomCategory(item.key)}>
+                    {item.label} · {item.count}
                   </button>
                 ))}
               </div>
@@ -272,6 +321,43 @@ export default function DocumentsPage() {
                   当前结果：{filteredItems.length} / {data.items.length}
                 </div>
               </section>
+            </section>
+
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>待整理与分类建议</h3>
+                  <p>优先查看还在其他/待整理下的资料，或近期值得拆成新类的主题。</p>
+                </div>
+              </div>
+              <div className="documents-grid">
+                <section className="summary-item">
+                  <div className="summary-key">待整理资料</div>
+                  <div className="summary-value">{waitingSuggestions.length}</div>
+                  <div className="capture-task-list" style={{ marginTop: 10 }}>
+                    {waitingSuggestions.length ? waitingSuggestions.map((item) => (
+                      <div key={item.id} className="capture-task-item">
+                        <strong>{item.name}</strong>
+                        <div className="capture-task-meta">主分类：{getPrimaryCategoryLabel(item.confirmedBizCategory || item.bizCategory)}</div>
+                        <div className="capture-task-note">{item.summary}</div>
+                      </div>
+                    )) : <div className="capture-task-note">当前没有明显待整理资料。</div>}
+                  </div>
+                </section>
+                <section className="summary-item">
+                  <div className="summary-key">已接纳扩展分类</div>
+                  <div className="summary-value">{customCategorySummary.length}</div>
+                  <div className="capture-task-list" style={{ marginTop: 10 }}>
+                    {customCategorySummary.slice(0, 8).map((item) => (
+                      <div key={item.key} className="capture-task-item">
+                        <strong>{item.label}</strong>
+                        <div className="capture-task-meta">归属：{getPrimaryCategoryLabel(item.parent)}</div>
+                        <div className="capture-task-note">当前关联资料：{item.count} 项</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
             </section>
 
             <section className="card table-card">
