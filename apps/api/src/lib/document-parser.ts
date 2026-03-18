@@ -10,6 +10,8 @@ export type ParsedDocument = {
   title: string;
   category: string;
   bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'other';
+  confirmedBizCategory?: 'technical' | 'contract' | 'report' | 'paper' | 'other';
+  categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   summary: string;
   excerpt: string;

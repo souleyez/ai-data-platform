@@ -3,9 +3,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
-import { loadDocumentCategoryConfig, saveDocumentCategoryConfig } from '../lib/document-config.js';
+import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory } from '../lib/document-config.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
 import { buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
+import { saveDocumentOverride } from '../lib/document-overrides.js';
 
 function sanitizeFileName(fileName: string) {
   return fileName.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || `upload-${Date.now()}`;
@@ -138,6 +139,48 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       message: exists
         ? '文档扫描任务已完成，并已进行第一版文本提取（txt / md / pdf）。'
         : '扫描目录不存在，请先创建目录或配置 DOCUMENT_SCAN_DIR。',
+    };
+  });
+
+  app.post('/documents/classify', async (request, reply) => {
+    const body = (request.body || {}) as { items?: Array<{ id?: string; bizCategory?: BizCategory }> };
+    const updates = Array.isArray(body.items) ? body.items : [];
+
+    if (!updates.length) {
+      return reply.code(400).send({ error: 'classification items are required' });
+    }
+
+    const validCategories: BizCategory[] = ['technical', 'contract', 'report', 'paper', 'other'];
+    const { items } = await loadParsedDocuments(200, false);
+    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
+
+    const results = [] as Array<{ id: string; bizCategory: BizCategory; sourceName: string }>;
+
+    for (const update of updates) {
+      const found = update.id ? byId.get(update.id) : null;
+      if (!found || !update.bizCategory || !validCategories.includes(update.bizCategory)) continue;
+      await saveDocumentOverride(found.path, update.bizCategory);
+      results.push({
+        id: update.id as string,
+        bizCategory: update.bizCategory,
+        sourceName: found.name,
+      });
+    }
+
+    const refreshed = await loadParsedDocuments(200, true);
+    const refreshedById = new Map(refreshed.items.map((item) => [buildDocumentId(item.path), item]));
+    const ingestItems = results
+      .map((result) => refreshedById.get(result.id))
+      .filter(Boolean)
+      .map((item) => buildPreviewItemFromDocument(item!, 'file'));
+
+    return {
+      status: 'confirmed',
+      updatedCount: ingestItems.length,
+      message: ingestItems.length
+        ? `已确认 ${ingestItems.length} 项分类。`
+        : '没有可更新的分类项。',
+      ingestItems,
     };
   });
 

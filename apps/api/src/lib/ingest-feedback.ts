@@ -15,6 +15,14 @@ export type IngestPreviewItem = {
     category: string;
     reason: string;
   };
+  classification?: {
+    recommendedKey: string;
+    selectedKey: string;
+    selectedLabel: string;
+    options: Array<{ key: string; label: string }>;
+    confirmed: boolean;
+    confirmedAt?: string;
+  };
   errorMessage?: string;
 };
 
@@ -29,6 +37,10 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function toCategoryLabel(category?: string) {
   return CATEGORY_LABELS[category || 'other'] || '其他资料';
+}
+
+function getEffectiveCategoryKey(doc: ParsedDocument) {
+  return doc.confirmedBizCategory || (doc.bizCategory === 'other' ? doc.category : doc.bizCategory);
 }
 
 function buildReason(doc: ParsedDocument) {
@@ -53,6 +65,8 @@ function buildReason(doc: ParsedDocument) {
 }
 
 export function buildPreviewItemFromDocument(doc: ParsedDocument, sourceType: 'file' | 'url' = 'file', sourceName?: string): IngestPreviewItem {
+  const recommendedKey = doc.bizCategory === 'other' ? doc.category : doc.bizCategory;
+  const selectedKey = getEffectiveCategoryKey(doc);
   return {
     id: Buffer.from(doc.path).toString('base64url'),
     sourceType,
@@ -61,11 +75,19 @@ export function buildPreviewItemFromDocument(doc: ParsedDocument, sourceType: 'f
     preview: {
       title: doc.title || path.parse(doc.name).name,
       summary: doc.summary,
-      docType: toCategoryLabel(doc.bizCategory === 'other' ? doc.category : doc.bizCategory),
+      docType: toCategoryLabel(selectedKey),
     },
     recommendation: {
-      category: toCategoryLabel(doc.bizCategory === 'other' ? doc.category : doc.bizCategory),
+      category: toCategoryLabel(recommendedKey),
       reason: buildReason(doc),
+    },
+    classification: {
+      recommendedKey,
+      selectedKey,
+      selectedLabel: toCategoryLabel(selectedKey),
+      options: Object.entries(CATEGORY_LABELS).map(([key, label]) => ({ key, label })),
+      confirmed: Boolean(doc.confirmedBizCategory),
+      confirmedAt: doc.categoryConfirmedAt,
     },
   };
 }

@@ -20,7 +20,7 @@ const initialUploadForm = {
   note: '优先解析论文、技术白皮书、需求说明等资料',
 };
 
-function renderIngestFeedback(status, fallbackLink = true) {
+function renderIngestFeedback(status, onChangeClassification, onConfirmClassification, fallbackLink = true) {
   if (!status) return null;
 
   if (typeof status === 'string') {
@@ -47,6 +47,26 @@ function renderIngestFeedback(status, fallbackLink = true) {
                   <div style={{ marginTop: 4 }}>预解析：{item.preview?.summary || '-'}</div>
                   <div style={{ marginTop: 4 }}>推荐分类：{item.recommendation?.category || item.preview?.docType || '-'}</div>
                   <div style={{ marginTop: 4 }}>推荐理由：{item.recommendation?.reason || '-'}</div>
+                  {item.classification ? (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select
+                        className="filter-input"
+                        style={{ minWidth: 140, maxWidth: 220 }}
+                        value={item.classification.selectedKey}
+                        onChange={(event) => onChangeClassification?.(item.id, event.target.value)}
+                      >
+                        {item.classification.options?.map((option) => (
+                          <option key={option.key} value={option.key}>{option.label}</option>
+                        ))}
+                      </select>
+                      <button className="ghost-btn" type="button" onClick={() => onConfirmClassification?.(item.id)}>
+                        {item.classification.confirmed ? '重新确认' : '确认归类'}
+                      </button>
+                      <span style={{ opacity: 0.8 }}>
+                        当前分类：{item.classification.selectedLabel}{item.classification.confirmed ? '（已确认）' : '（待确认）'}
+                      </span>
+                    </div>
+                  ) : null}
                 </>
               ) : (
                 <div style={{ marginTop: 6 }}>处理失败：{item.errorMessage || '未知错误'}</div>
@@ -73,6 +93,7 @@ export default function HomePage() {
   const [captureLoading, setCaptureLoading] = useState(false);
   const [uploadForm, setUploadForm] = useState(initialUploadForm);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [classificationSaving, setClassificationSaving] = useState(false);
   const [documentSnapshot, setDocumentSnapshot] = useState({ totalFiles: 0, parsed: 0, scanRoot: '' });
 
   const selectWorkbenchCategory = (categoryKey) => {
@@ -195,6 +216,63 @@ export default function HomePage() {
     }
   };
 
+  const updateUploadClassificationSelection = (itemId, bizCategory) => {
+    setUploadStatus((prev) => {
+      if (!prev || typeof prev === 'string') return prev;
+      return {
+        ...prev,
+        ingestItems: (prev.ingestItems || []).map((item) => {
+          if (item.id !== itemId || !item.classification) return item;
+          const matched = (item.classification.options || []).find((option) => option.key === bizCategory);
+          return {
+            ...item,
+            classification: {
+              ...item.classification,
+              selectedKey: bizCategory,
+              selectedLabel: matched?.label || item.classification.selectedLabel,
+              confirmed: false,
+            },
+          };
+        }),
+      };
+    });
+  };
+
+  const confirmUploadClassification = async (itemId) => {
+    if (classificationSaving) return;
+    const current = typeof uploadStatus === 'object'
+      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
+      : null;
+    const bizCategory = current?.classification?.selectedKey;
+    if (!bizCategory) return;
+
+    setClassificationSaving(true);
+    try {
+      const response = await fetch(buildApiUrl('/api/documents/classify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: itemId, bizCategory }] }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || 'classification confirm failed');
+
+      setUploadStatus((prev) => {
+        if (!prev || typeof prev === 'string') return prev;
+        const refreshed = new Map((json?.ingestItems || []).map((item) => [item.id, item]));
+        return {
+          ...prev,
+          message: json?.message || prev.message,
+          ingestItems: (prev.ingestItems || []).map((item) => refreshed.get(item.id) || item),
+        };
+      });
+      await loadDocumentSnapshot();
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : '分类确认失败');
+    } finally {
+      setClassificationSaving(false);
+    }
+  };
+
   const submitDocumentUpload = async (event) => {
     event.preventDefault();
     if (!uploadForm.files.length) return;
@@ -296,7 +374,7 @@ export default function HomePage() {
                   </div>
                 </form>
 
-                {renderIngestFeedback(captureStatus, false)}
+                {renderIngestFeedback(captureStatus, null, null, false)}
               </section>
 
               <section className="summary-item intake-pane compact-intake-pane">
@@ -321,7 +399,7 @@ export default function HomePage() {
                   </button>
                 </form>
 
-                {renderIngestFeedback(uploadStatus, true)}
+                {renderIngestFeedback(uploadStatus, updateUploadClassificationSelection, confirmUploadClassification, true)}
               </section>
             </section>
           </section>

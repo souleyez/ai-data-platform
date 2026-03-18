@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseDocument, type ParsedDocument } from './document-parser.js';
 import { loadDocumentCategoryConfig } from './document-config.js';
+import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || path.resolve(process.cwd(), '../../storage/files');
 const CACHE_DIR = path.resolve(process.cwd(), '../../storage/cache');
@@ -92,7 +93,9 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
   }
 
   const categoryConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-  const items = await Promise.all(files.slice(0, limit).map((filePath) => parseDocument(filePath, categoryConfig)));
+  const overrides = await loadDocumentOverrides();
+  const parsedItems = await Promise.all(files.slice(0, limit).map((filePath) => parseDocument(filePath, categoryConfig)));
+  const items = applyDocumentOverrides(parsedItems, overrides);
   await writeCache({
     generatedAt: new Date().toISOString(),
     scanRoot: DEFAULT_SCAN_DIR,
