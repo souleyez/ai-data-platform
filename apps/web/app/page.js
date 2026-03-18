@@ -49,6 +49,12 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
                   <div style={{ marginTop: 4 }}>预解析：{item.preview?.summary || '-'}</div>
                   <div style={{ marginTop: 4 }}>推荐分类：{item.recommendation?.category || item.preview?.docType || '-'}</div>
                   <div style={{ marginTop: 4 }}>推荐理由：{item.recommendation?.reason || '-'}</div>
+                  {item.categorySuggestion ? (
+                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 10, background: 'rgba(59,130,246,0.08)', color: '#1e3a8a' }}>
+                      <div style={{ fontWeight: 700 }}>项目分类建议：{item.categorySuggestion.suggestedName}</div>
+                      <div style={{ marginTop: 4 }}>{item.categorySuggestion.basis}</div>
+                    </div>
+                  ) : null}
                   {item.classification ? (
                     <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <select
@@ -86,8 +92,8 @@ export default function HomePage() {
   const [messages, setMessages] = useState(initialMessages);
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
-  const [activeScenario, setActiveScenario] = useState('order');
-  const [panel, setPanel] = useState(scenarios.order);
+  const [activeScenario, setActiveScenario] = useState('technical');
+  const [panel, setPanel] = useState(scenarios.technical || scenarios.default);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
   const [captureForm, setCaptureForm] = useState(initialCaptureForm);
@@ -204,8 +210,8 @@ export default function HomePage() {
 
   const resetConversation = () => {
     setMessages(initialMessages);
-    setActiveScenario('order');
-    setPanel(scenarios.order);
+    setActiveScenario('technical');
+    setPanel(scenarios.technical || scenarios.default);
     setInput('');
     try {
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
@@ -227,8 +233,14 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(captureForm),
       });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json?.error || 'create web capture failed');
+      const raw = await response.text();
+      let json = {};
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = {};
+      }
+      if (!response.ok) throw new Error(json?.error || raw || 'create web capture failed');
 
       const nextStatus = {
         message: json?.message || '网页采集任务已创建。',
@@ -301,8 +313,14 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: [{ id: itemId, bizCategory }] }),
       });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json?.error || 'classification confirm failed');
+      const raw = await response.text();
+      let json = {};
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = {};
+      }
+      if (!response.ok) throw new Error(json?.error || raw || 'classification confirm failed');
 
       setUploadStatus((prev) => {
         if (!prev || typeof prev === 'string') return prev;

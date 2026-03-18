@@ -23,6 +23,11 @@ export type IngestPreviewItem = {
     confirmed: boolean;
     confirmedAt?: string;
   };
+  categorySuggestion?: {
+    suggestedName: string;
+    basis: string;
+    action: 'consider_new_category' | 'keep_in_other';
+  };
   errorMessage?: string;
 };
 
@@ -41,6 +46,34 @@ function toCategoryLabel(category?: string) {
 
 function getEffectiveCategoryKey(doc: ParsedDocument) {
   return doc.confirmedBizCategory || (doc.bizCategory === 'other' ? doc.category : doc.bizCategory);
+}
+
+function buildCategorySuggestion(doc: ParsedDocument) {
+  if (doc.bizCategory === 'other' && doc.topicTags?.length) {
+    return {
+      suggestedName: doc.topicTags[0],
+      basis: `检测到 ${doc.topicTags.slice(0, 3).join('、')} 等主题，但当前还没有合适的项目分类。`,
+      action: 'consider_new_category' as const,
+    };
+  }
+
+  if ((doc.bizCategory === 'paper' || doc.bizCategory === 'technical') && doc.topicTags?.length) {
+    return {
+      suggestedName: doc.topicTags[0],
+      basis: `该资料在 ${toCategoryLabel(doc.bizCategory)} 下已识别出 ${doc.topicTags.slice(0, 2).join('、')} 主题，可考虑后续扩展子分类。`,
+      action: 'consider_new_category' as const,
+    };
+  }
+
+  if (doc.bizCategory === 'other') {
+    return {
+      suggestedName: '其他待整理',
+      basis: '当前特征还不足以稳定拆出新类，建议先放入其他/待整理并持续观察后续上传资料。',
+      action: 'keep_in_other' as const,
+    };
+  }
+
+  return undefined;
 }
 
 function buildReason(doc: ParsedDocument) {
@@ -89,6 +122,7 @@ export function buildPreviewItemFromDocument(doc: ParsedDocument, sourceType: 'f
       confirmed: Boolean(doc.confirmedBizCategory),
       confirmedAt: doc.categoryConfirmedAt,
     },
+    categorySuggestion: buildCategorySuggestion(doc),
   };
 }
 

@@ -150,7 +150,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'classification items are required' });
     }
 
-    const validCategories: BizCategory[] = ['technical', 'contract', 'report', 'paper', 'other'];
+    const validCategories: BizCategory[] = ['technical', 'contract', 'report', 'paper', 'general', 'other'];
     const { items } = await loadParsedDocuments(200, false);
     const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
 

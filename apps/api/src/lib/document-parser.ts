@@ -9,8 +9,8 @@ export type ParsedDocument = {
   ext: string;
   title: string;
   category: string;
-  bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'other';
-  confirmedBizCategory?: 'technical' | 'contract' | 'report' | 'paper' | 'other';
+  bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
+  confirmedBizCategory?: 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   summary: string;
@@ -128,7 +128,7 @@ export function detectCategory(filePath: string, text = '') {
   return 'general';
 }
 
-export function detectBizCategory(filePath: string, category: string, text = '', config?: DocumentCategoryConfig): 'technical' | 'contract' | 'report' | 'paper' | 'other' {
+export function detectBizCategory(filePath: string, category: string, text = '', config?: DocumentCategoryConfig): 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other' {
   if (config) {
     const matched = detectBizCategoryFromConfig(filePath, config);
     if (matched !== 'other') return matched;
@@ -139,6 +139,7 @@ export function detectBizCategory(filePath: string, category: string, text = '',
   if (category === 'paper' || scoreHints(evidence, CATEGORY_HINTS.paper) >= 4) return 'paper';
   if (category === 'report' || scoreHints(evidence, CATEGORY_HINTS.report) >= 4) return 'report';
   if (category === 'technical' || scoreHints(evidence, CATEGORY_HINTS.technical) >= 3) return 'technical';
+  if (category === 'general') return 'general';
   return 'other';
 }
 

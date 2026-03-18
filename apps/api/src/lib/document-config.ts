@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-export type BizCategory = 'technical' | 'contract' | 'report' | 'paper' | 'other';
+export type BizCategory = 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
 
 export type DocumentCategoryConfig = {
   scanRoot: string;
@@ -19,8 +19,9 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
     categories: {
       technical: { label: '技术类', folders: ['tech-docs', 'technical', '技术'] },
       contract: { label: '合同类', folders: ['contracts', 'contract', '合同'] },
-      report: { label: '日报类', folders: ['reports', 'report', '日报', '周报'] },
+      report: { label: '报告类', folders: ['reports', 'report', '日报', '周报', '简报'] },
       paper: { label: '论文类', folders: ['papers', 'paper', '论文'] },
+      general: { label: '通用资料', folders: ['general', '资料', '文档'] },
       other: { label: '其他类', folders: [] },
     },
   };

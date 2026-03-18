@@ -1,3 +1,5 @@
+import { PROJECT_CATEGORIES } from './project-taxonomy';
+
 export const sourceItems = [
   { name: '合同文档库', status: 'success' },
   { name: '技术文档目录', status: 'success' },
@@ -117,15 +119,7 @@ export const scenarios = {
   },
 };
 
-export const workbenchCategories = [
-  { key: 'doc', label: '技术文档' },
-  { key: 'contract', label: '合同协议' },
-  { key: 'daily', label: '工作日报' },
-  { key: 'invoice', label: '发票凭据' },
-  { key: 'order', label: '订单分析' },
-  { key: 'service', label: '客服采集' },
-  { key: 'inventory', label: '库存监控' },
-];
+export const workbenchCategories = PROJECT_CATEGORIES;
 
 scenarios.daily = {
   reply:
@@ -237,6 +231,25 @@ scenarios.inventory = {
     { code: 'ST-014', customer: '包装耗材 B07', risk: '出库波动异常', level: '中', tone: 'warning' },
     { code: 'ST-025', customer: '半成品 C31', risk: '周转天数偏高', level: '中', tone: 'warning' },
   ],
+};
+
+scenarios.paper = {
+  ...scenarios.doc,
+  reply: '论文资料面板已切换：当前更适合查看研究主题、实验设计、结果摘要与可沉淀的知识线索。',
+  source: '来源：论文目录 / PDF 文本索引 / 研究摘要结果集',
+  chartTitle: '论文研究主题分布',
+  tableTitle: '重点研究主题',
+  tableSubtitle: '适合后续沉淀成研究知识卡片',
+};
+
+scenarios.technical = scenarios.doc;
+scenarios.report = scenarios.daily;
+scenarios.general = scenarios.default;
+scenarios.other = {
+  ...scenarios.default,
+  reply: '当前资料中仍有一部分未形成稳定归档分类，建议先查看上传反馈里的“新增分类建议”，再决定是否拆分新类。',
+  tableTitle: '待整理资料提示',
+  tableSubtitle: '优先关注被归为其他/待定的资料',
 };
 
 export const initialMessages = [
