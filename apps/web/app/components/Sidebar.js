@@ -60,7 +60,7 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
         <p>当前系统默认只读：禁止写入、删除、修改客户原系统。</p>
       </section>
 
-      <section className="side-card compact model-card" style={{ marginTop: 'auto' }}>
+      <section className="side-card compact model-card" style={{ marginTop: 8 }}>
         <div className="card-title">模型配置</div>
         <p>当前模型：{currentModel.provider} / {currentModel.label}</p>
         <button className="ghost-btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setModelPanelOpen((prev) => !prev)}>
