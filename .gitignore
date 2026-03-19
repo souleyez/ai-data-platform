@@ -11,4 +11,9 @@ coverage/
 storage/cache/
 storage/files/
 storage/web-captures/
+storage/config/document-overrides.json
+
+# ad-hoc local test artifacts
+apps/api/test/data/
+
 *.tgz

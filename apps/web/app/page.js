@@ -430,8 +430,14 @@ export default function HomePage() {
         method: 'POST',
         body: formData,
       });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json?.error || 'document upload failed');
+      const raw = await response.text();
+      let json = {};
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = {};
+      }
+      if (!response.ok) throw new Error(json?.error || raw || 'document upload failed');
 
       await Promise.all([loadDatasources(), loadCaptureTasks(), loadDocumentSnapshot()]);
       const nextStatus = {

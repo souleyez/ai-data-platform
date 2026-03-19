@@ -50,21 +50,31 @@ function RiskTable({ title, subtitle, rows = [] }) {
 }
 
 export default function InsightPanel({ panel }) {
+  const safePanel = panel || {
+    stats: [],
+    chartTitle: '暂无图表',
+    chartSubtitle: '当前没有可展示的数据',
+    chartBars: [],
+    tableTitle: '暂无列表',
+    tableSubtitle: '当前没有可展示的数据',
+    rows: [],
+  };
+
   return (
     <div className="insight-panel">
-      <StatsCards stats={panel.stats} />
+      <StatsCards stats={safePanel.stats} />
 
       <section className="card chart-card">
         <div className="panel-header">
           <div>
-            <h3>{panel.chartTitle}</h3>
-            <p>{panel.chartSubtitle}</p>
+            <h3>{safePanel.chartTitle}</h3>
+            <p>{safePanel.chartSubtitle}</p>
           </div>
         </div>
-        <TrendChart bars={panel.chartBars} title={panel.chartTitle} />
+        <TrendChart bars={safePanel.chartBars} title={safePanel.chartTitle} />
       </section>
 
-      <RiskTable title={panel.tableTitle} subtitle={panel.tableSubtitle} rows={panel.rows} />
+      <RiskTable title={safePanel.tableTitle} subtitle={safePanel.tableSubtitle} rows={safePanel.rows} />
     </div>
   );
 }
