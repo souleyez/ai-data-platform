@@ -1,0 +1,109 @@
+{
+  "scanRoot": "storage/files",
+  "updatedAt": "2026-03-19T08:20:00.000Z",
+  "categories": {
+    "technical": {
+      "label": "技术类",
+      "folders": [
+        "tech-docs",
+        "technical",
+        "技术"
+      ]
+    },
+    "contract": {
+      "label": "合同类",
+      "folders": [
+        "contracts",
+        "contract",
+        "合同"
+      ]
+    },
+    "report": {
+      "label": "报告类",
+      "folders": [
+        "reports",
+        "report",
+        "日报",
+        "周报",
+        "简报"
+      ]
+    },
+    "paper": {
+      "label": "论文类",
+      "folders": [
+        "papers",
+        "paper",
+        "论文"
+      ]
+    },
+    "general": {
+      "label": "通用资料",
+      "folders": [
+        "general",
+        "资料",
+        "文档"
+      ]
+    },
+    "other": {
+      "label": "其他类",
+      "folders": []
+    }
+  },
+  "customCategories": [
+    {
+      "key": "daily",
+      "label": "工作日报",
+      "parent": "report",
+      "keywords": [
+        "日报",
+        "周报",
+        "工作日报"
+      ],
+      "createdAt": "2026-03-19T08:20:00.000Z"
+    },
+    {
+      "key": "invoice",
+      "label": "发票凭据",
+      "parent": "general",
+      "keywords": [
+        "发票",
+        "票据",
+        "凭据"
+      ],
+      "createdAt": "2026-03-19T08:20:00.000Z"
+    },
+    {
+      "key": "order",
+      "label": "订单分析",
+      "parent": "general",
+      "keywords": [
+        "订单",
+        "回款",
+        "销售"
+      ],
+      "createdAt": "2026-03-19T08:20:00.000Z"
+    },
+    {
+      "key": "service",
+      "label": "客服采集",
+      "parent": "general",
+      "keywords": [
+        "客服",
+        "工单",
+        "投诉"
+      ],
+      "createdAt": "2026-03-19T08:20:00.000Z"
+    },
+    {
+      "key": "inventory",
+      "label": "库存监控",
+      "parent": "general",
+      "keywords": [
+        "库存",
+        "SKU",
+        "出入库"
+      ],
+      "createdAt": "2026-03-19T08:20:00.000Z"
+    }
+  ]
+}
