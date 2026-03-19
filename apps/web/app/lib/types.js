@@ -116,7 +116,10 @@ export function normalizeReportsResponse(data) {
   return {
     mode: data?.mode || 'read-only',
     total: data?.total || 0,
-    items: Array.isArray(data?.items) ? data.items : [],
+    fixedTemplates: Array.isArray(data?.fixedTemplates) ? data.fixedTemplates : [],
+    staticPageTemplates: Array.isArray(data?.staticPageTemplates) ? data.staticPageTemplates : [],
+    activePages: Array.isArray(data?.activePages) ? data.activePages : [],
+    outputRecords: Array.isArray(data?.outputRecords) ? data.outputRecords : [],
     meta: data?.meta || null,
   };
 }
