@@ -4,7 +4,8 @@ import type { ParsedDocument } from './document-parser.js';
 import type { BizCategory } from './document-config.js';
 
 export type DocumentOverride = {
-  bizCategory: BizCategory;
+  bizCategory?: BizCategory;
+  groups?: string[];
   confirmedAt: string;
 };
 
@@ -20,10 +21,13 @@ export async function loadDocumentOverrides() {
   }
 }
 
-export async function saveDocumentOverride(filePath: string, bizCategory: BizCategory) {
+export async function saveDocumentOverride(filePath: string, input: { bizCategory?: BizCategory; groups?: string[] }) {
   const current = await loadDocumentOverrides();
+  const previous = current[filePath] || { confirmedAt: new Date().toISOString() };
   current[filePath] = {
-    bizCategory,
+    ...previous,
+    ...(input.bizCategory ? { bizCategory: input.bizCategory } : {}),
+    ...(input.groups ? { groups: [...new Set(input.groups.map((item) => String(item).trim()).filter(Boolean))] } : {}),
     confirmedAt: new Date().toISOString(),
   };
 
@@ -38,7 +42,8 @@ export function applyDocumentOverrides(items: ParsedDocument[], overrides: Recor
     if (!matched) return item;
     return {
       ...item,
-      confirmedBizCategory: matched.bizCategory,
+      confirmedBizCategory: matched.bizCategory || item.confirmedBizCategory,
+      confirmedGroups: matched.groups || item.confirmedGroups,
       categoryConfirmedAt: matched.confirmedAt,
     };
   });

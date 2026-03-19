@@ -150,7 +150,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'classification items are required' });
     }
 
-    const validCategories: BizCategory[] = ['technical', 'contract', 'report', 'paper', 'general', 'other'];
+    const validCategories: BizCategory[] = ['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'];
     const { items } = await loadParsedDocuments(200, false);
     const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
 
@@ -159,7 +159,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     for (const update of updates) {
       const found = update.id ? byId.get(update.id) : null;
       if (!found || !update.bizCategory || !validCategories.includes(update.bizCategory)) continue;
-      const saved = await saveDocumentOverride(found.path, update.bizCategory);
+      const saved = await saveDocumentOverride(found.path, { bizCategory: update.bizCategory });
       results.push({
         id: update.id as string,
         bizCategory: update.bizCategory,
@@ -233,6 +233,44 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       message: accepted.length ? `已接纳 ${accepted.length} 条新增分类建议。` : '没有可接纳的分类建议。',
       accepted,
       config,
+    };
+  });
+
+  app.post('/documents/groups', async (request, reply) => {
+    const body = (request.body || {}) as { items?: Array<{ id?: string; groups?: string[] }> };
+    const updates = Array.isArray(body.items) ? body.items : [];
+
+    if (!updates.length) {
+      return reply.code(400).send({ error: 'group items are required' });
+    }
+
+    const { items } = await loadParsedDocuments(200, false);
+    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
+    const results = [] as Array<{ id: string; groups: string[]; confirmedAt: string }>;
+
+    for (const update of updates) {
+      const found = update.id ? byId.get(update.id) : null;
+      if (!found) continue;
+      const saved = await saveDocumentOverride(found.path, { groups: update.groups || [] });
+      results.push({ id: update.id as string, groups: saved.groups || [], confirmedAt: saved.confirmedAt });
+    }
+
+    const ingestItems = results.reduce<ReturnType<typeof buildPreviewItemFromDocument>[]>((acc, result) => {
+      const found = byId.get(result.id);
+      if (!found) return acc;
+      acc.push(buildPreviewItemFromDocument({
+        ...found,
+        confirmedGroups: result.groups,
+        categoryConfirmedAt: result.confirmedAt,
+      }, 'file'));
+      return acc;
+    }, []);
+
+    return {
+      status: 'confirmed',
+      updatedCount: ingestItems.length,
+      message: ingestItems.length ? `已确认 ${ingestItems.length} 项分组。` : '没有可更新的分组项。',
+      ingestItems,
     };
   });
 

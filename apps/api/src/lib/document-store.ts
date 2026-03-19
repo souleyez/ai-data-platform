@@ -180,14 +180,14 @@ function extractPromptKeywords(prompt: string) {
   return [...keywordSet];
 }
 
-function detectPromptIntent(keywords: string[]) {
+function detectPromptIntent(keywords: string[]): 'contract' | 'paper' | 'mixed' {
   const joined = keywords.join(' ');
   const contractIntent = CATEGORY_KEYWORDS.contract.some((keyword) => joined.includes(keyword));
-  const technicalIntent = [...CATEGORY_KEYWORDS.technical, ...CATEGORY_KEYWORDS.paper].some((keyword) => joined.includes(keyword));
+  const paperIntent = CATEGORY_KEYWORDS.paper.some((keyword) => joined.includes(keyword));
 
-  if (contractIntent && !technicalIntent) return 'contract';
-  if (technicalIntent && !contractIntent) return 'technical';
-  if (technicalIntent) return 'technical';
+  if (contractIntent && !paperIntent) return 'contract';
+  if (paperIntent && !contractIntent) return 'paper';
+  if (paperIntent) return 'paper';
   return 'mixed';
 }
 
@@ -200,7 +200,7 @@ function scoreKeywordAgainstText(keyword: string, text: string) {
   return 1;
 }
 
-function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptIntent: 'contract' | 'technical' | 'mixed') {
+function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptIntent: 'contract' | 'paper' | 'mixed') {
   const name = item.name.toLowerCase();
   const summary = item.summary.toLowerCase();
   const excerpt = item.excerpt.toLowerCase();
@@ -235,11 +235,11 @@ function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptInte
 
   if (promptIntent === 'contract') {
     if (item.category === 'contract' || item.bizCategory === 'contract') score += 10;
-    else if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'technical' || item.bizCategory === 'paper') score -= 6;
+    else if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'paper') score -= 6;
   }
 
-  if (promptIntent === 'technical') {
-    if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'technical' || item.bizCategory === 'paper') score += 10;
+  if (promptIntent === 'paper') {
+    if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'paper') score += 10;
     else if (item.category === 'contract' || item.bizCategory === 'contract') score -= 6;
   }
 

@@ -1,18 +1,17 @@
 export const PRIMARY_DOCUMENT_CATEGORIES = [
   { key: 'paper', label: '学术论文' },
-  { key: 'technical', label: '技术文档' },
   { key: 'contract', label: '合同协议' },
-  { key: 'report', label: '报告简报' },
-  { key: 'general', label: '通用资料' },
-  { key: 'other', label: '其他待整理' },
+  { key: 'daily', label: '工作日报' },
+  { key: 'invoice', label: '发票凭据' },
+  { key: 'order', label: '订单分析' },
+  { key: 'service', label: '客服采集' },
+  { key: 'inventory', label: '库存监控' },
 ];
 
 export const DEFAULT_CUSTOM_DOCUMENT_CATEGORIES = [
-  { key: 'daily', label: '工作日报', parent: 'report' },
-  { key: 'invoice', label: '发票凭据', parent: 'general' },
-  { key: 'order', label: '订单分析', parent: 'general' },
-  { key: 'service', label: '客服采集', parent: 'general' },
-  { key: 'inventory', label: '库存监控', parent: 'general' },
+  { key: 'formula', label: '奶粉配方', parent: 'paper', keywords: ['奶粉配方', '配方', '乳粉'] },
+  { key: 'brain-health', label: '脑健康', parent: 'paper', keywords: ['脑健康', 'brain', '认知', '阿尔茨海默'] },
+  { key: 'gut-health', label: '肠道健康', parent: 'paper', keywords: ['肠道健康', 'gut', '肠道', '菌群'] },
 ];
 
 export function getPrimaryCategoryLabel(key) {

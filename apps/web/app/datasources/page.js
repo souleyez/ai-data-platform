@@ -16,11 +16,22 @@ function StatCard({ label, value, subtle }) {
   );
 }
 
+const TYPE_LABELS = {
+  documents: '文档型',
+  web: '网页采集',
+  database: '数据库',
+  unknown: '其他',
+};
+
 export default function DatasourcesPage() {
   const [data, setData] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [hiddenIds, setHiddenIds] = useState([]);
+  const [activeType, setActiveType] = useState('all');
+  const [activeGroup, setActiveGroup] = useState('all');
+  const [activeStatus, setActiveStatus] = useState('all');
+  const [keyword, setKeyword] = useState('');
 
   useEffect(() => {
     async function load() {
@@ -39,16 +50,31 @@ export default function DatasourcesPage() {
   }, []);
 
   const visibleItems = useMemo(() => (data?.items || []).filter((item) => !hiddenIds.includes(item.id)), [data, hiddenIds]);
-  const activeItems = useMemo(() => (data?.activeItems || []).filter((item) => !hiddenIds.includes(item.id)), [data, hiddenIds]);
+  const groupedItems = useMemo(() => visibleItems.reduce((acc, item) => {
+    const group = item.group || '其他';
+    acc[group] = (acc[group] || 0) + 1;
+    return acc;
+  }, {}), [visibleItems]);
+  const typeItems = useMemo(() => visibleItems.reduce((acc, item) => {
+    const type = item.type || 'unknown';
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {}), [visibleItems]);
 
-  const groupedItems = useMemo(() => {
-    return visibleItems.reduce((acc, item) => {
-      const group = item.group || '其他';
-      acc[group] = acc[group] || [];
-      acc[group].push(item);
-      return acc;
-    }, {});
-  }, [visibleItems]);
+  const filteredItems = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return visibleItems.filter((item) => {
+      const typeMatch = activeType === 'all' || item.type === activeType;
+      const groupMatch = activeGroup === 'all' || item.group === activeGroup;
+      const statusMatch = activeStatus === 'all' || item.rawStatus === activeStatus || item.status === activeStatus;
+      const keywordMatch = !normalizedKeyword
+        || item.name.toLowerCase().includes(normalizedKeyword)
+        || item.group.toLowerCase().includes(normalizedKeyword)
+        || item.capability.toLowerCase().includes(normalizedKeyword)
+        || item.updateMode.toLowerCase().includes(normalizedKeyword);
+      return typeMatch && groupMatch && statusMatch && keywordMatch;
+    });
+  }, [visibleItems, activeType, activeGroup, activeStatus, keyword]);
 
   const hideItem = (id) => setHiddenIds((prev) => prev.includes(id) ? prev : [...prev, id]);
   const deleteItem = (id) => setHiddenIds((prev) => prev.includes(id) ? prev : [...prev, id]);
@@ -60,88 +86,119 @@ export default function DatasourcesPage() {
         <header className="topbar">
           <div>
             <h2>数据源管理</h2>
-            <p>展示所有正在采集或可更新的数据源，包括固定网页抓取、知识网站获取、数据库接入、ERP 订单后台与爬虫数据接入。尽量减少客户操作，仅保留屏蔽与删除。</p>
+            <p>先按分类和分组筛，再按状态和关键字缩小范围，下面统一看数据源大列表。</p>
           </div>
         </header>
 
         {error ? <p>{error}</p> : null}
         {data ? (
           <section className="documents-layout">
-            <section className="card stats-grid">
-              <StatCard label="总数据源" value={String(visibleItems.length)} subtle={data.mode} />
-              <StatCard label="正在更新/可用" value={String(activeItems.length)} subtle="active + connected" />
-              <StatCard label="已屏蔽" value={String(hiddenIds.length)} subtle="本地视图隐藏" />
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>分类</h3>
+                  <p>先看来源类型。</p>
+                </div>
+              </div>
+              <div className="summary-grid biz-summary-grid">
+                <button className={`summary-item filter-card ${activeType === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveType('all')}>
+                  <div className="summary-key">全部</div>
+                  <div className="summary-value">{visibleItems.length}</div>
+                </button>
+                {Object.entries(typeItems).map(([type, count]) => (
+                  <button key={type} className={`summary-item filter-card ${activeType === type ? 'active-filter' : ''}`} onClick={() => setActiveType(type)}>
+                    <div className="summary-key">{TYPE_LABELS[type] || type}</div>
+                    <div className="summary-value">{count}</div>
+                  </button>
+                ))}
+              </div>
             </section>
 
             <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>正在采集 / 可更新的数据</h3>
-                  <p>优先显示系统当前持续更新或可以随时更新的来源，减少用户到处找入口。</p>
+                  <h3>分组</h3>
+                  <p>按业务来源分组继续细分。</p>
                 </div>
               </div>
-              <div className="summary-grid biz-summary-grid">
-                {activeItems.map((item) => (
-                  <div key={item.id} className="summary-item">
-                    <div className="summary-key">{item.name}</div>
-                    <div className="summary-value" style={{ fontSize: 18 }}>{item.group}</div>
-                    <div className="capture-task-meta" style={{ marginTop: 8 }}>更新方式：{item.updateMode}</div>
-                    <div className="capture-task-note">{item.capability}</div>
-                  </div>
+              <div className="message-refs" style={{ gap: 10 }}>
+                <button className={`ref-chip ${activeGroup === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveGroup('all')}>全部分组</button>
+                {Object.entries(groupedItems).map(([group, count]) => (
+                  <button key={group} className={`ref-chip ${activeGroup === group ? 'active-filter' : ''}`} onClick={() => setActiveGroup(group)}>
+                    {group} · {count}
+                  </button>
                 ))}
               </div>
             </section>
 
             <section className="documents-grid three-columns">
-              {Object.entries(groupedItems).map(([group, items]) => (
-                <section key={group} className="card documents-card">
-                  <div className="panel-header">
-                    <div>
-                      <h3>{group}</h3>
-                      <p>{items.length} 个数据源</p>
-                    </div>
+              <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>状态</h3>
+                    <p>快速看可用性与隐藏情况。</p>
                   </div>
-                  <div className="summary-grid">
-                    {items.map((item) => (
-                      <div key={item.id} className="summary-item">
-                        <div className="summary-key">{item.name}</div>
-                        <div className="summary-value" style={{ fontSize: '15px' }}>{item.updateMode}</div>
-                        <div className="capture-task-note">{item.capability}</div>
-                      </div>
-                    ))}
+                </div>
+                <div className="summary-grid">
+                  <StatCard label="总数据源" value={String(visibleItems.length)} subtle={data.mode} />
+                  <StatCard label="可用 / 在线" value={String(visibleItems.filter((item) => item.status === 'success').length)} subtle="connected / active" />
+                  <StatCard label="已屏蔽" value={String(hiddenIds.length)} subtle="本地视图隐藏" />
+                </div>
+                <div className="message-refs" style={{ gap: 10, marginTop: 12 }}>
+                  <button className={`ref-chip ${activeStatus === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('all')}>全部状态</button>
+                  <button className={`ref-chip ${activeStatus === 'success' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('success')}>success</button>
+                  <button className={`ref-chip ${activeStatus === 'warning' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('warning')}>warning</button>
+                  <button className={`ref-chip ${activeStatus === 'idle' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('idle')}>idle</button>
+                </div>
+              </section>
+
+              <section className="card documents-card" style={{ gridColumn: 'span 2' }}>
+                <div className="panel-header">
+                  <div>
+                    <h3>关键字搜索</h3>
+                    <p>支持名称、分组、能力、更新方式搜索。</p>
                   </div>
-                </section>
-              ))}
+                </div>
+                <input
+                  className="filter-input"
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  placeholder="搜索数据源名称、分组、能力..."
+                />
+                <div className="page-note" style={{ marginTop: '12px', marginBottom: 0 }}>
+                  当前结果：{filteredItems.length} / {visibleItems.length}
+                </div>
+              </section>
             </section>
 
             <section className="card table-card">
               <div className="panel-header">
                 <div>
                   <h3>数据源列表</h3>
-                  <p>默认只做查看与轻管理；如无需要，不要求客户维护复杂配置。</p>
+                  <p>默认直接看大列表；上面三层筛选决定这里显示什么。</p>
                 </div>
               </div>
               <table>
                 <thead>
                   <tr>
                     <th>名称</th>
-                    <th>来源分组</th>
-                    <th>类型</th>
+                    <th>分类</th>
+                    <th>分组</th>
+                    <th>状态</th>
                     <th>更新方式</th>
                     <th>能力</th>
-                    <th>状态</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleItems.map((item) => (
+                  {filteredItems.map((item) => (
                     <tr key={item.id}>
                       <td>{item.name}</td>
+                      <td>{TYPE_LABELS[item.type] || item.type}</td>
                       <td>{item.group}</td>
-                      <td>{item.type}</td>
+                      <td><span className={`tag ${item.status === 'success' ? 'up-tag' : item.status === 'warning' ? 'warning' : 'neutral-tag'}`}>{item.rawStatus}</span></td>
                       <td>{item.updateMode}</td>
                       <td className="summary-cell">{item.capability}</td>
-                      <td><span className={`tag ${item.status === 'success' ? 'up-tag' : item.status === 'warning' ? 'warning' : 'neutral-tag'}`}>{item.rawStatus}</span></td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button className="ghost-btn" onClick={() => hideItem(item.id)}>屏蔽</button>

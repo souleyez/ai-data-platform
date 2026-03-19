@@ -5,15 +5,16 @@ import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
 import { formatDocumentBusinessResult, normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
-import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES, PRIMARY_DOCUMENT_CATEGORIES, getPrimaryCategoryLabel } from '../lib/document-taxonomy';
+import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES, PRIMARY_DOCUMENT_CATEGORIES } from '../lib/document-taxonomy';
 
 const BIZ_CATEGORY_LABELS = {
-  technical: '技术文档',
-  contract: '合同协议',
-  report: '报告简报',
   paper: '学术论文',
-  general: '通用资料',
-  other: '其他待整理',
+  contract: '合同协议',
+  daily: '工作日报',
+  invoice: '发票凭据',
+  order: '订单分析',
+  service: '客服采集',
+  inventory: '库存监控',
 };
 
 function StatCard({ label, value, subtle }) {
@@ -26,18 +27,23 @@ function StatCard({ label, value, subtle }) {
   );
 }
 
+function extractTimestamp(item) {
+  const text = `${item?.name || ''} ${item?.path || ''}`;
+  const match = text.match(/(\d{13})/);
+  return match ? Number(match[1]) : 0;
+}
+
 export default function DocumentsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanLoading, setScanLoading] = useState(false);
-  const [saveLoading, setSaveLoading] = useState(false);
   const [error, setError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [activeBizCategory, setActiveBizCategory] = useState('all');
   const [activeCustomCategory, setActiveCustomCategory] = useState('all');
   const [keyword, setKeyword] = useState('');
-  const [folderBindings, setFolderBindings] = useState({});
+  const [activeExtension, setActiveExtension] = useState('all');
 
   const loadDocuments = async () => {
     try {
@@ -47,10 +53,6 @@ export default function DocumentsPage() {
       const json = await response.json();
       const normalized = normalizeDocumentsResponse(json);
       setData(normalized);
-      const nextBindings = Object.fromEntries(
-        Object.entries(normalized.config?.categories || {}).map(([key, value]) => [key, (value.folders || []).join('\n')]),
-      );
-      setFolderBindings(nextBindings);
     } catch {
       setError('文档接口暂时不可用');
     } finally {
@@ -92,51 +94,18 @@ export default function DocumentsPage() {
     }
   };
 
-  const saveBindings = async () => {
-    try {
-      setSaveLoading(true);
-      setScanMessage('');
-      const categories = Object.fromEntries(
-        Object.entries(folderBindings).map(([key, value]) => [
-          key,
-          {
-            label: BIZ_CATEGORY_LABELS[key] || key,
-            folders: String(value || '').split(/\n|,/).map((item) => item.trim()).filter(Boolean),
-          },
-        ]),
-      );
-
-      const response = await fetch(buildApiUrl('/api/documents/config'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categories }),
-      });
-      if (!response.ok) throw new Error('save config failed');
-      const json = await response.json();
-      setScanMessage(json.message || '分类目录配置已保存，并已自动重扫文档。');
-      await loadDocuments();
-    } catch {
-      setScanMessage('分类目录配置保存失败，请稍后重试');
-    } finally {
-      setSaveLoading(false);
-    }
-  };
-
   const extensionSummary = useMemo(() => (data?.byExtension ? Object.entries(data.byExtension) : []), [data]);
-  const statusSummary = useMemo(() => (data?.byStatus ? Object.entries(data.byStatus) : []), [data]);
   const bizCategorySummary = useMemo(() => {
     const entries = data?.byBizCategory ? Object.entries(data.byBizCategory) : [];
     return entries.map(([key, value]) => ({ key, label: BIZ_CATEGORY_LABELS[key] || key, value }));
   }, [data]);
 
   const customCategorySummary = useMemo(() => {
-    const configured = data?.customCategories?.length
-      ? data.customCategories
-      : DEFAULT_CUSTOM_DOCUMENT_CATEGORIES;
+    const configured = data?.customCategories?.length ? data.customCategories : DEFAULT_CUSTOM_DOCUMENT_CATEGORIES;
     return configured.map((item) => {
       const count = (data?.items || []).filter((doc) => {
         const text = `${doc.name} ${doc.summary} ${doc.excerpt} ${(doc.topicTags || []).join(' ')}`.toLowerCase();
-        return (item.keywords || [item.label]).some((keyword) => text.includes(String(keyword).toLowerCase()));
+        return (item.keywords || [item.label]).some((entry) => text.includes(String(entry).toLowerCase()));
       }).length;
       return {
         key: item.key,
@@ -148,41 +117,44 @@ export default function DocumentsPage() {
     });
   }, [data]);
 
-  const waitingSuggestions = useMemo(() => {
-    return (data?.items || []).filter((item) => item.bizCategory === 'other' || item.confirmedBizCategory === 'other').slice(0, 6);
-  }, [data]);
-
   const filteredItems = useMemo(() => {
     const items = data?.items || [];
-    return items.filter((item) => {
-      const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory || item.confirmedBizCategory === activeBizCategory;
-      const customCategory = customCategorySummary.find((entry) => entry.key === activeCustomCategory);
-      const customMatch = activeCustomCategory === 'all'
-        || !!customCategory && customCategory.keywords.some((keyword) => `${item.name} ${item.summary} ${item.excerpt} ${(item.topicTags || []).join(' ')}`.toLowerCase().includes(String(keyword).toLowerCase()));
-      const normalizedKeyword = keyword.trim().toLowerCase();
-      const keywordMatch = !normalizedKeyword
-        || item.name.toLowerCase().includes(normalizedKeyword)
-        || item.summary.toLowerCase().includes(normalizedKeyword)
-        || item.excerpt.toLowerCase().includes(normalizedKeyword);
-      return categoryMatch && customMatch && keywordMatch;
-    });
-  }, [data, activeBizCategory, activeCustomCategory, keyword, customCategorySummary]);
+    const normalizedKeyword = keyword.trim().toLowerCase();
+
+    return items
+      .filter((item) => {
+        const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory || item.confirmedBizCategory === activeBizCategory;
+        const customCategory = customCategorySummary.find((entry) => entry.key === activeCustomCategory);
+        const customMatch = activeCustomCategory === 'all'
+          || (!!customCategory && customCategory.keywords.some((entry) => `${item.name} ${item.summary} ${item.excerpt} ${(item.topicTags || []).join(' ')}`.toLowerCase().includes(String(entry).toLowerCase())));
+        const extensionMatch = activeExtension === 'all' || item.ext === activeExtension;
+        const keywordMatch = !normalizedKeyword
+          || item.name.toLowerCase().includes(normalizedKeyword)
+          || item.summary.toLowerCase().includes(normalizedKeyword)
+          || item.excerpt.toLowerCase().includes(normalizedKeyword)
+          || (item.topicTags || []).join(' ').toLowerCase().includes(normalizedKeyword);
+
+        return categoryMatch && customMatch && extensionMatch && keywordMatch;
+      })
+      .sort((a, b) => extractTimestamp(b) - extractTimestamp(a) || String(b.path).localeCompare(String(a.path)));
+  }, [data, activeBizCategory, activeCustomCategory, activeExtension, keyword, customCategorySummary]);
+
+  const parsedCount = data?.meta?.parsed || 0;
+  const totalFiles = data?.totalFiles || 0;
+  const parseRate = totalFiles ? `${Math.round((parsedCount / totalFiles) * 100)}%` : '0%';
+  const recentCount = useMemo(() => filteredItems.filter((item) => extractTimestamp(item) > 0).slice(0, 10).length, [filteredItems]);
 
   return (
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/documents" />
-
       <main className="main-panel">
         <header className="topbar">
           <div>
             <h2>文档中心</h2>
-            <p>按业务分类浏览文档，并通过目录绑定把真实文件稳定归入技术类、合同类、日报类、论文类等分类。</p>
+            <p>大分类固定，分组可扩展；先按分类和分组筛，再看状态与列表。</p>
           </div>
           <div className="topbar-actions">
             <button className="ghost-btn" onClick={loadDocuments}>刷新</button>
-            <button className="ghost-btn" onClick={saveBindings} disabled={saveLoading}>
-              {saveLoading ? '保存中...' : '保存分类目录'}
-            </button>
             <button className="primary-btn" onClick={triggerScan} disabled={scanLoading}>
               {scanLoading ? '扫描中...' : '执行扫描'}
             </button>
@@ -195,49 +167,16 @@ export default function DocumentsPage() {
 
         {data ? (
           <section className="documents-layout">
-            <section className="card stats-grid">
-              <StatCard label="扫描目录" value={data.scanRoot} subtle={data.exists ? '目录可访问' : '目录不存在'} />
-              <StatCard label="总文件数" value={String(data.totalFiles)} subtle="只读扫描" />
-              <StatCard label="最近扫描" value={new Date(data.lastScanAt).toLocaleString()} subtle="解析第一版" />
-            </section>
-
             <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>分类目录配置</h3>
-                  <p>为每个业务分类指定文件夹关键词或目录名。后续如果要改分类，直接移动文件夹或在对话里让我移动文件即可。</p>
-                </div>
-              </div>
-              <div className="documents-grid three-columns">
-                {Object.entries(BIZ_CATEGORY_LABELS).map(([key, label]) => (
-                  <section key={key} className="summary-item">
-                    <div className="summary-key">{label}</div>
-                    <div className="message-refs" style={{ marginTop: '8px', marginBottom: '4px' }}>
-                      <span className="source-chip">已绑定：{String(folderBindings[key] || '').split(/\n|,/).map((item) => item.trim()).filter(Boolean).length} 项</span>
-                      <span className="source-chip">当前命中：{data.byBizCategory?.[key] || 0} 篇</span>
-                    </div>
-                    <textarea
-                      className="filter-input"
-                      style={{ minHeight: '92px', marginTop: '8px' }}
-                      value={folderBindings[key] || ''}
-                      onChange={(event) => setFolderBindings((prev) => ({ ...prev, [key]: event.target.value }))}
-                      placeholder={'每行一个目录名，例如:\ncontracts\n合同'}
-                    />
-                  </section>
-                ))}
-              </div>
-            </section>
-
-            <section className="card documents-card">
-              <div className="panel-header">
-                <div>
-                  <h3>主分类</h3>
-                  <p>先按稳定的项目主分类筛选，再看二级扩展分类。</p>
+                  <h3>分类</h3>
+                  <p>固定主分类：学术论文、合同协议、工作日报、发票凭据、订单分析、客服采集、库存监控。</p>
                 </div>
               </div>
               <div className="summary-grid biz-summary-grid">
                 <button className={`summary-item filter-card ${activeBizCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveBizCategory('all')}>
-                  <div className="summary-key">全部资料</div>
+                  <div className="summary-key">全部</div>
                   <div className="summary-value">{data.totalFiles}</div>
                 </button>
                 {PRIMARY_DOCUMENT_CATEGORIES.map((category) => {
@@ -255,12 +194,12 @@ export default function DocumentsPage() {
             <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>扩展分类</h3>
-                  <p>这里展示默认业务分类和已接纳的新增项目分类，适合进一步细分查看。</p>
+                  <h3>分组</h3>
+                  <p>分组支持 AI 建议与用户自定义，后续会支持一份资料属于多个分组。</p>
                 </div>
               </div>
               <div className="message-refs" style={{ gap: 10 }}>
-                <button className={`ref-chip ${activeCustomCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveCustomCategory('all')}>全部扩展分类</button>
+                <button className={`ref-chip ${activeCustomCategory === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveCustomCategory('all')}>全部分组</button>
                 {customCategorySummary.map((item) => (
                   <button key={item.key} className={`ref-chip ${activeCustomCategory === item.key ? 'active-filter' : ''}`} onClick={() => setActiveCustomCategory(item.key)}>
                     {item.label} · {item.count}
@@ -273,16 +212,30 @@ export default function DocumentsPage() {
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
-                    <h3>扩展名统计</h3>
-                    <p>当前已尝试接入 txt / md / pdf</p>
+                    <h3>状态</h3>
+                    <p>当前文档整体情况。</p>
                   </div>
                 </div>
                 <div className="summary-grid">
-                  {extensionSummary.map(([key, value]) => (
-                    <div key={key} className="summary-item">
-                      <div className="summary-key">{key}</div>
-                      <div className="summary-value">{value}</div>
-                    </div>
+                  <StatCard label="文档总数" value={String(totalFiles)} subtle={data.exists ? '目录可访问' : '目录不存在'} />
+                  <StatCard label="新增" value={String(recentCount)} subtle="默认按最近文档排序" />
+                  <StatCard label="解析度" value={parseRate} subtle={`${parsedCount} / ${totalFiles || 0}`} />
+                </div>
+              </section>
+
+              <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>后缀包含</h3>
+                    <p>先做轻筛选，避免列表太散。</p>
+                  </div>
+                </div>
+                <div className="message-refs" style={{ gap: 10 }}>
+                  <button className={`ref-chip ${activeExtension === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveExtension('all')}>全部后缀</button>
+                  {extensionSummary.map(([ext, count]) => (
+                    <button key={ext} className={`ref-chip ${activeExtension === ext ? 'active-filter' : ''}`} onClick={() => setActiveExtension(ext)}>
+                      {ext} · {count}
+                    </button>
                   ))}
                 </div>
               </section>
@@ -290,33 +243,11 @@ export default function DocumentsPage() {
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
-                    <h3>解析状态</h3>
-                    <p>观察当前解析成功 / 不支持 / 失败情况</p>
+                    <h3>关键字搜索</h3>
+                    <p>支持文件名、摘要、摘录、标签搜索。</p>
                   </div>
                 </div>
-                <div className="summary-grid">
-                  {statusSummary.map(([key, value]) => (
-                    <div key={key} className="summary-item">
-                      <div className="summary-key">{key}</div>
-                      <div className="summary-value">{value}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>筛选</h3>
-                    <p>支持按业务分类和关键词快速查看。</p>
-                  </div>
-                </div>
-                <input
-                  className="filter-input"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索文件名、摘要、摘录..."
-                />
+                <input className="filter-input" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索文件名、摘要、主题词..." />
                 <div className="page-note" style={{ marginTop: '12px', marginBottom: 0 }}>
                   当前结果：{filteredItems.length} / {data.items.length}
                 </div>
@@ -326,55 +257,30 @@ export default function DocumentsPage() {
             <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>待整理与分类建议</h3>
-                  <p>优先查看还在其他/待整理下的资料，或近期值得拆成新类的主题。</p>
+                  <h3>重复文档提示（待接实）</h3>
+                  <p>后续这里会延迟提示“XX 文档重复（摘要 90%）”，默认覆盖并保留最新日期，也支持用户放弃合并；分组建议也会在上传后一起给出。</p>
                 </div>
               </div>
-              <div className="documents-grid">
-                <section className="summary-item">
-                  <div className="summary-key">待整理资料</div>
-                  <div className="summary-value">{waitingSuggestions.length}</div>
-                  <div className="capture-task-list" style={{ marginTop: 10 }}>
-                    {waitingSuggestions.length ? waitingSuggestions.map((item) => (
-                      <div key={item.id} className="capture-task-item">
-                        <strong>{item.name}</strong>
-                        <div className="capture-task-meta">主分类：{getPrimaryCategoryLabel(item.confirmedBizCategory || item.bizCategory)}</div>
-                        <div className="capture-task-note">{item.summary}</div>
-                      </div>
-                    )) : <div className="capture-task-note">当前没有明显待整理资料。</div>}
-                  </div>
-                </section>
-                <section className="summary-item">
-                  <div className="summary-key">已接纳扩展分类</div>
-                  <div className="summary-value">{customCategorySummary.length}</div>
-                  <div className="capture-task-list" style={{ marginTop: 10 }}>
-                    {customCategorySummary.slice(0, 8).map((item) => (
-                      <div key={item.key} className="capture-task-item">
-                        <strong>{item.label}</strong>
-                        <div className="capture-task-meta">归属：{getPrimaryCategoryLabel(item.parent)}</div>
-                        <div className="capture-task-note">当前关联资料：{item.count} 项</div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+              <div className="page-note" style={{ marginBottom: 0 }}>
+                当前先保留提示位，后面接真实重复摘要比对逻辑与合并确认交互。
               </div>
             </section>
 
             <section className="card table-card">
               <div className="panel-header">
                 <div>
-                  <h3>文件列表</h3>
-                  <p>当前展示基础摘要、业务分类与解析状态；如果要改分类，直接调整目录绑定或移动文件夹即可。</p>
+                  <h3>文档列表</h3>
+                  <p>默认按最近文档排序，并按上面的分类/分组/状态筛选结果展示。</p>
                 </div>
               </div>
               <table>
                 <thead>
                   <tr>
                     <th>文件名</th>
-                    <th>业务分类</th>
-                    <th>解析分类</th>
-                    <th>业务结果</th>
+                    <th>分类</th>
+                    <th>分组</th>
                     <th>解析状态</th>
+                    <th>业务结果</th>
                     <th>摘要</th>
                   </tr>
                 </thead>
@@ -382,10 +288,10 @@ export default function DocumentsPage() {
                   {filteredItems.map((item) => (
                     <tr key={item.path}>
                       <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
-                      <td>{BIZ_CATEGORY_LABELS[item.bizCategory] || item.bizCategory}</td>
-                      <td>{item.category}</td>
-                      <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
+                      <td>{BIZ_CATEGORY_LABELS[item.confirmedBizCategory || item.bizCategory] || item.bizCategory}</td>
+                      <td>{item.topicTags?.slice(0, 2).join('、') || '-'}</td>
                       <td>{item.parseStatus}</td>
+                      <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                       <td className="summary-cell">{item.summary}</td>
                     </tr>
                   ))}

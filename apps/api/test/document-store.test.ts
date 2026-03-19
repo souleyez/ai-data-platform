@@ -29,7 +29,7 @@ const docs: ParsedDocument[] = [
     ext: '.txt',
     title: 'sample-tech-doc',
     category: 'technical',
-    bizCategory: 'technical',
+    bizCategory: 'paper',
     parseStatus: 'parsed',
     summary: '技术文档覆盖设备接入、边缘计算、数据采集与告警联动。',
     excerpt: '重点包括 API 接口设计、部署规范与异常告警推送。',
@@ -64,9 +64,9 @@ const docs: ParsedDocument[] = [
   },
 ];
 
-test('matches technical document for Chinese prompt without whitespace tokenization', () => {
+test('matches paper-like document for Chinese technical/paper prompt without whitespace tokenization', () => {
   const matches = matchDocumentsByPrompt(docs, '帮我总结技术文档重点');
-  assert.equal(matches[0]?.category, 'technical');
+  assert.equal(matches[0]?.bizCategory, 'paper');
 });
 
 test('matches contract document for Chinese risk prompt', () => {

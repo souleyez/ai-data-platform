@@ -9,8 +9,8 @@ export type ParsedDocument = {
   ext: string;
   title: string;
   category: string;
-  bizCategory: 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
-  confirmedBizCategory?: 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
+  bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
+  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   summary: string;
@@ -18,6 +18,8 @@ export type ParsedDocument = {
   extractedChars: number;
   riskLevel?: 'low' | 'medium' | 'high';
   topicTags?: string[];
+  groups?: string[];
+  confirmedGroups?: string[];
   contractFields?: {
     contractNo?: string;
     amount?: string;
@@ -128,19 +130,20 @@ export function detectCategory(filePath: string, text = '') {
   return 'general';
 }
 
-export function detectBizCategory(filePath: string, category: string, text = '', config?: DocumentCategoryConfig): 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other' {
+export function detectBizCategory(filePath: string, category: string, text = '', config?: DocumentCategoryConfig): ParsedDocument['bizCategory'] {
   if (config) {
     const matched = detectBizCategoryFromConfig(filePath, config);
-    if (matched !== 'other') return matched;
+    if (matched) return matched;
   }
 
   const evidence = buildEvidence(filePath, text);
+  if (scoreHints(evidence, ['发票', '票据', '凭据', 'invoice']) >= 4) return 'invoice';
+  if (scoreHints(evidence, ['订单', '回款', '销售', 'order']) >= 4) return 'order';
+  if (scoreHints(evidence, ['客服', '工单', '投诉', 'service']) >= 4) return 'service';
+  if (scoreHints(evidence, ['库存', 'sku', '出入库', 'inventory']) >= 4) return 'inventory';
   if (category === 'contract' || scoreHints(evidence, CATEGORY_HINTS.contract) >= 4) return 'contract';
-  if (category === 'paper' || scoreHints(evidence, CATEGORY_HINTS.paper) >= 4) return 'paper';
-  if (category === 'report' || scoreHints(evidence, CATEGORY_HINTS.report) >= 4) return 'report';
-  if (category === 'technical' || scoreHints(evidence, CATEGORY_HINTS.technical) >= 3) return 'technical';
-  if (category === 'general') return 'general';
-  return 'other';
+  if (category === 'report' || scoreHints(evidence, CATEGORY_HINTS.report) >= 4) return 'daily';
+  return 'paper';
 }
 
 function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'high' | undefined {
@@ -152,7 +155,7 @@ function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'hi
 }
 
 function detectTopicTags(text: string, category: string, bizCategory: ParsedDocument['bizCategory']) {
-  if (category !== 'technical' && category !== 'paper' && bizCategory !== 'technical' && bizCategory !== 'paper') return [];
+  if (category !== 'technical' && category !== 'paper' && bizCategory !== 'paper') return [];
   const normalized = text.toLowerCase();
   const tagRules: Array<[string, KeywordRule[]]> = [
     ['设备接入', ['接入', /\bdevice\b/i, '协议']],
@@ -168,8 +171,15 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     ['白皮书', [/white\s*book/i, '白皮书']],
     ['随机对照', [/\brandomized\b/i, /\bplacebo\b/i, /double-blind/i, '双盲', '随机']],
   ];
-  const tags = tagRules.filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword)));
-  return tags.map(([label]) => label);
+  return tagRules.filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword))).map(([label]) => label);
+}
+
+function detectGroups(filePath: string, text: string, topicTags: string[], config?: DocumentCategoryConfig) {
+  if (!config?.customCategories?.length) return [];
+  const evidence = buildEvidence(filePath, `${text} ${(topicTags || []).join(' ')}`);
+  return config.customCategories
+    .filter((group) => (group.keywords || [group.label]).some((keyword) => matchesKeyword(evidence, String(keyword).toLowerCase())))
+    .map((group) => group.key);
 }
 
 function extractContractFields(text: string, category: string) {
@@ -220,8 +230,12 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
         excerpt: '当前版本尚未支持该文件类型的内容提取。',
         extractedChars: 0,
         topicTags: [],
+        groups: [],
       };
     }
+
+    const topicTags = detectTopicTags(normalizedText, category, bizCategory);
+    const groups = detectGroups(filePath, normalizedText, topicTags, config);
 
     return {
       path: filePath,
@@ -235,7 +249,8 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       excerpt: excerpt(normalizedText, '文档内容为空或暂未提取到文本。'),
       extractedChars: normalizedText.length,
       riskLevel: detectRiskLevel(normalizedText, category),
-      topicTags: detectTopicTags(normalizedText, category, bizCategory),
+      topicTags,
+      groups,
       contractFields: extractContractFields(normalizedText, category),
     };
   } catch {
@@ -253,6 +268,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       excerpt: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
       extractedChars: 0,
       topicTags: [],
+      groups: [],
     };
   }
 }

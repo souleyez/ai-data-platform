@@ -415,6 +415,56 @@ export default function HomePage() {
     }
   };
 
+  const acceptUploadGroupSuggestion = async (itemId) => {
+    if (groupSaving) return;
+    const current = typeof uploadStatus === 'object'
+      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
+      : null;
+    const groups = current?.groupSuggestion?.suggestedGroups || [];
+    if (!groups.length) return;
+
+    setGroupSaving(true);
+    try {
+      const response = await fetch(buildApiUrl('/api/documents/groups'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: itemId, groups }] }),
+      });
+      const raw = await response.text();
+      let json = {};
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = {};
+      }
+      if (!response.ok) throw new Error(json?.error || raw || 'accept group suggestion failed');
+
+      setUploadStatus((prev) => {
+        if (!prev || typeof prev === 'string') return prev;
+        const refreshed = new Map((json?.ingestItems || []).map((item) => [item.id, item]));
+        return {
+          ...prev,
+          message: json?.message || prev.message,
+          ingestItems: (prev.ingestItems || []).map((item) => refreshed.get(item.id) || item),
+        };
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          title: '已接纳分组建议',
+          content: `${current?.sourceName || '该资料'} 已加入分组：${groups.join('、')}。`,
+          meta: current?.preview?.title || current?.sourceName,
+        },
+      ]);
+      await loadDocumentSnapshot();
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : '接纳分组建议失败');
+    } finally {
+      setGroupSaving(false);
+    }
+  };
+
   const submitDocumentUpload = async (event) => {
     event.preventDefault();
     if (!uploadForm.files.length) return;

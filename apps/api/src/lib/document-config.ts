@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-export type BizCategory = 'technical' | 'contract' | 'report' | 'paper' | 'general' | 'other';
+export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
 export type ProjectCustomCategory = {
   key: string;
@@ -26,19 +26,18 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
     scanRoot,
     updatedAt: new Date().toISOString(),
     categories: {
-      technical: { label: '技术类', folders: ['tech-docs', 'technical', '技术'] },
-      contract: { label: '合同类', folders: ['contracts', 'contract', '合同'] },
-      report: { label: '报告类', folders: ['reports', 'report', '日报', '周报', '简报'] },
-      paper: { label: '论文类', folders: ['papers', 'paper', '论文'] },
-      general: { label: '通用资料', folders: ['general', '资料', '文档'] },
-      other: { label: '其他类', folders: [] },
+      paper: { label: '学术论文', folders: ['papers', 'paper', '论文', 'study', 'research'] },
+      contract: { label: '合同协议', folders: ['contracts', 'contract', '合同', '协议'] },
+      daily: { label: '工作日报', folders: ['daily', '日报', '周报', '简报'] },
+      invoice: { label: '发票凭据', folders: ['invoice', '发票', '票据', '凭据'] },
+      order: { label: '订单分析', folders: ['order', 'orders', '订单', '销售', '回款'] },
+      service: { label: '客服采集', folders: ['service', 'customer-service', '客服', '工单', '投诉'] },
+      inventory: { label: '库存监控', folders: ['inventory', 'stock', '库存', 'sku', '出入库'] },
     },
     customCategories: [
-      { key: 'daily', label: '工作日报', parent: 'report', keywords: ['日报', '周报', '工作日报'], createdAt: new Date().toISOString() },
-      { key: 'invoice', label: '发票凭据', parent: 'general', keywords: ['发票', '票据', '凭据'], createdAt: new Date().toISOString() },
-      { key: 'order', label: '订单分析', parent: 'general', keywords: ['订单', '回款', '销售'], createdAt: new Date().toISOString() },
-      { key: 'service', label: '客服采集', parent: 'general', keywords: ['客服', '工单', '投诉'], createdAt: new Date().toISOString() },
-      { key: 'inventory', label: '库存监控', parent: 'general', keywords: ['库存', 'SKU', '出入库'], createdAt: new Date().toISOString() },
+      { key: 'formula', label: '奶粉配方', parent: 'paper', keywords: ['奶粉配方', '配方', '乳粉'], createdAt: new Date().toISOString() },
+      { key: 'brain-health', label: '脑健康', parent: 'paper', keywords: ['脑健康', 'brain', '认知', '阿尔茨海默'], createdAt: new Date().toISOString() },
+      { key: 'gut-health', label: '肠道健康', parent: 'paper', keywords: ['肠道健康', 'gut', '肠道', '菌群'], createdAt: new Date().toISOString() },
     ],
   };
 }
@@ -55,7 +54,7 @@ export async function loadDocumentCategoryConfig(scanRoot: string) {
         ...buildDefault(scanRoot).categories,
         ...(parsed.categories || {}),
       },
-      customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : [],
+      customCategories: Array.isArray(parsed.customCategories) ? parsed.customCategories : buildDefault(scanRoot).customCategories,
     } satisfies DocumentCategoryConfig;
   } catch {
     return buildDefault(scanRoot);
@@ -79,15 +78,14 @@ export async function saveDocumentCategoryConfig(scanRoot: string, input: Partia
   return next;
 }
 
-export function detectBizCategoryFromConfig(filePath: string, config: DocumentCategoryConfig): BizCategory {
+export function detectBizCategoryFromConfig(filePath: string, config: DocumentCategoryConfig): BizCategory | null {
   const normalized = filePath.toLowerCase();
 
   for (const [key, value] of Object.entries(config.categories) as Array<[BizCategory, { label: string; folders: string[] }]>) {
-    if (key === 'other') continue;
     if (value.folders.some((folder) => folder && normalized.includes(folder.toLowerCase()))) {
       return key;
     }
   }
 
-  return 'other';
+  return null;
 }

@@ -1,109 +1,57 @@
 {
   "scanRoot": "storage/files",
-  "updatedAt": "2026-03-19T08:20:00.000Z",
+  "updatedAt": "2026-03-19T08:35:00.000Z",
   "categories": {
-    "technical": {
-      "label": "技术类",
-      "folders": [
-        "tech-docs",
-        "technical",
-        "技术"
-      ]
+    "paper": {
+      "label": "学术论文",
+      "folders": ["papers", "paper", "论文", "study", "research"]
     },
     "contract": {
-      "label": "合同类",
-      "folders": [
-        "contracts",
-        "contract",
-        "合同"
-      ]
+      "label": "合同协议",
+      "folders": ["contracts", "contract", "合同", "协议"]
     },
-    "report": {
-      "label": "报告类",
-      "folders": [
-        "reports",
-        "report",
-        "日报",
-        "周报",
-        "简报"
-      ]
+    "daily": {
+      "label": "工作日报",
+      "folders": ["daily", "日报", "周报", "简报"]
     },
-    "paper": {
-      "label": "论文类",
-      "folders": [
-        "papers",
-        "paper",
-        "论文"
-      ]
+    "invoice": {
+      "label": "发票凭据",
+      "folders": ["invoice", "发票", "票据", "凭据"]
     },
-    "general": {
-      "label": "通用资料",
-      "folders": [
-        "general",
-        "资料",
-        "文档"
-      ]
+    "order": {
+      "label": "订单分析",
+      "folders": ["order", "orders", "订单", "销售", "回款"]
     },
-    "other": {
-      "label": "其他类",
-      "folders": []
+    "service": {
+      "label": "客服采集",
+      "folders": ["service", "customer-service", "客服", "工单", "投诉"]
+    },
+    "inventory": {
+      "label": "库存监控",
+      "folders": ["inventory", "stock", "库存", "sku", "出入库"]
     }
   },
   "customCategories": [
     {
-      "key": "daily",
-      "label": "工作日报",
-      "parent": "report",
-      "keywords": [
-        "日报",
-        "周报",
-        "工作日报"
-      ],
-      "createdAt": "2026-03-19T08:20:00.000Z"
+      "key": "formula",
+      "label": "奶粉配方",
+      "parent": "paper",
+      "keywords": ["奶粉配方", "配方", "乳粉"],
+      "createdAt": "2026-03-19T08:35:00.000Z"
     },
     {
-      "key": "invoice",
-      "label": "发票凭据",
-      "parent": "general",
-      "keywords": [
-        "发票",
-        "票据",
-        "凭据"
-      ],
-      "createdAt": "2026-03-19T08:20:00.000Z"
+      "key": "brain-health",
+      "label": "脑健康",
+      "parent": "paper",
+      "keywords": ["脑健康", "brain", "认知", "阿尔茨海默"],
+      "createdAt": "2026-03-19T08:35:00.000Z"
     },
     {
-      "key": "order",
-      "label": "订单分析",
-      "parent": "general",
-      "keywords": [
-        "订单",
-        "回款",
-        "销售"
-      ],
-      "createdAt": "2026-03-19T08:20:00.000Z"
-    },
-    {
-      "key": "service",
-      "label": "客服采集",
-      "parent": "general",
-      "keywords": [
-        "客服",
-        "工单",
-        "投诉"
-      ],
-      "createdAt": "2026-03-19T08:20:00.000Z"
-    },
-    {
-      "key": "inventory",
-      "label": "库存监控",
-      "parent": "general",
-      "keywords": [
-        "库存",
-        "SKU",
-        "出入库"
-      ],
-      "createdAt": "2026-03-19T08:20:00.000Z"
+      "key": "gut-health",
+      "label": "肠道健康",
+      "parent": "paper",
+      "keywords": ["肠道健康", "gut", "肠道", "菌群"],
+      "createdAt": "2026-03-19T08:35:00.000Z"
     }
   ]
 }
