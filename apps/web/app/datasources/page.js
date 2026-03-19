@@ -16,21 +16,30 @@ function StatCard({ label, value, subtle }) {
   );
 }
 
-const TYPE_LABELS = {
-  documents: '文档型',
-  web: '网页采集',
-  database: '数据库',
-  unknown: '其他',
-};
+function toContinuousItem(item) {
+  return {
+    ...item,
+    focus: item.capability,
+    cycle: item.updateMode,
+    totalCollected: item.rawStatus === 'connected' ? '持续累计中' : item.rawStatus === 'warning' ? '最近有波动' : '尚未开始',
+    mainContent: item.capability,
+  };
+}
+
+function toCompletedItem(item) {
+  return {
+    ...item,
+    ingestedCount: 1,
+    defaultCategory: '已按结果自动归档到文档中心',
+    mainContent: item.capability,
+  };
+}
 
 export default function DatasourcesPage() {
   const [data, setData] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [hiddenIds, setHiddenIds] = useState([]);
-  const [activeType, setActiveType] = useState('all');
-  const [activeGroup, setActiveGroup] = useState('all');
-  const [activeStatus, setActiveStatus] = useState('all');
   const [keyword, setKeyword] = useState('');
 
   useEffect(() => {
@@ -50,34 +59,25 @@ export default function DatasourcesPage() {
   }, []);
 
   const visibleItems = useMemo(() => (data?.items || []).filter((item) => !hiddenIds.includes(item.id)), [data, hiddenIds]);
-  const groupedItems = useMemo(() => visibleItems.reduce((acc, item) => {
-    const group = item.group || '其他';
-    acc[group] = (acc[group] || 0) + 1;
-    return acc;
-  }, {}), [visibleItems]);
-  const typeItems = useMemo(() => visibleItems.reduce((acc, item) => {
-    const type = item.type || 'unknown';
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {}), [visibleItems]);
+  const normalizedKeyword = keyword.trim().toLowerCase();
 
-  const filteredItems = useMemo(() => {
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    return visibleItems.filter((item) => {
-      const typeMatch = activeType === 'all' || item.type === activeType;
-      const groupMatch = activeGroup === 'all' || item.group === activeGroup;
-      const statusMatch = activeStatus === 'all' || item.rawStatus === activeStatus || item.status === activeStatus;
-      const keywordMatch = !normalizedKeyword
-        || item.name.toLowerCase().includes(normalizedKeyword)
-        || item.group.toLowerCase().includes(normalizedKeyword)
-        || item.capability.toLowerCase().includes(normalizedKeyword)
-        || item.updateMode.toLowerCase().includes(normalizedKeyword);
-      return typeMatch && groupMatch && statusMatch && keywordMatch;
-    });
-  }, [visibleItems, activeType, activeGroup, activeStatus, keyword]);
+  const continuousItems = useMemo(() => visibleItems
+    .filter((item) => item.updateMode.includes('定时') || item.updateMode.includes('周期') || item.mode === 'active')
+    .filter((item) => !normalizedKeyword
+      || item.name.toLowerCase().includes(normalizedKeyword)
+      || item.capability.toLowerCase().includes(normalizedKeyword)
+      || item.updateMode.toLowerCase().includes(normalizedKeyword))
+    .map(toContinuousItem), [visibleItems, normalizedKeyword]);
 
-  const hideItem = (id) => setHiddenIds((prev) => prev.includes(id) ? prev : [...prev, id]);
-  const deleteItem = (id) => setHiddenIds((prev) => prev.includes(id) ? prev : [...prev, id]);
+  const completedItems = useMemo(() => visibleItems
+    .filter((item) => !(item.updateMode.includes('定时') || item.updateMode.includes('周期') || item.mode === 'active'))
+    .filter((item) => !normalizedKeyword
+      || item.name.toLowerCase().includes(normalizedKeyword)
+      || item.capability.toLowerCase().includes(normalizedKeyword)
+      || item.updateMode.toLowerCase().includes(normalizedKeyword))
+    .map(toCompletedItem), [visibleItems, normalizedKeyword]);
+
+  const toggleHidden = (id) => setHiddenIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
 
   return (
     <div className="app-shell">
@@ -86,69 +86,25 @@ export default function DatasourcesPage() {
         <header className="topbar">
           <div>
             <h2>数据源管理</h2>
-            <p>先按分类和分组筛，再按状态和关键字缩小范围，下面统一看数据源大列表。</p>
+            <p>这里只看两类：采集完成，以及需要持续关注的动态采集任务。</p>
           </div>
         </header>
 
         {error ? <p>{error}</p> : null}
         {data ? (
           <section className="documents-layout">
-            <section className="card documents-card">
-              <div className="panel-header">
-                <div>
-                  <h3>分类</h3>
-                  <p>先看来源类型。</p>
-                </div>
-              </div>
-              <div className="summary-grid biz-summary-grid">
-                <button className={`summary-item filter-card ${activeType === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveType('all')}>
-                  <div className="summary-key">全部</div>
-                  <div className="summary-value">{visibleItems.length}</div>
-                </button>
-                {Object.entries(typeItems).map(([type, count]) => (
-                  <button key={type} className={`summary-item filter-card ${activeType === type ? 'active-filter' : ''}`} onClick={() => setActiveType(type)}>
-                    <div className="summary-key">{TYPE_LABELS[type] || type}</div>
-                    <div className="summary-value">{count}</div>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="card documents-card">
-              <div className="panel-header">
-                <div>
-                  <h3>分组</h3>
-                  <p>按业务来源分组继续细分。</p>
-                </div>
-              </div>
-              <div className="message-refs" style={{ gap: 10 }}>
-                <button className={`ref-chip ${activeGroup === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveGroup('all')}>全部分组</button>
-                {Object.entries(groupedItems).map(([group, count]) => (
-                  <button key={group} className={`ref-chip ${activeGroup === group ? 'active-filter' : ''}`} onClick={() => setActiveGroup(group)}>
-                    {group} · {count}
-                  </button>
-                ))}
-              </div>
-            </section>
-
             <section className="documents-grid three-columns">
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
-                    <h3>状态</h3>
-                    <p>快速看可用性与隐藏情况。</p>
+                    <h3>总览</h3>
+                    <p>整体看板，不再展开多余分类。</p>
                   </div>
                 </div>
                 <div className="summary-grid">
-                  <StatCard label="总数据源" value={String(visibleItems.length)} subtle={data.mode} />
-                  <StatCard label="可用 / 在线" value={String(visibleItems.filter((item) => item.status === 'success').length)} subtle="connected / active" />
-                  <StatCard label="已屏蔽" value={String(hiddenIds.length)} subtle="本地视图隐藏" />
-                </div>
-                <div className="message-refs" style={{ gap: 10, marginTop: 12 }}>
-                  <button className={`ref-chip ${activeStatus === 'all' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('all')}>全部状态</button>
-                  <button className={`ref-chip ${activeStatus === 'success' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('success')}>success</button>
-                  <button className={`ref-chip ${activeStatus === 'warning' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('warning')}>warning</button>
-                  <button className={`ref-chip ${activeStatus === 'idle' ? 'active-filter' : ''}`} onClick={() => setActiveStatus('idle')}>idle</button>
+                  <StatCard label="动态持续采集" value={String(continuousItems.length)} subtle="持续进入文档库" />
+                  <StatCard label="采集完成" value={String(completedItems.length)} subtle="已结构化入库" />
+                  <StatCard label="已隐藏" value={String(hiddenIds.length)} subtle="仅当前视图" />
                 </div>
               </section>
 
@@ -156,57 +112,98 @@ export default function DatasourcesPage() {
                 <div className="panel-header">
                   <div>
                     <h3>关键字搜索</h3>
-                    <p>支持名称、分组、能力、更新方式搜索。</p>
+                    <p>支持名称、内容、周期搜索。</p>
                   </div>
                 </div>
                 <input
                   className="filter-input"
                   value={keyword}
                   onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="搜索数据源名称、分组、能力..."
+                  placeholder="搜索数据源名称、主要内容、采集周期..."
                 />
                 <div className="page-note" style={{ marginTop: '12px', marginBottom: 0 }}>
-                  当前结果：{filteredItems.length} / {visibleItems.length}
+                  当前结果：动态持续采集 {continuousItems.length} 项，采集完成 {completedItems.length} 项。
                 </div>
               </section>
             </section>
 
-            <section className="card table-card">
+            <section className="card documents-card">
               <div className="panel-header">
                 <div>
-                  <h3>数据源列表</h3>
-                  <p>默认直接看大列表；上面三层筛选决定这里显示什么。</p>
+                  <h3>动态持续采集</h3>
+                  <p>每次采集都会分别存入文档中心，可持续关注、暂停或调整频率。</p>
                 </div>
               </div>
               <table>
                 <thead>
                   <tr>
                     <th>名称</th>
-                    <th>分类</th>
-                    <th>分组</th>
+                    <th>已采集多少</th>
+                    <th>主要是什么</th>
+                    <th>采集周期</th>
                     <th>状态</th>
-                    <th>更新方式</th>
-                    <th>能力</th>
                     <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredItems.map((item) => (
+                  {continuousItems.map((item) => (
                     <tr key={item.id}>
                       <td>{item.name}</td>
-                      <td>{TYPE_LABELS[item.type] || item.type}</td>
-                      <td>{item.group}</td>
+                      <td>{item.totalCollected}</td>
+                      <td className="summary-cell">{item.mainContent}</td>
+                      <td>{item.cycle}</td>
                       <td><span className={`tag ${item.status === 'success' ? 'up-tag' : item.status === 'warning' ? 'warning' : 'neutral-tag'}`}>{item.rawStatus}</span></td>
-                      <td>{item.updateMode}</td>
-                      <td className="summary-cell">{item.capability}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button className="ghost-btn" onClick={() => hideItem(item.id)}>屏蔽</button>
-                          <button className="ghost-btn" onClick={() => deleteItem(item.id)}>删除</button>
+                          <button className="ghost-btn" onClick={() => toggleHidden(item.id)}>是否暂停</button>
+                          <button className="ghost-btn">调整频率</button>
+                          <a className="ghost-btn back-link" href="/documents">查看文档</a>
                         </div>
                       </td>
                     </tr>
                   ))}
+                  {!continuousItems.length ? (
+                    <tr><td colSpan={6} className="summary-cell">当前没有需要持续关注的动态采集任务。</td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>采集完成</h3>
+                  <p>一次性采集完成后，结果会变成结构化资料进入文档中心，按结果默认分类。</p>
+                </div>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>已入库</th>
+                    <th>默认分类</th>
+                    <th>主要是什么</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {completedItems.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.name}</td>
+                      <td>{item.ingestedCount} 份</td>
+                      <td>{item.defaultCategory}</td>
+                      <td className="summary-cell">{item.mainContent}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <a className="ghost-btn back-link" href="/documents">查看文档</a>
+                          <button className="ghost-btn" onClick={() => toggleHidden(item.id)}>隐藏</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!completedItems.length ? (
+                    <tr><td colSpan={5} className="summary-cell">当前没有采集完成的静态结果。</td></tr>
+                  ) : null}
                 </tbody>
               </table>
             </section>
