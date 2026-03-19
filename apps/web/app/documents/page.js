@@ -126,7 +126,8 @@ export default function DocumentsPage() {
         const categoryMatch = activeBizCategory === 'all' || item.bizCategory === activeBizCategory || item.confirmedBizCategory === activeBizCategory;
         const customCategory = customCategorySummary.find((entry) => entry.key === activeCustomCategory);
         const customMatch = activeCustomCategory === 'all'
-          || (!!customCategory && customCategory.keywords.some((entry) => `${item.name} ${item.summary} ${item.excerpt} ${(item.topicTags || []).join(' ')}`.toLowerCase().includes(String(entry).toLowerCase())));
+          || (item.confirmedGroups || item.groups || []).includes(activeCustomCategory)
+          || (!!customCategory && customCategory.keywords.some((entry) => `${item.name} ${item.summary} ${item.excerpt} ${(item.topicTags || []).join(' ')} ${((item.confirmedGroups || item.groups || []).join(' '))}`.toLowerCase().includes(String(entry).toLowerCase())));
         const extensionMatch = activeExtension === 'all' || item.ext === activeExtension;
         const keywordMatch = !normalizedKeyword
           || item.name.toLowerCase().includes(normalizedKeyword)
@@ -289,7 +290,7 @@ export default function DocumentsPage() {
                     <tr key={item.path}>
                       <td><a href={`/documents/${item.id}`}>{item.name}</a></td>
                       <td>{BIZ_CATEGORY_LABELS[item.confirmedBizCategory || item.bizCategory] || item.bizCategory}</td>
-                      <td>{item.topicTags?.slice(0, 2).join('、') || '-'}</td>
+                      <td className="summary-cell">{(item.confirmedGroups || item.groups || []).join('、') || '-'}</td>
                       <td>{item.parseStatus}</td>
                       <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                       <td className="summary-cell">{item.summary}</td>
