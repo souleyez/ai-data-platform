@@ -415,6 +415,17 @@ export default function HomePage() {
     }
   };
 
+  const updateUploadGroupDraft = (itemId, value) => {
+    setUploadGroupDrafts((prev) => ({ ...prev, [itemId]: value }));
+    setUploadStatus((prev) => {
+      if (!prev || typeof prev === 'string') return prev;
+      return {
+        ...prev,
+        ingestItems: (prev.ingestItems || []).map((item) => item.id === itemId ? { ...item, groupDraft: value } : item),
+      };
+    });
+  };
+
   const acceptUploadGroupSuggestion = async (itemId) => {
     if (groupSaving) return;
     const current = typeof uploadStatus === 'object'

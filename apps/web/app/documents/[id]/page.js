@@ -156,7 +156,7 @@ export default function DocumentDetailPage({ params }) {
                 <div className="message-refs" style={{ gap: 8 }}>
                   {currentGroups.length ? currentGroups.map((group) => (
                     <span key={group} className="ref-chip">
-                      {group}
+                      {getDocumentGroupLabel(group)}
                       <button className="ghost-btn" style={{ marginLeft: 8 }} onClick={() => removeGroup(group)} disabled={groupSaving}>移除</button>
                     </span>
                   )) : <div className="page-note" style={{ marginBottom: 0 }}>当前还没有已确认分组。</div>}

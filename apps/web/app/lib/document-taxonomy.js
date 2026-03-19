@@ -17,3 +17,7 @@ export const DEFAULT_CUSTOM_DOCUMENT_CATEGORIES = [
 export function getPrimaryCategoryLabel(key) {
   return PRIMARY_DOCUMENT_CATEGORIES.find((item) => item.key === key)?.label || key || '未分类';
 }
+
+export function getDocumentGroupLabel(key) {
+  return DEFAULT_CUSTOM_DOCUMENT_CATEGORIES.find((item) => item.key === key)?.label || key || '未分组';
+}

@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
 import { formatDocumentBusinessResult, normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
-import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES, PRIMARY_DOCUMENT_CATEGORIES } from '../lib/document-taxonomy';
+import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES, PRIMARY_DOCUMENT_CATEGORIES, getDocumentGroupLabel } from '../lib/document-taxonomy';
 
 const BIZ_CATEGORY_LABELS = {
   paper: '学术论文',
