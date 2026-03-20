@@ -14,7 +14,7 @@ export const DEFAULT_PROJECT_CUSTOM_CATEGORIES = [
   { key: 'gut-health', label: '肠道健康', scenarioKey: 'gut-health', parent: 'paper', type: 'default-group' },
 ];
 
-export const PROJECT_WORKBENCH_CATEGORIES = [...PROJECT_CATEGORIES, ...DEFAULT_PROJECT_CUSTOM_CATEGORIES];
+export const PROJECT_WORKBENCH_CATEGORIES = [...PROJECT_CATEGORIES];
 export const PROJECT_CATEGORY_OPTIONS = PROJECT_WORKBENCH_CATEGORIES.map(({ key, label }) => ({ key, label }));
 
 export function getProjectCategoryLabel(categoryKey) {

@@ -12,7 +12,7 @@ const auditLogs = [
     time: '2026-03-19 14:10',
     actor: '系统自动',
     action: '自动抓取',
-    target: '品玩 OpenClaw 专题',
+    target: '行业模型能力专题',
     result: '成功',
     note: '抓取 1 个网页并写入文档库。',
   },

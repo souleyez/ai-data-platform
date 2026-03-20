@@ -22,7 +22,16 @@ const initialUploadForm = {
   note: '优先解析论文、技术白皮书、需求说明等资料',
 };
 
-function renderIngestFeedback(status, onChangeClassification, onConfirmClassification, onAcceptCategorySuggestion, fallbackLink = true) {
+function renderIngestFeedback({
+  status,
+  onAcceptGroupSuggestion,
+  onAssignLibrary,
+  selectedManualLibraries,
+  onChangeManualLibrary,
+  availableLibraries = [],
+  fallbackLink = true,
+  groupSaving = false,
+}) {
   if (!status) return null;
 
   if (typeof status === 'string') {
@@ -30,6 +39,7 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
   }
 
   const items = Array.isArray(status.ingestItems) ? status.ingestItems : [];
+
   return (
     <div className="page-note" style={{ marginTop: 14 }}>
       <div>{status.message}</div>
@@ -38,51 +48,79 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
           共 {status.summary.total} 项，成功 {status.summary.successCount} 项，失败 {status.summary.failedCount} 项。
         </div>
       ) : null}
+
       {items.length ? (
         <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
           {items.map((item) => (
-            <div key={item.id} style={{ padding: '10px 12px', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 10, background: 'rgba(15,23,42,0.18)' }}>
-              <div style={{ fontWeight: 700 }}>{item.sourceName}</div>
+            <div
+              key={item.id}
+              style={{
+                padding: '10px 12px',
+                border: '1px solid rgba(148,163,184,0.25)',
+                borderRadius: 10,
+                background: 'rgba(15,23,42,0.18)',
+              }}
+            >
+              <div style={{ fontSize: 12, color: 'rgba(226,232,240,0.78)' }}>{item.sourceName}</div>
+
               {item.status === 'success' ? (
                 <>
-                  <div style={{ marginTop: 6 }}>识别标题：{item.preview?.title || '-'}</div>
-                  <div style={{ marginTop: 4 }}>预解析：{item.preview?.summary || '-'}</div>
-                  <div style={{ marginTop: 4 }}>推荐分类：{item.recommendation?.category || item.preview?.docType || '-'}</div>
-                  <div style={{ marginTop: 4 }}>推荐理由：{item.recommendation?.reason || '-'}</div>
-                  {item.categorySuggestion ? (
-                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 10, background: 'rgba(59,130,246,0.08)', color: '#1e3a8a' }}>
-                      <div style={{ fontWeight: 700 }}>项目分类建议：{item.categorySuggestion.suggestedName}</div>
-                      <div style={{ marginTop: 4 }}>{item.categorySuggestion.basis}</div>
-                      {item.categorySuggestion.action === 'consider_new_category' ? (
-                        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <button className="ghost-btn" type="button" onClick={() => onAcceptCategorySuggestion?.(item.id)} disabled={item.categorySuggestion.accepted}>
-                            {item.categorySuggestion.accepted ? '已加入项目分类' : '接纳为项目分类'}
-                          </button>
-                          <span style={{ opacity: 0.8 }}>归属大类：{item.categorySuggestion.parentCategoryKey}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {item.classification ? (
+                  <div style={{ marginTop: 6, fontWeight: 700, fontSize: 15 }}>{item.preview?.title || '-'}</div>
+
+                  <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <span className="source-chip">分类：{item.recommendation?.category || item.preview?.docType || '-'}</span>
+                    {item.groupSuggestion?.suggestedGroups?.length ? (
+                      item.groupSuggestion.suggestedGroups.map((group) => (
+                        <span key={group.key} className="source-chip">
+                          {item.groupSuggestion?.accepted ? '已加入知识库：' : '推荐知识库：'}{group.label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="source-chip">默认：未分组</span>
+                    )}
+                  </div>
+
+                  {item.groupSuggestion?.suggestedGroups?.length && !item.groupSuggestion?.accepted ? (
                     <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <select
-                        className="filter-input"
-                        style={{ minWidth: 140, maxWidth: 220 }}
-                        value={item.classification.selectedKey}
-                        onChange={(event) => onChangeClassification?.(item.id, event.target.value)}
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => onAcceptGroupSuggestion?.(item.id)}
+                        disabled={groupSaving || item.groupSuggestion.accepted}
                       >
-                        {item.classification.options?.map((option) => (
-                          <option key={option.key} value={option.key}>{option.label}</option>
-                        ))}
-                      </select>
-                      <button className="ghost-btn" type="button" onClick={() => onConfirmClassification?.(item.id)}>
-                        {item.classification.confirmed ? '重新确认' : '确认归类'}
+                        {item.groupSuggestion.accepted ? '已纳入推荐分组' : '自动纳入推荐分组'}
                       </button>
-                      <span style={{ opacity: 0.8 }}>
-                        当前分类：{item.classification.selectedLabel}{item.classification.confirmed ? '（已确认）' : '（待确认）'}
-                      </span>
+                      <span style={{ opacity: 0.8 }}>{item.groupSuggestion.basis}</span>
                     </div>
-                  ) : null}
+                  ) : (
+                    <div style={{ marginTop: 8, opacity: 0.8 }}>
+                      {item.groupSuggestion?.basis || '未命中合适知识库，先保持未分组。'}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                      className="filter-input"
+                      style={{ minWidth: 180, maxWidth: 260 }}
+                      value={selectedManualLibraries?.[item.id] || ''}
+                      onChange={(event) => onChangeManualLibrary?.(item.id, event.target.value)}
+                      disabled={groupSaving || !availableLibraries.length}
+                    >
+                      <option value="">手动加入指定知识库</option>
+                      {availableLibraries.map((library) => (
+                        <option key={library.key} value={library.key}>{library.label}</option>
+                      ))}
+                    </select>
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      onClick={() => onAssignLibrary?.(item.id)}
+                      disabled={groupSaving || !selectedManualLibraries?.[item.id]}
+                    >
+                      加入指定库
+                    </button>
+                    {!availableLibraries.length ? <span style={{ opacity: 0.75 }}>先去文档中心创建知识库分组</span> : null}
+                  </div>
                 </>
               ) : (
                 <div style={{ marginTop: 6 }}>处理失败：{item.errorMessage || '未知错误'}</div>
@@ -91,7 +129,10 @@ function renderIngestFeedback(status, onChangeClassification, onConfirmClassific
           ))}
         </div>
       ) : null}
-      {fallbackLink ? <a href="/documents" style={{ display: 'inline-block', marginTop: 10, fontWeight: 700 }}>立即查看</a> : null}
+
+      {fallbackLink ? (
+        <a href="/documents" style={{ display: 'inline-block', marginTop: 10, fontWeight: 700 }}>立即查看</a>
+      ) : null}
     </div>
   );
 }
@@ -110,8 +151,10 @@ export default function HomePage() {
   const [captureLoading, setCaptureLoading] = useState(false);
   const [uploadForm, setUploadForm] = useState(initialUploadForm);
   const [uploadStatus, setUploadStatus] = useState('');
-  const [classificationSaving, setClassificationSaving] = useState(false);
-  const [suggestionSaving, setSuggestionSaving] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [documentLibraries, setDocumentLibraries] = useState([]);
+  const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
   const [documentSnapshot, setDocumentSnapshot] = useState({ totalFiles: 0, parsed: 0, scanRoot: '' });
 
   const selectWorkbenchCategory = (categoryKey) => {
@@ -147,12 +190,14 @@ export default function HomePage() {
       const response = await fetch(buildApiUrl('/api/documents'));
       if (!response.ok) throw new Error('load documents failed');
       const json = await response.json();
+      setDocumentLibraries(Array.isArray(json?.libraries) ? json.libraries : []);
       setDocumentSnapshot({
         totalFiles: json?.totalFiles || 0,
         parsed: json?.meta?.parsed || 0,
         scanRoot: json?.scanRoot || '',
       });
     } catch {
+      setDocumentLibraries([]);
       setDocumentSnapshot({ totalFiles: 0, parsed: 0, scanRoot: '' });
     }
   }
@@ -162,9 +207,7 @@ export default function HomePage() {
       const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) {
-          setMessages(parsed);
-        }
+        if (Array.isArray(parsed) && parsed.length) setMessages(parsed);
       }
     } catch {
       // ignore invalid local cache
@@ -285,155 +328,7 @@ export default function HomePage() {
     }
   };
 
-  const updateUploadClassificationSelection = (itemId, bizCategory) => {
-    setUploadStatus((prev) => {
-      if (!prev || typeof prev === 'string') return prev;
-      return {
-        ...prev,
-        ingestItems: (prev.ingestItems || []).map((item) => {
-          if (item.id !== itemId || !item.classification) return item;
-          const matched = (item.classification.options || []).find((option) => option.key === bizCategory);
-          return {
-            ...item,
-            classification: {
-              ...item.classification,
-              selectedKey: bizCategory,
-              selectedLabel: matched?.label || item.classification.selectedLabel,
-              confirmed: false,
-            },
-          };
-        }),
-      };
-    });
-  };
-
-  const confirmUploadClassification = async (itemId) => {
-    if (classificationSaving) return;
-    const current = typeof uploadStatus === 'object'
-      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
-      : null;
-    const bizCategory = current?.classification?.selectedKey;
-    if (!bizCategory) return;
-
-    setClassificationSaving(true);
-    try {
-      const response = await fetch(buildApiUrl('/api/documents/classify'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: itemId, bizCategory }] }),
-      });
-      const raw = await response.text();
-      let json = {};
-      try {
-        json = raw ? JSON.parse(raw) : {};
-      } catch {
-        json = {};
-      }
-      if (!response.ok) throw new Error(json?.error || raw || 'classification confirm failed');
-
-      setUploadStatus((prev) => {
-        if (!prev || typeof prev === 'string') return prev;
-        const refreshed = new Map((json?.ingestItems || []).map((item) => [item.id, item]));
-        return {
-          ...prev,
-          message: json?.message || prev.message,
-          ingestItems: (prev.ingestItems || []).map((item) => refreshed.get(item.id) || item),
-        };
-      });
-      const confirmedItem = (json?.ingestItems || [])[0];
-      if (confirmedItem?.classification) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            title: '分类已确认',
-            content: `${confirmedItem.sourceName} 当前分类已确认为 ${confirmedItem.classification.selectedLabel}。系统推荐仍保留为 ${confirmedItem.recommendation?.category || '未识别'}。`,
-            meta: confirmedItem.preview?.title || confirmedItem.sourceName,
-          },
-        ]);
-      }
-      await loadDocumentSnapshot();
-    } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : '分类确认失败');
-    } finally {
-      setClassificationSaving(false);
-    }
-  };
-
-  const acceptUploadCategorySuggestion = async (itemId) => {
-    if (suggestionSaving) return;
-    const current = typeof uploadStatus === 'object'
-      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
-      : null;
-    const suggestion = current?.categorySuggestion;
-    if (!suggestion?.suggestedName) return;
-
-    setSuggestionSaving(true);
-    try {
-      const response = await fetch(buildApiUrl('/api/documents/category-suggestions'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: itemId, suggestedName: suggestion.suggestedName, parentCategoryKey: suggestion.parentCategoryKey }] }),
-      });
-      const raw = await response.text();
-      let json = {};
-      try {
-        json = raw ? JSON.parse(raw) : {};
-      } catch {
-        json = {};
-      }
-      if (!response.ok) throw new Error(json?.error || raw || 'accept category suggestion failed');
-
-      setUploadStatus((prev) => {
-        if (!prev || typeof prev === 'string') return prev;
-        return {
-          ...prev,
-          message: json?.message || prev.message,
-          ingestItems: (prev.ingestItems || []).map((item) => item.id === itemId
-            ? {
-                ...item,
-                categorySuggestion: item.categorySuggestion
-                  ? { ...item.categorySuggestion, accepted: true }
-                  : item.categorySuggestion,
-              }
-            : item),
-        };
-      });
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          title: '已接纳新增分类建议',
-          content: `已将“${suggestion.suggestedName}”加入项目分类，归属大类为 ${suggestion.parentCategoryKey}。`,
-          meta: current?.sourceName || suggestion.suggestedName,
-        },
-      ]);
-    } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : '接纳分类建议失败');
-    } finally {
-      setSuggestionSaving(false);
-    }
-  };
-
-  const updateUploadGroupDraft = (itemId, value) => {
-    setUploadGroupDrafts((prev) => ({ ...prev, [itemId]: value }));
-    setUploadStatus((prev) => {
-      if (!prev || typeof prev === 'string') return prev;
-      return {
-        ...prev,
-        ingestItems: (prev.ingestItems || []).map((item) => item.id === itemId ? { ...item, groupDraft: value } : item),
-      };
-    });
-  };
-
-  const acceptUploadGroupSuggestion = async (itemId) => {
-    if (groupSaving) return;
-    const current = typeof uploadStatus === 'object'
-      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
-      : null;
-    const groups = current?.groupSuggestion?.suggestedGroups || [];
-    if (!groups.length) return;
-
+  const saveGroupsForUploadItem = async (itemId, groups, successTitle, successContent) => {
     setGroupSaving(true);
     try {
       const response = await fetch(buildApiUrl('/api/documents/groups'), {
@@ -448,7 +343,7 @@ export default function HomePage() {
       } catch {
         json = {};
       }
-      if (!response.ok) throw new Error(json?.error || raw || 'accept group suggestion failed');
+      if (!response.ok) throw new Error(json?.error || raw || 'save groups failed');
 
       setUploadStatus((prev) => {
         if (!prev || typeof prev === 'string') return prev;
@@ -459,27 +354,71 @@ export default function HomePage() {
           ingestItems: (prev.ingestItems || []).map((item) => refreshed.get(item.id) || item),
         };
       });
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          title: '已接纳分组建议',
-          content: `${current?.sourceName || '该资料'} 已加入分组：${groups.join('、')}。`,
-          meta: current?.preview?.title || current?.sourceName,
-        },
-      ]);
+
+      if (successTitle && successContent) {
+        setMessages((prev) => [...prev, { role: 'assistant', title: successTitle, content: successContent }]);
+      }
+
       await loadDocumentSnapshot();
+      return true;
     } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : '接纳分组建议失败');
+      setUploadStatus(error instanceof Error ? error.message : '保存知识库分组失败');
+      return false;
     } finally {
       setGroupSaving(false);
     }
   };
 
+  const acceptUploadGroupSuggestion = async (itemId) => {
+    if (groupSaving) return;
+    const current = typeof uploadStatus === 'object'
+      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
+      : null;
+    const groups = (current?.groupSuggestion?.suggestedGroups || []).map((item) => item.key);
+    if (!groups.length) return;
+
+    await saveGroupsForUploadItem(
+      itemId,
+      groups,
+      '已纳入推荐分组',
+      `${current?.preview?.title || current?.sourceName} 已自动纳入：${(current?.groupSuggestion?.suggestedGroups || []).map((item) => item.label).join('、')}。`,
+    );
+  };
+
+  const assignUploadToSelectedLibrary = async (itemId) => {
+    if (groupSaving) return;
+
+    const selectedLibraryKey = selectedManualLibraries[itemId];
+    if (!selectedLibraryKey) return;
+
+    const current = typeof uploadStatus === 'object'
+      ? (uploadStatus.ingestItems || []).find((item) => item.id === itemId)
+      : null;
+
+    const existingGroups = current?.groupSuggestion?.suggestedGroups || [];
+    const groups = Array.from(new Set([
+      ...existingGroups.map((item) => item.key),
+      selectedLibraryKey,
+    ]));
+
+    const selectedLibrary = documentLibraries.find((item) => item.key === selectedLibraryKey);
+    const saved = await saveGroupsForUploadItem(
+      itemId,
+      groups,
+      '已加入指定知识库',
+      `${current?.preview?.title || current?.sourceName} 已加入指定知识库：${selectedLibrary?.label || selectedLibraryKey}。`,
+    );
+
+    if (saved) {
+      setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: '' }));
+    }
+  };
+
   const submitDocumentUpload = async (event) => {
     event.preventDefault();
-    if (!uploadForm.files.length) return;
+    if (!uploadForm.files.length || uploadLoading) return;
 
+    setUploadLoading(true);
     setUploadStatus('');
 
     try {
@@ -506,14 +445,25 @@ export default function HomePage() {
         summary: json?.summary,
         ingestItems: json?.ingestItems || [],
       };
+      const importantTitles = nextStatus.ingestItems
+        .filter((item) => item.status === 'success')
+        .map((item) => item.preview?.title)
+        .filter(Boolean)
+        .slice(0, 4);
+
+      setSelectedManualLibraries({});
       setUploadStatus(nextStatus);
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          title: '文档已上传并进入解析',
-          content: `${nextStatus.message}${nextStatus.summary ? ` 共 ${nextStatus.summary.total} 项，成功 ${nextStatus.summary.successCount} 项，失败 ${nextStatus.summary.failedCount} 项。` : ''}`,
-          meta: uploadForm.files.map((file) => file.name).join('，'),
+          title: '文档已上传',
+          content: importantTitles.length
+            ? `本次重点识别标题：${importantTitles.join('；')}${nextStatus.summary && nextStatus.summary.total > importantTitles.length ? ` 等 ${nextStatus.summary.total} 项` : ''}。`
+            : nextStatus.message,
+          meta: nextStatus.summary
+            ? `成功 ${nextStatus.summary.successCount} 项，失败 ${nextStatus.summary.failedCount} 项`
+            : uploadForm.files.map((file) => file.name).join('，'),
         },
       ]);
       setUploadForm(initialUploadForm);
@@ -530,6 +480,8 @@ export default function HomePage() {
           meta: uploadForm.files.map((file) => file.name).join('，'),
         },
       ]);
+    } finally {
+      setUploadLoading(false);
     }
   };
 
@@ -604,7 +556,16 @@ export default function HomePage() {
                   </div>
                 </form>
 
-                {renderIngestFeedback(captureStatus, null, null, null, false)}
+                {renderIngestFeedback({
+                  status: captureStatus,
+                  onAcceptGroupSuggestion: null,
+                  onAssignLibrary: null,
+                  selectedManualLibraries: null,
+                  onChangeManualLibrary: null,
+                  availableLibraries: [],
+                  fallbackLink: false,
+                  groupSaving,
+                })}
               </section>
 
               <section className="summary-item intake-pane compact-intake-pane">
@@ -622,24 +583,46 @@ export default function HomePage() {
                     onChange={(event) => setUploadForm((prev) => ({ ...prev, files: Array.from(event.target.files || []) }))}
                     style={{ display: 'none' }}
                   />
-                  <div className="upload-dropzone minimal-dropzone" role="button" tabIndex={0} onClick={() => uploadInputRef.current?.click()} onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      uploadInputRef.current?.click();
-                    }
-                  }}>
-                    <span className="upload-hint">已选 {uploadForm.files.length} 个文件</span>
+                  <div
+                    className="upload-dropzone minimal-dropzone"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => uploadInputRef.current?.click()}
+                    onKeyDown={(event) => {
+                      if (uploadLoading) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        uploadInputRef.current?.click();
+                      }
+                    }}
+                    style={{ opacity: uploadLoading ? 0.65 : 1, pointerEvents: uploadLoading ? 'none' : 'auto' }}
+                  >
+                    <span className="upload-hint">{uploadLoading ? '上传处理中...' : `已选 ${uploadForm.files.length} 个文件`}</span>
                     <span style={{ fontSize: 13, color: '#475569' }}>点击选择文件，支持多选</span>
                   </div>
                   {!!uploadForm.files.length ? (
                     <div className="capture-task-meta">{uploadForm.files.map((file) => file.name).join('，')}</div>
                   ) : null}
-                  <button className="primary-btn" type="submit" disabled={!uploadForm.files.length}>
-                    上传并加入文档库
+                  <button className="primary-btn" type="submit" disabled={!uploadForm.files.length || uploadLoading}>
+                    {uploadLoading ? '上传中...' : '上传并加入文档库'}
                   </button>
+                  {uploadLoading ? (
+                    <div className="page-note" style={{ marginBottom: 0 }}>
+                      正在上传并解析资料，请稍候，当前已锁定按钮以避免重复提交。
+                    </div>
+                  ) : null}
                 </form>
 
-                {renderIngestFeedback(uploadStatus, updateUploadClassificationSelection, confirmUploadClassification, acceptUploadCategorySuggestion, true)}
+                {renderIngestFeedback({
+                  status: uploadStatus,
+                  onAcceptGroupSuggestion: acceptUploadGroupSuggestion,
+                  onAssignLibrary: assignUploadToSelectedLibrary,
+                  selectedManualLibraries,
+                  onChangeManualLibrary: (itemId, value) => setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: value })),
+                  availableLibraries: documentLibraries,
+                  fallbackLink: true,
+                  groupSaving,
+                })}
               </section>
             </section>
           </section>

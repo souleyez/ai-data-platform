@@ -4,8 +4,17 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.11.0",
   "scripts": {
-    "dev": "echo 'TODO: wire web/api/worker dev orchestration'",
-    "build": "echo 'TODO: build all apps'",
-    "lint": "echo 'TODO: add lint config'"
+    "setup:env": "node tools/ensure-env.mjs",
+    "dev": "corepack pnpm setup:env && corepack pnpm -r --parallel --filter ./apps/api --filter ./apps/web --filter ./apps/worker dev",
+    "dev:api": "corepack pnpm --filter api dev",
+    "dev:web": "corepack pnpm --filter web dev",
+    "dev:worker": "corepack pnpm --filter worker dev",
+    "openclaw:install": "powershell -ExecutionPolicy Bypass -File tools/install-openclaw-latest.ps1",
+    "local:start": "powershell -ExecutionPolicy Bypass -File tools/start-local.ps1",
+    "local:stop": "powershell -ExecutionPolicy Bypass -File tools/stop-local.ps1",
+    "local:status": "powershell -ExecutionPolicy Bypass -File tools/status-local.ps1",
+    "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
+    "test": "corepack pnpm --filter api test",
+    "lint": "corepack pnpm build"
   }
 }

@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Data Platform Model Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/ai-data-platform
+EnvironmentFile=/srv/ai-data-platform/deploy/server/ai-data-platform.env
+ExecStart=/usr/bin/node tools/http-model-bridge.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -98,13 +98,14 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
 
   if (!forceRefresh) {
     const cache = await readCache();
+    const overrides = await loadDocumentOverrides();
     if (
       cache
       && cache.scanRoot === DEFAULT_SCAN_DIR
       && cache.totalFiles === files.length
       && cache.scanSignature === scanSignature
     ) {
-      return { exists, files, items: cache.items.slice(0, limit), cacheHit: true };
+      return { exists, files, items: applyDocumentOverrides(cache.items, overrides).slice(0, limit), cacheHit: true };
     }
   }
 

@@ -4,8 +4,9 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory, type ProjectCustomCategory } from '../lib/document-config.js';
+import { createDocumentLibrary, deleteDocumentLibrary, loadDocumentLibraries } from '../lib/document-libraries.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths } from '../lib/document-store.js';
-import { buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
+import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from '../lib/ingest-feedback.js';
 import { saveDocumentOverride } from '../lib/document-overrides.js';
 
 function sanitizeFileName(fileName: string) {
@@ -51,6 +52,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
   app.get('/documents', async () => {
     const { exists, files, items, cacheHit } = await loadParsedDocuments();
+    const libraries = await loadDocumentLibraries();
 
     const byExtension = items.reduce<Record<string, number>>((acc, item) => {
       acc[item.ext] = (acc[item.ext] || 0) + 1;
@@ -73,6 +75,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }, {});
 
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const libraryCounts = libraries.reduce<Record<string, number>>((acc, library) => {
+      acc[library.key] = items.filter((item) => (item.confirmedGroups || item.groups || []).includes(library.key)).length;
+      return acc;
+    }, {});
 
     return {
       mode: 'read-only',
@@ -88,41 +94,64 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       cacheHit,
       lastScanAt: new Date().toISOString(),
       config,
+      libraries,
       meta: {
         parsed: byStatus.parsed || 0,
         unsupported: byStatus.unsupported || 0,
         error: byStatus.error || 0,
         bizCategories: byBizCategory,
+        libraryCounts,
       },
     };
   });
 
-  app.get('/documents/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const { items } = await loadParsedDocuments();
-    const found = items.find((item) => buildDocumentId(item.path) === id);
-
-    if (!found) {
-      return reply.code(404).send({ error: 'document not found' });
-    }
-
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const matchedFolders = Object.entries(config.categories)
-      .filter(([, value]) => value.folders.some((folder) => folder && found.path.toLowerCase().includes(folder.toLowerCase())))
-      .map(([key, value]) => ({ key, label: value.label, folders: value.folders }));
+  app.get('/documents/libraries', async () => {
+    const [{ items }, libraries] = await Promise.all([
+      loadParsedDocuments(200, false),
+      loadDocumentLibraries(),
+    ]);
 
     return {
       mode: 'read-only',
-      item: {
-        ...found,
-        id,
-      },
-      meta: {
-        category: found.category,
-        bizCategory: found.bizCategory,
-        parseStatus: found.parseStatus,
-        matchedFolders,
-      },
+      items: libraries.map((library) => ({
+        ...library,
+        documentCount: items.filter((item) => (item.confirmedGroups || item.groups || []).includes(library.key)).length,
+      })),
+    };
+  });
+
+  app.post('/documents/libraries', async (request, reply) => {
+    const body = (request.body || {}) as { name?: string; description?: string };
+    const name = String(body.name || '').trim();
+    if (!name) {
+      return reply.code(400).send({ error: 'library name is required' });
+    }
+
+    const library = await createDocumentLibrary({ name, description: body.description });
+    const libraries = await loadDocumentLibraries();
+    return {
+      status: 'created',
+      message: `已新增知识库分组“${library.label}”。`,
+      item: library,
+      items: libraries,
+    };
+  });
+
+  app.delete('/documents/libraries/:key', async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const libraries = await loadDocumentLibraries();
+    const found = libraries.find((item) => item.key === key);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'library not found' });
+    }
+
+    await deleteDocumentLibrary(key);
+    const nextLibraries = await loadDocumentLibraries();
+    return {
+      status: 'deleted',
+      message: `已删除知识库分组“${found.label}”，文档仍保留，仅移除了分组关联。`,
+      items: nextLibraries,
     };
   });
 
@@ -151,6 +180,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     const validCategories: BizCategory[] = ['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'];
+    const libraries = await loadDocumentLibraries();
     const { items } = await loadParsedDocuments(200, false);
     const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
 
@@ -175,7 +205,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         ...found,
         confirmedBizCategory: result.bizCategory,
         categoryConfirmedAt: result.confirmedAt,
-      }, 'file'));
+      }, 'file', undefined, libraries));
       return acc;
     }, []);
 
@@ -244,6 +274,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'group items are required' });
     }
 
+    const libraries = await loadDocumentLibraries();
+    const validGroups = new Set(libraries.map((item) => item.key));
     const { items } = await loadParsedDocuments(200, false);
     const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
     const results = [] as Array<{ id: string; groups: string[]; confirmedAt: string }>;
@@ -251,7 +283,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     for (const update of updates) {
       const found = update.id ? byId.get(update.id) : null;
       if (!found) continue;
-      const saved = await saveDocumentOverride(found.path, { groups: update.groups || [] });
+      const nextGroups = (update.groups || []).filter((group) => validGroups.has(group));
+      const saved = await saveDocumentOverride(found.path, { groups: nextGroups });
       results.push({ id: update.id as string, groups: saved.groups || [], confirmedAt: saved.confirmedAt });
     }
 
@@ -262,7 +295,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         ...found,
         confirmedGroups: result.groups,
         categoryConfirmedAt: result.confirmedAt,
-      }, 'file'));
+      }, 'file', undefined, libraries));
       return acc;
     }, []);
 
@@ -304,21 +337,36 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'no files uploaded' });
     }
 
+    const libraries = await loadDocumentLibraries();
     const { files, items } = await mergeParsedDocumentsForPaths(savedFiles.map((file) => file.path), 200);
     const itemMap = new Map(items.map((item) => [item.path, item]));
-    const ingestItems = savedFiles.map((file) => {
+    const ingestItems = [];
+    for (const file of savedFiles) {
       const parsed = itemMap.get(file.path);
       if (!parsed) {
-        return {
+        ingestItems.push({
           id: Buffer.from(file.path).toString('base64url'),
           sourceType: 'file' as const,
           sourceName: file.name,
           status: 'failed' as const,
           errorMessage: '文件已保存，但本次自动重扫后未找到对应解析结果。',
-        };
+        });
+        continue;
       }
-      return buildPreviewItemFromDocument(parsed, 'file', file.name);
-    });
+
+      const suggestedGroups = resolveSuggestedLibraryKeys(parsed, libraries);
+      if (suggestedGroups.length) {
+        const saved = await saveDocumentOverride(parsed.path, { groups: suggestedGroups });
+        ingestItems.push(buildPreviewItemFromDocument({
+          ...parsed,
+          confirmedGroups: saved.groups || suggestedGroups,
+          categoryConfirmedAt: saved.confirmedAt,
+        }, 'file', file.name, libraries));
+        continue;
+      }
+
+      ingestItems.push(buildPreviewItemFromDocument(parsed, 'file', file.name, libraries));
+    }
 
     return {
       status: 'uploaded',
@@ -329,13 +377,42 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       uploadedCount: savedFiles.length,
       uploadedFiles: savedFiles,
       totalFiles: files.length,
-      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动解析与索引更新。`,
+      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动解析、索引更新与推荐知识库归组。`,
       summary: {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,
         failedCount: ingestItems.filter((item) => item.status === 'failed').length,
       },
       ingestItems,
+    };
+  });
+
+  app.get('/documents/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { items } = await loadParsedDocuments();
+    const found = items.find((item) => buildDocumentId(item.path) === id);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
+    }
+
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const matchedFolders = Object.entries(config.categories)
+      .filter(([, value]) => value.folders.some((folder) => folder && found.path.toLowerCase().includes(folder.toLowerCase())))
+      .map(([key, value]) => ({ key, label: value.label, folders: value.folders }));
+
+    return {
+      mode: 'read-only',
+      item: {
+        ...found,
+        id,
+      },
+      meta: {
+        category: found.category,
+        bizCategory: found.bizCategory,
+        parseStatus: found.parseStatus,
+        matchedFolders,
+      },
     };
   });
 }

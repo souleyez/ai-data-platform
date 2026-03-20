@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { createAndRunWebCaptureTask, listWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
+import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
 import { loadDocumentCategoryConfig } from '../lib/document-config.js';
+import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
 import { parseDocument } from '../lib/document-parser.js';
 import { buildFailedPreviewItem, buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
@@ -26,6 +27,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       focus?: string;
       frequency?: WebCaptureFrequency;
       note?: string;
+      maxItems?: number;
     };
 
     const url = String(body.url || '').trim();
@@ -38,14 +40,16 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       focus: String(body.focus || '').trim(),
       frequency: (['manual', 'daily', 'weekly'].includes(String(body.frequency)) ? body.frequency : 'daily') as WebCaptureFrequency,
       note: String(body.note || '').trim(),
+      maxItems: Number(body.maxItems || 5),
     });
 
     let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
 
     if (task.lastStatus === 'success' && task.documentPath) {
       const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+      const libraries = await loadDocumentLibraries();
       const parsed = await parseDocument(task.documentPath, config);
-      ingestItems = [buildPreviewItemFromDocument(parsed, 'url')];
+      ingestItems = [buildPreviewItemFromDocument(parsed, 'url', undefined, libraries)];
     } else {
       ingestItems = [buildFailedPreviewItem({
         id: task.id,
@@ -65,8 +69,17 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,
         failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+        collectedCount: task.lastCollectedCount || 0,
       },
       ingestItems,
+    };
+  });
+
+  app.post('/web-captures/run-due', async () => {
+    const result = await runDueWebCaptureTasks();
+    return {
+      status: result.executedCount ? 'processed' : 'idle',
+      ...result,
     };
   });
 }

@@ -1,3 +1,5 @@
+import { getActiveOpenClawModel } from './model-config.js';
+
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -20,6 +22,17 @@ export type OpenClawChatResult = {
 function env(name: string, fallback?: string) {
   const value = process.env[name];
   return value && value.trim() ? value.trim() : fallback;
+}
+
+function hasUsableGatewayToken(token?: string) {
+  const value = String(token || '').trim();
+  if (!value) return false;
+  return !/^replace-with-your-/i.test(value);
+}
+
+function isLocalGatewayUrl(url?: string) {
+  const value = String(url || '').trim().toLowerCase();
+  return value.startsWith('http://127.0.0.1') || value.startsWith('http://localhost');
 }
 
 function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
@@ -45,24 +58,64 @@ function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
   ];
 }
 
+function sanitizeModelContent(content: string) {
+  return String(content || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+}
+
 export function isOpenClawGatewayConfigured() {
-  return Boolean(env('OPENCLAW_GATEWAY_URL') && env('OPENCLAW_GATEWAY_TOKEN'));
+  const baseUrl = env('OPENCLAW_GATEWAY_URL');
+  const token = env('OPENCLAW_GATEWAY_TOKEN');
+  return Boolean(baseUrl && (hasUsableGatewayToken(token) || isLocalGatewayUrl(baseUrl)));
+}
+
+export async function isOpenClawGatewayReachable() {
+  const baseUrl = env('OPENCLAW_GATEWAY_URL');
+  const token = env('OPENCLAW_GATEWAY_TOKEN');
+  if (!baseUrl) return false;
+  if (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl)) return false;
+
+  const headers: Record<string, string> = {};
+  if (hasUsableGatewayToken(token)) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 800);
+
+  try {
+    const url = `${baseUrl.replace(/\/$/, '')}/health`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+    return response.ok || response.status < 500;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenClawChatResult> {
   const baseUrl = env('OPENCLAW_GATEWAY_URL');
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
-  const model = env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+  const model = (await getActiveOpenClawModel()) || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
 
-  if (!baseUrl || !token) {
+  if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('OpenClaw gateway is not configured');
   }
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+
+  if (hasUsableGatewayToken(token)) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   if (agentId) {
     headers['x-openclaw-agent-id'] = agentId;
@@ -88,7 +141,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     choices?: Array<{ message?: { content?: string } }>;
   };
 
-  const content = json.choices?.[0]?.message?.content?.trim();
+  const content = sanitizeModelContent(json.choices?.[0]?.message?.content || '');
   if (!content) {
     throw new Error('OpenClaw gateway returned empty content');
   }

@@ -12,6 +12,9 @@ storage/cache/
 storage/files/
 storage/web-captures/
 storage/config/document-overrides.json
+storage/config/document-libraries.json
+storage/config/report-center.json
+tmp/
 
 # ad-hoc local test artifacts
 apps/api/test/data/

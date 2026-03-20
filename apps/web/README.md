@@ -15,8 +15,8 @@
 在 `ai-data-platform/apps/web` 目录执行：
 
 ```bash
-pnpm install
-pnpm dev
+corepack pnpm install
+corepack pnpm dev
 ```
 
 然后访问：
@@ -33,9 +33,18 @@ http://localhost:3000
 - 指标卡片
 - 趋势图占位
 - 风险合同表格
-- 前端通过 fetch 调用独立 `apps/api`
+- 前端默认通过同源 `/api/*` 路由代理到独立 `apps/api`
 - 首页调用 `POST /api/chat`
 - 文档中心调用 `GET /api/documents`
+
+## 本地环境变量
+
+默认推荐：
+
+- `NEXT_PUBLIC_API_BASE_URL=` 保持为空，浏览器请求走同源代理
+- `BACKEND_API_BASE_URL=http://127.0.0.1:3100` 由 Next 服务端代理转发到后端 API
+
+这样本地开发更稳定，不依赖浏览器直接跨域访问 `3100`。
 
 ## 当前接口
 

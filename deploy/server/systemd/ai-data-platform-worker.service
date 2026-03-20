@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Data Platform Worker
+After=network-online.target ai-data-platform-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/ai-data-platform/apps/worker
+EnvironmentFile=/srv/ai-data-platform/deploy/server/ai-data-platform.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

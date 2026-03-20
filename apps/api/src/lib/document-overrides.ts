@@ -36,14 +36,22 @@ export async function saveDocumentOverride(filePath: string, input: { bizCategor
   return current[filePath];
 }
 
+export async function saveDocumentOverrides(overrides: Record<string, DocumentOverride>) {
+  await fs.mkdir(OVERRIDE_DIR, { recursive: true });
+  await fs.writeFile(OVERRIDE_FILE, JSON.stringify(overrides, null, 2), 'utf8');
+  return overrides;
+}
+
 export function applyDocumentOverrides(items: ParsedDocument[], overrides: Record<string, DocumentOverride>) {
   return items.map((item) => {
     const matched = overrides[item.path];
     if (!matched) return item;
+    const hasBizCategory = Object.prototype.hasOwnProperty.call(matched, 'bizCategory');
+    const hasGroups = Object.prototype.hasOwnProperty.call(matched, 'groups');
     return {
       ...item,
-      confirmedBizCategory: matched.bizCategory || item.confirmedBizCategory,
-      confirmedGroups: matched.groups || item.confirmedGroups,
+      confirmedBizCategory: hasBizCategory ? matched.bizCategory : item.confirmedBizCategory,
+      confirmedGroups: hasGroups ? (matched.groups || []) : item.confirmedGroups,
       categoryConfirmedAt: matched.confirmedAt,
     };
   });

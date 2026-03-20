@@ -1,6 +1,48 @@
 import { useEffect, useRef } from 'react';
 import { QUICK_ACTIONS, formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
+function FormulaTable({ table }) {
+  if (!table) return null;
+
+  return (
+    <div className="formula-table-wrap">
+      <div className="formula-table-head">
+        <strong>{table.title}</strong>
+        {table.subtitle ? <div className="formula-table-subtitle">{table.subtitle}</div> : null}
+      </div>
+
+      <div className="formula-table-scroll">
+        <table className="formula-table">
+          <thead>
+            <tr>
+              {table.columns?.map((column) => (
+                <th key={column}>{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows?.map((row, rowIndex) => (
+              <tr key={`${table.title}-${rowIndex}`}>
+                {row.map((cell, cellIndex) => (
+                  <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {table.notes?.length ? (
+        <div className="formula-table-notes">
+          {table.notes.map((note, index) => (
+            <div key={`${table.title}-note-${index}`}>{index + 1}. {note}</div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function ChatPanel({
   messages,
   input,
@@ -34,6 +76,7 @@ export default function ChatPanel({
             <div className={`bubble ${message.role === 'user' ? 'user-bubble' : ''}`}>
               {message.title ? <strong>{message.title}</strong> : null}
               <p>{message.content}</p>
+              {message.table ? <FormulaTable table={message.table} /> : null}
               {message.meta ? <div className="message-meta">{message.meta}</div> : null}
               {message.references?.length ? (
                 <div className="message-ref-block">

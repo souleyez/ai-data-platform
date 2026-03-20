@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NAV_ITEMS } from '../lib/types';
 
 const NAV_LINKS = {
@@ -11,16 +11,126 @@ const NAV_LINKS = {
   审计日志: '/audit',
 };
 
-const MODEL_OPTIONS = [
-  { id: 'github-copilot/gpt-5.4', label: 'GPT-5.4', provider: 'GitHub Copilot', active: true },
-  { id: 'github-copilot/gpt-4o', label: 'GPT-4o', provider: 'GitHub Copilot' },
-  { id: 'openclaw/openai-compatible', label: 'OpenClaw 外接模型', provider: '演示入口' },
-];
+const INITIAL_MODEL_STATE = {
+  openclaw: {
+    installed: false,
+    running: false,
+    installMode: 'none',
+    installedVersion: null,
+    gatewayUrl: 'http://127.0.0.1:18789',
+    needsInstall: false,
+    usesDevBridge: false,
+  },
+  currentModel: null,
+  availableModels: [],
+};
+
+function getRuntimeLabel(openclaw) {
+  if (openclaw.running) {
+    return `已连接${openclaw.installedVersion ? ` · ${openclaw.installedVersion}` : ''}`;
+  }
+
+  if (openclaw.installed) {
+    return '已安装，网关未连通';
+  }
+
+  return '未安装';
+}
 
 export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('github-copilot/gpt-5.4');
-  const currentModel = useMemo(() => MODEL_OPTIONS.find((item) => item.id === selectedModel) || MODEL_OPTIONS[0], [selectedModel]);
+  const [modelState, setModelState] = useState(INITIAL_MODEL_STATE);
+  const [modelBusy, setModelBusy] = useState(false);
+  const [modelMessage, setModelMessage] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadModelState() {
+      try {
+        const response = await fetch('/api/model-config', { cache: 'no-store' });
+        const json = await response.json();
+        if (!alive) return;
+        setModelState({
+          openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
+          currentModel: json.currentModel || null,
+          availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+        });
+      } catch {
+        if (!alive) return;
+        setModelMessage('模型状态读取失败，请稍后重试。');
+      }
+    }
+
+    loadModelState();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const currentModel = useMemo(() => modelState.currentModel || modelState.availableModels[0] || null, [modelState]);
+
+  async function refreshModelState(message = '') {
+    try {
+      const response = await fetch('/api/model-config', { cache: 'no-store' });
+      const json = await response.json();
+      setModelState({
+        openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
+        currentModel: json.currentModel || null,
+        availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+      });
+      setModelMessage(message);
+    } catch {
+      if (message) setModelMessage(message);
+    }
+  }
+
+  async function handleSelectModel(modelId) {
+    setModelBusy(true);
+    setModelMessage('');
+
+    try {
+      const response = await fetch('/api/model-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modelId }),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(json.message || '模型切换失败');
+      }
+
+      setModelState({
+        openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
+        currentModel: json.currentModel || null,
+        availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+      });
+      setModelMessage(json.message || '模型已切换。');
+    } catch (error) {
+      setModelMessage(error instanceof Error ? error.message : '模型切换失败，请稍后重试。');
+    } finally {
+      setModelBusy(false);
+    }
+  }
+
+async function handleInstallOpenClaw() {
+  setModelBusy(true);
+  setModelMessage('正在安装云端模型服务，并启动默认网关...');
+
+    try {
+      const response = await fetch('/api/model-config/install', { method: 'POST' });
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(json.message || 'install_openclaw_failed');
+      }
+
+      await refreshModelState(json.message || '云端模型服务已安装完成。');
+    } catch (error) {
+      setModelMessage(error instanceof Error ? error.message : '云端模型服务安装失败。');
+    } finally {
+      setModelBusy(false);
+    }
+  }
 
   return (
     <aside className="sidebar">
@@ -38,7 +148,9 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
           const href = NAV_LINKS[item] || '#';
           const active = href !== '#' && currentPath === href;
           return (
-            <a key={item} href={href} className={`nav-item ${active ? 'active' : ''}`}>{item}</a>
+            <a key={item} href={href} className={`nav-item ${active ? 'active' : ''}`}>
+              {item}
+            </a>
           );
         })}
       </nav>
@@ -62,32 +174,75 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
 
       <section className="side-card compact model-card" style={{ marginTop: 8 }}>
         <div className="card-title">模型配置</div>
-        <p>当前模型：{currentModel.provider} / {currentModel.label}</p>
-        <button className="ghost-btn" type="button" style={{ marginTop: 10, width: '100%' }} onClick={() => setModelPanelOpen((prev) => !prev)}>
+        <p>
+          当前模型：
+          {currentModel ? ` ${currentModel.provider} / ${currentModel.label}` : ' 未配置'}
+        </p>
+        <p style={{ marginTop: 8, fontSize: 12, color: '#b7c3d6' }}>
+          云端模型：{getRuntimeLabel(modelState.openclaw)}
+        </p>
+        <button
+          className="ghost-btn"
+          type="button"
+          style={{ marginTop: 10, width: '100%' }}
+          onClick={() => setModelPanelOpen((prev) => !prev)}
+        >
           {modelPanelOpen ? '收起模型面板' : '打开模型面板'}
         </button>
+
         {modelPanelOpen ? (
           <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-            {MODEL_OPTIONS.map((item) => (
+            {modelState.availableModels.length ? (
+              modelState.availableModels.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="ghost-btn"
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    borderColor: item.id === currentModel?.id ? '#93c5fd' : undefined,
+                    background: item.id === currentModel?.id ? '#eff6ff' : '#fff',
+                    opacity: modelBusy ? 0.72 : 1,
+                  }}
+                  onClick={() => handleSelectModel(item.id)}
+                  disabled={modelBusy}
+                >
+                  <div style={{ fontWeight: 700 }}>{item.label}</div>
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>{item.provider}</div>
+                </button>
+              ))
+            ) : (
+              <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
+                当前还没有读取到云端模型列表。
+              </div>
+            )}
+
+            {!modelState.openclaw.installed ? (
               <button
-                key={item.id}
                 type="button"
                 className="ghost-btn"
-                style={{
-                  width: '100%',
-                  textAlign: 'left',
-                  borderColor: item.id === selectedModel ? '#93c5fd' : undefined,
-                  background: item.id === selectedModel ? '#eff6ff' : '#fff',
-                }}
-                onClick={() => setSelectedModel(item.id)}
+                onClick={handleInstallOpenClaw}
+                disabled={modelBusy}
+                style={{ width: '100%', marginTop: 4 }}
               >
-                <div style={{ fontWeight: 700 }}>{item.label}{item.active ? '（当前接入）' : ''}</div>
-                <div style={{ fontSize: 12, opacity: 0.75 }}>{item.provider}</div>
+                {modelBusy ? '安装中...' : '安装云端模型服务'}
               </button>
-            ))}
-            <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.5 }}>
-              当前为前端演示入口，点击后只切换展示状态，不真正修改后端模型。
+            ) : null}
+
+            <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
+              {modelState.openclaw.usesDevBridge
+                ? '当前为开发机模式：页面通过本机桥接接入云端模型服务。'
+                : '当前为直连模式：项目 API 直接访问云端模型服务网关。'}
             </div>
+
+            <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
+              系统仍可独立运行：即使未安装云端模型服务，也会保留本地AI兜底能力。
+            </div>
+
+            {modelMessage ? (
+              <div style={{ fontSize: 12, color: '#60a5fa', lineHeight: 1.6 }}>{modelMessage}</div>
+            ) : null}
           </div>
         ) : null}
       </section>

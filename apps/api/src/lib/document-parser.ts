@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
-import pdfParse from 'pdf-parse';
+import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
 
 export type ParsedDocument = {
@@ -36,6 +37,7 @@ const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', stri
 };
 
 type KeywordRule = string | RegExp;
+const execFileAsync = promisify(execFile);
 
 function stripMarkdownSyntax(text: string) {
   return text
@@ -51,16 +53,97 @@ function normalizeText(text: string) {
   return stripMarkdownSyntax(text).replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function stripHtmlTags(text: string) {
+  return text
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ');
+}
+
+function flattenSpreadsheetRows(rows: unknown[][]) {
+  return rows
+    .map((row) => row.map((cell) => String(cell ?? '').trim()).filter(Boolean).join(' | '))
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function readUtf8Text(filePath: string) {
+  const buffer = await fs.readFile(filePath);
+  return buffer.toString('utf8');
+}
+
+async function extractPdfTextWithPdfParse(filePath: string) {
+  const buffer = await fs.readFile(filePath);
+  const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
+  const result = await pdfParse(buffer);
+  return String(result.text || '');
+}
+
+async function extractPdfTextWithPyPdf(filePath: string) {
+  const pythonScript = [
+    'import json, sys',
+    'try:',
+    '    from pypdf import PdfReader',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+    '    sys.exit(0)',
+    'try:',
+    '    reader = PdfReader(sys.argv[1])',
+    '    text = "\\n".join((page.extract_text() or "") for page in reader.pages)',
+    '    print(json.dumps({"ok": True, "text": text}, ensure_ascii=False))',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+  ].join('\n');
+
+  const candidates = [
+    { command: 'python3', args: ['-c', pythonScript, filePath] },
+    { command: 'python', args: ['-c', pythonScript, filePath] },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const { stdout } = await execFileAsync(candidate.command, candidate.args, {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string };
+      if (parsed.ok && parsed.text) return parsed.text;
+    } catch {
+      // Try the next interpreter.
+    }
+  }
+
+  return '';
+}
+
+async function extractPdfText(filePath: string) {
+  let primaryText = '';
+  try {
+    primaryText = await extractPdfTextWithPdfParse(filePath);
+  } catch {
+    primaryText = '';
+  }
+
+  const normalizedPrimary = normalizeText(primaryText);
+  if (normalizedPrimary.length >= 80) return primaryText;
+
+  const fallbackText = await extractPdfTextWithPyPdf(filePath);
+  const normalizedFallback = normalizeText(fallbackText);
+  if (normalizedFallback.length > normalizedPrimary.length) return fallbackText;
+  if (normalizedPrimary.length > 0) return primaryText;
+
+  throw new Error('PDF text extraction returned empty content');
+}
+
 function summarize(text: string, fallback: string) {
   const normalized = normalizeText(text);
   if (!normalized) return fallback;
-  return normalized.slice(0, 140) + (normalized.length > 140 ? '…' : '');
+  return normalized.slice(0, 140) + (normalized.length > 140 ? '...' : '');
 }
 
 function excerpt(text: string, fallback: string) {
   const normalized = normalizeText(text);
   if (!normalized) return fallback;
-  return normalized.slice(0, 360) + (normalized.length > 360 ? '…' : '');
+  return normalized.slice(0, 360) + (normalized.length > 360 ? '...' : '');
 }
 
 function cleanTitleCandidate(line: string) {
@@ -156,6 +239,7 @@ function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'hi
 
 function detectTopicTags(text: string, category: string, bizCategory: ParsedDocument['bizCategory']) {
   if (category !== 'technical' && category !== 'paper' && bizCategory !== 'paper') return [];
+
   const normalized = text.toLowerCase();
   const tagRules: Array<[string, KeywordRule[]]> = [
     ['设备接入', ['接入', /\bdevice\b/i, '协议']],
@@ -164,14 +248,20 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     ['告警联动', ['告警', '报警']],
     ['部署规范', ['部署', /\binstall\b/i]],
     ['接口设计', ['接口', /\bapi\b/i]],
-    ['肠道健康', [/\bgut\b/i, /\bintestinal\b/i, '肠道', /\bibs\b/i, /\bflora\b/i]],
+    ['肠道健康', [/\bgut\b/i, /\bintestinal\b/i, '肠道', /\bibs\b/i, /\bflora\b/i, /\bmicrobiome\b/i]],
     ['过敏免疫', [/\ballergic\b/i, /\brhinitis\b/i, '过敏', '鼻炎', /\bimmune\b/i]],
-    ['脑健康', [/\bbrain\b/i, '脑', '认知', /\balzheimer/i, /aβ/i]],
+    ['脑健康', [/\bbrain\b/i, '脑', '认知', /\balzheimer/i]],
     ['运动代谢', [/\bexercise\b/i, '减脂', '运动', /\bmetabolism\b/i, /weight loss/i]],
-    ['白皮书', [/white\s*book/i, '白皮书']],
+    ['奶粉配方', ['奶粉', '配方', '乳粉', '婴配粉', /\bformula\b/i, /\binfant\b/i, /\bpediatric\b/i]],
+    ['益生菌', [/\bprobiotic\b/i, /\bprebiotic\b/i, /\bsynbiotic\b/i, /\blactobacillus\b/i, /\bbifidobacterium\b/i, '益生菌', '益生元', '菌株']],
+    ['营养强化', [/\bnutrition\b/i, /\bnutritional\b/i, /\bhmo\b/i, /\bhmos\b/i, '营养', '强化']],
+    ['白皮书', [/white\s*paper/i, '白皮书']],
     ['随机对照', [/\brandomized\b/i, /\bplacebo\b/i, /double-blind/i, '双盲', '随机']],
   ];
-  return tagRules.filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword))).map(([label]) => label);
+
+  return tagRules
+    .filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword)))
+    .map(([label]) => label);
 }
 
 function detectGroups(filePath: string, text: string, topicTags: string[], config?: DocumentCategoryConfig) {
@@ -185,23 +275,54 @@ function detectGroups(filePath: string, text: string, topicTags: string[], confi
 function extractContractFields(text: string, category: string) {
   if (category !== 'contract') return undefined;
   const normalized = text.replace(/\s+/g, ' ');
-  const contractNo = normalized.match(/(合同编号|编号)[:：]?\s*([A-Za-z0-9\-]+)/)?.[2];
-  const amount = normalized.match(/(金额|合同金额)[:：]?\s*([¥￥]?[0-9,.]+[万千元]*)/)?.[2];
+  const contractNo = normalized.match(/(合同编号|编号)[:：]?\s*([A-Za-z0-9-]+)/)?.[2];
+  const amount = normalized.match(/(金额|合同金额)[:：]?\s*([￥¥]?[0-9,.]+[万千元]*)/)?.[2];
   const paymentTerms = normalized.match(/(付款方式|付款条款)[:：]?\s*([^。；;]+)/)?.[2];
   const duration = normalized.match(/(期限|服务期|合同期)[:：]?\s*([^。；;]+)/)?.[2];
   return { contractNo, amount, paymentTerms, duration };
 }
 
 async function extractText(filePath: string, ext: string) {
-  if (ext === '.txt' || ext === '.md') {
-    const content = await fs.readFile(filePath, 'utf8');
+  if (ext === '.txt' || ext === '.md' || ext === '.csv') {
+    const content = await readUtf8Text(filePath);
     return { status: 'parsed' as const, text: content };
   }
 
+  if (ext === '.json') {
+    const content = await readUtf8Text(filePath);
+    const parsed = JSON.parse(content);
+    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2) };
+  }
+
+  if (ext === '.html' || ext === '.htm' || ext === '.xml') {
+    const content = await readUtf8Text(filePath);
+    return { status: 'parsed' as const, text: stripHtmlTags(content) };
+  }
+
   if (ext === '.pdf') {
-    const buffer = await fs.readFile(filePath);
-    const result = await pdfParse(buffer);
-    return { status: 'parsed' as const, text: result.text || '' };
+    const text = await extractPdfText(filePath);
+    return { status: 'parsed' as const, text };
+  }
+
+  if (ext === '.docx') {
+    const { default: mammoth } = await import('mammoth');
+    const result = await mammoth.extractRawText({ path: filePath });
+    return { status: 'parsed' as const, text: result.value || '' };
+  }
+
+  if (ext === '.xlsx' || ext === '.xls') {
+    const { readFile, utils } = await import('xlsx');
+    const workbook = readFile(filePath);
+    const text = workbook.SheetNames
+      .map((sheetName) => {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = utils.sheet_to_json(sheet, { header: 1, raw: false }) as unknown[][];
+        const body = flattenSpreadsheetRows(rows.slice(0, 80));
+        return [`# ${sheetName}`, body].filter(Boolean).join('\n');
+      })
+      .filter(Boolean)
+      .join('\n\n');
+    return { status: 'parsed' as const, text };
   }
 
   return { status: 'unsupported' as const, text: '' };
@@ -218,6 +339,8 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
 
     if (status === 'unsupported') {
+      const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+      const groups = detectGroups(filePath, '', topicTags, config);
       return {
         path: filePath,
         name,
@@ -226,15 +349,15 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
         category,
         bizCategory,
         parseStatus: 'unsupported',
-        summary: '当前版本尚未支持该文件类型的内容提取。',
-        excerpt: '当前版本尚未支持该文件类型的内容提取。',
+        summary: '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls。',
+        excerpt: '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls。',
         extractedChars: 0,
-        topicTags: [],
-        groups: [],
+        topicTags,
+        groups,
       };
     }
 
-    const topicTags = detectTopicTags(normalizedText, category, bizCategory);
+    const topicTags = detectTopicTags(`${name} ${normalizedText}`, category, bizCategory);
     const groups = detectGroups(filePath, normalizedText, topicTags, config);
 
     return {
@@ -256,6 +379,12 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
   } catch {
     const category = detectCategory(filePath);
     const bizCategory = detectBizCategory(filePath, category, '', config);
+    const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+    const groups = detectGroups(filePath, '', topicTags, config);
+    const fallbackSummary = topicTags.length
+      ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
+      : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';
+
     return {
       path: filePath,
       name,
@@ -264,11 +393,11 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       category,
       bizCategory,
       parseStatus: 'error',
-      summary: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
-      excerpt: '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。',
+      summary: fallbackSummary,
+      excerpt: fallbackSummary,
       extractedChars: 0,
-      topicTags: [],
-      groups: [],
+      topicTags,
+      groups,
     };
   }
 }
