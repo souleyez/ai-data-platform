@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } from './document-overrides.js';
+import { STORAGE_CONFIG_DIR } from './paths.js';
 
 export type DocumentLibrary = {
   key: string;
@@ -9,7 +10,7 @@ export type DocumentLibrary = {
   createdAt: string;
 };
 
-const CONFIG_DIR = path.resolve(process.cwd(), '../../storage/config');
+const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const LIBRARIES_FILE = path.join(CONFIG_DIR, 'document-libraries.json');
 
 function slugifyLibraryName(value: string) {

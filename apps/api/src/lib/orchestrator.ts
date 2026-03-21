@@ -1,4 +1,4 @@
-import { buildDocumentId, loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
+import { buildDocumentId, loadParsedDocuments, matchDocumentEvidenceByPrompt, matchDocumentsByPrompt, type DocumentEvidenceMatch } from './document-store.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { buildBlockedPolicyAnswer, buildGeneralChatSystemPrompt, classifyChatPrompt } from './chat-policy.js';
 import { resolveScenario, scenarios, type ScenarioKey } from './mock-data.js';
@@ -136,6 +136,168 @@ function buildDocumentContext(items: ParsedDocument[]) {
 
     return `资料 ${index + 1}\n${extras.join('\n')}`;
   });
+}
+
+function buildEvidenceContext(matches: DocumentEvidenceMatch[]) {
+  return matches.map((match, index) => {
+    const item = match.item;
+    return [
+      `证据 ${index + 1}`,
+      `文档名：${item.name}`,
+      `文档标题：${item.title}`,
+      `业务分类：${item.bizCategory}`,
+      `解析来源：${item.parseMethod || item.parseStatus}`,
+      item.topicTags?.length ? `主题标签：${item.topicTags.join('、')}` : '',
+      `证据摘录：${trimSentence(match.chunkText, 320)}`,
+    ].filter(Boolean).join('\n');
+  });
+}
+
+function buildReferencePayload(matches: DocumentEvidenceMatch[]) {
+  const canonicalName = (value: string) => String(value || '')
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  const grouped = new Map<string, {
+    id: string;
+    name: string;
+    summary: string;
+    category: string;
+    parseMethod?: string;
+    riskLevel?: string;
+    topicTags?: string[];
+    evidence: string[];
+  }>();
+
+  for (const match of matches) {
+    const key = canonicalName(match.item.title || match.item.name);
+    const existing = grouped.get(key);
+    const snippet = trimSentence(match.chunkText, 220);
+    if (existing) {
+      if (snippet && !existing.evidence.includes(snippet) && existing.evidence.length < 3) {
+        existing.evidence.push(snippet);
+      }
+      continue;
+    }
+
+    grouped.set(key, {
+      id: buildDocumentId(match.item.path),
+      name: match.item.name,
+      summary: match.item.summary,
+      category: match.item.category,
+      parseMethod: match.item.parseMethod,
+      riskLevel: match.item.riskLevel,
+      topicTags: match.item.topicTags,
+      evidence: snippet ? [snippet] : [],
+    });
+  }
+
+  return [...grouped.values()];
+}
+
+function buildCanonicalDocIdentity(item: ParsedDocument | { title?: string; name?: string }) {
+  return String(item.title || item.name || '')
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeEvidenceMatches(matches: DocumentEvidenceMatch[]) {
+  const deduped: DocumentEvidenceMatch[] = [];
+  const seen = new Set<string>();
+  for (const match of matches) {
+    const key = buildCanonicalDocIdentity(match.item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(match);
+  }
+  return deduped;
+}
+
+function extractReadablePromptFocus(prompt: string) {
+  const text = String(prompt || '').toLowerCase();
+  if (text.includes('结论')) return '核心结论';
+  if (text.includes('实验对象') || text.includes('模型')) return '实验对象与模型';
+  if (text.includes('价值')) return '主要价值';
+  if (text.includes('适用场景')) return '适用场景';
+  if (text.includes('区别') || text.includes('对比')) return '主要差异';
+  if (text.includes('哪些') || text.includes('分类') || text.includes('分组') || text.includes('主题')) return '主题归纳';
+  return '核心内容';
+}
+
+function buildEvidenceDrivenConclusion(prompt: string, matchedDocs: ParsedDocument[], evidenceMatches: DocumentEvidenceMatch[]) {
+  const focus = extractReadablePromptFocus(prompt);
+  if (!matchedDocs.length) {
+    return '当前没有命中可直接支撑回答的文档资料。';
+  }
+
+  if (evidenceMatches.length) {
+    const best = [...evidenceMatches].sort((a, b) => scoreConclusionEvidence(b.chunkText) - scoreConclusionEvidence(a.chunkText))[0];
+    return `围绕“${focus}”来看，当前最直接的证据来自《${best.item.name}》：${trimSentence(best.chunkText, 180)}`;
+  }
+
+  if (matchedDocs.length === 1) {
+    return `围绕“${focus}”来看，当前命中的核心资料是《${matchedDocs[0].name}》：${trimSentence(matchedDocs[0].summary || matchedDocs[0].excerpt, 180)}`;
+  }
+
+  const names = matchedDocs.slice(0, 3).map((item) => `《${item.name}》`).join('、');
+  return `围绕“${focus}”，当前主要参考的资料包括 ${names}，下面按证据摘录给出归纳。`;
+}
+
+function scoreConclusionEvidence(text: string) {
+  const value = String(text || '').toLowerCase();
+  if (!value) return -100;
+
+  let score = 0;
+  if (/(abstract|summary|results?|conclusions?|discussion|结论|结果|摘要|研究发现|主要发现)/i.test(value)) score += 12;
+  if (/(modulates|improved|reduced|increased|significant|retained|supports?|促进|改善|降低|提高|显著)/i.test(value)) score += 8;
+  if (/(introduction|background|author|affiliation|copyright|received|accepted|correspondence|通讯作者|作者单位)/i.test(value)) score -= 10;
+  if (/@/.test(value)) score -= 8;
+  if ((value.match(/\d/g) || []).length > Math.max(20, value.length * 0.18)) score -= 4;
+  return score;
+}
+
+function buildEvidenceDrivenAnswer(prompt: string, matchedDocs: ParsedDocument[], evidenceMatches: DocumentEvidenceMatch[] = []) {
+  if (!matchedDocs.length) {
+    return [
+      '当前没有命中可支撑回答的知识库资料。',
+      '你可以换一种问法，或者先把相关资料上传到文档中心后再继续提问。',
+    ].join('\n');
+  }
+
+  const uniqueEvidenceMatches = dedupeEvidenceMatches(evidenceMatches).slice(0, 5);
+  const conclusion = buildEvidenceDrivenConclusion(prompt, matchedDocs, uniqueEvidenceMatches);
+  const evidenceLines = uniqueEvidenceMatches.map((match, index) => {
+    const tags = (match.item.topicTags || []).slice(0, 3).join('、');
+    return [
+      `${index + 1}. ${match.item.name}`,
+      `- 证据：${trimSentence(match.chunkText, 220)}`,
+      `- 解析来源：${match.item.parseMethod || match.item.parseStatus}`,
+      tags ? `- 主题：${tags}` : '',
+    ].filter(Boolean).join('\n');
+  });
+
+  const fallbackEvidence = !evidenceLines.length
+    ? matchedDocs.slice(0, 3).map((item, index) => [
+        `${index + 1}. ${item.name}`,
+        `- 摘要：${trimSentence(item.summary, 160)}`,
+        `- 摘录：${trimSentence(item.excerpt, 220)}`,
+      ].join('\n'))
+    : [];
+
+  return [
+    '已优先依据文档中心资料生成回答。',
+    '',
+    `结论：${conclusion}`,
+    '',
+    '参考证据：',
+    ...(evidenceLines.length ? evidenceLines : fallbackEvidence),
+  ].join('\n');
 }
 
 function getDocumentGroups(item: ParsedDocument) {
@@ -740,39 +902,13 @@ function buildFormulaAdviceTable(
   }
 }
 
-export function buildFallbackAnswer(prompt: string, _scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[]) {
-  if (!matchedDocs.length) {
-    return [
-      '当前没有命中足够相关的文档证据。',
-      '如果你愿意，我下一步可以先帮你重扫文档库、调整分组绑定，或者换一种提问方式再试。',
-    ].join('\n');
-  }
-
-  const conclusion = matchedDocs.length === 1
-    ? buildPrimaryConclusion(prompt, matchedDocs[0])
-    : buildMultiDocTakeaway(prompt, matchedDocs);
-
-  const evidenceList = matchedDocs
-    .map((item, index) => {
-      const labels = [
-        `业务分类：${item.bizCategory}`,
-        `解析分类：${item.category}`,
-        item.riskLevel ? `风险等级：${item.riskLevel}` : '',
-        item.topicTags?.length ? `主题：${item.topicTags.join('、')}` : '',
-      ].filter(Boolean).join('；');
-
-      return `${index + 1}. ${item.name}${labels ? `（${labels}）` : ''}\n- 摘要：${trimSentence(item.summary, 160)}\n- 证据摘录：${trimSentence(item.excerpt, 220)}`;
-    })
-    .join('\n');
-
-  return [
-    '以下结论仅基于当前命中的只读文档材料。若证据不足，我会明确保留判断。',
-    '',
-    `结论：${conclusion}`,
-    '',
-    '依据：',
-    evidenceList,
-  ].join('\n');
+export function buildFallbackAnswer(
+  prompt: string,
+  _scenarioKey: ScenarioKey,
+  matchedDocs: ParsedDocument[],
+  evidenceMatches: DocumentEvidenceMatch[] = [],
+) {
+  return buildEvidenceDrivenAnswer(prompt, matchedDocs, evidenceMatches);
 }
 
 function chooseScenario(prompt: string, matchedDocs: ParsedDocument[]): ScenarioKey {
@@ -790,12 +926,18 @@ function chooseScenario(prompt: string, matchedDocs: ParsedDocument[]): Scenario
 export async function runChatOrchestration(input: ChatRequestInput) {
   const prompt = input.prompt.trim();
   const { items } = await loadParsedDocuments();
-  const initialMatchedDocs = matchDocumentsByPrompt(items, prompt);
+  const initialEvidenceMatches = matchDocumentEvidenceByPrompt(items, prompt);
+  const initialMatchedDocs = initialEvidenceMatches.length
+    ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()].slice(0, 3)
+    : matchDocumentsByPrompt(items, prompt);
   const libraries = await loadDocumentLibraries();
   const scope = resolveKnowledgeScope(prompt, items, initialMatchedDocs, libraries);
   const reportState = await loadReportCenterState();
   const templateScopedGroup = findReportGroupForPrompt(reportState.groups, prompt);
   const matchedDocs = scope.scopedDocs;
+  const scopedEvidenceMatches = matchDocumentEvidenceByPrompt(matchedDocs, prompt);
+  const referencePayload = buildReferencePayload(scopedEvidenceMatches);
+  const contextBlocks = scopedEvidenceMatches.length ? buildEvidenceContext(scopedEvidenceMatches) : buildDocumentContext(matchedDocs);
   const strongDocScope = hasStrongDocumentScope(prompt, matchedDocs);
   const gatewayReachable = await isOpenClawGatewayReachable();
   const hasKnowledgeScope = (scope.hasScope && strongDocScope) || Boolean(templateScopedGroup);
@@ -934,14 +1076,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
                 role: 'assistant' as const,
                 content: cloudResult.content,
                 meta: buildMeta('doc', matchedDocs, 'openclaw'),
-                references: matchedDocs.map((item) => ({
-                  id: buildDocumentId(item.path),
-                  name: item.name,
-                  summary: item.summary,
-                  category: item.category,
-                  riskLevel: item.riskLevel,
-                  topicTags: item.topicTags,
-                })),
+                references: referencePayload,
               },
               panel: scenarios.doc,
               sources: matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
@@ -958,7 +1093,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
           }
         }
 
-        const fallbackAnswer = buildFallbackAnswer(prompt, 'doc', matchedDocs);
+        const fallbackAnswer = buildFallbackAnswer(prompt, 'doc', matchedDocs, scopedEvidenceMatches);
         return {
           scenario: 'doc' as ScenarioKey,
           traceId: `trace_${Date.now()}`,
@@ -966,14 +1101,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
             role: 'assistant' as const,
             content: fallbackAnswer,
             meta: buildMeta('doc', matchedDocs, 'fallback'),
-            references: matchedDocs.map((item) => ({
-              id: buildDocumentId(item.path),
-              name: item.name,
-              summary: item.summary,
-              category: item.category,
-              riskLevel: item.riskLevel,
-              topicTags: item.topicTags,
-            })),
+            references: referencePayload,
           },
           panel: scenarios.doc,
           sources: matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
@@ -1020,14 +1148,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
         content: formulaAdvice.content,
         table: formulaAdvice.table,
         meta: buildMeta('doc', matchedDocs, segmentDecision.source === 'cloud' ? 'openclaw' : 'fallback'),
-        references: matchedDocs.map((item) => ({
-          id: buildDocumentId(item.path),
-          name: item.name,
-          summary: item.summary,
-          category: item.category,
-          riskLevel: item.riskLevel,
-          topicTags: item.topicTags,
-        })),
+            references: referencePayload,
       },
       panel: scenarios.doc,
       sources: matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
@@ -1053,7 +1174,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       const result = await runOpenClawChat({
         prompt,
         sessionUser: input.sessionUser,
-        contextBlocks: buildDocumentContext(matchedDocs),
+        contextBlocks,
         systemPrompt: buildScopedSystemPrompt(scope, [
           '回答时先给结论，再给简短依据。',
           '不要执行任务，不要给出知识库范围之外的推测性建议。',
@@ -1062,10 +1183,10 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       answer = result.content;
       orchestrationMode = 'openclaw';
     } catch {
-      answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs);
+      answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
     }
   } else {
-    answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs);
+    answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
   }
 
   return {
@@ -1076,14 +1197,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       content: answer,
       table: structuredTable,
       meta: buildMeta(scenarioKey, matchedDocs, orchestrationMode),
-      references: matchedDocs.map((item) => ({
-        id: buildDocumentId(item.path),
-        name: item.name,
-        summary: item.summary,
-        category: item.category,
-        riskLevel: item.riskLevel,
-        topicTags: item.topicTags,
-      })),
+      references: referencePayload,
     },
     panel: scenario,
     sources: [

@@ -5,6 +5,7 @@ const pollIntervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS || 15000);
 const apiBaseUrl = (process.env.API_BASE_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
 const scanPath = process.env.WORKER_SCAN_PATH || '/api/documents/scan';
 const webCapturePath = process.env.WORKER_WEB_CAPTURE_PATH || '/api/web-captures/run-due';
+const auditPolicyPath = process.env.WORKER_AUDIT_POLICY_PATH || '/api/audit/run-policy';
 
 type ScanResponse = {
   status?: string;
@@ -21,6 +22,12 @@ type WebCaptureTickResponse = {
   executedCount?: number;
   successCount?: number;
   errorCount?: number;
+};
+
+type AuditPolicyResponse = {
+  status?: string;
+  cleanedDocuments?: number;
+  cleanedCaptureTasks?: number;
 };
 
 async function triggerScan(): Promise<ScanResponse> {
@@ -73,9 +80,30 @@ async function runTick() {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[worker:${workerName}] web capture tick failed | api=${apiBaseUrl}${webCapturePath} | reason=${message}`);
   }
+
+  try {
+    const response = await fetch(`${apiBaseUrl}${auditPolicyPath}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`audit policy request failed with status ${response.status}`);
+    }
+
+    const result = await response.json() as AuditPolicyResponse;
+    console.log(
+      `[worker:${workerName}] audit-policy=${result.status || 'unknown'} | cleanedDocs=${result.cleanedDocuments ?? 0} | cleanedSources=${result.cleanedCaptureTasks ?? 0}`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[worker:${workerName}] audit policy tick failed | api=${apiBaseUrl}${auditPolicyPath} | reason=${message}`);
+  }
 }
 
-console.log(`[worker:${workerName}] starting with interval=${pollIntervalMs}ms | scan=${apiBaseUrl}${scanPath} | web=${apiBaseUrl}${webCapturePath}`);
+console.log(`[worker:${workerName}] starting with interval=${pollIntervalMs}ms | scan=${apiBaseUrl}${scanPath} | web=${apiBaseUrl}${webCapturePath} | audit=${apiBaseUrl}${auditPolicyPath}`);
 await runTick();
 setInterval(() => {
   void runTick();

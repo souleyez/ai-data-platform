@@ -16,6 +16,22 @@ const BIZ_CATEGORY_LABELS = {
   inventory: '库存监控',
 };
 
+const PARSE_METHOD_LABELS = {
+  'text-utf8': 'UTF-8 文本',
+  'markdown-utf8': 'Markdown',
+  'csv-utf8': 'CSV',
+  'json-parse': 'JSON',
+  'html-strip': 'HTML 清洗',
+  'mammoth': 'DOCX 提取',
+  'xlsx-sheet-reader': '表格读取',
+  'pdf-parse': 'PDF 文本',
+  'pypdf': 'PyPDF',
+  'pdf-auto': 'PDF 自动解析',
+  'ocr-fallback': 'OCR fallback',
+  'unsupported': '暂不支持',
+  error: '解析失败',
+};
+
 function extractTimestamp(item) {
   const text = `${item?.name || ''} ${item?.path || ''}`;
   const match = text.match(/(\d{13})/);
@@ -192,7 +208,7 @@ export default function DocumentsPage() {
         <header className="topbar">
           <div>
             <h2>文档中心</h2>
-            <p>首页数据分类继续保持固定分类；文档中心新增灵活知识库分组，便于后续按分组做分析结果和数据可视化。</p>
+            <p>首页业务类继续保持固定分类；文档中心新增灵活知识库分组，便于后续按分组做分析结果和数据可视化。</p>
           </div>
           <div className="topbar-actions">
             <button className="ghost-btn" onClick={loadDocuments}>刷新</button>
@@ -300,6 +316,7 @@ export default function DocumentsPage() {
                     <th>分类</th>
                     <th>知识库分组</th>
                     <th>解析状态</th>
+                    <th>??????</th>
                     <th>业务结果</th>
                     <th>摘要</th>
                   </tr>
@@ -355,7 +372,15 @@ export default function DocumentsPage() {
                             ) : null}
                           </div>
                         </td>
-                        <td>{item.parseStatus}</td>
+                        <td className="summary-cell">
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            <span>{item.parseStatus}</span>
+                            {item.retentionStatus === 'structured-only' ? (
+                              <span className="source-chip">仅保留结构化数据</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td>{PARSE_METHOD_LABELS[item.parseMethod] || item.parseMethod || '-'}</td>
                         <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                         <td className="summary-cell">{item.summary}</td>
                       </tr>

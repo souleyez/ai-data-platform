@@ -3,9 +3,11 @@ import path from 'node:path';
 import { parseDocument, type ParsedDocument } from './document-parser.js';
 import { loadDocumentCategoryConfig } from './document-config.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
+import { STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
+import { loadRetainedDocuments } from './retained-documents.js';
 
-export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || path.resolve(process.cwd(), '../../storage/files');
-const CACHE_DIR = path.resolve(process.cwd(), '../../storage/cache');
+export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || STORAGE_FILES_DIR;
+const CACHE_DIR = STORAGE_CACHE_DIR;
 const CACHE_FILE = path.join(CACHE_DIR, 'documents-cache.json');
 
 type CachePayload = {
@@ -23,6 +25,13 @@ type LoadParsedDocumentsResult = {
   cacheHit: boolean;
 };
 
+export type DocumentEvidenceMatch = {
+  item: ParsedDocument;
+  chunkId: string;
+  chunkText: string;
+  score: number;
+};
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   contract: ['合同', '付款', '回款', '违约', '条款', '风险', '审查', '法务'],
   technical: ['技术', '文档', '接入', '部署', '接口', '告警', '采集', '边缘', 'api', '知识库', '摘要', '白皮书', '需求', '方案'],
@@ -30,6 +39,24 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   report: ['日报', '周报', '月报', 'report'],
   general: ['文档', '资料'],
 };
+
+const GENERIC_STOPWORDS = new Set([
+  '根据',
+  '那篇',
+  '这篇',
+  '资料',
+  '文档',
+  '总结',
+  '核心',
+  '结论',
+  '内容',
+  '分析',
+  '归纳',
+  '说明',
+  '问题',
+  '请问',
+  '请',
+]);
 
 export async function listFilesRecursive(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -87,6 +114,21 @@ async function parseFiles(filePaths: string[]) {
   return applyDocumentOverrides(parsedItems, overrides);
 }
 
+async function mergeWithRetainedDocuments(items: ParsedDocument[]) {
+  const retained = await loadRetainedDocuments();
+  if (!retained.length) return items;
+
+  const byPath = new Map<string, ParsedDocument>();
+  for (const item of items) byPath.set(item.path, item);
+  for (const retainedItem of retained) {
+    if (!byPath.has(retainedItem.path)) {
+      byPath.set(retainedItem.path, retainedItem);
+    }
+  }
+
+  return Array.from(byPath.values());
+}
+
 export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<LoadParsedDocumentsResult> {
   const { exists, files } = await getCurrentFiles();
 
@@ -105,7 +147,8 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
       && cache.totalFiles === files.length
       && cache.scanSignature === scanSignature
     ) {
-      return { exists, files, items: applyDocumentOverrides(cache.items, overrides).slice(0, limit), cacheHit: true };
+      const mergedItems = await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides));
+      return { exists, files, items: mergedItems.slice(0, limit), cacheHit: true };
     }
   }
 
@@ -118,7 +161,8 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
     items,
   });
 
-  return { exists, files, items, cacheHit: false };
+  const mergedItems = await mergeWithRetainedDocuments(items);
+  return { exists, files, items: mergedItems, cacheHit: false };
 }
 
 export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 200): Promise<LoadParsedDocumentsResult> {
@@ -157,11 +201,21 @@ export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 
     items,
   });
 
-  return { exists, files, items, cacheHit: false };
+  const mergedItems = await mergeWithRetainedDocuments(items);
+  return { exists, files, items: mergedItems, cacheHit: false };
 }
 
 export function buildDocumentId(filePath: string) {
   return Buffer.from(filePath).toString('base64url');
+}
+
+function buildCanonicalDocKey(item: ParsedDocument) {
+  return `${item.title || item.name}`
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 function extractPromptKeywords(prompt: string) {
@@ -171,6 +225,7 @@ function extractPromptKeywords(prompt: string) {
   const keywordSet = new Set<string>();
 
   for (const token of [...asciiTokens, ...chineseTokens]) {
+    if (GENERIC_STOPWORDS.has(token)) continue;
     keywordSet.add(token);
     if (token.length >= 4) {
       for (let i = 0; i <= token.length - 2; i += 1) keywordSet.add(token.slice(i, i + 2));
@@ -179,6 +234,30 @@ function extractPromptKeywords(prompt: string) {
   }
 
   return [...keywordSet];
+}
+
+function extractStrongKeywords(keywords: string[]) {
+  const explicitIdKeywords = keywords.filter((keyword) => /[\d-]/.test(keyword) || /[a-z]/i.test(keyword));
+  if (explicitIdKeywords.length) {
+    return explicitIdKeywords;
+  }
+
+  return keywords.filter((keyword) => {
+    if (GENERIC_STOPWORDS.has(keyword)) return false;
+    return keyword.length >= 4;
+  });
+}
+
+function containsAnyKeyword(text: string, keywords: string[]) {
+  const haystack = String(text || '').toLowerCase();
+  if (!haystack || !keywords.length) return false;
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+function extractExplicitIdentifiers(prompt: string) {
+  const normalized = String(prompt || '').toLowerCase();
+  const matches = normalized.match(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b|\b[a-z]+\d+[a-z0-9-]*\b|\b\d+[a-z]+[a-z0-9-]*\b/g) ?? [];
+  return [...new Set(matches)];
 }
 
 function detectPromptIntent(keywords: string[]): 'contract' | 'paper' | 'mixed' {
@@ -256,15 +335,92 @@ function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptInte
   return score;
 }
 
+function scoreChunkMatch(text: string, keywords: string[]) {
+  const haystack = String(text || '').toLowerCase();
+  if (!haystack) return 0;
+
+  let score = 0;
+  for (const keyword of keywords) {
+    score += scoreKeywordAgainstText(keyword, haystack) * 2;
+  }
+
+  if (/(abstract|summary|results?|conclusions?|discussion|findings?|结论|结果|摘要|研究发现|主要发现)/i.test(haystack)) score += 10;
+  if (/(methods?|materials?|introduction|background|author information|correspondence|doi|received|accepted|affiliations?)/i.test(haystack)) score -= 4;
+  if (/@/.test(haystack)) score -= 6;
+  if ((haystack.match(/\d/g) || []).length > Math.max(20, haystack.length * 0.18)) score -= 4;
+  if ((haystack.match(/[,;:]/g) || []).length > 14 && !/[。！？.!?]/.test(haystack)) score -= 3;
+  if (haystack.length >= 120 && haystack.length <= 480) score += 2;
+  if (haystack.length > 700) score -= 2;
+  return score;
+}
+
 export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string) {
   const keywords = extractPromptKeywords(prompt);
   if (!keywords.length) return [];
   const promptIntent = detectPromptIntent(keywords);
+  const strongKeywords = extractStrongKeywords(keywords);
+  const explicitIdentifiers = extractExplicitIdentifiers(prompt);
 
   return items
-    .map((item) => ({ item, score: scoreDocumentMatch(item, keywords, promptIntent) }))
+    .map((item) => {
+      const searchable = [item.name, item.title, item.summary, item.excerpt, (item.topicTags || []).join(' ')]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      const blockedByIdentifier = explicitIdentifiers.length > 0 && !containsAnyKeyword(searchable, explicitIdentifiers);
+      const blockedByStrongKeyword = strongKeywords.length > 0 && !containsAnyKeyword(searchable, strongKeywords);
+      return { item, score: (blockedByIdentifier || blockedByStrongKeyword) ? 0 : scoreDocumentMatch(item, keywords, promptIntent) };
+    })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
     .map((entry) => entry.item);
+}
+
+export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: string) {
+  const keywords = extractPromptKeywords(prompt);
+  if (!keywords.length) return [] as DocumentEvidenceMatch[];
+  const promptIntent = detectPromptIntent(keywords);
+  const strongKeywords = extractStrongKeywords(keywords);
+  const explicitIdentifiers = extractExplicitIdentifiers(prompt);
+
+  const ranked = items
+    .flatMap((item) => {
+      const docScore = scoreDocumentMatch(item, keywords, promptIntent);
+      const searchable = [item.name, item.title, item.summary, item.excerpt, (item.topicTags || []).join(' ')]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (explicitIdentifiers.length > 0 && !containsAnyKeyword(searchable, explicitIdentifiers)) {
+        return [];
+      }
+      if (strongKeywords.length > 0 && !containsAnyKeyword(searchable, strongKeywords)) {
+        return [];
+      }
+      const chunks = item.evidenceChunks?.length
+        ? item.evidenceChunks
+        : [{ id: 'excerpt', text: item.excerpt || item.summary || '', charLength: (item.excerpt || item.summary || '').length, order: 0 }];
+
+      return chunks
+        .map((chunk) => ({
+          item,
+          chunkId: chunk.id,
+          chunkText: chunk.text,
+          score: docScore + scoreChunkMatch(chunk.text, keywords) - Math.min(chunk.order, 6),
+        }))
+        .filter((entry) => entry.score > 0);
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const deduped: DocumentEvidenceMatch[] = [];
+  const seenDocKeys = new Set<string>();
+  for (const entry of ranked) {
+    const docKey = buildCanonicalDocKey(entry.item);
+    if (seenDocKeys.has(docKey)) continue;
+    seenDocKeys.add(docKey);
+    deduped.push(entry);
+    if (deduped.length >= 8) break;
+  }
+
+  return deduped;
 }

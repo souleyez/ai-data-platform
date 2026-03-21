@@ -4,10 +4,10 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MultipartFile } from '@fastify/multipart';
 import { loadDocumentLibraries } from './document-libraries.js';
+import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
 
-const STORAGE_ROOT = path.resolve(process.cwd(), '../../storage');
-const REPORT_CONFIG_DIR = path.join(STORAGE_ROOT, 'config');
-const REPORT_REFERENCE_DIR = path.join(STORAGE_ROOT, 'files', 'report-references');
+const REPORT_CONFIG_DIR = STORAGE_CONFIG_DIR;
+const REPORT_REFERENCE_DIR = path.join(STORAGE_FILES_DIR, 'report-references');
 const REPORT_STATE_FILE = path.join(REPORT_CONFIG_DIR, 'report-center.json');
 
 export type ReportTemplateType = 'table' | 'static-page' | 'ppt';

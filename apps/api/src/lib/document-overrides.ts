@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import type { BizCategory } from './document-config.js';
+import { STORAGE_CONFIG_DIR } from './paths.js';
 
 export type DocumentOverride = {
   bizCategory?: BizCategory;
@@ -9,7 +10,7 @@ export type DocumentOverride = {
   confirmedAt: string;
 };
 
-const OVERRIDE_DIR = path.resolve(process.cwd(), '../../storage/config');
+const OVERRIDE_DIR = STORAGE_CONFIG_DIR;
 const OVERRIDE_FILE = path.join(OVERRIDE_DIR, 'document-overrides.json');
 
 export async function loadDocumentOverrides() {

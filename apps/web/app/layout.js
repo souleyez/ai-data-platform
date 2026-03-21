@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'AI 数据分析中台',
-  description: '企业只读型 AI 数据分析中台',
+  title: '文档数据助理',
+  description: '个人知识库，采编写一站式解决',
 };
 
 import './globals.css';

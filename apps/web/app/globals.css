@@ -264,6 +264,17 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 }
 .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .quick-actions button { background: #eef4ff; color: #1d4ed8; }
+.chat-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.upload-inline-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
 .chat-input-row { display: grid; grid-template-columns: 1fr 110px; gap: 12px; align-items: end; }
 textarea {
   width: 100%;

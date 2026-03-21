@@ -1,8 +1,10 @@
 import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
+import { buildAugmentedEnv, getOcrMyPdfCommandCandidates, getPythonCommandCandidates } from './runtime-executables.js';
 
 export type ParsedDocument = {
   path: string;
@@ -14,9 +16,11 @@ export type ParsedDocument = {
   confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
+  parseMethod?: string;
   summary: string;
   excerpt: string;
   extractedChars: number;
+  evidenceChunks?: EvidenceChunk[];
   riskLevel?: 'low' | 'medium' | 'high';
   topicTags?: string[];
   groups?: string[];
@@ -27,6 +31,17 @@ export type ParsedDocument = {
     paymentTerms?: string;
     duration?: string;
   };
+  retentionStatus?: 'structured-only';
+  retainedAt?: string;
+  originalDeletedAt?: string;
+};
+
+export type EvidenceChunk = {
+  id: string;
+  order: number;
+  text: string;
+  charLength: number;
+  title?: string;
 };
 
 const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
@@ -38,6 +53,31 @@ const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', stri
 
 type KeywordRule = string | RegExp;
 const execFileAsync = promisify(execFile);
+
+type PdfExtractionResult = {
+  text: string;
+  pageCount: number;
+  method: 'pdf-parse' | 'pypdf' | 'ocrmypdf';
+};
+
+function needsTemporaryAsciiPath(filePath: string) {
+  return process.platform === 'win32' && /[^\x00-\x7F]/.test(filePath);
+}
+
+async function withTemporaryAsciiCopy<T>(filePath: string, run: (inputPath: string) => Promise<T>) {
+  if (!needsTemporaryAsciiPath(filePath)) {
+    return run(filePath);
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-pdf-'));
+  const tempFilePath = path.join(tempDir, `input${path.extname(filePath) || '.pdf'}`);
+  try {
+    await fs.copyFile(filePath, tempFilePath);
+    return await run(tempFilePath);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 
 function stripMarkdownSyntax(text: string) {
   return text
@@ -51,6 +91,64 @@ function stripMarkdownSyntax(text: string) {
 
 function normalizeText(text: string) {
   return stripMarkdownSyntax(text).replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function splitEvidenceChunks(text: string): EvidenceChunk[] {
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!normalized) return [];
+
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length >= 40);
+
+  const sourceBlocks = blocks.length ? blocks : normalized
+    .split(/(?<=[。！？.!?])\s+|\n+/)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length >= 40);
+
+  const chunks: EvidenceChunk[] = [];
+  const maxChunkLength = 420;
+
+  for (const block of sourceBlocks) {
+    if (block.length <= maxChunkLength) {
+      chunks.push({
+        id: `chunk-${chunks.length + 1}`,
+        order: chunks.length,
+        text: block,
+        charLength: block.length,
+      });
+      continue;
+    }
+
+    let cursor = 0;
+    while (cursor < block.length) {
+      let next = Math.min(cursor + maxChunkLength, block.length);
+      if (next < block.length) {
+        const window = block.slice(cursor, next);
+        const softCut = Math.max(
+          window.lastIndexOf('。'),
+          window.lastIndexOf('；'),
+          window.lastIndexOf('. '),
+          window.lastIndexOf('; '),
+        );
+        if (softCut >= 120) next = cursor + softCut + 1;
+      }
+
+      const piece = block.slice(cursor, next).trim();
+      if (piece.length >= 40) {
+        chunks.push({
+          id: `chunk-${chunks.length + 1}`,
+          order: chunks.length,
+          text: piece,
+          charLength: piece.length,
+        });
+      }
+      cursor = next;
+    }
+  }
+
+  return chunks.slice(0, 12);
 }
 
 function stripHtmlTags(text: string) {
@@ -82,6 +180,7 @@ async function extractPdfTextWithPdfParse(filePath: string) {
 async function extractPdfTextWithPyPdf(filePath: string) {
   const pythonScript = [
     'import json, sys',
+    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
     'try:',
     '    from pypdf import PdfReader',
     'except Exception as exc:',
@@ -95,15 +194,16 @@ async function extractPdfTextWithPyPdf(filePath: string) {
     '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
   ].join('\n');
 
-  const candidates = [
-    { command: 'python3', args: ['-c', pythonScript, filePath] },
-    { command: 'python', args: ['-c', pythonScript, filePath] },
-  ];
+  const candidates = getPythonCommandCandidates().map((command) => ({
+    command,
+    args: ['-c', pythonScript, filePath],
+  }));
 
   for (const candidate of candidates) {
     try {
       const { stdout } = await execFileAsync(candidate.command, candidate.args, {
         maxBuffer: 16 * 1024 * 1024,
+        env: buildAugmentedEnv(),
       });
       const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string };
       if (parsed.ok && parsed.text) return parsed.text;
@@ -115,6 +215,163 @@ async function extractPdfTextWithPyPdf(filePath: string) {
   return '';
 }
 
+async function extractPdfInfoWithPyPdf(filePath: string) {
+  const pythonScript = [
+    'import json, sys',
+    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
+    'try:',
+    '    from pypdf import PdfReader',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+    '    sys.exit(0)',
+    'try:',
+    '    reader = PdfReader(sys.argv[1])',
+    '    text = "\\n".join((page.extract_text() or "") for page in reader.pages)',
+    '    print(json.dumps({"ok": True, "text": text, "pageCount": len(reader.pages)}, ensure_ascii=False))',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+  ].join('\n');
+
+  const candidates = getPythonCommandCandidates().map((command) => ({
+    command,
+    args: ['-c', pythonScript, filePath],
+  }));
+
+  return withTemporaryAsciiCopy(filePath, async (inputPath) => {
+    const inputCandidates = getPythonCommandCandidates().map((command) => ({
+      command,
+      args: ['-c', pythonScript, inputPath],
+    }));
+
+    for (const candidate of inputCandidates) {
+      try {
+        const { stdout } = await execFileAsync(candidate.command, candidate.args, {
+          maxBuffer: 32 * 1024 * 1024,
+          env: buildAugmentedEnv(),
+        });
+        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string; pageCount?: number };
+        if (parsed.ok) {
+          return {
+            text: String(parsed.text || ''),
+            pageCount: Number(parsed.pageCount || 0),
+          };
+        }
+      } catch {
+        // try next interpreter
+      }
+    }
+
+    return {
+      text: '',
+      pageCount: 0,
+    };
+  });
+}
+
+function isPdfTextLowQuality(text: string, pageCount: number) {
+  const normalized = normalizeText(text);
+  if (!normalized.length) return true;
+  const charsPerPage = pageCount > 0 ? normalized.length / pageCount : normalized.length;
+  const whitespaceRatio = text.length > 0 ? normalized.length / text.length : 0;
+  return normalized.length < 120 || (pageCount >= 2 && charsPerPage < 80) || whitespaceRatio < 0.35;
+}
+
+async function extractPdfTextWithOcrMyPdf(filePath: string) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-ocr-'));
+  const sidecarPath = path.join(tempDir, 'sidecar.txt');
+  const outputPdfPath = path.join(tempDir, 'ocr-output.pdf');
+
+  try {
+    return withTemporaryAsciiCopy(filePath, async (inputPath) => {
+      for (const command of getOcrMyPdfCommandCandidates()) {
+        try {
+          await execFileAsync(command, [
+            '--force-ocr',
+            '--skip-big',
+            '50',
+            '--sidecar',
+            sidecarPath,
+            inputPath,
+            outputPdfPath,
+          ], {
+            maxBuffer: 32 * 1024 * 1024,
+            env: buildAugmentedEnv(),
+          });
+
+          const text = await fs.readFile(sidecarPath, 'utf8').catch(() => '');
+          if (normalizeText(text)) return text;
+        } catch {
+          // try next OCRmyPDF location
+        }
+      }
+
+      return '';
+    });
+  } catch {
+    return '';
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function extractPdfTextWithTesseractRender(filePath: string) {
+  const pythonScript = [
+    'import json, os, shutil, subprocess, sys, tempfile',
+    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
+    'from pathlib import Path',
+    'try:',
+    '    import pypdfium2 as pdfium',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+    '    sys.exit(0)',
+    'texts = []',
+    'work = tempfile.mkdtemp(prefix="aidp-ocr-render-")',
+    'try:',
+    '    pdf = pdfium.PdfDocument(sys.argv[1])',
+    '    page_count = len(pdf)',
+    '    for index in range(min(page_count, 20)):',
+    '        page = pdf[index]',
+    '        bitmap = page.render(scale=2)',
+    '        image = bitmap.to_pil()',
+    '        image_path = Path(work) / f"page-{index + 1}.png"',
+    '        image.save(image_path)',
+    '        tesseract_bin = os.environ.get("TESSERACT_BIN", "tesseract")',
+    '        command = [tesseract_bin, str(image_path), "stdout", "--psm", "3"]',
+    '        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="ignore")',
+    '        if result.returncode == 0 and result.stdout.strip():',
+    '            texts.append(result.stdout.strip())',
+    '    print(json.dumps({"ok": True, "text": "\\n\\n".join(texts)}, ensure_ascii=False))',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+    'finally:',
+    '    shutil.rmtree(work, ignore_errors=True)',
+  ].join('\n');
+
+  return withTemporaryAsciiCopy(filePath, async (inputPath) => {
+    const candidates = getPythonCommandCandidates().map((command) => ({
+      command,
+      args: ['-c', pythonScript, inputPath],
+    }));
+
+    for (const candidate of candidates) {
+      try {
+        const { stdout } = await execFileAsync(candidate.command, candidate.args, {
+          maxBuffer: 64 * 1024 * 1024,
+          env: buildAugmentedEnv(),
+        });
+        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string };
+        if (parsed.ok && normalizeText(String(parsed.text || ''))) {
+          return String(parsed.text || '');
+        }
+      } catch {
+        // try next interpreter
+      }
+    }
+
+    return '';
+  });
+}
+
 async function extractPdfText(filePath: string) {
   let primaryText = '';
   try {
@@ -123,13 +380,48 @@ async function extractPdfText(filePath: string) {
     primaryText = '';
   }
 
-  const normalizedPrimary = normalizeText(primaryText);
-  if (normalizedPrimary.length >= 80) return primaryText;
+  const primaryNormalized = normalizeText(primaryText);
+  const fallbackInfo = await extractPdfInfoWithPyPdf(filePath);
+  const fallbackNormalized = normalizeText(fallbackInfo.text);
+  const bestText = fallbackNormalized.length > primaryNormalized.length ? fallbackInfo.text : primaryText;
+  const bestNormalized = normalizeText(bestText);
+  const pageCount = fallbackInfo.pageCount || 0;
 
-  const fallbackText = await extractPdfTextWithPyPdf(filePath);
-  const normalizedFallback = normalizeText(fallbackText);
-  if (normalizedFallback.length > normalizedPrimary.length) return fallbackText;
-  if (normalizedPrimary.length > 0) return primaryText;
+  if (!isPdfTextLowQuality(bestText, pageCount)) {
+    return {
+      text: bestText,
+      pageCount,
+      method: fallbackNormalized.length > primaryNormalized.length ? 'pypdf' : 'pdf-parse',
+    } satisfies PdfExtractionResult;
+  }
+
+  const ocrText = await extractPdfTextWithOcrMyPdf(filePath);
+  const ocrNormalized = normalizeText(ocrText);
+  if (ocrNormalized.length > bestNormalized.length) {
+    return {
+      text: ocrText,
+      pageCount,
+      method: 'ocrmypdf',
+    } satisfies PdfExtractionResult;
+  }
+
+  const renderedOcrText = await extractPdfTextWithTesseractRender(filePath);
+  const renderedOcrNormalized = normalizeText(renderedOcrText);
+  if (renderedOcrNormalized.length > bestNormalized.length) {
+    return {
+      text: renderedOcrText,
+      pageCount,
+      method: 'ocrmypdf',
+    } satisfies PdfExtractionResult;
+  }
+
+  if (bestNormalized.length > 0) {
+    return {
+      text: bestText,
+      pageCount,
+      method: fallbackNormalized.length > primaryNormalized.length ? 'pypdf' : 'pdf-parse',
+    } satisfies PdfExtractionResult;
+  }
 
   throw new Error('PDF text extraction returned empty content');
 }
@@ -285,29 +577,33 @@ function extractContractFields(text: string, category: string) {
 async function extractText(filePath: string, ext: string) {
   if (ext === '.txt' || ext === '.md' || ext === '.csv') {
     const content = await readUtf8Text(filePath);
-    return { status: 'parsed' as const, text: content };
+    const parseMethod = ext === '.txt' ? 'text-utf8' : ext === '.md' ? 'markdown-utf8' : 'csv-utf8';
+    return { status: 'parsed' as const, text: content, parseMethod };
   }
 
   if (ext === '.json') {
     const content = await readUtf8Text(filePath);
     const parsed = JSON.parse(content);
-    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2) };
+    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2), parseMethod: 'json-parse' };
   }
 
   if (ext === '.html' || ext === '.htm' || ext === '.xml') {
     const content = await readUtf8Text(filePath);
-    return { status: 'parsed' as const, text: stripHtmlTags(content) };
+    return { status: 'parsed' as const, text: stripHtmlTags(content), parseMethod: 'html-strip' };
   }
 
   if (ext === '.pdf') {
-    const text = await extractPdfText(filePath);
-    return { status: 'parsed' as const, text };
+    const result = await extractPdfText(filePath);
+    const methodNote = result.method === 'ocrmypdf'
+      ? '\n\n[解析链路] 当前 PDF 使用 OCR fallback 提取文本。'
+      : '';
+    return { status: 'parsed' as const, text: `${result.text}${methodNote}` };
   }
 
   if (ext === '.docx') {
     const { default: mammoth } = await import('mammoth');
     const result = await mammoth.extractRawText({ path: filePath });
-    return { status: 'parsed' as const, text: result.value || '' };
+    return { status: 'parsed' as const, text: result.value || '', parseMethod: 'mammoth' };
   }
 
   if (ext === '.xlsx' || ext === '.xls') {
@@ -322,10 +618,27 @@ async function extractText(filePath: string, ext: string) {
       })
       .filter(Boolean)
       .join('\n\n');
-    return { status: 'parsed' as const, text };
+    return { status: 'parsed' as const, text, parseMethod: 'xlsx-sheet-reader' };
   }
 
-  return { status: 'unsupported' as const, text: '' };
+  return { status: 'unsupported' as const, text: '', parseMethod: 'unsupported' };
+}
+
+function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
+  if (hintedMethod) return hintedMethod;
+  if (ext === '.txt') return 'text-utf8';
+  if (ext === '.md') return 'markdown-utf8';
+  if (ext === '.csv') return 'csv-utf8';
+  if (ext === '.json') return 'json-parse';
+  if (ext === '.html' || ext === '.htm' || ext === '.xml') return 'html-strip';
+  if (ext === '.docx') return 'mammoth';
+  if (ext === '.xlsx' || ext === '.xls') return 'xlsx-sheet-reader';
+  if (ext === '.pdf') {
+    return text.includes('OCR fallback') || text.includes('[瑙ｆ瀽閾捐矾]')
+      ? 'ocr-fallback'
+      : 'pdf-auto';
+  }
+  return 'unsupported';
 }
 
 export async function parseDocument(filePath: string, config?: DocumentCategoryConfig): Promise<ParsedDocument> {
@@ -333,7 +646,8 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
   const name = path.basename(filePath);
 
   try {
-    const { status, text } = await extractText(filePath, ext);
+    const { status, text, parseMethod: hintedMethod } = await extractText(filePath, ext);
+    const parseMethod = inferParseMethod(ext, text, hintedMethod);
     const normalizedText = normalizeText(text);
     const category = detectCategory(filePath, normalizedText);
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
@@ -349,9 +663,11 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
         category,
         bizCategory,
         parseStatus: 'unsupported',
+        parseMethod,
         summary: '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls。',
         excerpt: '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls。',
         extractedChars: 0,
+        evidenceChunks: [],
         topicTags,
         groups,
       };
@@ -359,6 +675,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
 
     const topicTags = detectTopicTags(`${name} ${normalizedText}`, category, bizCategory);
     const groups = detectGroups(filePath, normalizedText, topicTags, config);
+    const evidenceChunks = splitEvidenceChunks(text);
 
     return {
       path: filePath,
@@ -368,9 +685,11 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       category,
       bizCategory,
       parseStatus: 'parsed',
+      parseMethod,
       summary: summarize(normalizedText, '文档内容为空或暂未提取到文本。'),
       excerpt: excerpt(normalizedText, '文档内容为空或暂未提取到文本。'),
       extractedChars: normalizedText.length,
+      evidenceChunks,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
       groups,
@@ -393,9 +712,11 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       category,
       bizCategory,
       parseStatus: 'error',
+      parseMethod: 'error',
       summary: fallbackSummary,
       excerpt: fallbackSummary,
       extractedChars: 0,
+      evidenceChunks: [],
       topicTags,
       groups,
     };

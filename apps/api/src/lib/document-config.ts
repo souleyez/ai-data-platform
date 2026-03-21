@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { STORAGE_CONFIG_DIR } from './paths.js';
 
 export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
@@ -18,7 +19,7 @@ export type DocumentCategoryConfig = {
   updatedAt: string;
 };
 
-const CONFIG_DIR = path.resolve(process.cwd(), '../../storage/config');
+const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const CONFIG_FILE = path.join(CONFIG_DIR, 'document-categories.json');
 
 function buildDefault(scanRoot: string): DocumentCategoryConfig {

@@ -2,10 +2,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { STORAGE_CONFIG_DIR, TOOLS_DIR } from './paths.js';
 
 const execFileAsync = promisify(execFile);
 
-const STORAGE_DIR = path.resolve(process.cwd(), '../../storage/config');
+const STORAGE_DIR = STORAGE_CONFIG_DIR;
 const MODEL_CONFIG_FILE = path.join(STORAGE_DIR, 'model-config.json');
 
 type PersistedModelConfig = {
@@ -251,7 +252,7 @@ export async function installLatestOpenClaw() {
     throw new Error('当前安装脚本仅支持 Windows + WSL 开发环境。');
   }
 
-  const scriptPath = path.resolve(process.cwd(), '../../tools/install-openclaw-latest.ps1');
+  const scriptPath = path.join(TOOLS_DIR, 'install-openclaw-latest.ps1');
   const { stdout } = await execFileAsync('powershell.exe', ['-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
     windowsHide: true,
     maxBuffer: 1024 * 1024,

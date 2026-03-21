@@ -14,6 +14,8 @@ storage/web-captures/
 storage/config/document-overrides.json
 storage/config/document-libraries.json
 storage/config/report-center.json
+storage/config/audit-center.json
+storage/config/retained-documents.json
 tmp/
 
 # ad-hoc local test artifacts

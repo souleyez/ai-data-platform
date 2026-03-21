@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { NAV_ITEMS } from '../lib/types';
 
 const NAV_LINKS = {
-  智能问答: '/',
+  智能工作台: '/',
   文档中心: '/documents',
   数据源管理: '/datasources',
   报表中心: '/reports',
@@ -31,7 +31,7 @@ function getRuntimeLabel(openclaw) {
   }
 
   if (openclaw.installed) {
-    return '已安装，网关未连通';
+    return '已安装，网关未连接';
   }
 
   return '未安装';
@@ -68,7 +68,10 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
     };
   }, []);
 
-  const currentModel = useMemo(() => modelState.currentModel || modelState.availableModels[0] || null, [modelState]);
+  const currentModel = useMemo(
+    () => modelState.currentModel || modelState.availableModels[0] || null,
+    [modelState],
+  );
 
   async function refreshModelState(message = '') {
     try {
@@ -113,9 +116,9 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
     }
   }
 
-async function handleInstallOpenClaw() {
-  setModelBusy(true);
-  setModelMessage('正在安装云端模型服务，并启动默认网关...');
+  async function handleInstallOpenClaw() {
+    setModelBusy(true);
+    setModelMessage('正在安装云端模型服务，并启动默认网关...');
 
     try {
       const response = await fetch('/api/model-config/install', { method: 'POST' });
@@ -137,8 +140,8 @@ async function handleInstallOpenClaw() {
       <div className="brand">
         <div className="brand-logo">AI</div>
         <div>
-          <h1>数据分析中台</h1>
-          <p>企业智能分析工作台</p>
+          <h1>文档数据助理</h1>
+          <p>个人知识库，采编写一站式解决</p>
         </div>
       </div>
 

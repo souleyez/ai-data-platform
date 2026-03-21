@@ -1,93 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
 import { normalizeDatasourceResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
-
-const auditLogs = [
-  {
-    id: 'audit-001',
-    time: '2026-03-19 14:10',
-    actor: '系统自动',
-    action: '自动抓取',
-    target: '行业模型能力专题',
-    result: '成功',
-    note: '抓取 1 个网页并写入文档库。',
-  },
-  {
-    id: 'audit-002',
-    time: '2026-03-19 13:45',
-    actor: '用户',
-    action: '修改分组',
-    target: '研究资料 A.pdf',
-    result: '成功',
-    note: '新增分组：脑健康。',
-  },
-  {
-    id: 'audit-003',
-    time: '2026-03-19 12:50',
-    actor: '用户',
-    action: '确认分类',
-    target: '合同样本 B.docx',
-    result: '成功',
-    note: '业务分类确认：合同协议。',
-  },
-  {
-    id: 'audit-004',
-    time: '2026-03-18 18:40',
-    actor: '系统自动',
-    action: '生成报表',
-    target: '合同风险汇总-晨会版',
-    result: '成功',
-    note: '输出 1 份 PPT 记录。',
-  },
-];
-
-const reportReferences = [
-  {
-    id: 'ref-001',
-    report: '经营周报-2026W12',
-    document: '华东区域订单分析-近30天',
-    datasource: 'ERP 订单库',
-    referencedAt: '2026-03-19 09:20',
-    note: '用于订单趋势和区域增长分析。',
-  },
-  {
-    id: 'ref-002',
-    report: '合同风险汇总-晨会版',
-    document: '采购合同-条款复核',
-    datasource: '合同文档库',
-    referencedAt: '2026-03-18 18:40',
-    note: '用于付款节点和违约责任复核。',
-  },
-  {
-    id: 'ref-003',
-    report: '客服热点静态页（近7天）',
-    document: '客服工单聚合-本周',
-    datasource: '客服采集任务',
-    referencedAt: '2026-03-19 08:30',
-    note: '用于展示投诉热点和待回访事项。',
-  },
-];
-
-const staleDatasources = [
-  {
-    id: 'stale-001',
-    name: '商城后台采集',
-    lastCapturedAt: '2026-03-10 09:00',
-    lastReferencedAt: '2025-12-15 11:20',
-    suggestion: '近 3 个月未被报表引用，建议暂停采集或删除。',
-  },
-  {
-    id: 'stale-002',
-    name: '知识网站获取',
-    lastCapturedAt: '2026-03-08 20:10',
-    lastReferencedAt: '2025-12-02 16:00',
-    suggestion: '近 3 个月未形成有效报表引用，建议降低频率或暂停。',
-  },
-];
 
 function StatCard({ label, value, subtle }) {
   return (
@@ -99,23 +16,85 @@ function StatCard({ label, value, subtle }) {
   );
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  return String(value).replace('T', ' ').slice(0, 16);
+}
+
+function formatRatio(value) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function formatSize(value) {
+  const gb = Number(value || 0) / 1024 / 1024 / 1024;
+  return `${gb.toFixed(1)} GB`;
+}
+
+function renderStorageState(value) {
+  if (value === 'structured-only') return '仅保留结构化数据';
+  if (value === 'live') return '保留原文件';
+  return '无原文件';
+}
+
 export default function AuditPage() {
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
+  const [audit, setAudit] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [actingId, setActingId] = useState('');
+
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [datasourceResponse, auditResponse] = await Promise.all([
+        fetch(buildApiUrl('/api/datasources')),
+        fetch(buildApiUrl('/api/audit')),
+      ]);
+
+      if (datasourceResponse.ok) {
+        const datasourceJson = await datasourceResponse.json();
+        const normalized = normalizeDatasourceResponse(datasourceJson);
+        if (normalized.items.length) setSidebarSources(normalized.items);
+      }
+
+      if (auditResponse.ok) {
+        setAudit(await auditResponse.json());
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function loadDatasources() {
-      try {
-        const response = await fetch(buildApiUrl('/api/datasources'));
-        if (!response.ok) throw new Error('load datasources failed');
-        const json = await response.json();
-        const normalized = normalizeDatasourceResponse(json);
-        if (normalized.items.length) setSidebarSources(normalized.items);
-      } catch {
-        // keep local fallback
-      }
-    }
-    loadDatasources();
+    void loadAll();
   }, []);
+
+  async function runAction(actionId, path, body = {}) {
+    setActingId(actionId);
+    try {
+      await fetch(buildApiUrl(path), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      await loadAll();
+    } finally {
+      setActingId('');
+    }
+  }
+
+  const summary = useMemo(() => {
+    if (!audit) return null;
+    return {
+      storage: audit.storage,
+      staleDays: audit.staleDays,
+      hardDeleteDays: audit.hardDeleteDays,
+      staleDocs: (audit.documents || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
+      staleCaptures: (audit.captureTasks || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
+      logs: audit.logs || [],
+    };
+  }, [audit]);
 
   return (
     <div className="app-shell">
@@ -124,29 +103,227 @@ export default function AuditPage() {
         <header className="topbar">
           <div>
             <h2>审计中心</h2>
-            <p>这里分两层看：操作留痕，以及报表中心对文档/数据的引用情况。</p>
+            <p>把“清理原文件”和“彻底删除”拆开管理，长期低引用资料优先只删原件、保留结构化结果。</p>
           </div>
         </header>
 
         <section className="documents-layout">
           <section className="card stats-grid">
-            <StatCard label="操作记录" value={String(auditLogs.length)} subtle="增删改查 / 自动抓取" />
-            <StatCard label="引用记录" value={String(reportReferences.length)} subtle="报表引用文档 / 数据" />
-            <StatCard label="低引用提醒" value={String(staleDatasources.length)} subtle="近3个月未被报表使用" />
+            <StatCard
+              label="剩余存储"
+              value={summary ? formatRatio(summary.storage?.freeRatio) : '-'}
+              subtle={summary ? `自动清理阈值 ${formatRatio(summary.storage?.freeThresholdRatio)}` : ''}
+            />
+            <StatCard
+              label="建议清理原件"
+              value={summary ? String(summary.staleDocs.filter((item) => item.cleanupRecommended).length + summary.staleCaptures.filter((item) => item.cleanupRecommended).length) : '-'}
+              subtle={`超过 ${summary?.staleDays || 90} 天且报表无引用`}
+            />
+            <StatCard
+              label="相似原件待清理"
+              value={summary ? String(summary.staleDocs.filter((item) => item.similarityCleanupRecommended).length) : '-'}
+              subtle="保留结构化数据，优先删高相似原件"
+            />
+            <StatCard
+              label="建议彻底删除"
+              value={summary ? String(summary.staleDocs.filter((item) => item.hardDeleteRecommended).length + summary.staleCaptures.filter((item) => item.hardDeleteRecommended).length) : '-'}
+              subtle={`超过 ${summary?.hardDeleteDays || 180} 天且长期无引用`}
+            />
           </section>
 
           <section className="card table-card">
             <div className="panel-header">
               <div>
-                <h3>操作记录</h3>
-                <p>保留增删改查和自动抓取记录，后续可继续细化到真实操作流水。</p>
+                <h3>存储策略</h3>
+                <p>自动策略只清理原文件并保留结构化结果；彻底删除只对长期无引用对象开放，门槛更严格。</p>
+              </div>
+              <button
+                className="ghost-btn"
+                type="button"
+                onClick={() => runAction('run-policy', '/api/audit/run-policy')}
+                disabled={actingId === 'run-policy'}
+              >
+                {actingId === 'run-policy' ? '执行中...' : '立即执行策略'}
+              </button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>总存储</th>
+                  <th>已使用</th>
+                  <th>剩余</th>
+                  <th>剩余比例</th>
+                  <th>当前状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{summary ? formatSize(summary.storage.totalBytes) : '-'}</td>
+                  <td>{summary ? formatSize(summary.storage.usedBytes) : '-'}</td>
+                  <td>{summary ? formatSize(summary.storage.freeBytes) : '-'}</td>
+                  <td>{summary ? formatRatio(summary.storage.freeRatio) : '-'}</td>
+                  <td>
+                    <span className={`tag ${summary?.storage?.belowThreshold ? 'warning-tag' : 'up-tag'}`}>
+                      {summary?.storage?.belowThreshold ? '低于阈值，自动原件清理已启用' : '安全'}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section className="card table-card">
+            <div className="panel-header">
+              <div>
+                <h3>低引用文档</h3>
+                <p>先做“清理原文件”，让问答和报表继续复用结构化数据；只有长期无引用时才建议彻底删除。</p>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>文档</th>
+                  <th>来源</th>
+                  <th>库龄</th>
+                  <th>存储状态</th>
+                  <th>清理原因</th>
+                  <th>引用状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(summary?.staleDocs || []).map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.name}</td>
+                    <td>{item.sourceType === 'capture' ? '采集结果' : item.sourceType === 'upload' ? '上传文档' : '其他'}</td>
+                    <td>{item.ageDays} 天</td>
+                    <td>{renderStorageState(item.storageState)}</td>
+                    <td>
+                      {item.similarityCleanupRecommended
+                        ? `高相似原件（同组 ${item.similarDocumentCount} 份）`
+                        : item.cleanupRecommended
+                          ? `长期低引用（>${summary?.staleDays || 90} 天）`
+                          : '-'}
+                    </td>
+                    <td>{item.referencedByReports ? '报表已引用' : '报表无引用'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {item.cleanupRecommended ? (
+                          <button
+                            className="ghost-btn"
+                            type="button"
+                            onClick={() => runAction(`doc-clean-${item.id}`, '/api/audit/documents/cleanup', { id: item.id })}
+                            disabled={actingId === `doc-clean-${item.id}`}
+                          >
+                            {actingId === `doc-clean-${item.id}` ? '清理中...' : '清理原文件'}
+                          </button>
+                        ) : null}
+                        {item.hardDeleteRecommended ? (
+                          <button
+                            className="ghost-btn"
+                            type="button"
+                            onClick={() => runAction(`doc-hard-${item.id}`, '/api/audit/documents/hard-delete', { id: item.id })}
+                            disabled={actingId === `doc-hard-${item.id}`}
+                          >
+                            {actingId === `doc-hard-${item.id}` ? '删除中...' : '彻底删除'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && !(summary?.staleDocs || []).length ? (
+                  <tr>
+                    <td colSpan={7}>当前没有满足审计条件的文档。</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="card table-card">
+            <div className="panel-header">
+              <div>
+                <h3>低引用数据源</h3>
+                <p>数据源会先走“停采 + 清理原文件”，保留结构化结果；超过更长周期仍无引用时，再允许彻底删除。</p>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>数据源</th>
+                  <th>状态</th>
+                  <th>库龄</th>
+                  <th>存储状态</th>
+                  <th>引用状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(summary?.staleCaptures || []).map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.name}</td>
+                    <td>{item.captureStatus === 'paused' ? '已停采' : '采集中'}</td>
+                    <td>{item.ageDays} 天</td>
+                    <td>{renderStorageState(item.storageState)}</td>
+                    <td>{item.referencedByReports ? '报表已引用' : '报表无引用'}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {item.captureStatus !== 'paused' ? (
+                          <button
+                            className="ghost-btn"
+                            type="button"
+                            onClick={() => runAction(`pause-${item.id}`, `/api/audit/capture-tasks/${item.id}/pause`)}
+                            disabled={actingId === `pause-${item.id}`}
+                          >
+                            {actingId === `pause-${item.id}` ? '停采中...' : '停采'}
+                          </button>
+                        ) : null}
+                        {item.cleanupRecommended ? (
+                          <button
+                            className="ghost-btn"
+                            type="button"
+                            onClick={() => runAction(`capture-clean-${item.id}`, '/api/audit/capture-tasks/cleanup', { id: item.id })}
+                            disabled={actingId === `capture-clean-${item.id}`}
+                          >
+                            {actingId === `capture-clean-${item.id}` ? '清理中...' : '清理原文件'}
+                          </button>
+                        ) : null}
+                        {item.hardDeleteRecommended ? (
+                          <button
+                            className="ghost-btn"
+                            type="button"
+                            onClick={() => runAction(`capture-hard-${item.id}`, '/api/audit/capture-tasks/hard-delete', { id: item.id })}
+                            disabled={actingId === `capture-hard-${item.id}`}
+                          >
+                            {actingId === `capture-hard-${item.id}` ? '删除中...' : '彻底删除'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && !(summary?.staleCaptures || []).length ? (
+                  <tr>
+                    <td colSpan={6}>当前没有满足审计条件的采集数据源。</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="card table-card">
+            <div className="panel-header">
+              <div>
+                <h3>审计日志</h3>
+                <p>记录停采、原文件清理、彻底删除，以及自动策略执行结果。</p>
               </div>
             </div>
             <table>
               <thead>
                 <tr>
                   <th>时间</th>
-                  <th>执行来源</th>
+                  <th>执行方</th>
                   <th>动作</th>
                   <th>对象</th>
                   <th>结果</th>
@@ -154,83 +331,21 @@ export default function AuditPage() {
                 </tr>
               </thead>
               <tbody>
-                {auditLogs.map((item) => (
+                {(summary?.logs || []).map((item) => (
                   <tr key={item.id}>
-                    <td>{item.time}</td>
-                    <td>{item.actor}</td>
+                    <td>{formatDate(item.time)}</td>
+                    <td>{item.actor === 'system' ? '系统自动' : '用户'}</td>
                     <td>{item.action}</td>
                     <td>{item.target}</td>
-                    <td><span className="tag up-tag">{item.result}</span></td>
+                    <td>{item.result}</td>
                     <td className="summary-cell">{item.note}</td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="card table-card">
-            <div className="panel-header">
-              <div>
-                <h3>报表引用记录</h3>
-                <p>展示报表中心引用了哪些文档和数据，后续可追踪到具体引用链。</p>
-              </div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>报表</th>
-                  <th>引用文档</th>
-                  <th>来源数据</th>
-                  <th>引用时间</th>
-                  <th>说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reportReferences.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.report}</td>
-                    <td>{item.document}</td>
-                    <td>{item.datasource}</td>
-                    <td>{item.referencedAt}</td>
-                    <td className="summary-cell">{item.note}</td>
+                {!loading && !(summary?.logs || []).length ? (
+                  <tr>
+                    <td colSpan={6}>当前还没有审计日志。</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-
-          <section className="card table-card">
-            <div className="panel-header">
-              <div>
-                <h3>低引用提醒</h3>
-                <p>持续 3 个月未被报表引用的数据源，建议暂停采集、降频或删除。</p>
-              </div>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>数据源</th>
-                  <th>最近采集时间</th>
-                  <th>最近引用时间</th>
-                  <th>建议</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {staleDatasources.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.name}</td>
-                    <td>{item.lastCapturedAt}</td>
-                    <td>{item.lastReferencedAt}</td>
-                    <td className="summary-cell">{item.suggestion}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button className="ghost-btn" type="button">暂停采集</button>
-                        <button className="ghost-btn" type="button">删除</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                ) : null}
               </tbody>
             </table>
           </section>

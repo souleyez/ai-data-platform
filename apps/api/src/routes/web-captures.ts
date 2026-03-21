@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
+import { buildWebCaptureCredentialSummary, loadWebCaptureCredential, saveWebCaptureCredential } from '../lib/web-capture-credentials.js';
 import { loadDocumentCategoryConfig } from '../lib/document-config.js';
 import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
@@ -70,6 +71,105 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
         successCount: ingestItems.filter((item) => item.status === 'success').length,
         failedCount: ingestItems.filter((item) => item.status === 'failed').length,
         collectedCount: task.lastCollectedCount || 0,
+      },
+      ingestItems,
+    };
+  });
+
+  app.post('/web-captures/login', async (request, reply) => {
+    const body = (request.body || {}) as {
+      url?: string;
+      focus?: string;
+      note?: string;
+      username?: string;
+      password?: string;
+      remember?: boolean;
+      maxItems?: number;
+    };
+
+    const url = String(body.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      return reply.code(400).send({ error: 'valid http(s) url is required' });
+    }
+
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
+    const remember = Boolean(body.remember);
+
+    let stored = await loadWebCaptureCredential(url);
+
+    if (!username || !password) {
+      if (!stored) {
+        return {
+          status: 'credential_required',
+          message: '该站点需要登录采集，请在安全表单中填写账号和密码。',
+          credentialRequest: buildWebCaptureCredentialSummary(url, stored),
+        };
+      }
+    }
+
+    if (username && password) {
+      let savedCredential = null as Awaited<ReturnType<typeof saveWebCaptureCredential>> | null;
+      if (remember) {
+        savedCredential = await saveWebCaptureCredential({ url, username, password });
+      }
+      stored = {
+        id: savedCredential?.id || stored?.id || '',
+        origin: new URL(url).origin.toLowerCase(),
+        username,
+        password,
+        maskedUsername: savedCredential?.maskedUsername || `${username.slice(0, 2)}***`,
+        updatedAt: savedCredential?.updatedAt || new Date().toISOString(),
+      };
+    }
+
+    if (!stored?.username || !stored?.password) {
+      return reply.code(400).send({ error: 'login credentials are required' });
+    }
+
+    const task = await createAndRunWebCaptureTask({
+      url,
+      focus: String(body.focus || '').trim(),
+      note: String(body.note || '').trim(),
+      frequency: 'manual',
+      maxItems: Number(body.maxItems || 5),
+      auth: { username: stored.username, password: stored.password },
+      credentialRef: remember || (!username && !password && stored.id) ? stored.id : '',
+      credentialLabel: stored.maskedUsername,
+    });
+
+    let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
+
+    if (task.lastStatus === 'success' && task.documentPath) {
+      const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+      const libraries = await loadDocumentLibraries();
+      const parsed = await parseDocument(task.documentPath, config);
+      ingestItems = [buildPreviewItemFromDocument(parsed, 'url', undefined, libraries)];
+    } else {
+      ingestItems = [buildFailedPreviewItem({
+        id: task.id,
+        sourceType: 'url',
+        sourceName: task.title || task.url,
+        errorMessage: task.lastSummary || '登录采集失败',
+      })];
+    }
+
+    return {
+      status: task.lastStatus === 'success' ? 'captured' : 'failed',
+      task,
+      message: task.lastStatus === 'success'
+        ? '登录采集已完成，内容已结构化入库。'
+        : `登录采集已执行，但本次抓取失败：${task.lastSummary}`,
+      summary: {
+        total: ingestItems.length,
+        successCount: ingestItems.filter((item) => item.status === 'success').length,
+        failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+        collectedCount: task.lastCollectedCount || 0,
+      },
+      credentialSummary: {
+        origin: stored.origin,
+        maskedUsername: stored.maskedUsername,
+        remembered: remember || Boolean(task.credentialRef),
       },
       ingestItems,
     };
