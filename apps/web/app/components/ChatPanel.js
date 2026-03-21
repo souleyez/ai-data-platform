@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useRef } from 'react';
 import { QUICK_ACTIONS, formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
@@ -64,9 +66,9 @@ export default function ChatPanel({
       <div className="panel-header">
         <div>
           <h3>对话中心</h3>
-          <p>支持企业经营问答、合同归纳、技术文档总结、订单分析</p>
+          <p>支持知识问答、普通交流、方案讨论和内容整理，不支持系统执行或本地数据改写。</p>
         </div>
-        <span className="badge">只读分析</span>
+        <span className="badge">受控开放对话</span>
       </div>
 
       <div className="chat-messages" ref={messagesRef}>
@@ -107,8 +109,8 @@ export default function ChatPanel({
                 <div className="message-extra-block">
                   <div className="message-ref-title">数据来源</div>
                   <div className="message-refs">
-                    {message.sources.map((source, index) => (
-                      <span key={`${formatSourceLabel(source)}-${index}`} className="source-chip">{formatSourceLabel(source)}</span>
+                    {message.sources.map((source, sourceIndex) => (
+                      <span key={`${formatSourceLabel(source)}-${sourceIndex}`} className="source-chip">{formatSourceLabel(source)}</span>
                     ))}
                   </div>
                 </div>
@@ -149,7 +151,7 @@ export default function ChatPanel({
           <textarea
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
-            placeholder="输入问题，例如：最近30天哪些客户订单下滑最明显？"
+            placeholder="输入问题，可用于普通问答、知识分析和方案讨论，不支持系统指令或数据改写。"
           />
           <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
             {isLoading ? '分析中' : '发送'}

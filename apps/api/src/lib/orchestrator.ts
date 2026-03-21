@@ -1,5 +1,6 @@
 import { buildDocumentId, loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { loadDocumentLibraries } from './document-libraries.js';
+import { buildBlockedPolicyAnswer, buildGeneralChatSystemPrompt, classifyChatPrompt } from './chat-policy.js';
 import { resolveScenario, scenarios, type ScenarioKey } from './mock-data.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable, runOpenClawChat } from './openclaw-adapter.js';
 import type { ParsedDocument } from './document-parser.js';
@@ -797,6 +798,106 @@ export async function runChatOrchestration(input: ChatRequestInput) {
   const matchedDocs = scope.scopedDocs;
   const strongDocScope = hasStrongDocumentScope(prompt, matchedDocs);
   const gatewayReachable = await isOpenClawGatewayReachable();
+  const hasKnowledgeScope = (scope.hasScope && strongDocScope) || Boolean(templateScopedGroup);
+  const policy = classifyChatPrompt({
+    prompt,
+    hasKnowledgeScope,
+  });
+
+  if (policy.mode === 'blocked') {
+    return {
+      scenario: 'default' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: buildBlockedPolicyAnswer(policy.reason),
+        meta: '受控开放对话 / 已拦截执行型请求',
+        references: [],
+      },
+      panel: scenarios.default,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if (policy.mode === 'general') {
+    if (gatewayReachable) {
+      try {
+        const result = await runOpenClawChat({
+          prompt,
+          sessionUser: input.sessionUser,
+          contextBlocks: [],
+          systemPrompt: buildGeneralChatSystemPrompt(),
+        });
+
+        return {
+          scenario: 'default' as ScenarioKey,
+          traceId: `trace_${Date.now()}`,
+          message: {
+            role: 'assistant' as const,
+            content: result.content,
+            meta: '受控开放对话 / 云端模型',
+            references: [],
+          },
+          panel: scenarios.default,
+          sources: [],
+          permissions: { mode: 'read-only' },
+          orchestration: {
+            mode: 'openclaw' as const,
+            docMatches: 0,
+            gatewayConfigured: gatewayReachable,
+          },
+          latencyMs: 120,
+        };
+      } catch {
+        return {
+          scenario: 'default' as ScenarioKey,
+          traceId: `trace_${Date.now()}`,
+          message: {
+            role: 'assistant' as const,
+            content: '当前云端模型暂不可用。你可以继续进行普通问答和方案讨论，或稍后再试。',
+            meta: '受控开放对话 / 本地AI兜底',
+            references: [],
+          },
+          panel: scenarios.default,
+          sources: [],
+          permissions: { mode: 'read-only' },
+          orchestration: {
+            mode: 'fallback' as const,
+            docMatches: 0,
+            gatewayConfigured: gatewayReachable,
+          },
+          latencyMs: 120,
+        };
+      }
+    }
+
+    return {
+      scenario: 'default' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: '当前云端模型暂不可用。你可以继续进行普通问答和方案讨论，或稍后再试。',
+        meta: '受控开放对话 / 本地AI兜底',
+        references: [],
+      },
+      panel: scenarios.default,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
 
   if ((!scope.hasScope || !strongDocScope) && !templateScopedGroup) {
     return {
