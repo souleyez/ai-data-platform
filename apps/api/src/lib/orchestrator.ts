@@ -542,6 +542,7 @@ function isLikelyPersonName(value: string) {
   if (!text) return false;
   if (/@/.test(text) || /\d{5,}/.test(text)) return false;
   if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
+  if (['我的', '简历', '个人简历', '联系电话'].includes(text)) return false;
   return /^[\u4e00-\u9fff·]{2,12}$/.test(text) || /^[A-Za-z][A-Za-z\s.-]{1,40}$/.test(text);
 }
 
@@ -576,11 +577,7 @@ function inferResumeRoleFromDocument(item: ParsedDocument) {
 }
 
 function buildResumeHighlights(item: ParsedDocument) {
-  const claimHighlights = (item.claims || [])
-    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
-    .filter((entry) => entry && !/related_to 人才简历|related_to Java后端|related_to 产品经理|related_to 算法工程师|^铁\s/i.test(entry));
-  return claimHighlights.slice(0, 2).join('；')
-    || (item.resumeFields?.highlights || []).slice(0, 2).join('；')
+  return (item.resumeFields?.highlights || []).slice(0, 2).join('；')
     || trimSentence(item.summary || item.excerpt, 80)
     || '待补充';
 }
