@@ -80,6 +80,33 @@ function normalizeDoseLabel(value: string) {
   return text.replace(/\bcfu\b/gi, 'CFU').replace(/\biu\b/gi, 'IU');
 }
 
+function sanitizeResumeFields(fields: ParsedDocument['resumeFields']) {
+  if (!fields) return undefined;
+  const normalize = (value?: string) => String(value || '').replace(/\s+/g, ' ').trim();
+  const isGoodName = (value?: string) => {
+    const text = normalize(value);
+    if (!text) return false;
+    if (/@/.test(text) || /\d{5,}/.test(text)) return false;
+    if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
+    return true;
+  };
+  const normalizeList = (values?: string[]) => uniqStrings(values).map(normalize).filter(Boolean);
+  const sanitized = {
+    candidateName: isGoodName(fields.candidateName) ? normalize(fields.candidateName) : '',
+    targetRole: normalize(fields.targetRole),
+    currentRole: normalize(fields.currentRole),
+    yearsOfExperience: normalize(fields.yearsOfExperience),
+    education: normalize(fields.education),
+    major: normalize(fields.major),
+    expectedCity: normalize(fields.expectedCity),
+    expectedSalary: normalize(fields.expectedSalary),
+    latestCompany: normalize(fields.latestCompany),
+    skills: normalizeList(fields.skills),
+    highlights: normalizeList(fields.highlights),
+  };
+  return Object.values(sanitized).some((value) => Array.isArray(value) ? value.length : Boolean(value)) ? sanitized : undefined;
+}
+
 function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
   const allowedStrains = uniqStrings(item.intentSlots?.strains).filter(isValidStrainCandidate).map(normalizeStrainLabel).filter(Boolean);
   const allowedDoses = uniqStrings(item.intentSlots?.doses)
@@ -122,6 +149,7 @@ function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
       organizations: uniqStrings(item.intentSlots?.organizations),
       metrics: uniqStrings(item.intentSlots?.metrics),
     },
+    resumeFields: sanitizeResumeFields(item.resumeFields),
   };
 }
 

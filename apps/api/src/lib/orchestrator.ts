@@ -528,7 +528,36 @@ function inferResumeRole(text: string) {
   return found?.[1] || '';
 }
 
+function looksLikeResumeDocument(item: ParsedDocument) {
+  const evidence = `${item.name} ${item.title} ${(item.topicTags || []).join(' ')} ${item.summary}`.toLowerCase();
+  return item.category === 'resume'
+    || evidence.includes('人才简历')
+    || /\b(?:resume|cv)\b/i.test(evidence)
+    || evidence.includes('简历')
+    || evidence.includes('候选人');
+}
+
+function isLikelyPersonName(value: string) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (/@/.test(text) || /\d{5,}/.test(text)) return false;
+  if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
+  return /^[\u4e00-\u9fff·]{2,12}$/.test(text) || /^[A-Za-z][A-Za-z\s.-]{1,40}$/.test(text);
+}
+
+function inferResumeNameFromTitle(value: string) {
+  const normalized = String(value || '')
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  const named = normalized.match(/简历[-\s(（]*([\u4e00-\u9fff·]{2,12})|([\u4e00-\u9fff·]{2,12})[-\s]*简历/);
+  const fallback = named?.[1] || named?.[2] || normalized.match(/[\u4e00-\u9fff·]{2,12}/)?.[0] || normalized;
+  return fallback;
+}
+
 function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
+  const resume = item.resumeFields;
   const sourceText = [
     item.title,
     item.summary,
@@ -544,29 +573,32 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
     .replace(/\.[a-z0-9]+$/i, '')
     .trim();
 
-  const candidate = extractResumeField(compactText, [
-    /(姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
-    /候选人[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
-  ]) || normalizedTitle;
+  const rawCandidate = resume?.candidateName || extractResumeField(compactText, [
+    /(?:姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+    /(?:候选人)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+  ]) || inferResumeNameFromTitle(normalizedTitle);
+  const candidate = isLikelyPersonName(rawCandidate) ? rawCandidate : inferResumeNameFromTitle(normalizedTitle);
 
-  const role = extractResumeField(compactText, [
-    /(应聘岗位|目标岗位|求职方向|当前职位|岗位|职位)[:：]?\s*([^，。；;\n]{2,40})/i,
+  const role = resume?.targetRole || resume?.currentRole || extractResumeField(compactText, [
+    /(?:应聘岗位|目标岗位|求职方向|当前职位|岗位|职位)[:：]?\s*([^，。；;\n]{2,40})/i,
   ]) || inferResumeRole(compactText) || '待识别';
 
-  const years = extractResumeField(compactText, [
+  const years = resume?.yearsOfExperience || extractResumeField(compactText, [
     /(\d{1,2}\+?\s*年(?:工作经验)?)/i,
     /(工作经验[^，。；;\n]{0,12}\d{1,2}\+?\s*年)/i,
   ]) || '待识别';
 
-  const education = extractResumeField(compactText, [
+  const education = resume?.education || extractResumeField(compactText, [
     /(博士|硕士|本科|大专|中专|MBA|EMBA|研究生)/i,
   ]) || '待识别';
 
-  const skills = pickResumeSkills(compactText)
+  const skills = (resume?.skills || []).slice(0, 6).join(' / ')
+    || pickResumeSkills(compactText)
     || (item.intentSlots?.ingredients || []).slice(0, 6).join(' / ')
     || '待识别';
 
-  const highlights = (item.claims || [])
+  const highlights = (resume?.highlights || []).slice(0, 2).join('；')
+    || (item.claims || [])
     .slice(0, 2)
     .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
     .filter(Boolean)
@@ -585,7 +617,11 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
 }
 
 function buildResumeCompareTable(matchedDocs: ParsedDocument[]) {
-  const rows = matchedDocs.slice(0, 5).map((item) => {
+  const resumeDocs = matchedDocs
+    .filter((item) => item.parseStatus === 'parsed')
+    .filter((item) => looksLikeResumeDocument(item))
+    .slice(0, 5);
+  const rows = resumeDocs.map((item) => {
     const row = extractResumeCompareRow(item);
     return [row.candidate, row.role, row.years, row.education, row.skills, row.highlights];
   });

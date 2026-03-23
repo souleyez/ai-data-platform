@@ -26,6 +26,7 @@ export type ParsedDocument = {
   entities?: StructuredEntity[];
   claims?: StructuredClaim[];
   intentSlots?: IntentSlots;
+  resumeFields?: ResumeFields;
   riskLevel?: 'low' | 'medium' | 'high';
   topicTags?: string[];
   groups?: string[];
@@ -75,12 +76,28 @@ export type IntentSlots = {
   metrics?: string[];
 };
 
+export type ResumeFields = {
+  candidateName?: string;
+  targetRole?: string;
+  currentRole?: string;
+  yearsOfExperience?: string;
+  education?: string;
+  major?: string;
+  expectedCity?: string;
+  expectedSalary?: string;
+  latestCompany?: string;
+  skills?: string[];
+  highlights?: string[];
+};
+
 const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
   contract: ['contract', '合同', '协议', '条款', '付款', '甲方', '乙方', '采购'],
   technical: ['技术', '方案', '需求', '架构', '系统', '接口', '部署', '采集', '智能化', '白皮书', '知识库'],
   paper: ['paper', 'study', 'research', 'trial', 'randomized', 'placebo', 'abstract', 'introduction', 'methods', 'results', 'conclusion', 'mouse model', 'mice', 'zebrafish', '文献', '研究', '实验', '随机', '双盲'],
   report: ['report', '日报', '周报', '月报', '复盘'],
 };
+
+const RESUME_HINTS = ['简历', '履历', '候选人', '应聘', '求职', '教育经历', '工作经历', '项目经历', '期望薪资', '目标岗位', 'resume', 'curriculum vitae', 'cv'];
 
 type KeywordRule = string | RegExp;
 const execFileAsync = promisify(execFile);
@@ -895,6 +912,7 @@ function scoreHints(evidence: string, hints: string[]) {
 
 export function detectCategory(filePath: string, text = '') {
   const evidence = buildEvidence(filePath, text);
+  if (RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'resume';
   const scores = {
     contract: scoreHints(evidence, CATEGORY_HINTS.contract),
     technical: scoreHints(evidence, CATEGORY_HINTS.technical),
@@ -931,6 +949,148 @@ export function detectBizCategory(filePath: string, category: string, text = '',
   return 'paper';
 }
 
+function normalizeResumeTextValue(value: string) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function isLikelyResumePersonName(value: string) {
+  const text = normalizeResumeTextValue(value);
+  if (!text) return false;
+  if (/@/.test(text)) return false;
+  if (/\d{5,}/.test(text)) return false;
+  if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
+  if (/^[A-Za-z][A-Za-z\s.-]{1,40}$/.test(text)) return true;
+  if (/^[\u4e00-\u9fff·]{2,12}$/.test(text)) return true;
+  return false;
+}
+
+function inferResumeNameFromTitle(title: string) {
+  const normalized = String(title || '')
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  const fromResumePattern = normalized.match(/简历[-\s(（]*([\u4e00-\u9fff·]{2,12})|([\u4e00-\u9fff·]{2,12})[-\s]*简历/);
+  const candidate = fromResumePattern?.[1] || fromResumePattern?.[2] || '';
+  if (isLikelyResumePersonName(candidate)) return candidate;
+  const chineseName = normalized.match(/[\u4e00-\u9fff·]{2,12}/g)?.find(isLikelyResumePersonName);
+  return chineseName || normalized;
+}
+
+function cutOffNextResumeLabel(value: string) {
+  const normalized = normalizeResumeTextValue(value);
+  return normalized.replace(/\s+(?:姓名|Name|候选人|应聘岗位|目标岗位|求职方向|当前职位|职位|岗位|工作经验|学历|专业|期望城市|意向城市|工作城市|地点|期望薪资|薪资要求|期望工资|最近工作经历|最近公司|现任公司|就职公司|核心技能|项目经历)[:：][\s\S]*$/i, '').trim();
+}
+
+function extractResumeLabelMap(text: string) {
+  const map = new Map<string, string>();
+  const lines = String(text || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    const match = line.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
+    if (!match) continue;
+    map.set(normalizeResumeTextValue(match[1]), cutOffNextResumeLabel(match[2]));
+  }
+
+  return map;
+}
+
+function extractResumeValue(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match?.[1] || match?.[2];
+    if (value) return cutOffNextResumeLabel(value);
+  }
+  return '';
+}
+
+function collectResumeSkills(text: string) {
+  const keywords = [
+    'Java', 'Python', 'Go', 'C++', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Kafka',
+    'React', 'Vue', 'Node.js', 'TypeScript', 'JavaScript', 'Spring Boot',
+    '产品设计', '需求分析', '用户研究', 'Axure', 'Xmind', '数据分析', '项目管理',
+    '微服务', '分布式', '机器学习', '品牌营销', '销售管理', '招聘',
+  ];
+  return [...new Set(keywords.filter((keyword) => new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)))].slice(0, 8);
+}
+
+function extractResumeHighlights(text: string) {
+  const normalized = String(text || '').replace(/\r/g, '');
+  const lines = normalized
+    .split(/\n+/)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length >= 12);
+
+  const priority = lines.filter((line) => /(负责|主导|参与|完成|推动|落地|优化|提升|增长|实现|设计|搭建|管理|项目)/.test(line));
+  return [...new Set((priority.length ? priority : lines).slice(0, 4).map((item) => item.slice(0, 80)))];
+}
+
+function extractResumeFields(text: string, title: string, entities: StructuredEntity[] = [], claims: StructuredClaim[] = []): ResumeFields | undefined {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const titleText = String(title || '').trim();
+  const evidence = `${titleText} ${normalized}`.toLowerCase();
+  const looksLikeResume = RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()));
+  if (!looksLikeResume) return undefined;
+  const labelMap = extractResumeLabelMap(text);
+  const byLabel = (...labels: string[]) => {
+    for (const label of labels) {
+      const value = labelMap.get(label);
+      if (value) return value;
+    }
+    return '';
+  };
+
+  const skillsFromEntities = entities
+    .filter((item) => item.type === 'ingredient' || item.type === 'term')
+    .map((item) => normalizeResumeTextValue(item.text))
+    .filter(Boolean);
+  const highlightsFromClaims = claims
+    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
+    .filter(Boolean);
+
+  const fields: ResumeFields = {
+    candidateName: byLabel('姓名', 'Name', '候选人') || extractResumeValue(normalized, [
+      /(?:姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+      /(?:候选人)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+    ]) || inferResumeNameFromTitle(titleText),
+    targetRole: byLabel('应聘岗位', '目标岗位', '求职方向') || extractResumeValue(normalized, [
+      /(?:应聘岗位|目标岗位|求职方向)[:：]?\s*([^，。；;\n]{2,40})/i,
+    ]),
+    currentRole: byLabel('当前职位', '现任职位'),
+    yearsOfExperience: byLabel('工作经验') || extractResumeValue(normalized, [
+      /(\d{1,2}\+?\s*年(?:工作经验)?)/i,
+      /(工作经验[^，。；;\n]{0,12}\d{1,2}\+?\s*年)/i,
+    ]),
+    education: byLabel('学历') || extractResumeValue(normalized, [
+      /(博士|硕士|本科|大专|中专|MBA|EMBA|研究生)/i,
+    ]),
+    major: byLabel('专业') || extractResumeValue(normalized, [
+      /(?:专业)[:：]?\s*([^，。；;\n]{2,40})/i,
+    ]),
+    expectedCity: byLabel('期望城市', '意向城市', '工作城市', '地点') || extractResumeValue(normalized, [
+      /(?:期望城市|意向城市|工作城市|地点)[:：]?\s*([^，。；;\n]{2,30})/i,
+    ]),
+    expectedSalary: byLabel('期望薪资', '薪资要求', '期望工资') || extractResumeValue(normalized, [
+      /(?:期望薪资|薪资要求|期望工资)[:：]?\s*([^，。；;\n]{2,30})/i,
+    ]),
+    latestCompany: byLabel('最近工作经历', '最近公司', '现任公司', '就职公司') || extractResumeValue(normalized, [
+      /(?:最近工作经历|最近公司|现任公司|就职公司)[:：]?\s*([^，。；;\n]{2,60})/i,
+    ]),
+    skills: [...new Set([...collectResumeSkills(normalized), ...skillsFromEntities])].slice(0, 8),
+    highlights: [...new Set([...highlightsFromClaims, ...extractResumeHighlights(text)])].slice(0, 4),
+  };
+
+  const hasAnyValue = Object.values(fields).some((value) => Array.isArray(value) ? value.length : Boolean(value));
+  if (fields.candidateName && !isLikelyResumePersonName(fields.candidateName)) {
+    fields.candidateName = inferResumeNameFromTitle(titleText);
+  }
+  return hasAnyValue ? fields : undefined;
+}
+
 function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'high' | undefined {
   if (category !== 'contract') return undefined;
   const normalized = text.toLowerCase();
@@ -940,6 +1100,17 @@ function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'hi
 }
 
 function detectTopicTags(text: string, category: string, bizCategory: ParsedDocument['bizCategory']) {
+  if (category === 'resume') {
+    const normalized = text.toLowerCase();
+    const tags = ['人才简历'];
+    if (/(java|spring|backend|后端)/i.test(normalized)) tags.push('Java后端');
+    if (/(产品经理|product manager|axure|xmind)/i.test(normalized)) tags.push('产品经理');
+    if (/(算法|machine learning|deep learning)/i.test(normalized)) tags.push('算法工程师');
+    if (/(前端|frontend|react|vue)/i.test(normalized)) tags.push('前端开发');
+    if (/(技术总监|技术负责人|cto)/i.test(normalized)) tags.push('技术管理');
+    return tags;
+  }
+
   if (category !== 'technical' && category !== 'paper' && bizCategory !== 'paper') return [];
 
   const normalized = text.toLowerCase();
@@ -1092,12 +1263,14 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
     const evidenceChunks = splitEvidenceChunks(text);
     const contractFields = extractContractFields(normalizedText, category);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
+    const resumeFields = extractResumeFields(text, inferTitle(text, name), structured.entities, structured.claims);
+    const inferredTitle = inferTitle(text, name);
 
     return {
       path: filePath,
       name,
       ext,
-      title: inferTitle(text, name),
+      title: inferredTitle,
       category,
       bizCategory,
       parseStatus: 'parsed',
@@ -1110,6 +1283,7 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       entities: structured.entities,
       claims: structured.claims,
       intentSlots: structured.intentSlots,
+      resumeFields,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
       groups,
