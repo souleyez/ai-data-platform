@@ -407,7 +407,7 @@ function resolveKnowledgeScope(
   if (!scopedDocs.length && groupKeys.size) {
     const groupScopedItems = items.filter((item) => getDocumentGroups(item).some((group) => groupKeys.has(group)));
     scopedDocs = matchDocumentsByPrompt(groupScopedItems, prompt);
-    if (!scopedDocs.length) scopedDocs = groupScopedItems.slice(0, 3);
+    if (!scopedDocs.length) scopedDocs = groupScopedItems;
   }
 
   const libraryMap = new Map(libraries.map((item) => [item.key, item.label]));
@@ -1182,7 +1182,7 @@ export async function runChatOrchestration(input: ChatRequestInput) {
   const { items } = await loadParsedDocuments();
   const initialEvidenceMatches = matchDocumentEvidenceByPrompt(items, prompt);
   const initialMatchedDocs = initialEvidenceMatches.length
-    ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()].slice(0, 3)
+    ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()]
     : matchDocumentsByPrompt(items, prompt);
   const libraries = await loadDocumentLibraries();
   const scope = resolveKnowledgeScope(prompt, items, initialMatchedDocs, libraries);

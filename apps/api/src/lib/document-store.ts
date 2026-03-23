@@ -482,7 +482,7 @@ function scoreChunkMatch(text: string, keywords: string[]) {
   return score;
 }
 
-export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string) {
+export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string, limit = Number.POSITIVE_INFINITY) {
   const keywords = extractPromptKeywords(prompt);
   if (!keywords.length) return [];
   const promptIntent = detectPromptIntent(keywords);
@@ -501,11 +501,11 @@ export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string) 
     })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
+    .slice(0, Number.isFinite(limit) ? limit : undefined)
     .map((entry) => entry.item);
 }
 
-export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: string) {
+export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: string, limit = Number.POSITIVE_INFINITY) {
   const keywords = extractPromptKeywords(prompt);
   if (!keywords.length) return [] as DocumentEvidenceMatch[];
   const promptIntent = detectPromptIntent(keywords);
@@ -547,7 +547,7 @@ export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: s
     if (seenDocKeys.has(docKey)) continue;
     seenDocKeys.add(docKey);
     deduped.push(entry);
-    if (deduped.length >= 8) break;
+    if (Number.isFinite(limit) && deduped.length >= limit) break;
   }
 
   return deduped;
@@ -583,7 +583,7 @@ export function matchResumeDocuments(items: ParsedDocument[], prompt: string, li
     .filter((item) => looksLikeResumeDocument(item))
     .map((item) => ({
       item,
-      score: scoreDocumentMatch(item, keywords, 'doc') + (item.resumeFields ? 12 : 0),
+      score: scoreDocumentMatch(item, keywords, 'mixed') + (item.resumeFields ? 12 : 0),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
