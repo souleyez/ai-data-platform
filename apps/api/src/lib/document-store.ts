@@ -552,3 +552,40 @@ export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: s
 
   return deduped;
 }
+
+function looksLikeResumeDocument(item: ParsedDocument) {
+  const evidence = [
+    item.name,
+    item.title,
+    item.category,
+    item.summary,
+    item.excerpt,
+    (item.topicTags || []).join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return item.parseStatus === 'parsed'
+    && (
+      item.category === 'resume'
+      || evidence.includes('简历')
+      || evidence.includes('resume')
+      || evidence.includes('cv')
+      || evidence.includes('候选人')
+      || evidence.includes('人才简历')
+    );
+}
+
+export function matchResumeDocuments(items: ParsedDocument[], prompt: string, limit = 30) {
+  const keywords = extractPromptKeywords(prompt);
+  return items
+    .filter((item) => looksLikeResumeDocument(item))
+    .map((item) => ({
+      item,
+      score: scoreDocumentMatch(item, keywords, 'doc') + (item.resumeFields ? 12 : 0),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.item);
+}

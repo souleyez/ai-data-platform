@@ -1,4 +1,4 @@
-import { buildDocumentId, loadParsedDocuments, matchDocumentEvidenceByPrompt, matchDocumentsByPrompt, type DocumentEvidenceMatch } from './document-store.js';
+import { buildDocumentId, loadParsedDocuments, matchDocumentEvidenceByPrompt, matchDocumentsByPrompt, matchResumeDocuments, type DocumentEvidenceMatch } from './document-store.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { buildBlockedPolicyAnswer, buildGeneralChatSystemPrompt, classifyChatPrompt } from './chat-policy.js';
 import { resolveScenario, scenarios, type ScenarioKey } from './mock-data.js';
@@ -1223,8 +1223,12 @@ export async function runChatOrchestration(input: ChatRequestInput) {
   }
 
   if (isResumeComparePrompt(prompt)) {
-    const compareDocs = matchedDocs.length ? matchedDocs : initialMatchedDocs;
-    const compareEvidence = matchedDocs.length ? referencePayload : buildReferencePayload(initialEvidenceMatches);
+    const resumeDocs = matchResumeDocuments(items, prompt, 30);
+    const compareDocs = resumeDocs.length ? resumeDocs : (matchedDocs.length ? matchedDocs : initialMatchedDocs);
+    const compareEvidenceMatches = compareDocs.length ? matchDocumentEvidenceByPrompt(compareDocs, prompt) : [];
+    const compareEvidence = compareEvidenceMatches.length
+      ? buildReferencePayload(compareEvidenceMatches)
+      : (matchedDocs.length ? referencePayload : buildReferencePayload(initialEvidenceMatches));
     const compareResult = buildResumeCompareTable(compareDocs);
     return {
       scenario: 'doc' as ScenarioKey,
