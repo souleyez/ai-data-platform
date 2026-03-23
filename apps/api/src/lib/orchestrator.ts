@@ -551,9 +551,12 @@ function inferResumeNameFromTitle(value: string) {
     .replace(/\.[a-z0-9]+$/i, '')
     .replace(/[_-]+/g, ' ')
     .trim();
-  const named = normalized.match(/简历[-\s(（]*([\u4e00-\u9fff·]{2,12})|([\u4e00-\u9fff·]{2,12})[-\s]*简历/);
-  const fallback = named?.[1] || named?.[2] || normalized.match(/[\u4e00-\u9fff·]{2,12}/)?.[0] || normalized;
-  return fallback;
+  const afterResume = normalized.match(/简历[\s\-_(（]*([\u4e00-\u9fff·]{2,12})/);
+  if (afterResume?.[1] && afterResume[1] !== '我的') return afterResume[1];
+  const beforeResume = normalized.match(/([\u4e00-\u9fff·]{2,12})[\s\-]*简历/);
+  if (beforeResume?.[1] && beforeResume[1] !== '我的') return beforeResume[1];
+  const candidates = normalized.match(/[\u4e00-\u9fff·]{2,12}/g) || [];
+  return candidates.find((item) => item !== '我的' && item !== '简历') || normalized;
 }
 
 function inferResumeNameFromDocument(item: ParsedDocument) {
@@ -575,7 +578,7 @@ function inferResumeRoleFromDocument(item: ParsedDocument) {
 function buildResumeHighlights(item: ParsedDocument) {
   const claimHighlights = (item.claims || [])
     .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
-    .filter((entry) => entry && !/related_to 人才简历|related_to Java后端/i.test(entry));
+    .filter((entry) => entry && !/related_to 人才简历|related_to Java后端|related_to 产品经理|related_to 算法工程师|^铁\s/i.test(entry));
   return claimHighlights.slice(0, 2).join('；')
     || (item.resumeFields?.highlights || []).slice(0, 2).join('；')
     || trimSentence(item.summary || item.excerpt, 80)
