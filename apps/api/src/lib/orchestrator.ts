@@ -556,6 +556,32 @@ function inferResumeNameFromTitle(value: string) {
   return fallback;
 }
 
+function inferResumeNameFromDocument(item: ParsedDocument) {
+  const candidates = [item.name, item.title];
+  for (const value of candidates) {
+    const inferred = inferResumeNameFromTitle(value);
+    if (isLikelyPersonName(inferred)) return inferred;
+  }
+  return '';
+}
+
+function inferResumeRoleFromDocument(item: ParsedDocument) {
+  const evidence = `${item.name} ${item.title}`;
+  const parenMatch = evidence.match(/[（(]([^()（）]{2,40})[)）]/);
+  if (parenMatch?.[1]) return parenMatch[1].replace(/^原/, '').trim();
+  return inferResumeRole(evidence);
+}
+
+function buildResumeHighlights(item: ParsedDocument) {
+  const claimHighlights = (item.claims || [])
+    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
+    .filter((entry) => entry && !/related_to 人才简历|related_to Java后端/i.test(entry));
+  return claimHighlights.slice(0, 2).join('；')
+    || (item.resumeFields?.highlights || []).slice(0, 2).join('；')
+    || trimSentence(item.summary || item.excerpt, 80)
+    || '待补充';
+}
+
 function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
   const resume = item.resumeFields;
   const sourceText = [
@@ -573,13 +599,13 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
     .replace(/\.[a-z0-9]+$/i, '')
     .trim();
 
-  const rawCandidate = resume?.candidateName || extractResumeField(compactText, [
+  const rawCandidate = resume?.candidateName || inferResumeNameFromDocument(item) || extractResumeField(compactText, [
     /(?:姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
     /(?:候选人)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
   ]) || inferResumeNameFromTitle(normalizedTitle);
   const candidate = isLikelyPersonName(rawCandidate) ? rawCandidate : inferResumeNameFromTitle(normalizedTitle);
 
-  const role = resume?.targetRole || resume?.currentRole || extractResumeField(compactText, [
+  const role = resume?.targetRole || resume?.currentRole || inferResumeRoleFromDocument(item) || extractResumeField(compactText, [
     /(?:应聘岗位|目标岗位|求职方向|当前职位|岗位|职位)[:：]?\s*([^，。；;\n]{2,40})/i,
   ]) || inferResumeRole(compactText) || '待识别';
 
@@ -597,14 +623,7 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
     || (item.intentSlots?.ingredients || []).slice(0, 6).join(' / ')
     || '待识别';
 
-  const highlights = (resume?.highlights || []).slice(0, 2).join('；')
-    || (item.claims || [])
-    .slice(0, 2)
-    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
-    .filter(Boolean)
-    .join('；')
-    || trimSentence(item.summary || item.excerpt || compactText, 80)
-    || '待补充';
+  const highlights = buildResumeHighlights(item);
 
   return {
     candidate,
