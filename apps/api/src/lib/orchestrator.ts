@@ -594,7 +594,7 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
     .filter(Boolean)
     .join('\n');
   const compactText = String(sourceText || '').replace(/\s+/g, ' ').trim();
-  const normalizedTitle = String(item.title || item.name || '')
+  const normalizedTitle = String(item.name || item.title || '')
     .replace(/^\d{10,}-/, '')
     .replace(/\.[a-z0-9]+$/i, '')
     .trim();
@@ -603,7 +603,7 @@ function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
     /(?:姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
     /(?:候选人)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
   ]) || inferResumeNameFromTitle(normalizedTitle);
-  const candidate = isLikelyPersonName(rawCandidate) ? rawCandidate : inferResumeNameFromTitle(normalizedTitle);
+  const candidate = isLikelyPersonName(rawCandidate) ? rawCandidate : (inferResumeNameFromDocument(item) || inferResumeNameFromTitle(normalizedTitle));
 
   const role = resume?.targetRole || resume?.currentRole || inferResumeRoleFromDocument(item) || extractResumeField(compactText, [
     /(?:应聘岗位|目标岗位|求职方向|当前职位|岗位|职位)[:：]?\s*([^，。；;\n]{2,40})/i,
