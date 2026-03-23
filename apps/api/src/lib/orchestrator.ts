@@ -53,6 +53,15 @@ type KnowledgeScope = {
   hasScope: boolean;
 };
 
+type ResumeCompareRow = {
+  candidate: string;
+  role: string;
+  years: string;
+  education: string;
+  skills: string;
+  highlights: string;
+};
+
 const FORMULA_COLUMNS = ['模块', '建议原料', '建议添加量', '核心作用', '配方说明'];
 const PET_FORMULA_PATTERN = /(\u5e7c\u732b|kitten|\u6210\u732b|adult cat|\u5e7c\u72ac|puppy|\u6210\u72ac|adult dog|\u5ba0\u7269|pet|\u732b|\u732b\u54aa|cat|\u72d7|\u72ac|\u72d7\u72d7|dog|canine)/i;
 const PET_MILK_PATTERN = /(\u4e73\u54c1|\u5976\u5236\u54c1|\u4e73\u5236\u54c1|\u5976\u7c89|\u4e73\u7c89|\u732b\u5976|\u72ac\u5976|\u72d7\u5976|\u7f8a\u5976|\u7f8a\u5976\u7c89|milk|dairy)/i;
@@ -64,6 +73,7 @@ const CAT_PATTERN = /(\u732b|\u732b\u54aa|cat|feline)/i;
 const DOG_PATTERN = /(\u72d7|\u72ac|\u72d7\u72d7|dog|canine)/i;
 const PET_PATTERN = /(\u5ba0\u7269|pet|\u4f34\u4fa3\u52a8\u7269)/i;
 const MILK_PATTERN = /(\u5976\u7c89|\u4e73\u7c89|\u4e73\u54c1|\u5976\u5236\u54c1|\u4e73\u5236\u54c1|milk powder|milk formula|dairy|\u7f8a\u5976|\u7f8a\u5976\u7c89|\u732b\u5976|\u72ac\u5976|\u72d7\u5976)/i;
+const RESUME_COMPARE_PATTERN = /(\u7b80\u5386|resume|cv|\u4eba\u624d|\u5019\u9009\u4eba).*(\u5bf9\u6bd4|\u5bf9\u7167|\u6bd4\u8f83|\u8868\u683c|table)|(\u5bf9\u6bd4|\u5bf9\u7167|\u6bd4\u8f83).*(\u7b80\u5386|resume|cv|\u4eba\u624d|\u5019\u9009\u4eba)/i;
 
 function trimSentence(text: string, limit = 220) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
@@ -476,6 +486,127 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   if (matchedDocs.length) parts.push(`命中文档 ${matchedDocs.length} 篇`);
   parts.push(mode === 'openclaw' ? '分析链路：云端模型增强' : '分析链路：本地AI');
   return parts.join(' / ');
+}
+
+function isResumeComparePrompt(prompt: string) {
+  return RESUME_COMPARE_PATTERN.test(String(prompt || ''));
+}
+
+function extractResumeField(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const value = match?.[1] || match?.[2];
+    if (value) return String(value).replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+function pickResumeSkills(text: string) {
+  const keywords = [
+    'Java', 'Python', 'Go', 'C++', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Kafka',
+    'React', 'Vue', 'Node.js', 'Node', 'TypeScript', 'JavaScript', 'Spring Boot',
+    '微服务', '分布式', '机器学习', '数据分析', '产品设计', '用户研究', '运营增长',
+    '销售管理', '项目管理', '供应链', '财务分析', '品牌营销', '招聘', '绩效管理',
+  ];
+  const hits = keywords.filter((keyword) => new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text));
+  return [...new Set(hits)].slice(0, 6).join(' / ');
+}
+
+function inferResumeRole(text: string) {
+  const patterns: Array<[RegExp, string]> = [
+    [/(java\s*后端|java backend|后端开发)/i, 'Java后端'],
+    [/(前端开发|frontend|react|vue)/i, '前端开发'],
+    [/(产品经理|product manager)/i, '产品经理'],
+    [/(算法工程师|machine learning|深度学习)/i, '算法工程师'],
+    [/(数据分析|data analyst|商业分析)/i, '数据分析'],
+    [/(运营|growth|增长)/i, '运营'],
+    [/(销售|客户成功|business development)/i, '销售/商务'],
+    [/(hr|招聘|人力资源)/i, '人力资源'],
+    [/(设计师|ui\/ux|视觉设计)/i, '设计'],
+  ];
+  const found = patterns.find(([pattern]) => pattern.test(text));
+  return found?.[1] || '';
+}
+
+function extractResumeCompareRow(item: ParsedDocument): ResumeCompareRow {
+  const sourceText = [
+    item.title,
+    item.summary,
+    item.excerpt,
+    item.fullText,
+    ...(item.topicTags || []),
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const compactText = String(sourceText || '').replace(/\s+/g, ' ').trim();
+  const normalizedTitle = String(item.title || item.name || '')
+    .replace(/^\d{10,}-/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .trim();
+
+  const candidate = extractResumeField(compactText, [
+    /(姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+    /候选人[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
+  ]) || normalizedTitle;
+
+  const role = extractResumeField(compactText, [
+    /(应聘岗位|目标岗位|求职方向|当前职位|岗位|职位)[:：]?\s*([^，。；;\n]{2,40})/i,
+  ]) || inferResumeRole(compactText) || '待识别';
+
+  const years = extractResumeField(compactText, [
+    /(\d{1,2}\+?\s*年(?:工作经验)?)/i,
+    /(工作经验[^，。；;\n]{0,12}\d{1,2}\+?\s*年)/i,
+  ]) || '待识别';
+
+  const education = extractResumeField(compactText, [
+    /(博士|硕士|本科|大专|中专|MBA|EMBA|研究生)/i,
+  ]) || '待识别';
+
+  const skills = pickResumeSkills(compactText)
+    || (item.intentSlots?.ingredients || []).slice(0, 6).join(' / ')
+    || '待识别';
+
+  const highlights = (item.claims || [])
+    .slice(0, 2)
+    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
+    .filter(Boolean)
+    .join('；')
+    || trimSentence(item.summary || item.excerpt || compactText, 80)
+    || '待补充';
+
+  return {
+    candidate,
+    role,
+    years,
+    education,
+    skills,
+    highlights,
+  };
+}
+
+function buildResumeCompareTable(matchedDocs: ParsedDocument[]) {
+  const rows = matchedDocs.slice(0, 5).map((item) => {
+    const row = extractResumeCompareRow(item);
+    return [row.candidate, row.role, row.years, row.education, row.skills, row.highlights];
+  });
+
+  return {
+    content: rows.length
+      ? '已根据当前命中的简历资料生成对比表。'
+      : '当前没有命中可用于生成简历对比表的资料。',
+    table: {
+      title: '人才简历对比表',
+      subtitle: `当前纳入对比 ${rows.length} 份资料`,
+      columns: ['候选人', '目标岗位', '经验', '学历', '核心技能', '亮点'],
+      rows,
+      notes: [
+        '当前为基础对比表，优先展示岗位、年限、学历、技能和亮点。',
+        '如果需要针对某岗位 JD 对比，可继续在对话里补充岗位要求。',
+      ],
+      templateLabel: '表格',
+      groupLabel: '人才简历库',
+    },
+  };
 }
 
 function isFormulaAdvicePrompt(prompt: string) {
@@ -1030,6 +1161,32 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       orchestration: {
         mode: 'fallback' as const,
         docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if (isResumeComparePrompt(prompt)) {
+    const compareDocs = matchedDocs.length ? matchedDocs : initialMatchedDocs;
+    const compareEvidence = matchedDocs.length ? referencePayload : buildReferencePayload(initialEvidenceMatches);
+    const compareResult = buildResumeCompareTable(compareDocs);
+    return {
+      scenario: 'doc' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: compareResult.content,
+        table: compareResult.table,
+        meta: buildMeta('doc', compareDocs, 'fallback'),
+        references: compareEvidence,
+      },
+      panel: scenarios.doc,
+      sources: compareDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: compareDocs.length,
         gatewayConfigured: gatewayReachable,
       },
       latencyMs: 120,
