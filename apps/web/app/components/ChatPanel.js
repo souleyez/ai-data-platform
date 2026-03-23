@@ -205,6 +205,20 @@ export default function ChatPanel({
                             ))}
                           </div>
                         ) : null}
+                        {Array.isArray(ref.structured) && ref.structured.length ? (
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            {ref.structured.map((entry, entryIndex) => (
+                              <span key={`${ref.id}-structured-${entryIndex}`}>结构化：{entry}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {Array.isArray(ref.claims) && ref.claims.length ? (
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            {ref.claims.map((entry, entryIndex) => (
+                              <span key={`${ref.id}-claim-${entryIndex}`}>关系：{entry}</span>
+                            ))}
+                          </div>
+                        ) : null}
                         <em>
                           {ref.category === 'contract'
                             ? `合同风险：${ref.riskLevel || 'unknown'}`

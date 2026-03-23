@@ -53,6 +53,17 @@ export function getPythonCommandCandidates() {
   return unique(commands);
 }
 
+export function getUIEPythonCommandCandidates() {
+  const commands = [
+    process.env.PADDLE_UIE_PYTHON_BIN || '',
+    'C:\\Users\\soulzyn\\develop\\python-envs\\paddle-uie-runtime310\\Scripts\\python.exe',
+    'C:\\Users\\soulzyn\\develop\\python-envs\\paddle-uie-runtime\\Scripts\\python.exe',
+    ...getPythonCommandCandidates(),
+  ];
+
+  return unique(commands);
+}
+
 export function getOcrMyPdfCommandCandidates() {
   const commands = [process.env.OCRMYPDF_BIN || ''];
 

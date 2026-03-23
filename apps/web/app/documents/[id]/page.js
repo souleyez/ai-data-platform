@@ -1,59 +1,71 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Sidebar from '../../components/Sidebar';
 import { buildApiUrl } from '../../lib/config';
 import { normalizeDatasourceResponse, normalizeDocumentDetailResponse } from '../../lib/types';
 import { sourceItems } from '../../lib/mock-data';
-import { DEFAULT_CUSTOM_DOCUMENT_CATEGORIES } from '../../lib/document-taxonomy';
+import { getDocumentGroupLabel, getPrimaryCategoryLabel } from '../../lib/document-taxonomy';
 
-const BIZ_CATEGORY_LABELS = {
-  paper: '学术论文',
-  contract: '合同协议',
-  daily: '工作日报',
-  invoice: '发票凭据',
-  order: '订单分析',
-  service: '客服采集',
-  inventory: '库存监控',
+const PARSE_METHOD_LABELS = {
+  'text-utf8': 'UTF-8 文本',
+  'markdown-utf8': 'Markdown',
+  'csv-utf8': 'CSV',
+  'json-parse': 'JSON',
+  'html-strip': 'HTML 清洗',
+  mammoth: 'DOCX 提取',
+  'xlsx-sheet-reader': '表格读取',
+  'pdf-parse': 'PDF 文本',
+  pypdf: 'PyPDF',
+  'pdf-auto': 'PDF 自动解析',
+  'ocr-fallback': 'OCR fallback',
+  unsupported: '暂不支持',
+  error: '解析失败',
 };
 
-function DetailCard({ title, subtitle, children }) {
+function DetailCard({ title, children }) {
   return (
     <section className="card documents-card">
       <div className="panel-header">
-        <div>
-          <h3>{title}</h3>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
+        <div><h3>{title}</h3></div>
       </div>
       {children}
     </section>
   );
 }
 
-export default function DocumentDetailPage({ params }) {
+export default function DocumentDetailPage() {
+  const params = useParams();
+  const documentId = Array.isArray(params?.id) ? params.id[0] : params?.id;
+
   const [data, setData] = useState(null);
   const [meta, setMeta] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [groupInput, setGroupInput] = useState('');
-  const [groupSaving, setGroupSaving] = useState(false);
-  const [notice, setNotice] = useState('');
-
-  async function loadDetail() {
-    try {
-      const response = await fetch(buildApiUrl(`/api/documents/${params.id}`));
-      if (!response.ok) throw new Error('load detail failed');
-      const json = await response.json();
-      const normalized = normalizeDocumentDetailResponse(json);
-      setData(normalized.item);
-      setMeta(normalized.meta);
-    } catch {
-      setError('文档详情加载失败');
-    }
-  }
+  const [keyword, setKeyword] = useState('');
 
   useEffect(() => {
+    async function loadDetail() {
+      if (!documentId) return;
+
+      try {
+        setLoading(true);
+        setError('');
+        const response = await fetch(buildApiUrl(`/api/documents/detail?id=${encodeURIComponent(documentId)}`), { cache: 'no-store' });
+        if (!response.ok) throw new Error('load detail failed');
+        const json = await response.json();
+        const normalized = normalizeDocumentDetailResponse(json);
+        setData(normalized.item);
+        setMeta(normalized.meta);
+      } catch {
+        setError('文档详情加载失败');
+      } finally {
+        setLoading(false);
+      }
+    }
+
     async function loadDatasources() {
       try {
         const response = await fetch(buildApiUrl('/api/datasources'));
@@ -68,54 +80,15 @@ export default function DocumentDetailPage({ params }) {
 
     loadDetail();
     loadDatasources();
-  }, [params.id]);
+  }, [documentId]);
 
   const currentGroups = useMemo(() => data?.confirmedGroups || data?.groups || [], [data]);
-  const suggestedGroups = useMemo(() => {
-    const available = data?.groups || [];
-    return available.filter((group) => !currentGroups.includes(group));
-  }, [data, currentGroups]);
-  const allKnownGroups = useMemo(() => {
-    const defaults = DEFAULT_CUSTOM_DOCUMENT_CATEGORIES.map((item) => item.key);
-    return [...new Set([...defaults, ...(data?.groups || []), ...(data?.confirmedGroups || [])])];
-  }, [data]);
-
-  const saveGroups = async (groups) => {
-    setGroupSaving(true);
-    setNotice('');
-    try {
-      const response = await fetch(buildApiUrl('/api/documents/groups'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: [{ id: params.id, groups }] }),
-      });
-      const raw = await response.text();
-      const json = raw ? JSON.parse(raw) : {};
-      if (!response.ok) throw new Error(json?.error || raw || 'save groups failed');
-      setNotice(json?.message || '分组已保存');
-      await loadDetail();
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : '分组保存失败');
-    } finally {
-      setGroupSaving(false);
-    }
-  };
-
-  const addGroup = async () => {
-    const next = String(groupInput || '').trim();
-    if (!next) return;
-    await saveGroups([...new Set([...currentGroups, next])]);
-    setGroupInput('');
-  };
-
-  const removeGroup = async (group) => {
-    await saveGroups(currentGroups.filter((item) => item !== group));
-  };
-
-  const acceptSuggestedGroups = async () => {
-    if (!suggestedGroups.length) return;
-    await saveGroups([...new Set([...currentGroups, ...suggestedGroups])]);
-  };
+  const fullText = useMemo(() => String(data?.fullText || data?.excerpt || '').trim(), [data]);
+  const highlightedText = useMemo(() => {
+    if (!keyword.trim() || !fullText) return fullText;
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return fullText.replace(new RegExp(escaped, 'gi'), (match) => `<<<HIT>>>${match}<<<END>>>`);
+  }, [fullText, keyword]);
 
   return (
     <div className="app-shell">
@@ -124,15 +97,16 @@ export default function DocumentDetailPage({ params }) {
         <header className="topbar">
           <div>
             <h2>文档详情</h2>
-            <p>查看单个文档的分类、分组、归类依据、结构化字段、摘要与摘录。</p>
+            <p>以原文阅读为主，其他信息只保留必要摘要和结构化结果。</p>
           </div>
           <div className="topbar-actions">
             <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
           </div>
         </header>
 
+        {loading ? <p>加载中...</p> : null}
         {error ? <p>{error}</p> : null}
-        {notice ? <div className="page-note">{notice}</div> : null}
+
         {data ? (
           <section className="documents-layout">
             <section className="card table-card">
@@ -143,97 +117,109 @@ export default function DocumentDetailPage({ params }) {
                 </div>
               </div>
               <div className="message-refs">
-                <span className="source-chip">业务分类：{BIZ_CATEGORY_LABELS[meta?.bizCategory] || meta?.bizCategory || '-'}</span>
-                <span className="source-chip">解析分类：{meta?.category || '-'}</span>
-                <span className="source-chip">解析状态：{meta?.parseStatus || '-'}</span>
-                <span className="source-chip">扩展名：{data.ext}</span>
-                <span className="source-chip">提取字符：{data.extractedChars}</span>
+                <span className="source-chip">业务类：{getPrimaryCategoryLabel(meta?.bizCategory)}</span>
+                <span className="source-chip">知识库：{currentGroups.length ? currentGroups.map(getDocumentGroupLabel).join('、') : '未分组'}</span>
+                <span className="source-chip">解析状态：{data.parseStatus || '-'}</span>
+                <span className="source-chip">解析方式：{PARSE_METHOD_LABELS[data.parseMethod] || data.parseMethod || '-'}</span>
+                <span className="source-chip">提取字符：{data.extractedChars ?? 0}</span>
+                {data.retentionStatus === 'structured-only' ? <span className="source-chip">仅保留结构化数据</span> : null}
               </div>
             </section>
 
-            <section className="documents-grid three-columns">
-              <DetailCard title="当前分组" subtitle="一份资料可属于多个分组。">
-                <div className="message-refs" style={{ gap: 8 }}>
-                  {currentGroups.length ? currentGroups.map((group) => (
-                    <span key={group} className="ref-chip">
-                      {getDocumentGroupLabel(group)}
-                      <button className="ghost-btn" style={{ marginLeft: 8 }} onClick={() => removeGroup(group)} disabled={groupSaving}>移除</button>
-                    </span>
-                  )) : <div className="page-note" style={{ marginBottom: 0 }}>当前还没有已确认分组。</div>}
-                </div>
-              </DetailCard>
+            <section className="document-reader-layout">
+              <div className="document-reader-main">
+                <section className="card documents-card">
+                  <div className="panel-header">
+                    <div>
+                      <h3>文档原文</h3>
+                      <p>这里显示当前可用于问答和输出的正文内容。</p>
+                    </div>
+                    <div style={{ minWidth: 260 }}>
+                      <input
+                        className="filter-input"
+                        value={keyword}
+                        onChange={(event) => setKeyword(event.target.value)}
+                        placeholder="搜索原文关键字..."
+                      />
+                    </div>
+                  </div>
+                  <div className="document-raw-view">
+                    {highlightedText
+                      ? highlightedText.split('<<<HIT>>>').map((segment, index) => {
+                        if (!segment.includes('<<<END>>>')) return <span key={index}>{segment}</span>;
+                        const [hit, rest] = segment.split('<<<END>>>');
+                        return (
+                          <span key={index}>
+                            <mark>{hit}</mark>
+                            {rest}
+                          </span>
+                        );
+                      })
+                      : '当前没有可展示的正文内容。'}
+                  </div>
+                </section>
+              </div>
 
-              <DetailCard title="AI 建议分组" subtitle="可直接一键接纳。">
-                <div className="message-refs" style={{ gap: 8 }}>
-                  {suggestedGroups.length ? suggestedGroups.map((group) => <span key={group} className="source-chip">{group}</span>) : <span className="source-chip">暂无新增建议</span>}
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <button className="primary-btn" onClick={acceptSuggestedGroups} disabled={!suggestedGroups.length || groupSaving}>接纳建议分组</button>
-                </div>
-              </DetailCard>
+              <aside className="document-reader-aside">
+                <DetailCard title="摘要">
+                  <div className="summary-cell" style={{ maxWidth: 'none' }}>{data.summary || '-'}</div>
+                </DetailCard>
 
-              <DetailCard title="手动增加分组" subtitle="支持补一个自定义分组。">
-                <input className="filter-input" value={groupInput} onChange={(event) => setGroupInput(event.target.value)} placeholder={`例如：${allKnownGroups[0] || '脑健康'}`} />
-                <div style={{ marginTop: 12 }}>
-                  <button className="primary-btn" onClick={addGroup} disabled={!groupInput.trim() || groupSaving}>添加分组</button>
-                </div>
-              </DetailCard>
-            </section>
-
-            <section className="documents-grid three-columns">
-              <DetailCard title="归类依据" subtitle="当前按目录绑定优先，其次才回退到规则推断。">
-                {meta?.matchedFolders?.length ? (
+                <DetailCard title="结构化结果">
                   <div className="message-ref-list">
-                    {meta.matchedFolders.map((item) => (
-                      <div key={item.key} className="message-ref-item">
-                        <strong>{item.label}</strong>
-                        <span>{item.folders.join('、')}</span>
+                    <div className="message-ref-item"><strong>主题标签</strong><span>{data.topicTags?.join('、') || '-'}</span></div>
+                    <div className="message-ref-item"><strong>合同编号</strong><span>{data.contractFields?.contractNo || '-'}</span></div>
+                    <div className="message-ref-item"><strong>合同金额</strong><span>{data.contractFields?.amount || '-'}</span></div>
+                    <div className="message-ref-item"><strong>付款条款</strong><span>{data.contractFields?.paymentTerms || '-'}</span></div>
+                    <div className="message-ref-item"><strong>期限</strong><span>{data.contractFields?.duration || '-'}</span></div>
+                  </div>
+                </DetailCard>
+
+                <DetailCard title="意图槽位">
+                  <div className="message-ref-list">
+                    <div className="message-ref-item"><strong>人群</strong><span>{data.intentSlots?.audiences?.join('、') || '-'}</span></div>
+                    <div className="message-ref-item"><strong>成分</strong><span>{data.intentSlots?.ingredients?.join('、') || '-'}</span></div>
+                    <div className="message-ref-item"><strong>菌株</strong><span>{data.intentSlots?.strains?.join('、') || '-'}</span></div>
+                    <div className="message-ref-item"><strong>功效</strong><span>{data.intentSlots?.benefits?.join('、') || '-'}</span></div>
+                    <div className="message-ref-item"><strong>剂量/指标</strong><span>{[...(data.intentSlots?.doses || []), ...(data.intentSlots?.metrics || [])].join('、') || '-'}</span></div>
+                  </div>
+                </DetailCard>
+
+                <DetailCard title="实体抽取">
+                  <div className="message-refs" style={{ gap: 8 }}>
+                    {(data.entities || []).slice(0, 24).map((entity, index) => (
+                      <span key={`${entity.type}-${entity.text}-${index}`} className="source-chip">
+                        {entity.type}: {entity.text}
+                      </span>
+                    ))}
+                    {!data.entities?.length ? <div className="page-note" style={{ marginBottom: 0 }}>当前还没有抽取到实体。</div> : null}
+                  </div>
+                </DetailCard>
+
+                <DetailCard title="关系/结论">
+                  <div className="message-ref-list">
+                    {(data.claims || []).slice(0, 10).map((claim, index) => (
+                      <div key={`${claim.subject}-${claim.predicate}-${claim.object}-${index}`} className="message-ref-item">
+                        <strong>{claim.subject}</strong>
+                        <span>{claim.predicate} {claim.object}</span>
                       </div>
                     ))}
+                    {!data.claims?.length ? <div className="page-note" style={{ marginBottom: 0 }}>当前还没有抽取到关系或结论。</div> : null}
                   </div>
-                ) : (
-                  <div className="page-note" style={{ marginBottom: 0 }}>当前未明确命中目录绑定，归类结果来自系统规则推断。</div>
-                )}
-              </DetailCard>
+                </DetailCard>
 
-              <DetailCard title="业务结果" subtitle="不同类型文档会显示不同的关键字段。">
-                <div className="message-ref-list">
-                  <div className="message-ref-item"><strong>风险等级</strong><span>{data.riskLevel || '-'}</span></div>
-                  <div className="message-ref-item"><strong>主题标签</strong><span>{data.topicTags?.join('、') || '-'}</span></div>
-                  <div className="message-ref-item"><strong>建议分组</strong><span>{(data.groups || []).join('、') || '-'}</span></div>
-                  <div className="message-ref-item"><strong>合同编号</strong><span>{data.contractFields?.contractNo || '-'}</span></div>
-                </div>
-              </DetailCard>
-
-              <DetailCard title="解析状态" subtitle="当前只读解析链路的基础状态。">
-                <div className="message-ref-list">
-                  <div className="message-ref-item"><strong>解析状态</strong><span>{data.parseStatus}</span></div>
-                  <div className="message-ref-item"><strong>扩展名</strong><span>{data.ext}</span></div>
-                  <div className="message-ref-item"><strong>提取字符数</strong><span>{data.extractedChars}</span></div>
-                </div>
-              </DetailCard>
-            </section>
-
-            <section className="documents-grid">
-              <DetailCard title="结构化字段" subtitle="当前主要对合同类做了首版结构化字段抽取。">
-                <table>
-                  <tbody>
-                    <tr><th>合同编号</th><td>{data.contractFields?.contractNo || '-'}</td></tr>
-                    <tr><th>合同金额</th><td>{data.contractFields?.amount || '-'}</td></tr>
-                    <tr><th>付款条款</th><td className="summary-cell">{data.contractFields?.paymentTerms || '-'}</td></tr>
-                    <tr><th>期限</th><td className="summary-cell">{data.contractFields?.duration || '-'}</td></tr>
-                  </tbody>
-                </table>
-              </DetailCard>
-
-              <DetailCard title="内容摘要与摘录" subtitle="用于问答、引用与后续结构化提炼。">
-                <table>
-                  <tbody>
-                    <tr><th>摘要</th><td className="summary-cell">{data.summary}</td></tr>
-                    <tr><th>原文摘录</th><td className="summary-cell">{data.excerpt}</td></tr>
-                  </tbody>
-                </table>
-              </DetailCard>
+                <DetailCard title="证据片段">
+                  <div className="message-ref-list">
+                    {(data.evidenceChunks || []).slice(0, 6).map((chunk) => (
+                      <div key={chunk.id} className="message-ref-item">
+                        <strong>{chunk.title || `片段 ${chunk.order + 1}`}</strong>
+                        <span>{chunk.text}</span>
+                      </div>
+                    ))}
+                    {!data.evidenceChunks?.length ? <div className="page-note" style={{ marginBottom: 0 }}>当前没有切分出的证据片段。</div> : null}
+                  </div>
+                </DetailCard>
+              </aside>
             </section>
           </section>
         ) : null}

@@ -117,8 +117,46 @@ function buildMultiDocTakeaway(prompt: string, items: ParsedDocument[]) {
   return `围绕“${focus}”，当前命中的材料主要集中在：${grouped.join('；')}。更细的判断以下方证据为准。`;
 }
 
+function buildStructuredReferenceList(item: ParsedDocument) {
+  const slots = item.intentSlots || {};
+  const normalizeList = (values?: string[]) => {
+    const seen = new Set<string>();
+    return (values || [])
+      .map((value) => String(value || '').trim().replace(/\s+/g, ' ').replace(/^(\d+(?:\.\d+)?)\s*(mg|g|kg|ml|ug|iu|cfu)$/i, (_, n, u) => `${n} ${String(u).toUpperCase()}`))
+      .filter((value) => {
+        const key = value.toLowerCase();
+        if (!value || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  };
+  const parts = [
+    normalizeList(slots.audiences).length ? `人群：${normalizeList(slots.audiences).slice(0, 3).join('、')}` : '',
+    normalizeList(slots.ingredients).length ? `成分：${normalizeList(slots.ingredients).slice(0, 4).join('、')}` : '',
+    normalizeList(slots.strains).length ? `菌株：${normalizeList(slots.strains).slice(0, 4).join('、')}` : '',
+    normalizeList(slots.benefits).length ? `功效：${normalizeList(slots.benefits).slice(0, 4).join('、')}` : '',
+    normalizeList(slots.doses).length ? `剂量：${normalizeList(slots.doses).slice(0, 4).join('、')}` : '',
+    normalizeList(slots.organizations).length ? `机构：${normalizeList(slots.organizations).slice(0, 3).join('、')}` : '',
+    normalizeList(slots.metrics).length ? `指标：${normalizeList(slots.metrics).slice(0, 4).join('、')}` : '',
+  ].filter(Boolean);
+
+  return parts.slice(0, 4);
+}
+
+function buildClaimReferenceList(item: ParsedDocument) {
+  return (item.claims || [])
+    .slice(0, 3)
+    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
+    .filter(Boolean);
+}
+
+function formatStructuredHighlights(item: ParsedDocument) {
+  return buildStructuredReferenceList(item).join('；');
+}
+
 function buildDocumentContext(items: ParsedDocument[]) {
   return items.map((item, index) => {
+    const structuredSummary = formatStructuredHighlights(item);
     const extras = [
       `文档名：${item.name}`,
       `业务分类：${item.bizCategory}`,
@@ -130,6 +168,7 @@ function buildDocumentContext(items: ParsedDocument[]) {
       item.contractFields?.amount ? `金额：${item.contractFields.amount}` : '',
       item.contractFields?.paymentTerms ? `付款条款：${item.contractFields.paymentTerms}` : '',
       item.contractFields?.duration ? `期限：${item.contractFields.duration}` : '',
+      structuredSummary ? `结构化要点：${structuredSummary}` : '',
       `摘要：${item.summary}`,
       `证据摘录：${item.excerpt}`,
     ].filter(Boolean);
@@ -141,6 +180,7 @@ function buildDocumentContext(items: ParsedDocument[]) {
 function buildEvidenceContext(matches: DocumentEvidenceMatch[]) {
   return matches.map((match, index) => {
     const item = match.item;
+    const structuredSummary = formatStructuredHighlights(item);
     return [
       `证据 ${index + 1}`,
       `文档名：${item.name}`,
@@ -148,6 +188,7 @@ function buildEvidenceContext(matches: DocumentEvidenceMatch[]) {
       `业务分类：${item.bizCategory}`,
       `解析来源：${item.parseMethod || item.parseStatus}`,
       item.topicTags?.length ? `主题标签：${item.topicTags.join('、')}` : '',
+      structuredSummary ? `结构化要点：${structuredSummary}` : '',
       `证据摘录：${trimSentence(match.chunkText, 320)}`,
     ].filter(Boolean).join('\n');
   });
@@ -169,6 +210,8 @@ function buildReferencePayload(matches: DocumentEvidenceMatch[]) {
     parseMethod?: string;
     riskLevel?: string;
     topicTags?: string[];
+    structured?: string[];
+    claims?: string[];
     evidence: string[];
   }>();
 
@@ -191,6 +234,8 @@ function buildReferencePayload(matches: DocumentEvidenceMatch[]) {
       parseMethod: match.item.parseMethod,
       riskLevel: match.item.riskLevel,
       topicTags: match.item.topicTags,
+      structured: buildStructuredReferenceList(match.item),
+      claims: buildClaimReferenceList(match.item),
       evidence: snippet ? [snippet] : [],
     });
   }
@@ -262,6 +307,24 @@ function scoreConclusionEvidence(text: string) {
   return score;
 }
 
+function buildStructuredAnswerLines(items: ParsedDocument[]) {
+  const primary = items[0];
+  if (!primary) return [] as string[];
+
+  const slots = primary.intentSlots || {};
+  const claims = (primary.claims || []).slice(0, 3).map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim());
+  const lines = [
+    slots.audiences?.length ? `- 适用人群：${slots.audiences.slice(0, 3).join('、')}` : '',
+    slots.strains?.length ? `- 关键菌株：${slots.strains.slice(0, 4).join('、')}` : '',
+    slots.ingredients?.length ? `- 相关成分：${slots.ingredients.slice(0, 4).join('、')}` : '',
+    slots.benefits?.length ? `- 主要功效：${slots.benefits.slice(0, 4).join('、')}` : '',
+    slots.doses?.length ? `- 相关剂量/规格：${slots.doses.slice(0, 4).join('、')}` : '',
+    claims.length ? `- 抽取关系：${claims.join('；')}` : '',
+  ].filter(Boolean);
+
+  return lines.slice(0, 5);
+}
+
 function buildEvidenceDrivenAnswer(prompt: string, matchedDocs: ParsedDocument[], evidenceMatches: DocumentEvidenceMatch[] = []) {
   if (!matchedDocs.length) {
     return [
@@ -272,6 +335,7 @@ function buildEvidenceDrivenAnswer(prompt: string, matchedDocs: ParsedDocument[]
 
   const uniqueEvidenceMatches = dedupeEvidenceMatches(evidenceMatches).slice(0, 5);
   const conclusion = buildEvidenceDrivenConclusion(prompt, matchedDocs, uniqueEvidenceMatches);
+  const structuredLines = buildStructuredAnswerLines(matchedDocs);
   const evidenceLines = uniqueEvidenceMatches.map((match, index) => {
     const tags = (match.item.topicTags || []).slice(0, 3).join('、');
     return [
@@ -294,6 +358,7 @@ function buildEvidenceDrivenAnswer(prompt: string, matchedDocs: ParsedDocument[]
     '已优先依据文档中心资料生成回答。',
     '',
     `结论：${conclusion}`,
+    ...(structuredLines.length ? ['', '结构化归纳：', ...structuredLines] : []),
     '',
     '参考证据：',
     ...(evidenceLines.length ? evidenceLines : fallbackEvidence),
@@ -704,7 +769,10 @@ async function runCloudDirectAnswer(
     systemPrompt: buildScopedSystemPrompt(scope, [
       '请优先利用提供的知识库文档、结构化信息和上下文来理解用户问题。',
       '如果问题与奶粉配方、乳品方案、宠物营养方案相关，但无法稳定映射到固定模板，只能在当前知识库范围内直接回答。',
-      '回答应先给结论，再给简短依据；如果证据不足，要明确说明。',
+      '回答必须优先使用结构化信息（如人群、成分、菌株、功效、剂量、关系）组织答案，再引用证据摘录支撑。',
+      '回答格式固定为三段：1. 结论 2. 结构化归纳 3. 证据依据。',
+      '结构化归纳优先输出人群、菌株/成分、功效、剂量或关键关系；没有就跳过该小项。',
+      '如果证据不足，要明确说明，不要用常识补齐未提供的信息。',
       '不要输出 JSON，不要假装已经命中某个模板。',
     ]),
   });

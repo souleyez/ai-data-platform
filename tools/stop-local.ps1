@@ -28,15 +28,21 @@ foreach ($port in @(18789, 3100, 3002)) {
 # Clean up any remaining app-local node/cmd processes tied to this workspace.
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
   Where-Object {
-    $_.Name -in @('node.exe', 'cmd.exe') -and
+    $_.Name -in @('node.exe', 'cmd.exe', 'python.exe') -and
     (
       $_.CommandLine -match 'ai-data-platform\\apps\\api' -or
+      $_.CommandLine -match 'ai-data-platform.*uie_service\.py' -or
+      $_.CommandLine -match 'src\\scripts\\uie_service\.py' -or
+      $_.CommandLine -match 'paddle-uie-runtime310.*uie_service\.py' -or
+      $_.CommandLine -match 'paddle-uie-runtime.*uie_service\.py' -or
       $_.CommandLine -match 'ai-data-platform\\apps\\worker' -or
       $_.CommandLine -match 'ai-data-platform\\apps\\web' -or
       $_.CommandLine -match 'ai-data-platform\\tools\\openclaw-local-gateway\.mjs' -or
       $_.CommandLine -match 'ai-data-platform.*src\\server\.ts' -or
       $_.CommandLine -match 'ai-data-platform.*dist\\index\.js' -or
+      $_.CommandLine -match 'node\s+dist\\server\.js' -or
       $_.CommandLine -match 'ai-data-platform.*next\\dist\\bin\\next.*start -p 3002' -or
+      $_.CommandLine -match 'next.*start -p 3002' -or
       $_.CommandLine -match 'ai-data-platform.*node dist\\server\.js'
     )
   } |

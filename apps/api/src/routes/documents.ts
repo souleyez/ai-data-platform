@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory, type ProjectCustomCategory } from '../lib/document-config.js';
+import { parseDocument } from '../lib/document-parser.js';
 import { createDocumentLibrary, deleteDocumentLibrary, loadDocumentLibraries } from '../lib/document-libraries.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths } from '../lib/document-store.js';
 import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from '../lib/ingest-feedback.js';
@@ -11,6 +12,11 @@ import { saveDocumentOverride } from '../lib/document-overrides.js';
 
 function sanitizeFileName(fileName: string) {
   return fileName.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || `upload-${Date.now()}`;
+}
+
+function toListItem<T extends Record<string, unknown>>(item: T) {
+  const { fullText, ...rest } = item as T & { fullText?: string };
+  return rest;
 }
 
 export async function registerDocumentRoutes(app: FastifyInstance) {
@@ -89,7 +95,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       byCategory,
       byBizCategory,
       byStatus,
-      items: items.map((item) => ({ ...item, id: buildDocumentId(item.path) })),
+      items: items.map((item) => toListItem({ ...item, id: buildDocumentId(item.path) })),
       capabilities: ['scan', 'summarize', 'classify'],
       cacheHit,
       lastScanAt: new Date().toISOString(),
@@ -101,6 +107,43 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         error: byStatus.error || 0,
         bizCategories: byBizCategory,
         libraryCounts,
+      },
+    };
+  });
+
+  app.get('/documents/detail', async (request, reply) => {
+    const { id } = (request.query || {}) as { id?: string };
+
+    if (!id) {
+      return reply.code(400).send({ error: 'id is required' });
+    }
+
+    const { items } = await loadParsedDocuments();
+    const found = items.find((item) => buildDocumentId(item.path) === id);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
+    }
+
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const detailItem = found.fullText
+      ? found
+      : await parseDocument(found.path, config);
+    const matchedFolders = Object.entries(config.categories)
+      .filter(([, value]) => value.folders.some((folder) => folder && found.path.toLowerCase().includes(folder.toLowerCase())))
+      .map(([key, value]) => ({ key, label: value.label, folders: value.folders }));
+
+    return {
+      mode: 'read-only',
+      item: {
+        ...detailItem,
+        id,
+      },
+      meta: {
+        category: detailItem.category,
+        bizCategory: detailItem.bizCategory,
+        parseStatus: detailItem.parseStatus,
+        matchedFolders,
       },
     };
   });
@@ -404,7 +447,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     return {
       mode: 'read-only',
       item: {
-        ...found,
+        ...(found.fullText ? found : await parseDocument(found.path, config)),
         id,
       },
       meta: {
