@@ -67,3 +67,37 @@ Worker:
 - WSL 内 OpenClaw gateway
 
 线上如果 OpenClaw 和项目已经同机或同内网，这层可以不部署。
+## 通用部署工具
+
+当前仓库已提供两层通用部署工具：
+
+- 服务端脚本：[update-server.sh](C:\Users\soulzyn\Desktop\codex\ai-data-platform\deploy\server\update-server.sh)
+- 本机远程入口：[deploy-remote.ps1](C:\Users\soulzyn\Desktop\codex\ai-data-platform\tools\deploy-remote.ps1)
+
+服务端脚本负责：
+
+- `git fetch / pull --ff-only`
+- `corepack pnpm install --frozen-lockfile`
+- 按包构建 `api / web / worker`
+- `systemctl restart`
+- 健康检查
+
+本机远程入口负责：
+
+- 将服务端脚本临时下发到目标机器
+- 传入目录、分支、服务名、健康检查地址等参数
+- 执行一次标准部署流程
+
+示例：
+
+```powershell
+corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root -Password '<server-password>'
+```
+
+切到其他项目或机器时，主要替换这些参数：
+
+- `-ProjectDir`
+- `-Branch`
+- `-HealthUrl`
+- `-Services`
+- `-BuildPackages`

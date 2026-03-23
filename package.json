@@ -13,6 +13,7 @@
     "local:start": "powershell -ExecutionPolicy Bypass -File tools/start-local.ps1",
     "local:stop": "powershell -ExecutionPolicy Bypass -File tools/stop-local.ps1",
     "local:status": "powershell -ExecutionPolicy Bypass -File tools/status-local.ps1",
+    "deploy:remote": "powershell -ExecutionPolicy Bypass -File tools/deploy-remote.ps1",
     "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
     "test": "corepack pnpm --filter api test",
     "lint": "corepack pnpm build"
