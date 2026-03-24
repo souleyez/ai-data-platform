@@ -7,6 +7,8 @@ import { STORAGE_CONFIG_DIR } from './paths.js';
 export type DocumentOverride = {
   bizCategory?: BizCategory;
   groups?: string[];
+  suggestedGroups?: string[];
+  ignored?: boolean;
   confirmedAt: string;
 };
 
@@ -22,14 +24,31 @@ export async function loadDocumentOverrides() {
   }
 }
 
-export async function saveDocumentOverride(filePath: string, input: { bizCategory?: BizCategory; groups?: string[] }) {
+export async function saveDocumentOverride(filePath: string, input: { bizCategory?: BizCategory; groups?: string[]; ignored?: boolean }) {
   const current = await loadDocumentOverrides();
   const previous = current[filePath] || { confirmedAt: new Date().toISOString() };
   current[filePath] = {
     ...previous,
     ...(input.bizCategory ? { bizCategory: input.bizCategory } : {}),
     ...(input.groups ? { groups: [...new Set(input.groups.map((item) => String(item).trim()).filter(Boolean))] } : {}),
+    ...(typeof input.ignored === 'boolean' ? { ignored: input.ignored } : {}),
     confirmedAt: new Date().toISOString(),
+  };
+
+  await fs.mkdir(OVERRIDE_DIR, { recursive: true });
+  await fs.writeFile(OVERRIDE_FILE, JSON.stringify(current, null, 2), 'utf8');
+  return current[filePath];
+}
+
+export async function saveDocumentSuggestion(filePath: string, input: { suggestedGroups?: string[] }) {
+  const current = await loadDocumentOverrides();
+  const previous = current[filePath] || { confirmedAt: new Date().toISOString() };
+  const hasSuggestedGroups = Object.prototype.hasOwnProperty.call(input, 'suggestedGroups');
+  current[filePath] = {
+    ...previous,
+    ...(hasSuggestedGroups
+      ? { suggestedGroups: [...new Set((input.suggestedGroups || []).map((item) => String(item).trim()).filter(Boolean))] }
+      : {}),
   };
 
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
@@ -53,6 +72,8 @@ export function applyDocumentOverrides(items: ParsedDocument[], overrides: Recor
       ...item,
       confirmedBizCategory: hasBizCategory ? matched.bizCategory : item.confirmedBizCategory,
       confirmedGroups: hasGroups ? (matched.groups || []) : item.confirmedGroups,
+      suggestedGroups: matched.suggestedGroups?.length ? matched.suggestedGroups : item.suggestedGroups,
+      ignored: matched.ignored === true,
       categoryConfirmedAt: matched.confirmedAt,
     };
   });

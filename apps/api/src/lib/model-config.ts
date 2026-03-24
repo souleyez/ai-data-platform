@@ -216,7 +216,7 @@ export async function loadModelConfigState() {
   return {
     openclaw: {
       installed: runtime.installed,
-      running: runtime.running && gatewayReachable,
+      running: runtime.running || gatewayReachable,
       installMode: runtime.installMode,
       installedVersion: runtime.installedVersion || null,
       gatewayUrl,

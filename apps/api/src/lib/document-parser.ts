@@ -31,6 +31,8 @@ export type ParsedDocument = {
   topicTags?: string[];
   groups?: string[];
   confirmedGroups?: string[];
+  suggestedGroups?: string[];
+  ignored?: boolean;
   contractFields?: {
     contractNo?: string;
     amount?: string;

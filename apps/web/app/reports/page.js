@@ -145,7 +145,7 @@ export default function ReportsPage() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <h2>报表中心</h2>
+            <h2>AI 知识库</h2>
             <p>报表中心现在严格按文档中心知识库分组输出。每个分组只选择一种当前输出方式，并可上传参考样例。</p>
           </div>
         </header>

@@ -1,13 +1,17 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { loadDocumentCategoryConfig, type BizCategory } from './document-config.js';
 import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } from './document-overrides.js';
-import { STORAGE_CONFIG_DIR } from './paths.js';
+import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
+import type { ParsedDocument } from './document-parser.js';
 
 export type DocumentLibrary = {
   key: string;
   label: string;
   description?: string;
   createdAt: string;
+  isDefault?: boolean;
+  sourceCategoryKey?: BizCategory;
 };
 
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
@@ -37,11 +41,52 @@ async function readLibrariesFile() {
 
 async function writeLibrariesFile(items: DocumentLibrary[]) {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(LIBRARIES_FILE, JSON.stringify({ items }, null, 2), 'utf8');
+  await fs.writeFile(
+    LIBRARIES_FILE,
+    JSON.stringify({
+      items: items
+        .filter((item) => !item.isDefault)
+        .map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => rest),
+    }, null, 2),
+    'utf8',
+  );
+}
+
+function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumentCategoryConfig>>['categories'], createdAt: string) {
+  return (Object.entries(categories) as Array<[BizCategory, { label: string }]>).map(([key, value]) => ({
+    key,
+    label: value.label || key,
+    createdAt,
+    isDefault: true,
+    sourceCategoryKey: key,
+  } satisfies DocumentLibrary));
+}
+
+function mergeLibraries(...groups: DocumentLibrary[][]) {
+  const merged: DocumentLibrary[] = [];
+  for (const group of groups) {
+    for (const item of group) {
+      if (merged.some((existing) => existing.key === item.key)) continue;
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+export function documentMatchesLibrary(item: ParsedDocument, library: DocumentLibrary) {
+  const groups = item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [];
+  if (groups.includes(library.key)) return true;
+
+  if (library.isDefault && library.sourceCategoryKey) {
+    return (item.confirmedBizCategory || item.bizCategory) === library.sourceCategoryKey;
+  }
+
+  return false;
 }
 
 export async function loadDocumentLibraries() {
   const stored = await readLibrariesFile();
+  const categoryConfig = await loadDocumentCategoryConfig(STORAGE_FILES_DIR);
   const overrides = await loadDocumentOverrides();
   const derived = Object.values(overrides)
     .flatMap((item) => item.groups || [])
@@ -55,10 +100,8 @@ export async function loadDocumentLibraries() {
       return acc;
     }, []);
 
-  const merged = [...stored];
-  for (const item of derived) {
-    if (!merged.some((existing) => existing.key === item.key)) merged.push(item);
-  }
+  const defaultLibraries = buildDefaultLibraries(categoryConfig.categories, categoryConfig.updatedAt);
+  const merged = mergeLibraries(defaultLibraries, stored, derived);
 
   return merged.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 }
@@ -84,6 +127,10 @@ export async function createDocumentLibrary(input: { name: string; description?:
 
 export async function deleteDocumentLibrary(key: string) {
   const current = await loadDocumentLibraries();
+  const target = current.find((item) => item.key === key);
+  if (target?.isDefault) {
+    throw new Error('default library cannot be deleted');
+  }
   const filtered = current.filter((item) => item.key !== key);
   await writeLibrariesFile(filtered);
 

@@ -50,7 +50,7 @@ Start-Sleep -Seconds 2
 Start-ServiceProcess `
   -Name 'api' `
   -Workdir (Join-Path $root 'apps\api') `
-  -Command 'set ENABLE_PADDLE_UIE=1&& set PADDLE_UIE_PYTHON_BIN=C:\Users\soulzyn\develop\python-envs\paddle-uie-runtime310\Scripts\python.exe&& node dist\server.js' `
+  -Command 'set ENABLE_PADDLE_UIE=1&& set PADDLE_UIE_PYTHON_BIN=C:\Users\soulzyn\develop\python-envs\paddle-uie-runtime310\Scripts\python.exe&& node --import tsx src\server.ts' `
   -PidFile (Join-Path $runDir 'api.pid')
 
 Start-Sleep -Seconds 3

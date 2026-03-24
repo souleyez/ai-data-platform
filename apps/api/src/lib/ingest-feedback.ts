@@ -101,6 +101,11 @@ function expandLibraryTerms(library: DocumentLibrary) {
 }
 
 function scoreLibrarySuggestion(doc: ParsedDocument, library: DocumentLibrary) {
+  const effectiveCategory = getEffectiveCategoryKey(doc);
+  if (library.isDefault && library.sourceCategoryKey === effectiveCategory) {
+    return 10;
+  }
+
   const evidence = [
     doc.title,
     doc.summary,
@@ -130,12 +135,7 @@ export function resolveSuggestedLibraryKeys(doc: ParsedDocument, libraries: Docu
 }
 
 function buildGroupSuggestion(doc: ParsedDocument, libraries: DocumentLibrary[] = []) {
-  const confirmedGroups = doc.confirmedGroups?.length
-    ? doc.confirmedGroups
-    : doc.groups?.length
-      ? doc.groups
-      : [];
-
+  const confirmedGroups = doc.confirmedGroups?.length ? doc.confirmedGroups : [];
   if (confirmedGroups.length) {
     const labels = confirmedGroups.map((key) => libraries.find((item) => item.key === key)?.label || key);
     return {
@@ -145,6 +145,17 @@ function buildGroupSuggestion(doc: ParsedDocument, libraries: DocumentLibrary[] 
       })),
       basis: `已根据解析内容自动加入推荐知识库：${labels.join('、')}。`,
       accepted: true,
+    };
+  }
+
+  const suggestedGroups = doc.suggestedGroups?.length ? doc.suggestedGroups : [];
+  if (suggestedGroups.length) {
+    const matchedSuggestions = suggestedGroups
+      .map((key) => libraries.find((item) => item.key === key) || ({ key, label: key } as DocumentLibrary));
+    return {
+      suggestedGroups: matchedSuggestions.map((library) => ({ key: library.key, label: library.label })),
+      basis: `根据标题、摘要和主题标签，建议加入：${matchedSuggestions.map((library) => library.label).join('、')}。`,
+      accepted: false,
     };
   }
 

@@ -17,7 +17,7 @@ const AUDIT_STATE_FILE = path.join(AUDIT_CONFIG_DIR, 'audit-center.json');
 const DOCUMENT_CACHE_FILE = path.join(STORAGE_CACHE_DIR, 'documents-cache.json');
 const SOFT_CLEANUP_DAYS = Number(process.env.AUDIT_STALE_DAYS || 90);
 const HARD_DELETE_DAYS = Number(process.env.AUDIT_HARD_DELETE_DAYS || 180);
-const MIN_FREE_RATIO = Number(process.env.AUDIT_STORAGE_MIN_FREE_RATIO || 0.8);
+const MIN_FREE_RATIO = Number(process.env.AUDIT_STORAGE_MIN_FREE_RATIO || 0.2);
 
 type AuditLog = {
   id: string;

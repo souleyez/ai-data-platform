@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { STORAGE_CONFIG_DIR } from './paths.js';
+import { REPO_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
 
 export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
@@ -14,6 +14,7 @@ export type ProjectCustomCategory = {
 
 export type DocumentCategoryConfig = {
   scanRoot: string;
+  scanRoots: string[];
   categories: Record<BizCategory, { label: string; folders: string[] }>;
   customCategories: ProjectCustomCategory[];
   updatedAt: string;
@@ -22,11 +23,31 @@ export type DocumentCategoryConfig = {
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const CONFIG_FILE = path.join(CONFIG_DIR, 'document-categories.json');
 
+function normalizeScanRoot(scanRoot: string) {
+  const value = String(scanRoot || '').trim();
+  if (!value) return value;
+  return path.isAbsolute(value) ? value : path.resolve(REPO_ROOT, value);
+}
+
+function normalizeScanRoots(scanRoots: string[], fallbackScanRoot: string) {
+  const normalized = Array.from(new Set(
+    (scanRoots || []).map((item) => normalizeScanRoot(item)).filter(Boolean),
+  ));
+
+  if (!normalized.length) {
+    const fallback = normalizeScanRoot(fallbackScanRoot);
+    return fallback ? [fallback] : [];
+  }
+
+  return normalized;
+}
+
 function buildDefault(scanRoot: string): DocumentCategoryConfig {
   const now = new Date().toISOString();
 
   return {
     scanRoot,
+    scanRoots: [scanRoot],
     updatedAt: now,
     categories: {
       paper: { label: '学术论文', folders: ['papers', 'paper', '论文', 'study', 'research'] },
@@ -82,11 +103,16 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
   };
 }
 
-export async function loadDocumentCategoryConfig(scanRoot: string) {
+export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
   try {
     const raw = await fs.readFile(CONFIG_FILE, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
-    const defaults = buildDefault(scanRoot);
+    const effectiveScanRoot = normalizeScanRoot(parsed.scanRoot || fallbackScanRoot || '') || normalizeScanRoot(fallbackScanRoot);
+    const effectiveScanRoots = normalizeScanRoots(
+      Array.isArray(parsed.scanRoots) ? parsed.scanRoots : (parsed.scanRoot ? [parsed.scanRoot] : []),
+      effectiveScanRoot,
+    );
+    const defaults = buildDefault(effectiveScanRoot);
     const parsedCustomCategories = Array.isArray(parsed.customCategories) ? parsed.customCategories : [];
     const mergedCustomCategories = defaults.customCategories.map((defaultItem) => {
       const existing = parsedCustomCategories.find((item) => item.key === defaultItem.key);
@@ -108,7 +134,8 @@ export async function loadDocumentCategoryConfig(scanRoot: string) {
     return {
       ...defaults,
       ...parsed,
-      scanRoot,
+      scanRoot: effectiveScanRoots[0] || effectiveScanRoot,
+      scanRoots: effectiveScanRoots,
       categories: {
         ...defaults.categories,
         ...(parsed.categories || {}),
@@ -116,14 +143,24 @@ export async function loadDocumentCategoryConfig(scanRoot: string) {
       customCategories: mergedCustomCategories,
     } satisfies DocumentCategoryConfig;
   } catch {
-    return buildDefault(scanRoot);
+    return buildDefault(normalizeScanRoot(fallbackScanRoot));
   }
 }
 
 export async function saveDocumentCategoryConfig(scanRoot: string, input: Partial<DocumentCategoryConfig>) {
-  const current = await loadDocumentCategoryConfig(scanRoot);
+  const normalizedScanRoot = normalizeScanRoot(scanRoot);
+  const current = await loadDocumentCategoryConfig(normalizedScanRoot);
+  const normalizedScanRoots = normalizeScanRoots(
+    Array.isArray(input.scanRoots) ? input.scanRoots : current.scanRoots,
+    normalizedScanRoot,
+  );
+  const orderedScanRoots = [
+    normalizedScanRoot,
+    ...normalizedScanRoots.filter((item) => item !== normalizedScanRoot),
+  ];
   const next: DocumentCategoryConfig = {
-    scanRoot,
+    scanRoot: normalizedScanRoot,
+    scanRoots: orderedScanRoots,
     updatedAt: new Date().toISOString(),
     categories: {
       ...current.categories,

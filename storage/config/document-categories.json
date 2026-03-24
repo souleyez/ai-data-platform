@@ -1,34 +1,79 @@
 {
-  "scanRoot": "storage/files",
-  "updatedAt": "2026-03-19T08:35:00.000Z",
+  "scanRoot": "C:\\Users\\soulzyn\\Desktop\\codex\\ai-data-platform\\storage\\files",
+  "scanRoots": [
+    "C:\\Users\\soulzyn\\Desktop\\codex\\ai-data-platform\\storage\\files",
+    "C:\\Users\\soulzyn\\Desktop",
+    "C:\\Users\\soulzyn\\Documents",
+    "C:\\Users\\soulzyn\\Downloads"
+  ],
+  "updatedAt": "2026-03-24T06:22:15.001Z",
   "categories": {
     "paper": {
       "label": "学术论文",
-      "folders": ["papers", "paper", "论文", "study", "research"]
+      "folders": [
+        "papers",
+        "paper",
+        "论文",
+        "study",
+        "research"
+      ]
     },
     "contract": {
       "label": "合同协议",
-      "folders": ["contracts", "contract", "合同", "协议"]
+      "folders": [
+        "contracts",
+        "contract",
+        "合同",
+        "协议"
+      ]
     },
     "daily": {
       "label": "工作日报",
-      "folders": ["daily", "日报", "周报", "简报"]
+      "folders": [
+        "daily",
+        "日报",
+        "周报",
+        "简报"
+      ]
     },
     "invoice": {
       "label": "发票凭据",
-      "folders": ["invoice", "发票", "票据", "凭据"]
+      "folders": [
+        "invoice",
+        "发票",
+        "票据",
+        "凭据"
+      ]
     },
     "order": {
       "label": "订单分析",
-      "folders": ["order", "orders", "订单", "销售", "回款"]
+      "folders": [
+        "order",
+        "orders",
+        "订单",
+        "销售",
+        "回款"
+      ]
     },
     "service": {
       "label": "客服采集",
-      "folders": ["service", "customer-service", "客服", "工单", "投诉"]
+      "folders": [
+        "service",
+        "customer-service",
+        "客服",
+        "工单",
+        "投诉"
+      ]
     },
     "inventory": {
       "label": "库存监控",
-      "folders": ["inventory", "stock", "库存", "sku", "出入库"]
+      "folders": [
+        "inventory",
+        "stock",
+        "库存",
+        "sku",
+        "出入库"
+      ]
     }
   },
   "customCategories": [
@@ -36,21 +81,52 @@
       "key": "formula",
       "label": "奶粉配方",
       "parent": "paper",
-      "keywords": ["奶粉配方", "配方", "乳粉"],
+      "keywords": [
+        "奶粉配方",
+        "配方",
+        "乳粉",
+        "婴配粉",
+        "婴幼儿配方",
+        "配方奶",
+        "formula",
+        "nutrition",
+        "nutritional",
+        "infant",
+        "children",
+        "pediatric",
+        "probiotic",
+        "prebiotic",
+        "synbiotic",
+        "lactobacillus",
+        "bifidobacterium",
+        "hmos"
+      ],
       "createdAt": "2026-03-19T08:35:00.000Z"
     },
     {
       "key": "brain-health",
       "label": "脑健康",
       "parent": "paper",
-      "keywords": ["脑健康", "brain", "认知", "阿尔茨海默"],
+      "keywords": [
+        "脑健康",
+        "brain",
+        "认知",
+        "阿尔茨海默"
+      ],
       "createdAt": "2026-03-19T08:35:00.000Z"
     },
     {
       "key": "gut-health",
       "label": "肠道健康",
       "parent": "paper",
-      "keywords": ["肠道健康", "gut", "肠道", "菌群"],
+      "keywords": [
+        "肠道健康",
+        "gut",
+        "肠道",
+        "菌群",
+        "intestinal",
+        "microbiome"
+      ],
       "createdAt": "2026-03-19T08:35:00.000Z"
     }
   ]

@@ -1,5 +1,5 @@
-export const metadata = {
-  title: '文档数据助理',
+﻿export const metadata = {
+  title: 'AI 知识数据管理',
   description: '个人知识库，采编写一站式解决',
 };
 

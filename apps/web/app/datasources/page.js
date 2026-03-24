@@ -218,7 +218,7 @@ export default function DatasourcesPage() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <h2>数据源管理</h2>
+            <h2>AI 知识库</h2>
             <p>现在不仅显示是否接入，还会展示固定站点采集是否在持续工作、最近一次抓取时间，以及具体采到并入库的内容。</p>
           </div>
         </header>

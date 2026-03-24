@@ -9,10 +9,31 @@ import { loadRetainedDocuments } from './retained-documents.js';
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || STORAGE_FILES_DIR;
 const CACHE_DIR = STORAGE_CACHE_DIR;
 const CACHE_FILE = path.join(CACHE_DIR, 'documents-cache.json');
+const SCANNABLE_DOCUMENT_EXTENSIONS = new Set([
+  '.pdf', '.txt', '.md', '.docx', '.csv', '.json', '.html', '.htm', '.xml', '.xlsx', '.xls',
+]);
+const SKIPPED_DIRECTORY_NAMES = new Set([
+  '.git',
+  '.next',
+  'node_modules',
+  'dist',
+  'build',
+  'bin',
+  'obj',
+  'target',
+  '__pycache__',
+  '.venv',
+  'venv',
+  'cache',
+  'Cache',
+  'Temp',
+  'tmp',
+]);
 
 type CachePayload = {
   generatedAt: string;
   scanRoot: string;
+  scanRoots?: string[];
   totalFiles: number;
   scanSignature: string;
   items: ParsedDocument[];
@@ -187,15 +208,35 @@ const GENERIC_STOPWORDS = new Set([
 ]);
 
 export async function listFilesRecursive(dir: string): Promise<string[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) return listFilesRecursive(fullPath);
-      return [fullPath];
-    }),
-  );
-  return nested.flat();
+  const results: string[] = [];
+  const stack = [dir];
+
+  while (stack.length) {
+    const current = stack.pop() as string;
+    let entries: Awaited<ReturnType<typeof fs.readdir>> = [];
+
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith('.') && !SKIPPED_DIRECTORY_NAMES.has(entry.name)) {
+          stack.push(fullPath);
+        }
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+      if (!SCANNABLE_DOCUMENT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      results.push(fullPath);
+    }
+  }
+
+  return results;
 }
 
 async function ensureCacheDir() {
@@ -209,6 +250,10 @@ async function readCache(): Promise<CachePayload | null> {
   } catch {
     return null;
   }
+}
+
+function sameScanRoots(left?: string[], right?: string[]) {
+  return JSON.stringify(left || []) === JSON.stringify(right || []);
 }
 
 async function writeCache(payload: CachePayload) {
@@ -226,17 +271,42 @@ async function buildScanSignature(files: string[]) {
   return stats.sort().join('|');
 }
 
-async function getCurrentFiles(): Promise<{ exists: boolean; files: string[] }> {
-  try {
-    const files = await listFilesRecursive(DEFAULT_SCAN_DIR);
-    return { exists: true, files };
-  } catch {
-    return { exists: false, files: [] };
-  }
+async function resolveScanRoot(scanRoot?: string) {
+  if (scanRoot) return scanRoot;
+  const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+  return config.scanRoot || DEFAULT_SCAN_DIR;
 }
 
-async function parseFiles(filePaths: string[]) {
-  const categoryConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+async function resolveScanRoots(scanRoot?: string | string[]) {
+  if (Array.isArray(scanRoot) && scanRoot.length) return [...new Set(scanRoot)];
+  if (typeof scanRoot === 'string' && scanRoot) return [scanRoot];
+  const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+  return (config.scanRoots?.length ? config.scanRoots : [config.scanRoot || DEFAULT_SCAN_DIR]).filter(Boolean);
+}
+
+async function getCurrentFiles(scanRoot?: string | string[]): Promise<{ exists: boolean; files: string[]; scanRoot: string; scanRoots: string[] }> {
+  const activeScanRoots = await resolveScanRoots(scanRoot);
+  const fileGroups = await Promise.all(
+    activeScanRoots.map(async (root) => {
+      try {
+        return await listFilesRecursive(root);
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const files = Array.from(new Set(fileGroups.flat())).sort((a, b) => a.localeCompare(b));
+  return {
+    exists: files.length > 0,
+    files,
+    scanRoot: activeScanRoots[0] || await resolveScanRoot(),
+    scanRoots: activeScanRoots,
+  };
+}
+
+async function parseFiles(filePaths: string[], scanRoot?: string | string[]) {
+  const activeScanRoot = Array.isArray(scanRoot) ? scanRoot[0] : await resolveScanRoot(scanRoot);
+  const categoryConfig = await loadDocumentCategoryConfig(activeScanRoot);
   const overrides = await loadDocumentOverrides();
   const parsedItems = await Promise.all(filePaths.map((filePath) => parseDocument(filePath, categoryConfig)));
   return applyDocumentOverrides(parsedItems, overrides).map(sanitizeParsedDocument);
@@ -257,8 +327,20 @@ async function mergeWithRetainedDocuments(items: ParsedDocument[]) {
   return Array.from(byPath.values());
 }
 
-export async function loadParsedDocuments(limit = 200, forceRefresh = false): Promise<LoadParsedDocumentsResult> {
-  const { exists, files } = await getCurrentFiles();
+export async function loadParsedDocuments(limit = 200, forceRefresh = false, scanRoot?: string | string[]): Promise<LoadParsedDocumentsResult> {
+  const activeScanRoots = await resolveScanRoots(scanRoot);
+  const cache = !forceRefresh ? await readCache() : null;
+
+  if (
+    cache
+    && sameScanRoots(cache.scanRoots || [cache.scanRoot], activeScanRoots)
+  ) {
+    const overrides = await loadDocumentOverrides();
+    const mergedItems = await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument));
+    return { exists: true, files: [], items: mergedItems.slice(0, limit), cacheHit: true };
+  }
+
+  const { exists, files, scanRoot: activeScanRoot, scanRoots: resolvedScanRoots } = await getCurrentFiles(activeScanRoots);
 
   if (!exists) {
     return { exists, files, items: [], cacheHit: false };
@@ -267,11 +349,10 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
   const scanSignature = await buildScanSignature(files);
 
   if (!forceRefresh) {
-    const cache = await readCache();
     const overrides = await loadDocumentOverrides();
     if (
       cache
-      && cache.scanRoot === DEFAULT_SCAN_DIR
+      && sameScanRoots(cache.scanRoots || [cache.scanRoot], resolvedScanRoots)
       && cache.totalFiles === files.length
       && cache.scanSignature === scanSignature
     ) {
@@ -280,10 +361,11 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
     }
   }
 
-  const items = await parseFiles(files.slice(0, limit));
+  const items = await parseFiles(files.slice(0, limit), resolvedScanRoots);
   await writeCache({
     generatedAt: new Date().toISOString(),
-    scanRoot: DEFAULT_SCAN_DIR,
+    scanRoot: activeScanRoot,
+    scanRoots: resolvedScanRoots,
     totalFiles: files.length,
     scanSignature,
     items,
@@ -293,8 +375,8 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false): Pr
   return { exists, files, items: mergedItems, cacheHit: false };
 }
 
-export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 200): Promise<LoadParsedDocumentsResult> {
-  const { exists, files } = await getCurrentFiles();
+export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 200, scanRoot?: string | string[]): Promise<LoadParsedDocumentsResult> {
+  const { exists, files, scanRoot: activeScanRoot, scanRoots: activeScanRoots } = await getCurrentFiles(scanRoot);
 
   if (!exists) {
     return { exists, files, items: [], cacheHit: false };
@@ -304,17 +386,17 @@ export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 
   const targetPaths = files.slice(0, limit);
   const cache = await readCache();
 
-  if (!cache || cache.scanRoot !== DEFAULT_SCAN_DIR) {
-    return loadParsedDocuments(limit, true);
+  if (!cache || JSON.stringify(cache.scanRoots || [cache.scanRoot]) !== JSON.stringify(activeScanRoots)) {
+    return loadParsedDocuments(limit, true, activeScanRoots);
   }
 
   const cachedByPath = new Map(cache.items.map((item) => [item.path, item]));
   const missingTargetPath = targetPaths.some((filePath) => !normalizedPaths.includes(filePath) && !cachedByPath.has(filePath));
   if (missingTargetPath) {
-    return loadParsedDocuments(limit, true);
+    return loadParsedDocuments(limit, true, activeScanRoot);
   }
 
-  const reparsedItems = await parseFiles(normalizedPaths.filter((filePath) => targetPaths.includes(filePath)));
+  const reparsedItems = await parseFiles(normalizedPaths.filter((filePath) => targetPaths.includes(filePath)), activeScanRoots);
   const reparsedByPath = new Map(reparsedItems.map((item) => [item.path, item]));
   const items = targetPaths
     .map((filePath) => reparsedByPath.get(filePath) || cachedByPath.get(filePath))
@@ -323,7 +405,8 @@ export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 
   const scanSignature = await buildScanSignature(files);
   await writeCache({
     generatedAt: new Date().toISOString(),
-    scanRoot: DEFAULT_SCAN_DIR,
+    scanRoot: activeScanRoot,
+    scanRoots: activeScanRoots,
     totalFiles: files.length,
     scanSignature,
     items,
