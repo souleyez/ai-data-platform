@@ -48,7 +48,7 @@ export default function InsightPanel({
       {!reportItems.length ? (
         <section className="card report-empty-card">
           <h4>还没有生成报表</h4>
-          <p>在左侧对话区提出报表需求后，这里会按列表出现。</p>
+          <p>在左侧对话区提出报表需求后，这里会按列表沉淀结果。</p>
         </section>
       ) : (
         <section className="report-center-list">

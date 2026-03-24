@@ -21,6 +21,36 @@ type FormulaTable = {
   groupLabel?: string;
 };
 
+type StaticPageCard = {
+  label: string;
+  value: string;
+  note?: string;
+};
+
+type StaticPageSection = {
+  title: string;
+  body: string;
+  bullets?: string[];
+};
+
+type StaticPageChart = {
+  title: string;
+  items: Array<{ label: string; value: number }>;
+};
+
+type StaticPageOutput = {
+  summary: string;
+  cards: StaticPageCard[];
+  sections: StaticPageSection[];
+  charts: StaticPageChart[];
+};
+
+type ChatOutput =
+  | { type: 'answer'; title?: string; content?: string }
+  | { type: 'table'; title: string; content?: string; table: FormulaTable }
+  | { type: 'page'; title: string; content?: string; page: StaticPageOutput; format?: 'html' }
+  | { type: 'ppt' | 'pdf'; title: string; content?: string; format: 'ppt' | 'pdf'; downloadUrl?: string };
+
 type FormulaSegment =
   | 'human_infant'
   | 'human_child'
@@ -276,6 +306,11 @@ function dedupeEvidenceMatches(matches: DocumentEvidenceMatch[]) {
 
 function extractReadablePromptFocus(prompt: string) {
   const text = String(prompt || '').toLowerCase();
+  if (/(contract|\u5408\u540c|\u6cd5\u52a1|\u6761\u6b3e|\u98ce\u9669)/i.test(text)) return '合同风险概览';
+  if (/(formula|\u5976\u7c89|\u914d\u65b9|\u8425\u517b)/i.test(text)) return '配方方案对比';
+  if (/(gut|\u80a0\u9053|\u809a\u80a0)/i.test(text)) return '肠道健康分析';
+  if (/(brain|\u8111|\u8ba4\u77e5)/i.test(text)) return '脑健康主题分析';
+  if (/(allergy|\u8fc7\u654f|\u514d\u75ab)/i.test(text)) return '过敏免疫分析';
   if (text.includes('结论')) return '核心结论';
   if (text.includes('实验对象') || text.includes('模型')) return '实验对象与模型';
   if (text.includes('价值')) return '主要价值';
@@ -486,6 +521,207 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   if (matchedDocs.length) parts.push(`命中文档 ${matchedDocs.length} 篇`);
   parts.push(mode === 'openclaw' ? '分析链路：云端模型增强' : '分析链路：本地AI');
   return parts.join(' / ');
+}
+
+function buildLibraryPayload(scope: KnowledgeScope) {
+  return scope.libraryKeys.map((key, index) => ({
+    key,
+    label: scope.libraryLabels[index] || key,
+  }));
+}
+
+function isVisualizationPrompt(prompt: string) {
+  return /(\u53ef\u89c6\u5316|\u56fe\u8868|\u4eea\u8868\u76d8|dashboard|chart|visual)/i.test(String(prompt || ''));
+}
+
+function isPageReportPrompt(prompt: string) {
+  return /(\u62a5\u8868|\u6982\u89c8|\u603b\u7ed3|\u9875\u9762|\u9759\u6001\u9875|page|dashboard)/i.test(String(prompt || ''));
+}
+
+function isTableReportPrompt(prompt: string) {
+  return /(\u8868\u683c|\u8868\u5355|table|csv|\u6e05\u5355)/i.test(String(prompt || ''));
+}
+
+function isKnowledgeReportPrompt(prompt: string) {
+  return /(\u77e5\u8bc6\u5e93|\u6587\u6863|\u6587\u732e|\u8d44\u6599|\u89e3\u6790|\u5f52\u7eb3|\u603b\u7ed3|\u62a5\u8868|\u53ef\u89c6\u5316|\u56fe\u8868|\u9759\u6001\u9875|dashboard|report|chart|table|page|pdf|ppt)/i
+    .test(String(prompt || ''));
+}
+
+function looksLikeEncodingComplaint(content: string) {
+  return /(\u4e71\u7801|\u8f93\u5165\u6cd5|\u7528\u82f1\u6587|\u91cd\u65b0\u6253\u5b57|\u622a\u56fe\u53d1\u7ed9\u6211)/i
+    .test(String(content || ''));
+}
+
+function inferPreferredLibraryKeys(
+  prompt: string,
+  libraries: Array<{ key: string; label: string; description?: string }>,
+) {
+  const text = String(prompt || '').toLowerCase();
+  const matches = new Set<string>();
+
+  for (const library of libraries) {
+    const haystack = `${library.key} ${library.label} ${library.description || ''}`.toLowerCase();
+    if (text.includes(library.key.toLowerCase()) || text.includes(library.label.toLowerCase())) {
+      matches.add(library.key);
+      continue;
+    }
+    if (/(\u5408\u540c|contract|\u6cd5\u52a1|\u6761\u6b3e|\u98ce\u9669)/i.test(text) && /(\u5408\u540c|contract)/i.test(haystack)) {
+      matches.add(library.key);
+    }
+    if (/(\u5976\u7c89|\u914d\u65b9|formula|\u8425\u517b)/i.test(text) && /(\u5976\u7c89|\u914d\u65b9|formula)/i.test(haystack)) {
+      matches.add(library.key);
+    }
+    if (/(\u80a0\u9053|gut)/i.test(text) && /(gut|\u80a0\u9053)/i.test(haystack)) {
+      matches.add(library.key);
+    }
+    if (/(\u8111|brain|\u8ba4\u77e5)/i.test(text) && /(brain|\u8111)/i.test(haystack)) {
+      matches.add(library.key);
+    }
+  }
+
+  return [...matches];
+}
+
+function documentMatchesLibraryKey(item: ParsedDocument, key: string) {
+  const haystack = [
+    item.name,
+    item.title,
+    item.summary,
+    item.excerpt,
+    item.bizCategory,
+    item.category,
+    ...(item.topicTags || []),
+    ...getDocumentGroups(item),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const normalizedKey = String(key || '').toLowerCase();
+
+  if (normalizedKey === 'contract') return /(\u5408\u540c|contract|\u6761\u6b3e|\u6cd5\u52a1)/i.test(haystack);
+  if (normalizedKey === '奶粉配方建议') return /(\u5976\u7c89|\u914d\u65b9|formula|\u8425\u517b|\u76ca\u751f\u83cc)/i.test(haystack);
+  if (normalizedKey === 'gut-health') return /(\u80a0\u9053|gut)/i.test(haystack);
+  if (normalizedKey === 'brain-health') return /(\u8111|brain|\u8ba4\u77e5)/i.test(haystack);
+
+  return haystack.includes(normalizedKey);
+}
+
+function documentMatchesAnyLibrary(item: ParsedDocument, libraryKeys: string[]) {
+  return libraryKeys.some((key) => documentMatchesLibraryKey(item, key));
+}
+
+function buildExpandedKnowledgeScope(
+  prompt: string,
+  items: ParsedDocument[],
+  initialMatchedDocs: ParsedDocument[],
+  libraries: Array<{ key: string; label: string; description?: string }>,
+  preferredLibraryKeys: string[] = [],
+): KnowledgeScope {
+  let scopedDocs = initialMatchedDocs.length
+    ? initialMatchedDocs
+    : matchDocumentsByPrompt(items, prompt).slice(0, 18);
+
+  if (preferredLibraryKeys.length && scopedDocs.length) {
+    const filtered = scopedDocs.filter((item) => (
+      getDocumentGroups(item).some((group) => preferredLibraryKeys.includes(group)) ||
+      documentMatchesAnyLibrary(item, preferredLibraryKeys)
+    ));
+    if (filtered.length) scopedDocs = filtered;
+  }
+
+  if (!scopedDocs.length && preferredLibraryKeys.length) {
+    scopedDocs = items
+      .filter((item) => (
+        getDocumentGroups(item).some((group) => preferredLibraryKeys.includes(group)) ||
+        documentMatchesAnyLibrary(item, preferredLibraryKeys)
+      ))
+      .slice(0, 18);
+  }
+
+  if (!scopedDocs.length) {
+    scopedDocs = items
+      .filter((item) => getDocumentGroups(item).length > 0)
+      .slice(0, 18);
+  }
+
+  const docGroupKeys = [...new Set(scopedDocs.flatMap((item) => getDocumentGroups(item)).filter(Boolean))];
+  const libraryMap = new Map(libraries.map((item) => [item.key, item.label]));
+  const libraryKeys = docGroupKeys.length ? docGroupKeys : libraries.map((item) => item.key);
+  const libraryLabels = libraryKeys.map((key) => libraryMap.get(key) || key);
+
+  return {
+    libraryKeys,
+    libraryLabels,
+    scopedDocs,
+    hasScope: scopedDocs.length > 0,
+  };
+}
+
+function buildTopicDistribution(items: ParsedDocument[]) {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const tags = item.topicTags?.length ? item.topicTags.slice(0, 2) : [item.bizCategory || item.category];
+    for (const tag of tags) {
+      const key = String(tag || '').trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([label, value]) => ({ label, value }));
+}
+
+function buildRiskDistribution(items: ParsedDocument[]) {
+  const levels = ['high', 'medium', 'low', 'unknown'];
+  return levels
+    .map((level) => ({
+      label: level === 'high' ? '高风险' : level === 'medium' ? '中风险' : level === 'low' ? '低风险' : '未标注',
+      value: items.filter((item) => String(item.riskLevel || 'unknown').toLowerCase() === level).length,
+    }))
+    .filter((entry) => entry.value > 0);
+}
+
+function buildStaticPageOutput(prompt: string, scope: KnowledgeScope, matchedDocs: ParsedDocument[], evidenceMatches: DocumentEvidenceMatch[]): ChatOutput {
+  const focus = extractReadablePromptFocus(prompt);
+  const topDocs = matchedDocs.slice(0, 4);
+  const evidence = dedupeEvidenceMatches(evidenceMatches).slice(0, 4);
+  const topicDistribution = buildTopicDistribution(matchedDocs);
+  const riskDistribution = buildRiskDistribution(matchedDocs);
+
+  return {
+    type: 'page',
+    title: `${focus}静态页`,
+    format: 'html',
+    content: buildEvidenceDrivenConclusion(prompt, matchedDocs, evidenceMatches),
+    page: {
+      summary: `基于 ${buildScopeLabel(scope)} 内命中的 ${matchedDocs.length} 份文档整理，适合作为可转发的静态分析页。`,
+      cards: [
+        { label: '命中文档', value: String(matchedDocs.length), note: buildScopeLabel(scope) },
+        { label: '知识库', value: String(scope.libraryLabels.length || 1), note: scope.libraryLabels.join('、') || '当前范围' },
+        { label: '证据片段', value: String(evidence.length), note: '用于支持本次归纳' },
+        { label: '主题数', value: String(topicDistribution.length), note: '按主题聚合' },
+      ],
+      sections: [
+        {
+          title: '结论摘要',
+          body: buildEvidenceDrivenConclusion(prompt, matchedDocs, evidenceMatches),
+          bullets: buildStructuredAnswerLines(matchedDocs),
+        },
+        {
+          title: '重点文档',
+          body: '以下文档是当前结论的主要支撑。',
+          bullets: topDocs.map((item) => `${item.name}：${trimSentence(item.summary || item.excerpt, 90)}`),
+        },
+      ],
+      charts: [
+        { title: '主题分布', items: topicDistribution },
+        { title: '风险分布', items: riskDistribution.length ? riskDistribution : [{ label: '未标注', value: matchedDocs.length }] },
+      ],
+    },
+  };
 }
 
 function isResumeComparePrompt(prompt: string) {
@@ -1496,4 +1732,395 @@ export async function runChatOrchestration(input: ChatRequestInput) {
       },
       latencyMs: 120,
     };
+}
+
+export async function runChatOrchestrationV2(input: ChatRequestInput) {
+  const prompt = input.prompt.trim();
+  const { items } = await loadParsedDocuments();
+  const initialEvidenceMatches = matchDocumentEvidenceByPrompt(items, prompt);
+  const initialMatchedDocs = initialEvidenceMatches.length
+    ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()]
+    : matchDocumentsByPrompt(items, prompt);
+  const libraries = await loadDocumentLibraries();
+  const reportState = await loadReportCenterState();
+  const templateScopedGroup = findReportGroupForPrompt(reportState.groups, prompt);
+  const baseScope = resolveKnowledgeScope(prompt, items, initialMatchedDocs, libraries);
+  const preferredLibraryKeys = [...new Set([...baseScope.libraryKeys, ...inferPreferredLibraryKeys(prompt, libraries)])];
+  const forceKnowledgeRoute = isKnowledgeReportPrompt(prompt);
+  const scope = forceKnowledgeRoute
+    ? buildExpandedKnowledgeScope(prompt, items, initialMatchedDocs, libraries, preferredLibraryKeys)
+    : baseScope;
+  const matchedDocs = scope.scopedDocs;
+  const scopedEvidenceMatches = matchDocumentEvidenceByPrompt(matchedDocs, prompt);
+  const referencePayload = buildReferencePayload(scopedEvidenceMatches);
+  const contextBlocks = scopedEvidenceMatches.length ? buildEvidenceContext(scopedEvidenceMatches) : buildDocumentContext(matchedDocs);
+  const strongDocScope = hasStrongDocumentScope(prompt, matchedDocs);
+  const gatewayReachable = await isOpenClawGatewayReachable();
+  const hasKnowledgeScope = forceKnowledgeRoute || ((scope.hasScope && strongDocScope) || Boolean(templateScopedGroup));
+  const policy = classifyChatPrompt({
+    prompt,
+    hasKnowledgeScope,
+  });
+  const libraryPayload = buildLibraryPayload(scope);
+
+  if (policy.mode === 'blocked') {
+    const content = buildBlockedPolicyAnswer(policy.reason);
+    const output: ChatOutput = { type: 'answer', content };
+    return {
+      mode: 'fallback' as const,
+      intent: 'system_change' as const,
+      needsKnowledge: false,
+      libraries: [],
+      output,
+      guard: {
+        requiresConfirmation: true,
+        reason: policy.reason,
+      },
+      scenario: 'default' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content,
+        output,
+        meta: '受控开放对话 / 已拦截执行型请求',
+        references: [],
+      },
+      panel: scenarios.default,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if (isResumeComparePrompt(prompt)) {
+    const resumeDocs = matchResumeDocuments(items, prompt, 30);
+    const compareDocs = resumeDocs.length ? resumeDocs : (matchedDocs.length ? matchedDocs : initialMatchedDocs);
+    const compareEvidenceMatches = compareDocs.length ? matchDocumentEvidenceByPrompt(compareDocs, prompt) : [];
+    const compareEvidence = compareEvidenceMatches.length
+      ? buildReferencePayload(compareEvidenceMatches)
+      : (matchedDocs.length ? referencePayload : buildReferencePayload(initialEvidenceMatches));
+    const compareResult = buildResumeCompareTable(compareDocs);
+    const output: ChatOutput = {
+      type: 'table',
+      title: compareResult.table.title,
+      content: compareResult.content,
+      table: compareResult.table,
+    };
+    return {
+      mode: 'fallback' as const,
+      intent: 'report' as const,
+      needsKnowledge: compareDocs.length > 0,
+      libraries: libraryPayload,
+      output,
+      guard: {
+        requiresConfirmation: false,
+        reason: '',
+      },
+      scenario: 'doc' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: compareResult.content,
+        table: compareResult.table,
+        output,
+        meta: buildMeta('doc', compareDocs, 'fallback'),
+        references: compareEvidence,
+      },
+      panel: scenarios.doc,
+      sources: compareDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: compareDocs.length,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if (policy.mode === 'general') {
+    let content = '当前云端模型暂不可用。你可以继续进行普通问答和方案讨论，或稍后再试。';
+    let mode: 'openclaw' | 'fallback' = 'fallback';
+
+    if (gatewayReachable) {
+      try {
+        const result = await runOpenClawChat({
+          prompt,
+          sessionUser: input.sessionUser,
+          contextBlocks: [],
+          systemPrompt: buildGeneralChatSystemPrompt(),
+        });
+        content = result.content;
+        mode = 'openclaw';
+      } catch {
+        mode = 'fallback';
+      }
+    }
+
+    const output: ChatOutput = { type: 'answer', content };
+    return {
+      mode,
+      intent: 'general' as const,
+      needsKnowledge: false,
+      libraries: [],
+      output,
+      guard: {
+        requiresConfirmation: false,
+        reason: '',
+      },
+      scenario: 'default' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content,
+        output,
+        meta: mode === 'openclaw' ? '受控开放对话 / 云端模型' : '受控开放对话 / 本地AI兜底',
+        references: [],
+      },
+      panel: scenarios.default,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode,
+        docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if ((!scope.hasScope || !strongDocScope) && !templateScopedGroup) {
+    const content = buildKnowledgeScopeGuardAnswer(scope);
+    const output: ChatOutput = { type: 'answer', content };
+    return {
+      mode: 'fallback' as const,
+      intent: 'knowledge_qa' as const,
+      needsKnowledge: true,
+      libraries: libraryPayload,
+      output,
+      guard: {
+        requiresConfirmation: false,
+        reason: 'knowledge_scope_not_matched',
+      },
+      scenario: 'doc' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content,
+        output,
+        meta: '知识库范围保护已生效 / 未命中任何知识库分组或文档',
+        references: [],
+      },
+      panel: scenarios.doc,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: 'fallback' as const,
+        docMatches: 0,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  if (isFormulaAdvicePrompt(prompt)) {
+    const segmentDecision = await resolveFormulaSegment(prompt, matchedDocs, input.sessionUser, gatewayReachable);
+
+    if (!segmentDecision.segment) {
+      let content = buildFallbackAnswer(prompt, 'doc', matchedDocs, scopedEvidenceMatches);
+      let mode: 'openclaw' | 'fallback' = 'fallback';
+
+      if (gatewayReachable) {
+        try {
+          const cloudResult = await runCloudDirectAnswer(prompt, matchedDocs, scope, input.sessionUser);
+          content = cloudResult.content;
+          mode = 'openclaw';
+        } catch {
+          mode = 'fallback';
+        }
+      }
+
+      const output: ChatOutput = { type: 'answer', content };
+      return {
+        mode,
+        intent: 'knowledge_qa' as const,
+        needsKnowledge: true,
+        libraries: libraryPayload,
+        output,
+        guard: {
+          requiresConfirmation: false,
+          reason: '',
+        },
+        scenario: 'doc' as ScenarioKey,
+        traceId: `trace_${Date.now()}`,
+        message: {
+          role: 'assistant' as const,
+          content,
+          output,
+          meta: buildMeta('doc', matchedDocs, mode),
+          references: referencePayload,
+        },
+        panel: scenarios.doc,
+        sources: matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+        permissions: { mode: 'read-only' },
+        orchestration: {
+          mode,
+          docMatches: matchedDocs.length,
+          gatewayConfigured: gatewayReachable,
+        },
+        latencyMs: 120,
+      };
+    }
+
+    const formulaAdvice = buildFormulaAdviceTable(matchedDocs, segmentDecision);
+    const formulaGroup = templateScopedGroup || reportState.groups.find((item) => {
+      const text = `${item.label} ${item.key}`.toLowerCase();
+      return text.includes('濂剁矇閰嶆柟') || text.includes('閰嶆柟寤鸿') || text.includes('formula');
+    });
+
+    if (formulaGroup) {
+      const template = formulaGroup.templates.find((item) => item.key === formulaGroup.defaultTemplateKey) || formulaGroup.templates[0];
+      formulaAdvice.table.groupLabel = formulaGroup.label;
+      formulaAdvice.table.templateLabel = template?.label || '琛ㄦ牸';
+
+      await createReportOutput({
+        groupKey: formulaGroup.key,
+        templateKey: template?.key,
+        title: `${formulaGroup.label}-聊天输出-${new Date().toISOString().slice(0, 10)}`,
+        triggerSource: 'chat',
+      });
+    }
+
+    const mode = (segmentDecision.source === 'cloud' ? 'openclaw' : 'fallback') as 'openclaw' | 'fallback';
+    const output: ChatOutput = {
+      type: 'table',
+      title: formulaAdvice.table.title,
+      content: formulaAdvice.content,
+      table: formulaAdvice.table,
+    };
+    return {
+      mode,
+      intent: 'report' as const,
+      needsKnowledge: true,
+      libraries: libraryPayload,
+      output,
+      guard: {
+        requiresConfirmation: false,
+        reason: '',
+      },
+      scenario: 'doc' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: formulaAdvice.content,
+        table: formulaAdvice.table,
+        output,
+        meta: buildMeta('doc', matchedDocs, mode),
+        references: referencePayload,
+      },
+      panel: scenarios.doc,
+      sources: matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode,
+        docMatches: matchedDocs.length,
+        gatewayConfigured: gatewayReachable,
+      },
+      latencyMs: 120,
+    };
+  }
+
+  const scenarioKey = chooseScenario(prompt, matchedDocs);
+  const scenario = scenarios[scenarioKey];
+  let answer = '';
+  let orchestrationMode: 'openclaw' | 'fallback' = 'fallback';
+  const wantsPageOutput = isVisualizationPrompt(prompt) || isPageReportPrompt(prompt);
+  const wantsTableOutput = !wantsPageOutput && isTableReportPrompt(prompt);
+
+  if (gatewayReachable) {
+    try {
+      const result = await runOpenClawChat({
+        prompt,
+        sessionUser: input.sessionUser,
+        contextBlocks,
+        systemPrompt: buildScopedSystemPrompt(scope, [
+          '回答时先给结论，再给简短依据。',
+          '不要执行任务，不要给出知识库范围之外的推测性建议。',
+        ]),
+      });
+      if (looksLikeEncodingComplaint(result.content)) {
+        answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+        orchestrationMode = 'fallback';
+      } else {
+        answer = result.content;
+        orchestrationMode = 'openclaw';
+      }
+    } catch {
+      answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+      orchestrationMode = 'fallback';
+    }
+  } else {
+    answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+  }
+
+  const output: ChatOutput = wantsPageOutput
+    ? buildStaticPageOutput(prompt, scope, matchedDocs, scopedEvidenceMatches)
+    : wantsTableOutput
+      ? {
+          type: 'table',
+          title: `${extractReadablePromptFocus(prompt)}表格`,
+          content: answer,
+          table: {
+            title: `${extractReadablePromptFocus(prompt)}表格`,
+            subtitle: `基于 ${buildScopeLabel(scope)} 内命中的 ${matchedDocs.length} 份文档整理`,
+            columns: ['文档', '分类', '要点', '证据'],
+            rows: matchedDocs.slice(0, 8).map((item) => [
+              item.name,
+              item.bizCategory || item.category || '未分类',
+              trimSentence(item.summary || item.excerpt, 72) || '待补充',
+              trimSentence(item.excerpt, 72) || trimSentence(item.summary, 72) || '待补充',
+            ]),
+            notes: scopedEvidenceMatches.slice(0, 4).map((match) => trimSentence(match.chunkText, 90)).filter(Boolean),
+          },
+        }
+      : { type: 'answer', content: answer };
+
+  return {
+    mode: orchestrationMode,
+    intent: (wantsPageOutput || wantsTableOutput) ? 'report' as const : 'knowledge_qa' as const,
+    needsKnowledge: true,
+    libraries: libraryPayload,
+    output,
+    guard: {
+      requiresConfirmation: false,
+      reason: '',
+    },
+    scenario: scenarioKey,
+    traceId: `trace_${Date.now()}`,
+    message: {
+      role: 'assistant' as const,
+      content: output.content || answer,
+      table: output.type === 'table' ? output.table : undefined,
+      output,
+      meta: buildMeta(scenarioKey, matchedDocs, orchestrationMode),
+      references: referencePayload,
+    },
+    panel: scenario,
+    sources: [
+      ...scenario.sources,
+      ...matchedDocs.map((item) => ({ type: 'documents', name: item.name, table: item.path })),
+    ],
+    permissions: { mode: 'read-only' },
+    orchestration: {
+      mode: orchestrationMode,
+      docMatches: matchedDocs.length,
+      gatewayConfigured: gatewayReachable,
+    },
+    latencyMs: 120,
+  };
 }

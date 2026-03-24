@@ -32,6 +32,7 @@ export function formatOrchestrationLabel(orchestration) {
 }
 
 export function normalizeChatResponse(data, fallbackPanel) {
+  const output = data?.output || data?.message?.output || null;
   const message = {
     role: data?.message?.role || 'assistant',
     content: data?.message?.content || '暂无返回内容',
@@ -39,6 +40,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     meta: data?.message?.meta || '',
     references: Array.isArray(data?.message?.references) ? data.message.references : [],
     orchestration: data?.orchestration || data?.message?.orchestration || null,
+    output,
   };
 
   return {
@@ -47,6 +49,12 @@ export function normalizeChatResponse(data, fallbackPanel) {
     message,
     sources: Array.isArray(data?.sources) ? data.sources : [],
     orchestration: message.orchestration,
+    mode: data?.mode || data?.orchestration?.mode || 'fallback',
+    intent: data?.intent || 'general',
+    needsKnowledge: Boolean(data?.needsKnowledge),
+    libraries: Array.isArray(data?.libraries) ? data.libraries : [],
+    output,
+    guard: data?.guard || null,
   };
 }
 

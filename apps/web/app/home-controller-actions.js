@@ -247,9 +247,11 @@ export async function submitQuestion(value, context) {
     }
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
-    const generatedReport = createGeneratedReport({ message });
-    setReportItems?.((prev) => [generatedReport, ...prev]);
-    setSelectedReportId?.(generatedReport.id);
+    const generatedReport = createGeneratedReport({ response: normalized, message });
+    if (generatedReport) {
+      setReportItems?.((prev) => [generatedReport, ...prev]);
+      setSelectedReportId?.(generatedReport.id);
+    }
   } catch {
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),

@@ -60,10 +60,13 @@ export async function uploadDocuments(formData) {
 }
 
 export async function sendChatPrompt(prompt) {
+  const promptBase64 = typeof window === 'undefined'
+    ? ''
+    : window.btoa(String.fromCharCode(...new TextEncoder().encode(prompt)));
   const response = await fetch(buildApiUrl('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, promptBase64 }),
   });
   return parseApiResponse(response, 'chat api failed');
 }
