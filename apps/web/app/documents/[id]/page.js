@@ -97,7 +97,7 @@ export default function DocumentDetailPage() {
         <header className="topbar">
           <div>
             <h2>文档详情</h2>
-            <p>以原文阅读为主，其他信息只保留必要摘要和结构化结果。</p>
+            <p>以原文阅读为主，其它信息只保留必要摘要和结构化结果。</p>
           </div>
           <div className="topbar-actions">
             <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
@@ -139,7 +139,7 @@ export default function DocumentDetailPage() {
                         className="filter-input"
                         value={keyword}
                         onChange={(event) => setKeyword(event.target.value)}
-                        placeholder="搜索原文关键字..."
+                        placeholder="搜索原文关键词..."
                       />
                     </div>
                   </div>

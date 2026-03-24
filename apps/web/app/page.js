@@ -561,12 +561,12 @@ export default function HomePage() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <h2>数据智能工作台</h2>
-            <p>首页现在只保留一个对话入口：发问题、发链接采集、上传文件入库，反馈都会留在当前会话里。</p>
+            <h2>AI 知识库</h2>
+            <p>首页保留统一对话入口：发问题、发链接采集、上传文件入库，反馈都会留在当前会话里。</p>
           </div>
           <div className="topbar-actions">
             <button className="ghost-btn" onClick={resetConversation}>新建会话</button>
-            <button className="primary-btn" disabled>生成日报（待接实）</button>
+            <button className="primary-btn" disabled>生成日报（预留）</button>
           </div>
         </header>
 

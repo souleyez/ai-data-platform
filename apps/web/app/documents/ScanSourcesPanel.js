@@ -1,0 +1,142 @@
+'use client';
+
+export default function ScanSourcesPanel({
+  expanded,
+  onToggleExpanded,
+  candidateSourceLoading,
+  candidateSourceSubmitting,
+  selectedCandidatePaths,
+  onLoadCandidateSources,
+  onImportCandidateSources,
+  scanRootDraft,
+  onScanRootDraftChange,
+  onAddScanSource,
+  scanSourceSubmitting,
+  directoryOptions,
+  data,
+  scanSources,
+  onToggleCandidatePath,
+  formatLocalTime,
+  onSetPrimaryScanSource,
+  onRemoveScanSource,
+}) {
+  return (
+    <section className="card documents-card">
+      <div className="panel-header">
+        <div>
+          <h3>扫描源</h3>
+          <p>发现本机候选目录，勾选后加入扫描源并直接扫描入库。</p>
+        </div>
+        <button className="ghost-btn" type="button" onClick={onToggleExpanded}>
+          {expanded ? '收起扫描源' : '展开扫描源'}
+        </button>
+      </div>
+
+      {expanded ? (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div>
+              <strong>本机候选目录发现</strong>
+              <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
+                自动发现 Desktop、Documents、Downloads 等目录。可能过程较慢，请谨慎选择。
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="ghost-btn" onClick={onLoadCandidateSources} disabled={candidateSourceLoading}>
+                {candidateSourceLoading ? '发现中...' : '发现本机候选目录'}
+              </button>
+              <button className="primary-btn" onClick={onImportCandidateSources} disabled={candidateSourceSubmitting || !selectedCandidatePaths.length}>
+                {candidateSourceSubmitting ? '入库中...' : `加入扫描源并扫描 (${selectedCandidatePaths.length})`}
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gap: 8,
+              padding: 12,
+              borderRadius: 12,
+              border: scanRootDraft.trim() ? '1px solid #0f766e' : '1px solid #e2e8f0',
+              background: scanRootDraft.trim() ? '#f0fdfa' : '#ffffff',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong>手动指定目录</strong>
+              <span style={{ color: '#475569', fontSize: 13 }}>输入本地目录后加入同一批扫描列表</span>
+            </div>
+            <input
+              className="filter-input"
+              value={scanRootDraft}
+              onChange={(event) => onScanRootDraftChange(event.target.value)}
+              placeholder="例如：C:\\docs\\papers"
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="ghost-btn" onClick={onAddScanSource} disabled={scanSourceSubmitting || !scanRootDraft.trim()}>
+                {scanSourceSubmitting ? '处理中...' : '加入目录列表'}
+              </button>
+            </div>
+          </div>
+
+          {directoryOptions.length ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {directoryOptions.map((candidate) => (
+                <label
+                  key={candidate.path}
+                  style={{
+                    display: 'grid',
+                    gap: 6,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: selectedCandidatePaths.includes(candidate.path) ? '1px solid #0f766e' : '1px solid #e2e8f0',
+                    background: selectedCandidatePaths.includes(candidate.path) ? '#f0fdfa' : '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input type="checkbox" checked={selectedCandidatePaths.includes(candidate.path)} onChange={() => onToggleCandidatePath(candidate.path)} />
+                    <strong>{candidate.label}</strong>
+                    <span style={{ color: '#475569', fontSize: 13 }}>{candidate.reason}</span>
+                    {candidate.alreadyAdded ? <span className="source-chip" style={{ background: '#ecfeff', color: '#0f766e' }}>已加入</span> : null}
+                    {candidate.path === data?.scanRoot ? <span className="source-chip" style={{ background: '#eff6ff', color: '#1d4ed8' }}>主目录</span> : null}
+                  </div>
+                  <div style={{ color: '#0f172a', fontSize: 13, wordBreak: 'break-all' }}>{candidate.path}</div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#64748b', fontSize: 12 }}>
+                    <span>预计文件 {candidate.pendingScan ? '待扫描' : `${candidate.fileCount}${candidate.truncated ? '+' : ''}`}</span>
+                    <span>最近更新 {formatLocalTime(candidate.latestModifiedAt)}</span>
+                    {candidate.path !== data?.scanRoot && candidate.alreadyAdded ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onSetPrimaryScanSource(candidate.path);
+                        }}
+                        style={{ border: 'none', background: 'transparent', color: '#475569', cursor: 'pointer', padding: 0 }}
+                      >
+                        设为主目录
+                      </button>
+                    ) : null}
+                    {candidate.alreadyAdded && scanSources.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onRemoveScanSource(candidate.path);
+                        }}
+                        style={{ border: 'none', background: 'transparent', color: '#475569', cursor: 'pointer', padding: 0 }}
+                      >
+                        移除
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: '#64748b', fontSize: 13 }}>先点击“发现本机候选目录”获取可勾选的本地目录列表。</div>
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}

@@ -3,19 +3,46 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
-import { loadDocumentCategoryConfig, saveDocumentCategoryConfig, type BizCategory, type ProjectCustomCategory } from '../lib/document-config.js';
+import {
+  loadDocumentCategoryConfig,
+  saveDocumentCategoryConfig,
+  type BizCategory,
+  type ProjectCustomCategory,
+} from '../lib/document-config.js';
 import { parseDocument } from '../lib/document-parser.js';
-import { createDocumentLibrary, deleteDocumentLibrary, documentMatchesLibrary, loadDocumentLibraries } from '../lib/document-libraries.js';
-import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths } from '../lib/document-store.js';
-import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from '../lib/ingest-feedback.js';
+import {
+  createDocumentLibrary,
+  deleteDocumentLibrary,
+  documentMatchesLibrary,
+  loadDocumentLibraries,
+} from '../lib/document-libraries.js';
+import {
+  buildDocumentId,
+  DEFAULT_SCAN_DIR,
+  loadParsedDocuments,
+  mergeParsedDocumentsForPaths,
+} from '../lib/document-store.js';
+import {
+  buildPreviewItemFromDocument,
+  resolveSuggestedLibraryKeys,
+} from '../lib/ingest-feedback.js';
 import { saveDocumentOverride, saveDocumentSuggestion } from '../lib/document-overrides.js';
+import {
+  acceptDocumentSuggestions,
+  addDocumentScanSource,
+  autoAssignSuggestedLibraries,
+  buildNextScanRoots,
+  discoverCandidateDirectories,
+  importCandidateScanSources,
+  reclusterUngroupedDocuments,
+  removeDocumentScanSource,
+  saveConfirmedDocumentGroups,
+  saveIgnoredDocuments,
+  setPrimaryDocumentScanSource,
+} from '../lib/document-route-services.js';
 
 function sanitizeFileName(fileName: string) {
   return fileName.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || `upload-${Date.now()}`;
-}
-
-function buildNextScanRoots(currentScanRoots: string[], nextPrimary: string) {
-  return [nextPrimary, ...currentScanRoots.filter((item) => item !== nextPrimary)];
 }
 
 function truncateText(value: unknown, maxLength: number) {
@@ -23,76 +50,6 @@ function truncateText(value: unknown, maxLength: number) {
   if (!text) return '';
   if (text.length <= maxLength) return text;
   return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-async function safeStat(targetPath: string) {
-  try {
-    return await fs.stat(targetPath);
-  } catch {
-    return null;
-  }
-}
-
-async function summarizeCandidateDirectory(targetPath: string) {
-  const stat = await safeStat(targetPath);
-  if (!stat?.isDirectory()) return null;
-
-  return {
-    path: targetPath,
-    exists: true,
-    fileCount: 0,
-    latestModifiedAt: Math.floor(stat.mtimeMs),
-    truncated: false,
-    pendingScan: true,
-  };
-}
-
-async function discoverCandidateDirectories() {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const appData = process.env.APPDATA || '';
-  const localAppData = process.env.LOCALAPPDATA || '';
-  const documents = home ? path.join(home, 'Documents') : '';
-  const desktop = home ? path.join(home, 'Desktop') : '';
-  const downloads = home ? path.join(home, 'Downloads') : '';
-
-  const candidates = [
-    { key: 'downloads', label: 'Downloads', reason: '常见浏览器与应用默认下载目录', path: downloads },
-    { key: 'documents', label: 'Documents', reason: '系统默认文档目录', path: documents },
-    { key: 'desktop', label: 'Desktop', reason: '桌面常见临时文档区', path: desktop },
-    { key: 'wechat-files', label: '微信文件', reason: '微信接收文件常见目录', path: documents ? path.join(documents, 'WeChat Files') : '' },
-    { key: 'wecom-cache', label: '企业微信文件', reason: '企业微信缓存与下载常见目录', path: documents ? path.join(documents, 'WXWork') : '' },
-    { key: 'feishu-downloads', label: '飞书下载', reason: '飞书常见下载目录', path: downloads ? path.join(downloads, 'Lark') : '' },
-    { key: 'qq-files', label: 'QQ文件', reason: 'QQ接收文件常见目录', path: documents ? path.join(documents, 'Tencent Files') : '' },
-    { key: '360-downloads', label: '360下载', reason: '360浏览器常见下载目录', path: downloads ? path.join(downloads, '360Downloads') : '' },
-    { key: 'baidu-downloads', label: '百度下载', reason: '百度网盘/浏览器常见下载目录', path: downloads ? path.join(downloads, 'BaiduNetdiskDownload') : '' },
-    { key: 'feishu-appdata', label: '飞书缓存导出', reason: '飞书本地缓存常见目录', path: appData ? path.join(appData, 'LarkShell') : '' },
-    { key: 'wechat-appdata', label: '微信缓存导出', reason: '微信本地数据常见目录', path: localAppData ? path.join(localAppData, 'Tencent', 'WeChat') : '' },
-  ].filter((item) => item.path);
-
-  const summarized = [] as Array<{
-    key: string;
-    label: string;
-    reason: string;
-    path: string;
-    exists: boolean;
-    fileCount: number;
-    latestModifiedAt: number;
-    truncated: boolean;
-    pendingScan?: boolean;
-  }>;
-
-  for (const candidate of candidates) {
-    const summary = await summarizeCandidateDirectory(candidate.path);
-    if (!summary) continue;
-    summarized.push({
-      key: candidate.key,
-      label: candidate.label,
-      reason: candidate.reason,
-      ...summary,
-    });
-  }
-
-  return summarized.sort((a, b) => b.fileCount - a.fileCount || b.latestModifiedAt - a.latestModifiedAt);
 }
 
 function toListItem<T extends Record<string, unknown>>(item: T) {
@@ -153,7 +110,10 @@ function extractDocumentTimestamp(item: { name?: string; path?: string }) {
   return match ? Number(match[1]) : 0;
 }
 
-function resolveLibraryScenarioKey(library: { isDefault?: boolean; sourceCategoryKey?: string; key: string }, items: Array<{ bizCategory?: string; confirmedBizCategory?: string; path?: string; name?: string }>) {
+function resolveLibraryScenarioKey(
+  library: { isDefault?: boolean; sourceCategoryKey?: string; key: string },
+  items: Array<{ bizCategory?: string; confirmedBizCategory?: string }>,
+) {
   if (library.isDefault && library.sourceCategoryKey) {
     return library.sourceCategoryKey === 'paper' ? 'paper' : library.sourceCategoryKey;
   }
@@ -168,53 +128,6 @@ function resolveLibraryScenarioKey(library: { isDefault?: boolean; sourceCategor
   return dominant === 'paper' ? 'paper' : dominant;
 }
 
-function normalizeClusterLabel(value: string) {
-  return String(value || '')
-    .trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, ' ')
-    .slice(0, 24);
-}
-
-function collectClusterSeeds(item: Awaited<ReturnType<typeof loadParsedDocuments>>['items'][number]) {
-  const seeds = new Set<string>();
-  for (const tag of item.topicTags || []) {
-    const normalized = normalizeClusterLabel(tag);
-    if (normalized.length >= 2) seeds.add(normalized);
-  }
-
-  const titleTokens = String(item.title || item.name || '')
-    .split(/[\s/\\|,，、:：;；()（）【】[\]-]+/)
-    .map((token) => normalizeClusterLabel(token))
-    .filter((token) => token.length >= 3);
-
-  for (const token of titleTokens.slice(0, 3)) seeds.add(token);
-  return [...seeds];
-}
-
-async function autoAssignSuggestedLibraries(
-  items: Awaited<ReturnType<typeof loadParsedDocuments>>['items'],
-  libraries: Awaited<ReturnType<typeof loadDocumentLibraries>>,
-) {
-  let updatedCount = 0;
-
-  for (const item of items) {
-    if (item.confirmedGroups?.length) continue;
-
-    const suggestedGroups = resolveSuggestedLibraryKeys(item, libraries).filter((key) => {
-      const matched = libraries.find((library) => library.key === key);
-      return matched && !matched.isDefault;
-    });
-
-    if (!suggestedGroups.length) continue;
-
-    await saveDocumentSuggestion(item.path, { suggestedGroups });
-    updatedCount += 1;
-  }
-
-  return updatedCount;
-}
-
 export async function registerDocumentRoutes(app: FastifyInstance) {
   app.get('/documents/config', async () => {
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
@@ -225,7 +138,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/config', async (request) => {
-    const body = (request.body || {}) as { categories?: Record<string, { label?: string; folders?: string[] | string }> };
+    const body = (request.body || {}) as {
+      categories?: Record<string, { label?: string; folders?: string[] | string }>;
+    };
+
     const categories = Object.fromEntries(
       Object.entries(body.categories || {}).map(([key, value]) => [
         key,
@@ -233,7 +149,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
           label: value.label || key,
           folders: Array.isArray(value.folders)
             ? value.folders.map((item) => String(item).trim()).filter(Boolean)
-            : String(value.folders || '').split(/[,\n]/).map((item) => item.trim()).filter(Boolean),
+            : String(value.folders || '')
+              .split(/[,\n]/)
+              .map((item) => item.trim())
+              .filter(Boolean),
         },
       ]),
     );
@@ -241,6 +160,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const currentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
     const config = await saveDocumentCategoryConfig(currentConfig.scanRoot, { categories: categories as any });
     const { exists, files } = await loadParsedDocuments(200, true, config.scanRoot);
+
     return {
       status: 'saved',
       mode: 'read-only',
@@ -248,8 +168,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       rescanned: true,
       totalFiles: files.length,
       message: exists
-        ? '分类目录配置已保存，并已自动重扫文档。'
-        : '分类目录配置已保存，但扫描目录当前不存在。',
+        ? '分类目录配置已保存，并自动重扫文档。'
+        : '分类目录配置已保存，但当前扫描目录不存在。',
     };
   });
 
@@ -311,7 +231,6 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
   app.get('/documents/detail', async (request, reply) => {
     const { id } = (request.query || {}) as { id?: string };
-
     if (!id) {
       return reply.code(400).send({ error: 'id is required' });
     }
@@ -324,9 +243,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'document not found' });
     }
 
-    const detailItem = found.fullText
-      ? found
-      : await parseDocument(found.path, documentConfig);
+    const detailItem = found.fullText ? found : await parseDocument(found.path, documentConfig);
     const matchedFolders = Object.entries(documentConfig.categories)
       .filter(([, value]) => value.folders.some((folder) => folder && found.path.toLowerCase().includes(folder.toLowerCase())))
       .map(([key, value]) => ({ key, label: value.label, folders: value.folders }));
@@ -418,12 +335,14 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   app.post('/documents/libraries', async (request, reply) => {
     const body = (request.body || {}) as { name?: string; description?: string };
     const name = String(body.name || '').trim();
+
     if (!name) {
       return reply.code(400).send({ error: 'library name is required' });
     }
 
     const library = await createDocumentLibrary({ name, description: body.description });
     const libraries = await loadDocumentLibraries();
+
     return {
       status: 'created',
       message: `已新增知识库分组“${library.label}”。`,
@@ -447,6 +366,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
     await deleteDocumentLibrary(key);
     const nextLibraries = await loadDocumentLibraries();
+
     return {
       status: 'deleted',
       message: `已删除知识库分组“${found.label}”，文档仍保留，仅移除了分组关联。`,
@@ -514,13 +434,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'scanRoot is required' });
     }
 
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const savedConfig = await saveDocumentCategoryConfig(config.scanRoot, {
-      scanRoots: Array.from(new Set([...(config.scanRoots || [config.scanRoot]), requestedScanRoot])),
-      categories: config.categories,
-      customCategories: config.customCategories,
-    });
-
+    const savedConfig = await addDocumentScanSource(requestedScanRoot);
     return {
       status: 'added',
       mode: 'read-only',
@@ -540,23 +454,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'scanRoots are required' });
     }
 
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const nextScanRoots = Array.from(new Set([...(config.scanRoots || [config.scanRoot]), ...requestedScanRoots]));
-    const savedConfig = await saveDocumentCategoryConfig(config.scanRoot, {
-      scanRoots: nextScanRoots,
-      categories: config.categories,
-      customCategories: config.customCategories,
-    });
-
-    let totalFiles = 0;
-    let importedCount = 0;
-    let exists = true;
-    if (scanNow) {
-      const loaded = await loadParsedDocuments(200, false, savedConfig.scanRoots);
-      totalFiles = loaded.files.length;
-      importedCount = loaded.items.length;
-      exists = loaded.exists;
-    }
+    const { config, savedConfig, exists, totalFiles, importedCount } = await importCandidateScanSources(requestedScanRoots, scanNow);
 
     return {
       status: 'imported',
@@ -582,22 +480,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'scanRoot is required' });
     }
 
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const currentScanRoots = config.scanRoots || [config.scanRoot];
-    if (!currentScanRoots.includes(requestedScanRoot)) {
-      return reply.code(404).send({ error: 'scan source not found' });
+    const result = await setPrimaryDocumentScanSource(requestedScanRoot);
+    if ('error' in result) {
+      return reply.code(404).send({ error: result.error });
     }
-
-    const savedConfig = await saveDocumentCategoryConfig(requestedScanRoot, {
-      scanRoots: buildNextScanRoots(currentScanRoots, requestedScanRoot),
-      categories: config.categories,
-      customCategories: config.customCategories,
-    });
 
     return {
       status: 'updated',
       mode: 'read-only',
-      config: savedConfig,
+      config: result.savedConfig,
       message: '主扫描目录已更新。',
     };
   });
@@ -610,29 +501,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'scanRoot is required' });
     }
 
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const currentScanRoots = config.scanRoots || [config.scanRoot];
-    const nextScanRoots = currentScanRoots.filter((item) => item !== requestedScanRoot);
-
-    if (nextScanRoots.length === currentScanRoots.length) {
-      return reply.code(404).send({ error: 'scan source not found' });
+    const result = await removeDocumentScanSource(requestedScanRoot);
+    if ('error' in result) {
+      return reply.code(result.error === 'at least one scan source is required' ? 400 : 404).send({ error: result.error });
     }
-
-    if (!nextScanRoots.length) {
-      return reply.code(400).send({ error: 'at least one scan source is required' });
-    }
-
-    const nextPrimary = config.scanRoot === requestedScanRoot ? nextScanRoots[0] : config.scanRoot;
-    const savedConfig = await saveDocumentCategoryConfig(nextPrimary, {
-      scanRoots: buildNextScanRoots(nextScanRoots, nextPrimary),
-      categories: config.categories,
-      customCategories: config.customCategories,
-    });
 
     return {
       status: 'removed',
       mode: 'read-only',
-      config: savedConfig,
+      config: result.savedConfig,
       message: '扫描目录已移除。',
     };
   });
@@ -654,57 +531,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/recluster-ungrouped', async () => {
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { items } = await loadParsedDocuments(200, false, config.scanRoots);
-    const libraries = await loadDocumentLibraries();
-
-    const candidates = items.filter((item) => !item.ignored && item.parseStatus === 'parsed' && !(item.confirmedGroups?.length));
-    const clusterBuckets = new Map<string, typeof candidates>();
-    let suggestedCount = 0;
-    let createdLibraryCount = 0;
-
-    for (const item of candidates) {
-      const matched = resolveSuggestedLibraryKeys(item, libraries).filter((key) => {
-        const library = libraries.find((entry) => entry.key === key);
-        return Boolean(library && !library.isDefault);
-      });
-
-      if (matched.length) {
-        await saveDocumentSuggestion(item.path, { suggestedGroups: matched });
-        suggestedCount += 1;
-        continue;
-      }
-
-      await saveDocumentSuggestion(item.path, { suggestedGroups: [] });
-      for (const seed of collectClusterSeeds(item)) {
-        const bucket = clusterBuckets.get(seed) || [];
-        bucket.push(item);
-        clusterBuckets.set(seed, bucket);
-      }
-    }
-
-    const assignedClusterDocPaths = new Set<string>();
-    for (const [seed, bucket] of [...clusterBuckets.entries()].sort((a, b) => b[1].length - a[1].length)) {
-      if (bucket.length < 10) continue;
-      const created = await createDocumentLibrary({ name: seed, description: '按未分组文档内容自动聚合生成' });
-      if (!libraries.some((library) => library.key === created.key)) {
-        createdLibraryCount += 1;
-        libraries.push(created);
-      }
-      for (const item of bucket) {
-        if (item.confirmedGroups?.length || assignedClusterDocPaths.has(item.path)) continue;
-        await saveDocumentSuggestion(item.path, { suggestedGroups: [created.key] });
-        assignedClusterDocPaths.add(item.path);
-      }
-    }
+    const { processedCount, suggestedCount, createdLibraryCount } = await reclusterUngroupedDocuments();
 
     return {
       status: 'completed',
       mode: 'read-only',
-      processedCount: candidates.length,
+      processedCount,
       suggestedCount,
       createdLibraryCount,
-      message: `已扫描 ${candidates.length} 条未分组文档，更新建议 ${suggestedCount} 条，自动新建分组 ${createdLibraryCount} 个。`,
+      message: `已扫描 ${processedCount} 条未分组文档，更新建议 ${suggestedCount} 条，自动新建分组 ${createdLibraryCount} 个。`,
     };
   });
 
@@ -716,18 +551,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'suggestion items are required' });
     }
 
-    const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { items } = await loadParsedDocuments(200, false, documentConfig.scanRoots);
-    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
-    const results = [] as Array<{ id: string; groups: string[]; confirmedAt: string }>;
-
-    for (const update of updates) {
-      const found = update.id ? byId.get(update.id) : null;
-      if (!found?.suggestedGroups?.length) continue;
-      const saved = await saveDocumentOverride(found.path, { groups: found.suggestedGroups });
-      results.push({ id: update.id as string, groups: saved.groups || [], confirmedAt: saved.confirmedAt });
-    }
-
+    const results = await acceptDocumentSuggestions(updates);
     return {
       status: 'accepted',
       updatedCount: results.length,
@@ -785,7 +609,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/category-suggestions', async (request, reply) => {
-    const body = (request.body || {}) as { items?: Array<{ id?: string; suggestedName?: string; parentCategoryKey?: BizCategory }> };
+    const body = (request.body || {}) as {
+      items?: Array<{ id?: string; suggestedName?: string; parentCategoryKey?: BizCategory }>;
+    };
     const updates = Array.isArray(body.items) ? body.items : [];
 
     if (!updates.length) {
@@ -826,7 +652,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const savedConfig = await saveDocumentCategoryConfig(documentConfig.scanRoot, { customCategories });
     return {
       status: 'accepted',
-      message: accepted.length ? `已接纳 ${accepted.length} 条新增分类建议。` : '没有可接纳的分类建议。',
+      message: accepted.length
+        ? `已接纳 ${accepted.length} 条新增分类建议。`
+        : '没有可接纳的分类建议。',
       accepted,
       config: savedConfig,
     };
@@ -840,36 +668,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'group items are required' });
     }
 
-    const libraries = await loadDocumentLibraries();
-    const validGroups = new Set(libraries.map((item) => item.key));
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { items } = await loadParsedDocuments(200, false, config.scanRoots);
-    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
-    const results = [] as Array<{ id: string; groups: string[]; confirmedAt: string }>;
-
-    for (const update of updates) {
-      const found = update.id ? byId.get(update.id) : null;
-      if (!found) continue;
-      const nextGroups = (update.groups || []).filter((group) => validGroups.has(group));
-      const saved = await saveDocumentOverride(found.path, { groups: nextGroups });
-      results.push({ id: update.id as string, groups: saved.groups || [], confirmedAt: saved.confirmedAt });
-    }
-
-    const ingestItems = results.reduce<ReturnType<typeof buildPreviewItemFromDocument>[]>((acc, result) => {
-      const found = byId.get(result.id);
-      if (!found) return acc;
-      acc.push(buildPreviewItemFromDocument({
-        ...found,
-        confirmedGroups: result.groups,
-        categoryConfirmedAt: result.confirmedAt,
-      }, 'file', undefined, libraries));
-      return acc;
-    }, []);
-
+    const { ingestItems } = await saveConfirmedDocumentGroups(updates);
     return {
       status: 'confirmed',
       updatedCount: ingestItems.length,
-      message: ingestItems.length ? `已确认 ${ingestItems.length} 项分组。` : '没有可更新的分组项。',
+      message: ingestItems.length
+        ? `已确认 ${ingestItems.length} 项分组。`
+        : '没有可更新的分组项。',
       ingestItems,
     };
   });
@@ -882,18 +687,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'ignore items are required' });
     }
 
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { items } = await loadParsedDocuments(200, false, config.scanRoots);
-    const byId = new Map(items.map((item) => [buildDocumentId(item.path), item]));
-    const results = [] as Array<{ id: string; ignored: boolean; confirmedAt: string }>;
-
-    for (const update of updates) {
-      const found = update.id ? byId.get(update.id) : null;
-      if (!found || typeof update.ignored !== 'boolean') continue;
-      const saved = await saveDocumentOverride(found.path, { ignored: update.ignored });
-      results.push({ id: update.id as string, ignored: Boolean(saved.ignored), confirmedAt: saved.confirmedAt });
-    }
-
+    const results = await saveIgnoredDocuments(updates);
     return {
       status: 'saved',
       updatedCount: results.length,
@@ -937,6 +731,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const { files, items } = await mergeParsedDocumentsForPaths(savedFiles.map((file) => file.path), 200, config.scanRoots);
     const itemMap = new Map(items.map((item) => [item.path, item]));
     const ingestItems = [];
+
     for (const file of savedFiles) {
       const parsed = itemMap.get(file.path);
       if (!parsed) {

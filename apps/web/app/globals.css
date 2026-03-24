@@ -395,6 +395,26 @@ th { color: var(--subtle); font-weight: 600; }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+.table-pagination-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--subtle);
+  font-size: 13px;
+}
+.table-pagination {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.table-pagination-text {
+  color: var(--subtle);
+  font-size: 13px;
+}
 .back-link { text-decoration: none; display: inline-flex; align-items: center; }
 .home-top-grid { grid-template-columns: 1fr 1fr; }
 .home-bottom-grid { grid-template-columns: 1fr; }
