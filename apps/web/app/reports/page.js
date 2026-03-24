@@ -1,8 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import GeneratedReportDetail from '../components/GeneratedReportDetail';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
+import {
+  copyGeneratedReportLink,
+  downloadGeneratedReport,
+  formatGeneratedReportTime,
+  loadGeneratedReports,
+} from '../lib/generated-reports';
 import { normalizeDatasourceResponse, normalizeReportsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
@@ -28,13 +36,25 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-export default function ReportsPage() {
+function ReportsPageContent() {
+  const searchParams = useSearchParams();
+  const generatedId = searchParams.get('generated') || '';
   const [data, setData] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
   const [selectedTemplates, setSelectedTemplates] = useState({});
+  const [generatedReport, setGeneratedReport] = useState(null);
+
+  useEffect(() => {
+    if (!generatedId) {
+      setGeneratedReport(null);
+      return;
+    }
+    const items = loadGeneratedReports();
+    setGeneratedReport(items.find((item) => item.id === generatedId) || null);
+  }, [generatedId]);
 
   async function loadReports() {
     try {
@@ -70,6 +90,47 @@ export default function ReportsPage() {
   }, []);
 
   const groups = useMemo(() => data?.groups || [], [data]);
+
+  if (generatedId) {
+    return (
+      <div className="app-shell">
+        <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
+        <main className="main-panel">
+          <header className="topbar">
+            <div>
+              <h2>AI 知识库</h2>
+              <p>生成报表详情页。可继续下载文件，或复制当前静态页链接转发。</p>
+            </div>
+          </header>
+
+          {!generatedReport ? (
+            <section className="card report-empty-card">
+              <h4>报表不存在</h4>
+              <p>当前链接对应的本地生成报表不存在，可能已被删除。</p>
+            </section>
+          ) : (
+            <section className="card documents-card" style={{ display: 'grid', gap: 16 }}>
+              <div className="panel-header">
+                <div>
+                  <h3>{generatedReport.title}</h3>
+                  <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="ghost-btn" type="button" onClick={() => void copyGeneratedReportLink(generatedReport)}>
+                    复制链接
+                  </button>
+                  <button className="primary-btn" type="button" onClick={() => downloadGeneratedReport(generatedReport)}>
+                    下载报表
+                  </button>
+                </div>
+              </div>
+              <GeneratedReportDetail item={generatedReport} />
+            </section>
+          )}
+        </main>
+      </div>
+    );
+  }
 
   async function updateGroupTemplate(groupKey, templateKey) {
     try {
@@ -279,5 +340,13 @@ export default function ReportsPage() {
         ) : null}
       </main>
     </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <Suspense fallback={<div className="app-shell"><main className="main-panel"><p>加载报表中...</p></main></div>}>
+      <ReportsPageContent />
+    </Suspense>
   );
 }

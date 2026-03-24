@@ -3,7 +3,6 @@
 export default function WorkbenchToolbar({ categories = [], activeKey, onSelect }) {
   return (
     <section className="workbench-toolbar card">
-      <div className="workbench-toolbar-label">业务类</div>
       <div className="workbench-toolbar-tabs">
         {categories.map((item) => (
           <button

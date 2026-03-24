@@ -29,8 +29,8 @@ export async function fetchCaptureTasks() {
 }
 
 export async function fetchDocumentsSnapshot() {
-  const response = await fetch(buildApiUrl('/api/documents'));
-  return parseApiResponse(response, 'load documents failed');
+  const response = await fetch(buildApiUrl('/api/documents-overview'));
+  return parseApiResponse(response, 'load documents overview failed');
 }
 
 export async function createWebCapture(payload) {

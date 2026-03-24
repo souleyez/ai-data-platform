@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { fetchCaptureTasks, fetchDatasources, fetchDocumentsSnapshot } from './home-api';
-import { CHAT_STORAGE_KEY, DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
+import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
   acceptIngestGroupSuggestion,
   assignIngestToSelectedLibrary,
@@ -13,27 +13,23 @@ import {
 import { normalizeDatasourceResponse } from './lib/types';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
-const EMPTY_DOCUMENT_SNAPSHOT = { totalFiles: 0, parsed: 0, scanRoot: '' };
-
 export function useHomePageController() {
   const [messages, setMessages] = useState(initialMessages);
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
   const [activeScenario, setActiveScenario] = useState('technical');
   const [panel, setPanel] = useState(scenarios.technical || scenarios.default);
+  const [reportCollapsed, setReportCollapsed] = useState(false);
+  const [reportItems, setReportItems] = useState([]);
+  const [selectedReportId, setSelectedReportId] = useState('');
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
   const [captureTasks, setCaptureTasks] = useState([]);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
   const [documentLibraries, setDocumentLibraries] = useState([]);
+  const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
-  const [documentSnapshot, setDocumentSnapshot] = useState(EMPTY_DOCUMENT_SNAPSHOT);
-
-  const selectWorkbenchCategory = (categoryKey) => {
-    setActiveScenario(categoryKey);
-    setPanel(scenarios[categoryKey] || scenarios.default);
-  };
 
   async function loadDatasources() {
     try {
@@ -57,15 +53,13 @@ export function useHomePageController() {
   async function loadDocumentSnapshot() {
     try {
       const json = await fetchDocumentsSnapshot();
-      setDocumentLibraries(Array.isArray(json?.libraries) ? json.libraries : []);
-      setDocumentSnapshot({
-        totalFiles: json?.totalFiles || 0,
-        parsed: json?.meta?.parsed || 0,
-        scanRoot: json?.scanRoot || '',
-      });
+      const libraries = Array.isArray(json?.libraries) ? json.libraries : [];
+      const libraryDocumentTotal = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
+      setDocumentLibraries(libraries);
+      setDocumentTotal(libraryDocumentTotal || Number(json?.totalFiles || 0));
     } catch {
       setDocumentLibraries([]);
-      setDocumentSnapshot(EMPTY_DOCUMENT_SNAPSHOT);
+      setDocumentTotal(0);
     }
   }
 
@@ -74,70 +68,71 @@ export function useHomePageController() {
   }
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) setMessages(parsed);
-      }
-    } catch {
-      // ignore invalid local cache
-    }
-
     loadDatasources();
     loadCaptureTasks();
     loadDocumentSnapshot();
   }, []);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-60)));
-    } catch {
-      // ignore persistence failure
+    if (!reportItems.length) {
+      setSelectedReportId('');
+      return;
     }
-  }, [messages]);
+    if (!reportItems.some((item) => item.id === selectedReportId)) {
+      setSelectedReportId(reportItems[0].id);
+    }
+  }, [reportItems, selectedReportId]);
 
   function resetConversation() {
     setMessages(initialMessages);
     setActiveScenario('technical');
     setPanel(scenarios.technical || scenarios.default);
+    setReportCollapsed(false);
+    setReportItems([]);
+    setSelectedReportId('');
     setInput('');
-    try {
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
-    } catch {
-      // ignore clear failure
-    }
+  }
+
+  function deleteReport(reportId) {
+    setReportItems((prev) => prev.filter((item) => item.id !== reportId));
   }
 
   const baseActionContext = {
-    loadDocumentSnapshot,
     refreshHomeData,
+    setActiveScenario,
     setGroupSaving,
     setInput,
     setIsLoading,
     setMessages,
+    setPanel,
+    setReportItems,
+    setSelectedReportId,
     setSelectedManualLibraries,
     setUploadLoading,
     uploadInputRef,
   };
 
   return {
-    activeScenario,
     captureTasks,
     documentLibraries,
-    documentSnapshot,
+    documentTotal,
     groupSaving,
     input,
     isLoading,
     messages,
     panel,
+    reportCollapsed,
+    reportItems,
+    selectedReportId,
     selectedManualLibraries,
     sidebarSources,
     uploadInputRef,
     uploadLoading,
     setInput,
+    setReportCollapsed,
+    setSelectedReportId,
     setSelectedManualLibraries,
-    selectWorkbenchCategory,
+    deleteReport,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
       inputState: { isLoading, uploadLoading },

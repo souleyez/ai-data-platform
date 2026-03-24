@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import IngestFeedback from './IngestFeedback';
-import { QUICK_ACTIONS, formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
+import { formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
 function FormulaTable({ table }) {
   if (!table) return null;
@@ -119,8 +119,6 @@ export default function ChatPanel({
   isLoading,
   onInputChange,
   onSubmit,
-  onQuickAction,
-  documentSnapshot,
   uploadInputRef,
   uploadLoading,
   onUploadFilesSelected,
@@ -142,21 +140,6 @@ export default function ChatPanel({
 
   return (
     <div className="chat-panel card">
-      <div className="panel-header">
-        <div>
-          <h3>对话中心</h3>
-          <p>直接在这里发问题、发链接采集，或点击上传按钮把资料送进知识库。系统级操作和本地数据改写仍会被拦截。</p>
-        </div>
-        <span className="badge">受控开放对话</span>
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
-        <span className="source-chip">当前文档总数：{documentSnapshot?.totalFiles || 0}</span>
-        <span className="source-chip">已解析：{documentSnapshot?.parsed || 0}</span>
-        {documentSnapshot?.scanRoot ? <span className="source-chip">扫描目录：{documentSnapshot.scanRoot}</span> : null}
-        <a href="/documents" className="ref-chip">前往文档中心</a>
-      </div>
-
       <div className="chat-messages" ref={messagesRef}>
         {messages.map((message, index) => (
           <div className={`message ${message.role}`} key={message.id || `${message.role}-${index}`}>
@@ -266,14 +249,6 @@ export default function ChatPanel({
       </div>
 
       <div className="chat-composer-wrap">
-        <div className="quick-actions">
-          {QUICK_ACTIONS.map((item) => (
-            <button key={item.label} onClick={() => onQuickAction(item.prompt)}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-
         <div className="chat-composer-actions">
           <input
             ref={uploadInputRef}
@@ -295,14 +270,22 @@ export default function ChatPanel({
           >
             {uploadLoading ? '上传解析中...' : '上传文件'}
           </button>
-          <span className="message-meta">发送链接时可直接写“采集 https://...”或“登录采集 https://...”。</span>
+          <span className="message-meta">你可以直接说“看订单趋势”或“生成一份合同风险清单”。</span>
         </div>
 
         <div className="chat-input-row">
           <textarea
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
-            placeholder="输入问题，或直接发送“采集 + 链接”；如果是公开页面，系统会自动抓正文、分类并入库。"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                if (!isLoading) {
+                  onSubmit(input);
+                }
+              }
+            }}
+            placeholder="输入问题，或直接说明想看的数据；也可以发“采集 + 链接”或上传文件。"
           />
           <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
             {isLoading ? '分析中...' : '发送'}

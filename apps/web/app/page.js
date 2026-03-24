@@ -1,38 +1,51 @@
 'use client';
 
 import ChatPanel from './components/ChatPanel';
-import CaptureTasksPanel from './components/CaptureTasksPanel';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
-import WorkbenchToolbar from './components/WorkbenchToolbar';
-import { workbenchCategories } from './lib/mock-data';
 import { useHomePageController } from './use-home-page-controller';
+
+function buildTopSummary(documentTotal, documentLibraries) {
+  const libraryCount = documentLibraries.length;
+  const names = documentLibraries
+    .filter((library) => Number(library?.documentCount || 0) > 0)
+    .sort((a, b) => Number(b?.documentCount || 0) - Number(a?.documentCount || 0))
+    .slice(0, 3)
+    .map((library) => library.label || library.name || library.key)
+    .filter(Boolean)
+    .join('、');
+
+  return `已管理文档 ${documentTotal} 份，知识库 ${libraryCount} 个${names ? `（${names}${libraryCount > 3 ? ' 等' : ''}）` : ''}。直接说明知识库需求，可定制数据报表、静态 PPT、研发计划等。`;
+}
 
 export default function HomePage() {
   const {
-    activeScenario,
-    captureTasks,
     documentLibraries,
-    documentSnapshot,
+    documentTotal,
+    deleteReport,
     groupSaving,
     input,
     isLoading,
     messages,
-    panel,
+    reportCollapsed,
+    reportItems,
+    selectedReportId,
     selectedManualLibraries,
     sidebarSources,
     uploadInputRef,
     uploadLoading,
     setInput,
+    setReportCollapsed,
+    setSelectedReportId,
     setSelectedManualLibraries,
-    selectWorkbenchCategory,
     submitQuestion,
-    resetConversation,
     runDocumentUpload,
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
     submitCredentialForMessage,
   } = useHomePageController();
+
+  const topSummary = buildTopSummary(documentTotal, documentLibraries);
 
   return (
     <div className="app-shell">
@@ -40,48 +53,41 @@ export default function HomePage() {
 
       <main className="main-panel">
         <header className="topbar">
-          <div>
+          <div className="topbar-title-row">
             <h2>AI 知识库</h2>
-            <p>首页保留统一对话入口：发问题、发链接采集、上传文件入库，反馈都会留在当前会话里。</p>
-          </div>
-          <div className="topbar-actions">
-            <button className="ghost-btn" onClick={resetConversation}>新建会话</button>
-            <button className="primary-btn" disabled>生成日报（预留）</button>
+            <span className="topbar-inline-note">{topSummary}</span>
           </div>
         </header>
 
-        <WorkbenchToolbar
-          categories={workbenchCategories}
-          activeKey={activeScenario}
-          onSelect={selectWorkbenchCategory}
-        />
-
         <section className="homepage-grid">
-          <section className="workspace-grid">
+          <section className={`workspace-grid ${reportCollapsed ? 'workspace-grid-expanded' : ''}`}>
             <ChatPanel
               messages={messages}
               input={input}
               isLoading={isLoading}
               onInputChange={setInput}
               onSubmit={submitQuestion}
-              onQuickAction={submitQuestion}
-              documentSnapshot={documentSnapshot}
               uploadInputRef={uploadInputRef}
               uploadLoading={uploadLoading}
               onUploadFilesSelected={runDocumentUpload}
               availableLibraries={documentLibraries}
               selectedManualLibraries={selectedManualLibraries}
-              onChangeManualLibrary={(itemId, value) => setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: value }))}
+              onChangeManualLibrary={(itemId, value) =>
+                setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: value }))
+              }
               onAcceptGroupSuggestion={acceptIngestGroupSuggestion}
               onAssignLibrary={assignIngestToSelectedLibrary}
               groupSaving={groupSaving}
               onSubmitCredential={submitCredentialForMessage}
             />
-            <InsightPanel panel={panel} />
-          </section>
-
-          <section className="documents-grid home-bottom-grid">
-            <CaptureTasksPanel captureTasks={captureTasks} />
+            <InsightPanel
+              collapsed={reportCollapsed}
+              onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
+              reportItems={reportItems}
+              selectedReportId={selectedReportId}
+              onSelectReport={setSelectedReportId}
+              onDeleteReport={deleteReport}
+            />
           </section>
         </section>
       </main>

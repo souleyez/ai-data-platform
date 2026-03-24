@@ -17,8 +17,21 @@ import {
   patchMessageById,
   patchMessagesWithIngestItems,
 } from './home-message-helpers';
+import { createGeneratedReport } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
 import { scenarios } from './lib/mock-data';
+
+function inferScenarioFromPrompt(text) {
+  if (!text) return '';
+  if (/(订单|销售|回款|sku)/i.test(text)) return 'order';
+  if (/(合同|法务|条款|违约)/i.test(text)) return 'contract';
+  if (/(文档|论文|技术|知识库|研究)/i.test(text)) return 'technical';
+  if (/(日报|周报|进度|待办)/i.test(text)) return 'daily';
+  if (/(发票|票据|核销)/i.test(text)) return 'invoice';
+  if (/(客服|投诉|工单)/i.test(text)) return 'service';
+  if (/(库存|出入库|补货)/i.test(text)) return 'inventory';
+  return '';
+}
 
 function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
   setSelectedManualLibraries((prev) => {
@@ -167,15 +180,25 @@ export async function runDocumentUpload(files, context) {
 export async function submitQuestion(value, context) {
   const {
     inputState,
+    setActiveScenario,
     setInput,
     setIsLoading,
     setMessages,
+    setPanel,
+    setReportItems,
+    setSelectedReportId,
     refreshHomeData,
     setSelectedManualLibraries,
   } = context;
 
   const text = value.trim();
   if (!text || inputState.isLoading || inputState.uploadLoading) return;
+
+  const inferredScenario = inferScenarioFromPrompt(text);
+  if (inferredScenario && scenarios[inferredScenario]) {
+    setActiveScenario?.(inferredScenario);
+    setPanel?.(scenarios[inferredScenario]);
+  }
 
   setMessages((prev) => [...prev, { id: createMessageId('user'), role: 'user', content: text }]);
   setInput('');
@@ -216,7 +239,17 @@ export async function submitQuestion(value, context) {
   try {
     const data = await sendChatPrompt(text);
     const normalized = normalizeChatResponse(data, scenarios.default);
-    appendAssistantMessage(setMessages, { ...normalized.message, id: createMessageId('assistant') });
+    if (normalized.scenario) {
+      setActiveScenario?.(normalized.scenario);
+    }
+    if (normalized.panel) {
+      setPanel?.(normalized.panel);
+    }
+    const message = { ...normalized.message, id: createMessageId('assistant') };
+    appendAssistantMessage(setMessages, message);
+    const generatedReport = createGeneratedReport({ message });
+    setReportItems?.((prev) => [generatedReport, ...prev]);
+    setSelectedReportId?.(generatedReport.id);
   } catch {
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),

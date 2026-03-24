@@ -1,80 +1,99 @@
-import TrendChart from './TrendChart';
+'use client';
 
-function StatsCards({ stats = [] }) {
-  return (
-    <section className="card stats-grid">
-      {stats.map((stat) => (
-        <div className="stat-card" key={stat.label}>
-          <div className="stat-label">{stat.label}</div>
-          <div className="stat-value">{stat.value}</div>
-          <div className={`stat-trend ${stat.tone}`}>{stat.trend}</div>
-        </div>
-      ))}
-    </section>
-  );
-}
+import GeneratedReportDetail from './GeneratedReportDetail';
+import {
+  copyGeneratedReportLink,
+  downloadGeneratedReport,
+  getGeneratedReportActionLabel,
+} from '../lib/generated-reports';
 
-function RiskTable({ title, subtitle, rows = [] }) {
+export default function InsightPanel({
+  collapsed = false,
+  onToggleCollapsed,
+  reportItems = [],
+  selectedReportId,
+  onSelectReport,
+  onDeleteReport,
+}) {
+  async function handlePrimaryAction(item) {
+    if (!item) return;
+    if (item.kind === 'table' || item.format === 'ppt' || item.format === 'pdf' || item.downloadUrl) {
+      downloadGeneratedReport(item);
+      return;
+    }
+    await copyGeneratedReportLink(item);
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="insight-panel insight-panel-collapsed">
+        <button className="ghost-btn insight-collapse-handle" onClick={onToggleCollapsed} type="button">
+          展开报表列表
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <section className="card table-card">
-      <div className="panel-header">
+    <aside className="insight-panel report-center-panel">
+      <button className="ghost-btn insight-collapse-handle" onClick={onToggleCollapsed} type="button">
+        收起
+      </button>
+      <div className="insight-panel-header">
         <div>
-          <h3>{title}</h3>
-          <p>{subtitle}</p>
+          <h3>生成报表列表</h3>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>编号</th>
-            <th>对象</th>
-            <th>摘要</th>
-            <th>状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.code}>
-              <td>{row.code}</td>
-              <td>{row.customer}</td>
-              <td>{row.risk}</td>
-              <td>
-                <span className={`tag ${row.tone}`}>{row.level}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
-}
 
-export default function InsightPanel({ panel }) {
-  const safePanel = panel || {
-    stats: [],
-    chartTitle: '暂无图表',
-    chartSubtitle: '当前没有可展示的数据',
-    chartBars: [],
-    tableTitle: '暂无列表',
-    tableSubtitle: '当前没有可展示的数据',
-    rows: [],
-  };
+      {!reportItems.length ? (
+        <section className="card report-empty-card">
+          <h4>还没有生成报表</h4>
+          <p>在左侧对话区提出报表需求后，这里会按列表出现。</p>
+        </section>
+      ) : (
+        <section className="report-center-list">
+          {reportItems.map((item) => {
+            const expanded = item.id === selectedReportId;
 
-  return (
-    <div className="insight-panel">
-      <StatsCards stats={safePanel.stats} />
+            return (
+              <article
+                className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`}
+                key={item.id}
+              >
+                <button
+                  className="report-list-trigger"
+                  type="button"
+                  onClick={() => onSelectReport?.(expanded ? '' : item.id)}
+                >
+                  <span className="report-list-title">{item.title}</span>
+                </button>
 
-      <section className="card chart-card">
-        <div className="panel-header">
-          <div>
-            <h3>{safePanel.chartTitle}</h3>
-            <p>{safePanel.chartSubtitle}</p>
-          </div>
-        </div>
-        <TrendChart bars={safePanel.chartBars} title={safePanel.chartTitle} />
-      </section>
-
-      <RiskTable title={safePanel.tableTitle} subtitle={safePanel.tableSubtitle} rows={safePanel.rows} />
-    </div>
+                {expanded ? (
+                  <div className="report-list-expanded">
+                    <div className="report-list-actions">
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => void handlePrimaryAction(item)}
+                      >
+                        {getGeneratedReportActionLabel(item)}
+                      </button>
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => onDeleteReport?.(item.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                    <GeneratedReportDetail item={item} />
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </aside>
   );
 }
