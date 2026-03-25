@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { fetchCaptureTasks, fetchDatasources, fetchDocumentsSnapshot } from './home-api';
+import { fetchCaptureTasks, fetchDatasources, fetchDocumentsSnapshot, fetchReportsSnapshot, deleteReportOutput } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
   acceptIngestGroupSuggestion,
@@ -11,10 +11,81 @@ import {
   submitQuestion,
 } from './home-controller-actions';
 import { normalizeDatasourceResponse } from './lib/types';
+import { normalizeGeneratedReportRecord } from './lib/generated-reports';
 import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
 
+const CHAT_HISTORY_STORAGE_KEY = 'aidp_home_chat_history_v1';
+
+function normalizeStoredMessages(raw) {
+  if (!Array.isArray(raw) || !raw.length) return initialMessages;
+  const items = raw
+    .map((item, index) => ({
+      id: String(item?.id || `history-${index}`),
+      role: item?.role === 'user' ? 'user' : 'assistant',
+      title: typeof item?.title === 'string' ? item.title : '',
+      content: typeof item?.content === 'string' ? item.content : '',
+      meta: typeof item?.meta === 'string' ? item.meta : '',
+      table: item?.table && typeof item.table === 'object' ? item.table : null,
+    }))
+    .filter((item) => {
+      const content = item.content.trim();
+      if (!content) return false;
+      if (item.role === 'assistant' && content.length < 2) return false;
+      return true;
+    });
+  return items.length ? items : initialMessages;
+}
+
+function loadStoredMessages() {
+  if (typeof window === 'undefined') return initialMessages;
+  try {
+    const raw = window.localStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+    if (!raw) return initialMessages;
+    return normalizeStoredMessages(JSON.parse(raw));
+  } catch {
+    return initialMessages;
+  }
+}
+
+function persistMessages(messages) {
+  if (typeof window === 'undefined') return;
+  try {
+    const serialized = (Array.isArray(messages) ? messages : [])
+      .filter((item) => {
+        if (!(item?.role === 'user' || item?.role === 'assistant')) return false;
+        if (item?.ingestFeedback || item?.credentialRequest) return false;
+        const content = String(item?.content || '').trim();
+        if (!content) return false;
+        if (item?.role === 'assistant' && content.length < 2) return false;
+        return true;
+      })
+      .slice(-40)
+      .map((item, index) => ({
+        id: String(item?.id || `history-${index}`),
+        role: item?.role === 'user' ? 'user' : 'assistant',
+        title: typeof item?.title === 'string' ? item.title : '',
+        content: typeof item?.content === 'string' ? item.content : '',
+        meta: typeof item?.meta === 'string' ? item.meta : '',
+        table: item?.table && typeof item.table === 'object' ? item.table : null,
+      }))
+      .filter((item) => item.content.trim());
+    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(serialized));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function clearStoredMessages() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export function useHomePageController() {
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState(() => loadStoredMessages());
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
   const [activeScenario, setActiveScenario] = useState('technical');
@@ -30,7 +101,6 @@ export function useHomePageController() {
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
-  const [conversationState, setConversationState] = useState(null);
 
   async function loadDatasources() {
     try {
@@ -64,15 +134,30 @@ export function useHomePageController() {
     }
   }
 
+  async function loadReports() {
+    try {
+      const json = await fetchReportsSnapshot();
+      const records = Array.isArray(json?.outputRecords) ? json.outputRecords : [];
+      setReportItems(records.map(normalizeGeneratedReportRecord));
+    } catch {
+      setReportItems([]);
+    }
+  }
+
   async function refreshHomeData() {
-    await Promise.all([loadCaptureTasks(), loadDatasources(), loadDocumentSnapshot()]);
+    await Promise.all([loadCaptureTasks(), loadDatasources(), loadDocumentSnapshot(), loadReports()]);
   }
 
   useEffect(() => {
     loadDatasources();
     loadCaptureTasks();
     loadDocumentSnapshot();
+    loadReports();
   }, []);
+
+  useEffect(() => {
+    persistMessages(messages);
+  }, [messages]);
 
   useEffect(() => {
     if (!reportItems.length) {
@@ -86,21 +171,27 @@ export function useHomePageController() {
 
   function resetConversation() {
     setMessages(initialMessages);
+    clearStoredMessages();
     setActiveScenario('technical');
     setPanel(scenarios.technical || scenarios.default);
     setReportCollapsed(false);
-    setReportItems([]);
-    setSelectedReportId('');
     setInput('');
-    setConversationState(null);
+    loadReports();
   }
 
-  function deleteReport(reportId) {
-    setReportItems((prev) => prev.filter((item) => item.id !== reportId));
+  async function deleteReport(reportId) {
+    if (!reportId) return;
+    try {
+      await deleteReportOutput(reportId);
+      setReportItems((prev) => prev.filter((item) => item.id !== reportId));
+    } catch {
+      // keep existing list on failure
+    }
   }
 
   const baseActionContext = {
     refreshHomeData,
+    loadReports,
     setActiveScenario,
     setGroupSaving,
     setInput,
@@ -110,7 +201,6 @@ export function useHomePageController() {
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
-    setConversationState,
     setUploadLoading,
     uploadInputRef,
   };
@@ -124,7 +214,6 @@ export function useHomePageController() {
     isLoading,
     messages,
     panel,
-    conversationState,
     reportCollapsed,
     reportItems,
     selectedReportId,
@@ -139,7 +228,6 @@ export function useHomePageController() {
     deleteReport,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
-      conversationState,
       inputState: { isLoading, uploadLoading },
     }),
     resetConversation,

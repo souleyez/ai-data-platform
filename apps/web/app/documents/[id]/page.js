@@ -80,6 +80,46 @@ function renderStructuredProfile(item) {
     );
   }
 
+  if (schemaType === 'formula') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="领域" value="奶粉配方" />
+        <DetailRow label="关注主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
+        <DetailRow label="摘要" value={profile.summary || item?.summary} />
+      </div>
+    );
+  }
+
+  if (schemaType === 'paper') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="领域" value="学术论文" />
+        <DetailRow label="研究主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
+        <DetailRow label="摘要" value={profile.summary || item?.summary} />
+      </div>
+    );
+  }
+
+  if (schemaType === 'technical') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="领域" value="技术文档" />
+        <DetailRow label="关注主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
+        <DetailRow label="摘要" value={profile.summary || item?.summary} />
+      </div>
+    );
+  }
+
+  if (schemaType === 'report') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="领域" value="业务报表" />
+        <DetailRow label="报告主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
+        <DetailRow label="摘要" value={profile.summary || item?.summary} />
+      </div>
+    );
+  }
+
   return (
     <div className="message-ref-list">
       <DetailRow label="Schema 类型" value={schemaType} />

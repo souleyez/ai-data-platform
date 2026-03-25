@@ -3,6 +3,7 @@
 import {
   createLoginCapture,
   createWebCapture,
+  saveChatGeneratedReport,
   saveDocumentGroups,
   sendChatPrompt,
   uploadDocuments,
@@ -13,25 +14,11 @@ import {
   buildSummaryText,
   createMessageId,
   findIngestItem,
-  parseConversationAction,
   patchMessageById,
   patchMessagesWithIngestItems,
 } from './home-message-helpers';
 import { createGeneratedReport } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
-import { scenarios } from './lib/mock-data';
-
-function inferScenarioFromPrompt(text) {
-  if (!text) return '';
-  if (/(订单|销售|回款|sku)/i.test(text)) return 'order';
-  if (/(合同|法务|条款|违约)/i.test(text)) return 'contract';
-  if (/(文档|论文|技术|知识库|研究)/i.test(text)) return 'technical';
-  if (/(日报|周报|进度|待办)/i.test(text)) return 'daily';
-  if (/(发票|票据|核销)/i.test(text)) return 'invoice';
-  if (/(客服|投诉|工单)/i.test(text)) return 'service';
-  if (/(库存|出入库|补货)/i.test(text)) return 'inventory';
-  return '';
-}
 
 function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
   setSelectedManualLibraries((prev) => {
@@ -47,13 +34,19 @@ function appendAssistantMessage(setMessages, message) {
 
 function buildRecentChatHistory(messages) {
   return (messages || [])
-    .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+    .filter((message) => {
+      if (!(message?.role === 'user' || message?.role === 'assistant')) return false;
+      if (message?.ingestFeedback || message?.credentialRequest) return false;
+      const content = String(message?.content || '').trim();
+      if (!content) return false;
+      if (message?.role === 'assistant' && content.length < 2) return false;
+      return true;
+    })
     .map((message) => ({
       role: message.role,
       content: String(message.content || '').trim(),
     }))
-    .filter((message) => message.content)
-    .slice(-6);
+    .slice(-8);
 }
 
 export async function runCaptureAction(action, context) {
@@ -75,10 +68,8 @@ export async function runCaptureAction(action, context) {
   seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
 
   appendAssistantMessage(setMessages, buildIngestChatMessage({
-    title: action.type === 'login_capture' ? '登录采集已转为正文采集' : '网页采集完成',
-    content: action.type === 'login_capture'
-      ? buildSummaryText(feedback, '已识别登录采集意图；当前先尝试按公开正文页面抓取并入库。')
-      : buildSummaryText(feedback, '网页抓取、正文解析和入库反馈已返回。'),
+    title: action.type === 'login_capture' ? '登录采集完成' : '网页采集完成',
+    content: buildSummaryText(feedback, feedback.message),
     meta: action.url,
     feedback,
   }));
@@ -107,7 +98,7 @@ export async function runLoginCaptureAction(action, credentials, context) {
   }
 
   const feedback = {
-    message: json?.message || '登录采集已完成，内容已结构化入库。',
+    message: json?.message || '登录采集已完成，内容已入库。',
     summary: json?.summary,
     ingestItems: json?.ingestItems || [],
   };
@@ -119,10 +110,8 @@ export async function runLoginCaptureAction(action, credentials, context) {
     needsCredential: false,
     message: buildIngestChatMessage({
       title: '登录采集完成',
-      content: buildSummaryText(feedback, '登录后的正文内容已抓取、解析并入库。'),
-      meta: json?.credentialSummary?.remembered
-        ? `${action.url} · 已记住凭据`
-        : action.url,
+      content: buildSummaryText(feedback, feedback.message),
+      meta: action.url,
       feedback,
     }),
   };
@@ -155,32 +144,22 @@ export async function runDocumentUpload(files, context) {
       summary: json?.summary,
       ingestItems: json?.ingestItems || [],
     };
-    const importantTitles = feedback.ingestItems
-      .filter((item) => item.status === 'success')
-      .map((item) => item.preview?.title)
-      .filter(Boolean)
-      .slice(0, 4);
 
     seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
 
     appendAssistantMessage(setMessages, buildIngestChatMessage({
       title: '资料上传完成',
-      content: importantTitles.length
-        ? `本次重点识别标题：${importantTitles.join('、')}${feedback.summary && feedback.summary.total > importantTitles.length ? ` 等 ${feedback.summary.total} 项。` : '。'}`
-        : buildSummaryText(feedback, feedback.message),
-      meta: feedback.summary
-        ? `成功 ${feedback.summary.successCount} 项，失败 ${feedback.summary.failedCount} 项`
-        : files.map((file) => file.name).join('，'),
+      content: buildSummaryText(feedback, feedback.message),
+      meta: files.map((file) => file.name).join(' / '),
       feedback,
     }));
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '文档上传失败';
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
       title: '资料上传失败',
-      content: errorMessage,
-      meta: files.map((file) => file.name).join('，'),
+      content: error instanceof Error ? error.message : '文档上传失败',
+      meta: files.map((file) => file.name).join(' / '),
     });
   } finally {
     if (uploadInputRef.current) uploadInputRef.current.value = '';
@@ -190,82 +169,52 @@ export async function runDocumentUpload(files, context) {
 
 export async function submitQuestion(value, context) {
   const {
-    conversationState,
     inputState,
-    setActiveScenario,
     setInput,
     setIsLoading,
     setMessages,
-    setPanel,
     setReportItems,
     setSelectedReportId,
-    setConversationState,
-    refreshHomeData,
-    setSelectedManualLibraries,
+    loadReports,
     messages,
   } = context;
 
   const text = value.trim();
   if (!text || inputState.isLoading || inputState.uploadLoading) return;
 
-  const inferredScenario = inferScenarioFromPrompt(text);
-  if (inferredScenario && scenarios[inferredScenario]) {
-    setActiveScenario?.(inferredScenario);
-    setPanel?.(scenarios[inferredScenario]);
-  }
-
   setMessages((prev) => [...prev, { id: createMessageId('user'), role: 'user', content: text }]);
   setInput('');
-
-  const action = parseConversationAction(text);
-  if (action) {
-    setIsLoading(true);
-    try {
-      if (action.type === 'login_capture') {
-        const result = await runLoginCaptureAction(action, undefined, {
-          setSelectedManualLibraries,
-          refreshHomeData,
-        });
-        appendAssistantMessage(setMessages, result.message);
-      } else {
-        await runCaptureAction(action, {
-          setMessages,
-          setSelectedManualLibraries,
-          refreshHomeData,
-        });
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '网页采集失败';
-      appendAssistantMessage(setMessages, {
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        title: action.type === 'login_capture' ? '登录采集失败' : '网页采集失败',
-        content: errorMessage,
-        meta: action.url,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-    return;
-  }
-
   setIsLoading(true);
+
   try {
-    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), conversationState);
-    const normalized = normalizeChatResponse(data, scenarios.default);
-    setConversationState?.(normalized.conversationState || null);
-    if (normalized.scenario) {
-      setActiveScenario?.(normalized.scenario);
-    }
-    if (normalized.panel) {
-      setPanel?.(normalized.panel);
-    }
+    const data = await sendChatPrompt(text, buildRecentChatHistory(messages));
+    const normalized = normalizeChatResponse(data, context.panel || null);
+
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
+
     const generatedReport = createGeneratedReport({ response: normalized, message });
     if (generatedReport) {
-      setReportItems?.((prev) => [generatedReport, ...prev]);
-      setSelectedReportId?.(generatedReport.id);
+      try {
+        const saved = await saveChatGeneratedReport({
+          groupKey: generatedReport.groupKey || normalized.libraries?.[0]?.key || '',
+          title: generatedReport.title,
+          kind: generatedReport.kind,
+          format: generatedReport.format,
+          content: generatedReport.content,
+          table: generatedReport.table,
+          page: generatedReport.page,
+          libraries: generatedReport.libraries,
+          downloadUrl: generatedReport.downloadUrl,
+        });
+        if (saved?.item) {
+          await loadReports?.();
+          setSelectedReportId?.(saved.item.id);
+        }
+      } catch {
+        setReportItems?.((prev) => [generatedReport, ...prev]);
+        setSelectedReportId?.(generatedReport.id);
+      }
     }
   } catch {
     appendAssistantMessage(setMessages, {
@@ -289,12 +238,11 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
     await loadDocumentSnapshot();
     return true;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '保存知识库分组失败';
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
       title: '知识库分组更新失败',
-      content: errorMessage,
+      content: error instanceof Error ? error.message : '保存知识库分组失败',
     });
     return false;
   } finally {
@@ -332,7 +280,7 @@ export async function assignIngestToSelectedLibrary(itemId, context) {
 }
 
 export async function submitCredentialForMessage(messageId, credentials, context) {
-  const { messages, refreshHomeData, setIsLoading, setMessages, setSelectedManualLibraries } = context;
+  const { messages, setIsLoading, setMessages } = context;
   const currentMessage = messages.find((message) => message.id === messageId);
   const request = currentMessage?.credentialRequest;
   if (!request?.url) return;
@@ -352,18 +300,14 @@ export async function submitCredentialForMessage(messageId, credentials, context
   })));
 
   try {
-    const result = await runLoginCaptureAction(action, credentials, {
-      setSelectedManualLibraries,
-      refreshHomeData,
-    });
+    const result = await runLoginCaptureAction(action, credentials, context);
     appendAssistantMessage(setMessages, result.message);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : '登录采集失败';
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
       title: '登录采集失败',
-      content: errorMessage,
+      content: error instanceof Error ? error.message : '登录采集失败',
       meta: request.url,
     });
   } finally {

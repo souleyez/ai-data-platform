@@ -2,36 +2,6 @@
 
 import { buildApiUrl } from './lib/config';
 
-const SESSION_USER_STORAGE_KEY = 'aidp-openclaw-session-user-v1';
-
-function buildSessionUserId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `web-${crypto.randomUUID()}`;
-  }
-  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function getOrCreateSessionUser() {
-  if (typeof window === 'undefined') return 'web-server';
-
-  try {
-    const stored = window.localStorage.getItem(SESSION_USER_STORAGE_KEY);
-    if (stored && stored.trim()) return stored.trim();
-  } catch {
-    // ignore storage access errors
-  }
-
-  const next = buildSessionUserId();
-
-  try {
-    window.localStorage.setItem(SESSION_USER_STORAGE_KEY, next);
-  } catch {
-    // ignore storage access errors
-  }
-
-  return next;
-}
-
 async function parseApiResponse(response, fallbackError) {
   const raw = await response.text();
   let json = {};
@@ -63,6 +33,11 @@ export async function fetchDocumentsSnapshot() {
   return parseApiResponse(response, 'load documents overview failed');
 }
 
+export async function fetchReportsSnapshot() {
+  const response = await fetch(buildApiUrl('/api/reports'));
+  return parseApiResponse(response, 'load reports failed');
+}
+
 export async function createWebCapture(payload) {
   const response = await fetch(buildApiUrl('/api/web-captures'), {
     method: 'POST',
@@ -89,15 +64,14 @@ export async function uploadDocuments(formData) {
   return parseApiResponse(response, 'document upload failed');
 }
 
-export async function sendChatPrompt(prompt, chatHistory = [], conversationState = null) {
+export async function sendChatPrompt(prompt, chatHistory = []) {
   const promptBase64 = typeof window === 'undefined'
     ? ''
     : window.btoa(String.fromCharCode(...new TextEncoder().encode(prompt)));
-  const sessionUser = getOrCreateSessionUser();
   const response = await fetch(buildApiUrl('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, promptBase64, chatHistory, conversationState, sessionUser }),
+    body: JSON.stringify({ prompt, promptBase64, chatHistory }),
   });
   return parseApiResponse(response, 'chat api failed');
 }
@@ -109,4 +83,20 @@ export async function saveDocumentGroups(items) {
     body: JSON.stringify({ items }),
   });
   return parseApiResponse(response, 'save groups failed');
+}
+
+export async function saveChatGeneratedReport(payload) {
+  const response = await fetch(buildApiUrl('/api/reports/chat-output'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'save generated report failed');
+}
+
+export async function deleteReportOutput(reportId) {
+  const response = await fetch(buildApiUrl(`/api/reports/output/${encodeURIComponent(reportId)}`), {
+    method: 'DELETE',
+  });
+  return parseApiResponse(response, 'delete report failed');
 }

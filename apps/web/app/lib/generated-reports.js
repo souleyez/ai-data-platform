@@ -2,8 +2,6 @@
 
 import { createSharedReportPayload } from './shared-report-link.js';
 
-export const GENERATED_REPORTS_STORAGE_KEY = 'aidp-generated-reports-v6';
-
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -88,49 +86,48 @@ export function createGeneratedReport({ response, message }) {
     mode: response?.mode || 'fallback',
     libraries: Array.isArray(response?.libraries) ? response.libraries : [],
     downloadUrl: output?.downloadUrl || '',
+    groupKey: response?.libraries?.[0]?.key || '',
+    templateKey: '',
   };
 }
 
-export function loadGeneratedReports() {
-  if (typeof window === 'undefined') return [];
-  try {
-    window.localStorage.removeItem('aidp-generated-reports-v1');
-    window.localStorage.removeItem('aidp-generated-reports-v2');
-    window.localStorage.removeItem('aidp-generated-reports-v3');
-    window.localStorage.removeItem('aidp-generated-reports-v4');
-    window.localStorage.removeItem('aidp-generated-reports-v5');
-
-    const raw = window.localStorage.getItem(GENERATED_REPORTS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed.map((item) => ({
-      id: item?.id || createGeneratedReportId(),
-      title: item?.title || '生成报表',
-      kind: item?.kind || (item?.table ? 'table' : item?.page ? 'page' : 'page'),
-      format: item?.format || (item?.table ? 'csv' : 'html'),
-      source: item?.source || 'chat',
-      createdAt: item?.createdAt || new Date().toISOString(),
-      content: item?.content || '',
-      table: item?.table || null,
-      page: normalizePage(item?.page),
-      intent: item?.intent || 'report',
-      mode: item?.mode || 'fallback',
-      libraries: Array.isArray(item?.libraries) ? item.libraries : [],
-      downloadUrl: item?.downloadUrl || '',
-    }));
-  } catch {
-    return [];
-  }
+export function normalizeGeneratedReportRecord(item) {
+  return {
+    id: item?.id || createGeneratedReportId(),
+    title: item?.title || '生成报表',
+    kind: item?.kind || (item?.table ? 'table' : item?.page ? 'page' : 'page'),
+    format: item?.format || (item?.table ? 'csv' : 'html'),
+    source: item?.triggerSource || item?.source || 'chat',
+    createdAt: item?.createdAt || new Date().toISOString(),
+    summary: item?.summary || '',
+    content: item?.content || '',
+    table: item?.table || null,
+    page: normalizePage(item?.page),
+    intent: item?.intent || 'report',
+    mode: item?.mode || 'openclaw',
+    libraries: Array.isArray(item?.libraries) ? item.libraries : [],
+    downloadUrl: item?.downloadUrl || '',
+    groupKey: item?.groupKey || '',
+    groupLabel: item?.groupLabel || '',
+    templateKey: item?.templateKey || '',
+    templateLabel: item?.templateLabel || '',
+  };
 }
 
-export function saveGeneratedReports(items) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(GENERATED_REPORTS_STORAGE_KEY, JSON.stringify(items || []));
-  } catch {
-    // ignore storage failures
-  }
+export function buildGeneratedReportPersistPayload(item) {
+  if (!item) return null;
+  return {
+    groupKey: item.groupKey || item.libraries?.[0]?.key || '',
+    templateKey: item.templateKey || '',
+    title: item.title,
+    kind: item.kind,
+    format: item.format,
+    content: item.content,
+    table: item.table,
+    page: item.page,
+    libraries: item.libraries || [],
+    downloadUrl: item.downloadUrl || '',
+  };
 }
 
 export function buildGeneratedReportLink(itemOrId) {

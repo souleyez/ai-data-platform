@@ -9,7 +9,7 @@ import {
   copyGeneratedReportLink,
   downloadGeneratedReport,
   formatGeneratedReportTime,
-  loadGeneratedReports,
+  normalizeGeneratedReportRecord,
 } from '../lib/generated-reports';
 import { normalizeDatasourceResponse, normalizeReportsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
@@ -48,13 +48,16 @@ function ReportsPageContent() {
   const [generatedReport, setGeneratedReport] = useState(null);
 
   useEffect(() => {
-    if (!generatedId) {
+    if (!generatedId || !data?.outputRecords) {
       setGeneratedReport(null);
       return;
     }
-    const items = loadGeneratedReports();
-    setGeneratedReport(items.find((item) => item.id === generatedId) || null);
-  }, [generatedId]);
+    setGeneratedReport(
+      data.outputRecords
+        .map(normalizeGeneratedReportRecord)
+        .find((item) => item.id === generatedId) || null,
+    );
+  }, [generatedId, data]);
 
   async function loadReports() {
     try {

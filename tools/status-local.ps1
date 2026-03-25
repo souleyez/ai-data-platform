@@ -10,21 +10,22 @@ function Get-ServiceState {
   )
 
   $pidFile = Join-Path $runDir "$Name.pid"
-  $pid = if (Test-Path $pidFile) { Get-Content $pidFile } else { $null }
+  $recordedPid = if (Test-Path $pidFile) { [int](Get-Content $pidFile) } else { $null }
   $listener = if ($Port) { Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
-  $effectivePid = if ($listener) { [int]$listener.OwningProcess } elseif ($pid) { [int]$pid } else { $null }
+  $effectivePid = if ($listener) { [int]$listener.OwningProcess } elseif ($recordedPid) { $recordedPid } else { $null }
   $process = if ($effectivePid) { Get-Process -Id $effectivePid -ErrorAction SilentlyContinue } else { $null }
-  $listening = if ($Port) {
-    [bool]$listener
+
+  $state = if ($Port) {
+    if ($listener -and $process) { 'running' } elseif ($recordedPid) { 'stale' } else { 'stopped' }
   } else {
-    [bool]$process
+    if ($process) { 'running' } elseif ($recordedPid) { 'stale' } else { 'stopped' }
   }
 
   [pscustomobject]@{
     Service = $Name
-    PID = if ($process) { $process.Id } else { '' }
+    PID = if ($process) { $process.Id } elseif ($recordedPid) { $recordedPid } else { '' }
     Port = if ($Port) { $Port } else { '-' }
-    Listening = $listening
+    State = $state
   }
 }
 

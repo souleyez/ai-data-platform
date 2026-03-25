@@ -4,6 +4,26 @@ import { useEffect, useRef, useState } from 'react';
 import IngestFeedback from './IngestFeedback';
 import { formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
 
+function sanitizeReadableText(content) {
+  return String(content || '')
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, '').trim())
+    .replace(/^[ \t]*[#*|]{1,}[ \t]*/gm, '')
+    .replace(/[ \t]*\|[ \t]*/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function renderMessageParagraphs(content) {
+  return sanitizeReadableText(content)
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part, index) => (
+      <p key={`message-paragraph-${index}`}>{part}</p>
+    ));
+}
+
 function FormulaTable({ table }) {
   if (!table) return null;
 
@@ -146,7 +166,7 @@ export default function ChatPanel({
             {message.role === 'assistant' && <div className="avatar">AI</div>}
             <div className={`bubble ${message.role === 'user' ? 'user-bubble' : ''}`}>
               {message.title ? <strong>{message.title}</strong> : null}
-              <p>{message.content}</p>
+              <div className="message-content-block">{renderMessageParagraphs(message.content)}</div>
               {message.table ? <FormulaTable table={message.table} /> : null}
               {message.credentialRequest ? (
                 <CredentialRequestCard

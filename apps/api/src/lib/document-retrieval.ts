@@ -24,15 +24,38 @@ function normalizePrompt(prompt: string) {
   return String(prompt || '').trim().toLowerCase();
 }
 
+function containsAny(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function collectPromptTokens(prompt: string) {
+  const text = normalizePrompt(prompt);
+  if (!text) return [];
+
+  const asciiTokens = text
+    .split(/[^a-z0-9]+/i)
+    .filter((entry) => entry.length >= 2);
+
+  const cjkTokens: string[] = [];
+  const compact = text.replace(/\s+/g, '');
+  for (let index = 0; index < compact.length - 1; index += 1) {
+    const slice = compact.slice(index, index + 2);
+    if (/[\u4e00-\u9fff]{2}/.test(slice)) cjkTokens.push(slice);
+  }
+
+  return [...new Set([...asciiTokens, ...cjkTokens])].slice(0, 24);
+}
+
 function scoreSchemaFit(item: ParsedDocument, prompt: string) {
   const text = normalizePrompt(prompt);
   let score = 0;
 
-  if (item.schemaType === 'resume' && /(简历|候选人|应聘|招聘|人才|resume|cv)/i.test(text)) score += 14;
-  if (item.schemaType === 'contract' && /(合同|条款|付款|回款|法务|违约|contract)/i.test(text)) score += 14;
-  if (item.schemaType === 'paper' && /(论文|研究|实验|文献|paper|study|trial)/i.test(text)) score += 12;
-  if (item.schemaType === 'technical' && /(技术|接口|部署|系统|方案|api|architecture)/i.test(text)) score += 10;
-  if (item.schemaType === 'report' && /(日报|周报|月报|复盘|report)/i.test(text)) score += 10;
+  if (item.schemaType === 'resume' && containsAny(text, ['简历', '候选人', '应聘', '招聘', '人才', 'resume', 'cv'])) score += 14;
+  if (item.schemaType === 'contract' && containsAny(text, ['合同', '条款', '付款', '回款', '法务', '违约', 'contract'])) score += 14;
+  if (item.schemaType === 'paper' && containsAny(text, ['论文', '研究', '实验', '文献', 'paper', 'study', 'trial'])) score += 12;
+  if (item.schemaType === 'technical' && containsAny(text, ['技术', '接口', '部署', '系统', '方案', 'api', 'architecture'])) score += 10;
+  if (item.schemaType === 'report' && containsAny(text, ['日报', '周报', '月报', '复盘', 'report'])) score += 10;
+  if (item.schemaType === 'formula' && containsAny(text, ['配方', '奶粉', '菌株', '营养', 'formula'])) score += 12;
 
   return score;
 }
@@ -40,11 +63,11 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string) {
 function scoreProfileFit(item: ParsedDocument, prompt: string) {
   const profile = item.structuredProfile || {};
   const haystack = JSON.stringify(profile).toLowerCase();
-  const text = normalizePrompt(prompt);
-  if (!haystack || !text) return 0;
+  const tokens = collectPromptTokens(prompt);
+  if (!haystack || !tokens.length) return 0;
 
   let score = 0;
-  for (const token of text.split(/\s+/).filter((entry) => entry.length >= 2).slice(0, 8)) {
+  for (const token of tokens) {
     if (haystack.includes(token)) score += token.length >= 4 ? 4 : 2;
   }
   return score;

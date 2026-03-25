@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   createReportOutput,
+  deleteReportOutput,
   loadReportCenterState,
   updateReportGroupTemplate,
   uploadReportReferenceImage,
@@ -47,6 +48,69 @@ export async function registerReportRoutes(app: FastifyInstance) {
       status: 'generated',
       item: record,
       message: `已生成 ${record.groupLabel} 分组的 ${record.templateLabel} 报表。`,
+    };
+  });
+
+  app.post('/reports/chat-output', async (request, reply) => {
+    const body = (request.body || {}) as {
+      groupKey?: string;
+      templateKey?: string;
+      title?: string;
+      kind?: 'table' | 'page' | 'ppt' | 'pdf';
+      format?: string;
+      content?: string;
+      table?: {
+        columns?: string[];
+        rows?: Array<Array<string | number | null>>;
+        title?: string;
+      } | null;
+      page?: {
+        summary?: string;
+        cards?: Array<{ label?: string; value?: string; note?: string }>;
+        sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+        charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+      } | null;
+      libraries?: Array<{ key?: string; label?: string }>;
+      downloadUrl?: string;
+    };
+
+    const groupKey = String(body.groupKey || '').trim();
+    if (!groupKey) {
+      return reply.code(400).send({ error: 'groupKey is required' });
+    }
+
+    const record = await createReportOutput({
+      groupKey,
+      templateKey: body.templateKey,
+      title: body.title,
+      triggerSource: 'chat',
+      kind: body.kind,
+      format: body.format,
+      content: body.content,
+      table: body.table,
+      page: body.page,
+      libraries: Array.isArray(body.libraries) ? body.libraries : [],
+      downloadUrl: body.downloadUrl,
+    });
+
+    return {
+      status: 'saved',
+      item: record,
+      message: `已保存 ${record.title}`,
+    };
+  });
+
+  app.delete('/reports/output/:id', async (request, reply) => {
+    const id = String((request.params as { id?: string })?.id || '').trim();
+    if (!id) {
+      return reply.code(400).send({ error: 'id is required' });
+    }
+
+    await deleteReportOutput(id);
+    return {
+      status: 'deleted',
+      id,
+      message: '已删除报表',
     };
   });
 

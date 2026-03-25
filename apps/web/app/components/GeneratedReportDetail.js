@@ -118,23 +118,55 @@ function PageDetail({ page, content }) {
   );
 }
 
+function EmptyDetail({ item }) {
+  return (
+    <div className="generated-report-detail">
+      <div className="generated-report-section">
+        <p>{item.summary || '该报表为历史记录，当前未保存正文内容。'}</p>
+        <div style={{ marginTop: 8, color: '#64748b', display: 'grid', gap: 4 }}>
+          <p>报表标题：{item.title || '未命名报表'}</p>
+          <p>输出类型：{item.kind || item.format || '未知'}</p>
+          {item.groupLabel ? <p>知识库：{item.groupLabel}</p> : null}
+          {item.templateLabel ? <p>输出模板：{item.templateLabel}</p> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GeneratedReportDetail({ item }) {
   if (!item) return null;
 
-  if (item.kind === 'page') {
+  const hasTable = Boolean(item.table?.rows?.length);
+  const hasPage = Boolean(
+    item.page?.summary
+      || item.page?.cards?.length
+      || item.page?.sections?.length
+      || item.page?.charts?.length,
+  );
+  const hasContent = Boolean(String(item.content || '').trim());
+
+  if (item.kind === 'page' && (hasPage || hasContent)) {
     return <PageDetail page={item.page} content={item.content} />;
   }
 
-  const hasTable = Boolean(item.table);
+  if (hasTable) {
+    return (
+      <div className="generated-report-detail">
+        <ReportTable table={item.table} />
+      </div>
+    );
+  }
 
-  return (
-    <div className="generated-report-detail">
-      {!hasTable && item.content ? (
+  if (hasContent) {
+    return (
+      <div className="generated-report-detail">
         <div className="generated-report-section">
           <p>{item.content}</p>
         </div>
-      ) : null}
-      <ReportTable table={item.table} />
-    </div>
-  );
+      </div>
+    );
+  }
+
+  return <EmptyDetail item={item} />;
 }

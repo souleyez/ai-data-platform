@@ -1248,12 +1248,14 @@ function inferSchemaType(
   category: string,
   bizCategory: ParsedDocument['bizCategory'],
   resumeFields?: ResumeFields,
+  topicTags: string[] = [],
 ) {
   if (resumeFields) return 'resume' as const;
   if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
-  if (category === 'paper') return 'paper' as const;
-  if (bizCategory === 'daily') return 'report' as const;
+  if (topicTags.includes('奶粉配方')) return 'formula' as const;
+  if (category === 'report' || bizCategory === 'daily') return 'report' as const;
   if (category === 'technical') return 'technical' as const;
+  if (category === 'paper' || bizCategory === 'paper') return 'paper' as const;
   return 'generic' as const;
 }
 
@@ -1292,6 +1294,38 @@ function buildStructuredProfile(input: {
       major: input.resumeFields?.major || '',
       skills: input.resumeFields?.skills || [],
       highlights: input.resumeFields?.highlights || [],
+    };
+  }
+
+  if (input.schemaType === 'formula') {
+    return {
+      ...base,
+      domain: 'formula',
+      focus: input.topicTags.filter((tag) => ['奶粉配方', '益生菌', '营养强化'].includes(tag)),
+    };
+  }
+
+  if (input.schemaType === 'paper') {
+    return {
+      ...base,
+      domain: 'paper',
+      focus: input.topicTags.slice(0, 4),
+    };
+  }
+
+  if (input.schemaType === 'technical') {
+    return {
+      ...base,
+      domain: 'technical',
+      focus: input.topicTags.slice(0, 4),
+    };
+  }
+
+  if (input.schemaType === 'report') {
+    return {
+      ...base,
+      domain: 'report',
+      focus: input.topicTags.slice(0, 4),
     };
   }
 
@@ -1389,7 +1423,7 @@ export async function parseDocument(
     if (status === 'unsupported') {
       const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
       const groups = detectGroups(filePath, '', topicTags, config);
-      const schemaType = inferSchemaType(category, bizCategory);
+      const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
       return {
         path: filePath,
         name,
@@ -1428,7 +1462,7 @@ export async function parseDocument(
 
     if (parseStage === 'quick') {
       const resumeFields = extractResumeFields(text.slice(0, 2400), inferredTitle);
-      const schemaType = inferSchemaType(category, bizCategory, resumeFields);
+      const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags);
       return {
         path: filePath,
         name,
@@ -1466,7 +1500,7 @@ export async function parseDocument(
     const contractFields = extractContractFields(normalizedText, category);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
     const resumeFields = extractResumeFields(text, inferredTitle, structured.entities, structured.claims);
-    const schemaType = inferSchemaType(category, bizCategory, resumeFields);
+    const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags);
 
     return {
       path: filePath,
@@ -1506,7 +1540,7 @@ export async function parseDocument(
     const bizCategory = detectBizCategory(filePath, category, '', config);
     const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
     const groups = detectGroups(filePath, '', topicTags, config);
-    const schemaType = inferSchemaType(category, bizCategory);
+    const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
     const fallbackSummary = topicTags.length
       ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
       : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';

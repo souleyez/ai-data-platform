@@ -46,10 +46,26 @@ export type ReportOutputRecord = {
   templateLabel: string;
   title: string;
   outputType: string;
+  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  format?: string;
   createdAt: string;
   status: 'ready';
   summary: string;
   triggerSource: 'report-center' | 'chat';
+  content?: string;
+  table?: {
+    columns?: string[];
+    rows?: Array<Array<string | number | null>>;
+    title?: string;
+  } | null;
+  page?: {
+    summary?: string;
+    cards?: Array<{ label?: string; value?: string; note?: string }>;
+    sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+    charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+  } | null;
+  libraries?: Array<{ key?: string; label?: string }>;
+  downloadUrl?: string;
 };
 
 type PersistedState = {
@@ -85,7 +101,7 @@ function isFormulaLibrary(label: string, key: string) {
   return text.includes('奶粉配方') || text.includes('配方建议') || text.includes('formula');
 }
 
-function buildTemplatesForLibrary(label: string, key: string): { templates: ReportGroupTemplate[]; defaultTemplateKey: string; triggerKeywords: string[]; description: string } {
+function buildTemplatesForLibrary(label: string, key: string) {
   if (isFormulaLibrary(label, key)) {
     return {
       defaultTemplateKey: `${key}-table`,
@@ -95,23 +111,23 @@ function buildTemplatesForLibrary(label: string, key: string): { templates: Repo
         {
           key: `${key}-table`,
           label: '配方表格',
-          type: 'table',
+          type: 'table' as const,
           description: '按模块、建议原料、添加量、核心作用和配方说明输出。',
           supported: true,
         },
         {
           key: `${key}-static-page`,
           label: '数据可视化静态页',
-          type: 'static-page',
+          type: 'static-page' as const,
           description: '后续扩展为固定可视化页面。',
-          supported: false,
+          supported: true,
         },
         {
           key: `${key}-ppt`,
           label: 'PPT',
-          type: 'ppt',
+          type: 'ppt' as const,
           description: '后续扩展为固定汇报稿。',
-          supported: false,
+          supported: true,
         },
       ],
     };
@@ -125,21 +141,21 @@ function buildTemplatesForLibrary(label: string, key: string): { templates: Repo
       {
         key: `${key}-table`,
         label: '表格',
-        type: 'table',
+        type: 'table' as const,
         description: `按 ${label} 分组输出结构化表格结果。`,
         supported: true,
       },
       {
         key: `${key}-static-page`,
         label: '数据可视化静态页',
-        type: 'static-page',
+        type: 'static-page' as const,
         description: `按 ${label} 分组生成静态页。`,
         supported: true,
       },
       {
         key: `${key}-ppt`,
         label: 'PPT',
-        type: 'ppt',
+        type: 'ppt' as const,
         description: `按 ${label} 分组生成汇报稿。`,
         supported: true,
       },
@@ -166,15 +182,30 @@ function reconcileOutputRecords(outputs: ReportOutputRecord[], groups: ReportGro
 
   const nextOutputs = outputs
     .map((record) => {
+      let nextRecord: ReportOutputRecord = { ...record };
       const directGroup = groups.find((group) => group.key === record.groupKey);
-      if (directGroup) return record;
+      if (!nextRecord.content && !nextRecord.table && !nextRecord.page) {
+        nextRecord = {
+          ...nextRecord,
+          content: [
+            nextRecord.summary || '该报表为历史记录，当前未保存正文内容。',
+            nextRecord.groupLabel ? `知识库：${nextRecord.groupLabel}` : '',
+            nextRecord.templateLabel ? `输出模板：${nextRecord.templateLabel}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        };
+        changed = true;
+      }
+
+      if (directGroup) return nextRecord;
 
       const looksLikeFormulaRecord = isFormulaLibrary(record.groupLabel || '', record.groupKey || '');
       if (looksLikeFormulaRecord && formulaGroup) {
         changed = true;
         const template = formulaGroup.templates.find((item) => item.key === formulaGroup.defaultTemplateKey) || formulaGroup.templates[0];
         return {
-          ...record,
+          ...nextRecord,
           groupKey: formulaGroup.key,
           groupLabel: formulaGroup.label,
           templateKey: template?.key || record.templateKey,
@@ -190,6 +221,21 @@ function reconcileOutputRecords(outputs: ReportOutputRecord[], groups: ReportGro
     .filter(Boolean) as ReportOutputRecord[];
 
   return { outputs: nextOutputs, changed };
+}
+
+async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutputRecord[]) {
+  await writeState({
+    groups: groups.map((group) => ({
+      key: group.key,
+      label: group.label,
+      description: group.description,
+      triggerKeywords: group.triggerKeywords,
+      defaultTemplateKey: group.defaultTemplateKey,
+      templates: group.templates,
+      referenceImages: group.referenceImages,
+    })),
+    outputs,
+  });
 }
 
 export async function loadReportCenterState() {
@@ -212,7 +258,6 @@ export async function loadReportCenterState() {
 
   const rawOutputs = Array.isArray(state.outputs) ? state.outputs : [];
   const { outputs, changed } = reconcileOutputRecords(rawOutputs, groups);
-
   if (changed) {
     await saveGroupsAndOutputs(groups, outputs);
   }
@@ -220,26 +265,18 @@ export async function loadReportCenterState() {
   return { groups, outputs };
 }
 
-async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutputRecord[]) {
-  await writeState({
-    groups: groups.map((group) => ({
-      key: group.key,
-      label: group.label,
-      description: group.description,
-      triggerKeywords: group.triggerKeywords,
-      defaultTemplateKey: group.defaultTemplateKey,
-      templates: group.templates,
-      referenceImages: group.referenceImages,
-    })),
-    outputs,
-  });
-}
-
 export async function createReportOutput(input: {
   groupKey: string;
   templateKey?: string;
   title?: string;
   triggerSource?: 'report-center' | 'chat';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  format?: string;
+  content?: string;
+  table?: ReportOutputRecord['table'];
+  page?: ReportOutputRecord['page'];
+  libraries?: ReportOutputRecord['libraries'];
+  downloadUrl?: string;
 }) {
   const state = await loadReportCenterState();
   const group = state.groups.find((item) => item.key === input.groupKey);
@@ -257,15 +294,31 @@ export async function createReportOutput(input: {
     templateLabel: template.label,
     title: input.title?.trim() || `${group.label}-${template.label}-${createdAt.slice(0, 10)}`,
     outputType: template.type === 'table' ? '表格' : template.type === 'static-page' ? '静态页' : 'PPT',
+    kind: input.kind || (template.type === 'table' ? 'table' : template.type === 'static-page' ? 'page' : 'ppt'),
+    format: input.format || (template.type === 'table' ? 'csv' : template.type === 'static-page' ? 'html' : 'ppt'),
     createdAt,
     status: 'ready',
     summary: `${group.label} 分组已按 ${template.label} 模板生成成型报表。`,
     triggerSource: input.triggerSource || 'report-center',
+    content: input.content || '',
+    table: input.table || null,
+    page: input.page || null,
+    libraries: Array.isArray(input.libraries) ? input.libraries : [],
+    downloadUrl: input.downloadUrl || '',
   };
 
   const nextOutputs = [record, ...state.outputs].slice(0, 100);
   await saveGroupsAndOutputs(state.groups, nextOutputs);
   return record;
+}
+
+export async function deleteReportOutput(outputId: string) {
+  const state = await loadReportCenterState();
+  const nextOutputs = state.outputs.filter((item) => item.id !== outputId);
+  if (nextOutputs.length === state.outputs.length) {
+    throw new Error('report output not found');
+  }
+  await saveGroupsAndOutputs(state.groups, nextOutputs);
 }
 
 export async function updateReportGroupTemplate(groupKey: string, templateKey: string) {
@@ -278,10 +331,7 @@ export async function updateReportGroupTemplate(groupKey: string, templateKey: s
 
   group.defaultTemplateKey = template.key;
   await saveGroupsAndOutputs(state.groups, state.outputs);
-  return {
-    group,
-    template,
-  };
+  return { group, template };
 }
 
 function sanitizeFileName(fileName: string) {

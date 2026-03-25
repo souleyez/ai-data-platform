@@ -8,13 +8,6 @@ export async function registerChatRoutes(app: FastifyInstance) {
       promptBase64?: string;
       sessionUser?: string;
       chatHistory?: Array<{ role?: string; content?: string }>;
-      conversationState?: {
-        pendingKnowledgePrompt?: string;
-        pendingOutputClarification?: boolean;
-        pendingLibraries?: string[];
-        lastIntent?: string;
-        lastOutputType?: string;
-      };
     };
     let prompt = String(body.prompt || '').trim();
 
@@ -42,17 +35,6 @@ export async function registerChatRoutes(app: FastifyInstance) {
           .filter((item) => item.content)
           .slice(-6)
         : [],
-      conversationState: body.conversationState && typeof body.conversationState === 'object'
-        ? {
-            pendingKnowledgePrompt: String(body.conversationState.pendingKnowledgePrompt || '').trim(),
-            pendingOutputClarification: Boolean(body.conversationState.pendingOutputClarification),
-            pendingLibraries: Array.isArray(body.conversationState.pendingLibraries)
-              ? body.conversationState.pendingLibraries.map((item) => String(item || '').trim()).filter(Boolean)
-              : [],
-            lastIntent: String(body.conversationState.lastIntent || '').trim(),
-            lastOutputType: String(body.conversationState.lastOutputType || '').trim(),
-          }
-        : undefined,
     });
   });
 }

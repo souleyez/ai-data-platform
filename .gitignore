@@ -16,6 +16,7 @@ storage/config/document-libraries.json
 storage/config/report-center.json
 storage/config/audit-center.json
 storage/config/retained-documents.json
+storage/config/model-config.json
 tmp/
 
 # ad-hoc local test artifacts

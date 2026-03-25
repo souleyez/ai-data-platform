@@ -9,12 +9,13 @@ export type OpenClawChatRequest = {
   prompt: string;
   systemPrompt?: string;
   contextBlocks?: string[];
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   sessionUser?: string;
 };
 
 export type OpenClawChatResult = {
   content: string;
-  provider: 'openclaw-gateway';
+  provider: 'cloud-gateway';
   model: string;
   raw?: unknown;
 };
@@ -41,33 +42,98 @@ function isLocalGatewayUrl(url?: string) {
   return value.startsWith('http://127.0.0.1') || value.startsWith('http://localhost');
 }
 
-function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
-  const context = input.contextBlocks?.filter(Boolean) ?? [];
-  const userContent = [
-    context.length ? `以下是与问题相关的只读文档上下文，请优先基于这些材料回答，并明确说明不确定处：\n\n${context.join('\n\n')}` : '',
-    `用户问题：${input.prompt}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-
+function buildDefaultSystemPrompt() {
   return [
+    '你是产品“AI 知识数据管理”里的云端智能助手。',
+    '除非用户明确要求其他语言，否则一律使用自然、专业、简洁的中文回答。',
+    '直接回答用户问题，不要自我介绍，不要说自己刚上线，不要说记忆是空的，不要让用户给你起名，不要询问别人该怎么称呼你。',
+    '不要提系统启动、内部配置、隐藏状态、bootstrap 文件、调试过程或任何实现细节。',
+    '不要声称自己修改了本地文件、数据库或系统设置，除非用户在产品里明确执行了可见操作。',
+    '普通业务问答就直接回答，不要把简单问题改写成寒暄、角色扮演或开场白。',
+    '输出风格以自然分段为主，尽量少括号、少插话、少装饰符号。',
+    '不要使用 markdown 标题、星号、井号、竖线、分隔线，除非用户明确要求 markdown 格式。',
+  ].join('\n');
+}
+
+function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
+  const messages: ChatMessage[] = [
     {
       role: 'system',
-      content:
-        input.systemPrompt ||
-        '你是企业只读分析助手。请仅基于提供的上下文回答，优先输出中文。先给结论，再列出依据；若证据不足要明确说明“不足以判断”或“材料未覆盖”；不要编造不存在的数据。若引用材料，优先点名具体文档名并结合证据摘录来回答。',
-    },
-    {
-      role: 'user',
-      content: userContent,
+      content: input.systemPrompt || buildDefaultSystemPrompt(),
     },
   ];
+
+  const context = (input.contextBlocks || []).filter(Boolean);
+  if (context.length) {
+    messages.push({
+      role: 'system',
+      content: ['以下是与当前请求相关的知识库上下文，请优先参考：', context.join('\n\n')].join('\n\n'),
+    });
+  }
+
+  for (const item of input.chatHistory || []) {
+    const role = item?.role === 'assistant' ? 'assistant' : 'user';
+    const content = String(item?.content || '').trim();
+    if (!content) continue;
+    messages.push({ role, content });
+  }
+
+  messages.push({
+    role: 'user',
+    content: String(input.prompt || '').trim(),
+  });
+
+  return messages;
 }
 
 function sanitizeModelContent(content: string) {
   return String(content || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .trim();
+}
+
+function looksLikeOnboardingDrift(content: string) {
+  const text = String(content || '');
+  return /(刚上线|不知道自己是谁|给我起个名字|该怎么称呼你|记忆是空的|名字、风格、个性都还没定|我是一个全新的开始)/.test(
+    text,
+  );
+}
+
+async function requestChatCompletion(baseUrl: string, headers: Record<string, string>, body: unknown) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Cloud gateway request failed (${response.status}): ${text}`);
+    }
+
+    const json = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = sanitizeModelContent(json.choices?.[0]?.message?.content || '');
+    if (!content) {
+      throw new Error('Cloud gateway returned empty content');
+    }
+
+    return { json, content };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Cloud gateway request timed out after ${getGatewayTimeoutMs()}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export function isOpenClawGatewayConfigured() {
@@ -112,7 +178,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const model = (await getActiveOpenClawModel()) || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
-    throw new Error('OpenClaw gateway is not configured');
+    throw new Error('Cloud gateway is not configured');
   }
 
   const headers: Record<string, string> = {
@@ -127,48 +193,39 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     headers['x-openclaw-agent-id'] = agentId;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
+  const baseMessages = buildMessages(input);
 
   try {
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-      method: 'POST',
-      headers,
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        user: input.sessionUser,
-        temperature: 0.2,
-        messages: buildMessages(input),
-      }),
+    let result = await requestChatCompletion(baseUrl, headers, {
+      model,
+      user: input.sessionUser,
+      temperature: 0.2,
+      messages: baseMessages,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OpenClaw gateway request failed (${response.status}): ${text}`);
-    }
-
-    const json = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    const content = sanitizeModelContent(json.choices?.[0]?.message?.content || '');
-    if (!content) {
-      throw new Error('OpenClaw gateway returned empty content');
+    if (looksLikeOnboardingDrift(result.content)) {
+      result = await requestChatCompletion(baseUrl, headers, {
+        model,
+        user: input.sessionUser,
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content:
+              '直接回答用户当前问题。不要自我介绍，不要说刚上线，不要谈记忆是否为空，不要向用户索要称呼或名字。',
+          },
+          ...baseMessages,
+        ],
+      });
     }
 
     return {
-      content,
-      provider: 'openclaw-gateway',
-      model: model || 'openclaw',
-      raw: json,
+      content: result.content,
+      provider: 'cloud-gateway',
+      model: model || 'cloud-model',
+      raw: result.json,
     };
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`OpenClaw gateway request timed out after ${getGatewayTimeoutMs()}ms`);
-    }
     throw error;
-  } finally {
-    clearTimeout(timeout);
   }
 }
