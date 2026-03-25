@@ -296,10 +296,10 @@ export default function DocumentsPage() {
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
-      await createDocumentLibrary(name);
+      const created = await createDocumentLibrary(name);
       setLibraryCreateDraft('');
       await loadDocuments();
-      setActiveLibrary('all');
+      setActiveLibrary(created?.item?.key || 'all');
       setScanMessage(`已新建知识库分组“${name}”`);
     } catch {
       setScanMessage('新建知识库分组失败，请稍后重试');

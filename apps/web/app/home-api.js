@@ -29,7 +29,7 @@ export async function fetchCaptureTasks() {
 }
 
 export async function fetchDocumentsSnapshot() {
-  const response = await fetch(buildApiUrl('/api/documents-overview'));
+  const response = await fetch(buildApiUrl('/api/documents-overview'), { cache: 'no-store' });
   return parseApiResponse(response, 'load documents overview failed');
 }
 

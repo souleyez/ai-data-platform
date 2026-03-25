@@ -235,7 +235,11 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
   try {
     const json = await saveDocumentGroups([{ id: itemId, groups }]);
     setMessages((prev) => patchMessagesWithIngestItems(prev, json?.ingestItems || [], json?.message));
-    await loadDocumentSnapshot();
+    try {
+      await loadDocumentSnapshot();
+    } catch {
+      // Ignore snapshot refresh failures so successful saves are not reported as failed.
+    }
     return true;
   } catch (error) {
     appendAssistantMessage(setMessages, {
