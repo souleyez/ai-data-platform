@@ -352,7 +352,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'library name is required' });
     }
 
-    const library = await createDocumentLibrary({ name, description: body.description });
+    let library;
+    try {
+      library = await createDocumentLibrary({ name, description: body.description });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'library already exists') {
+        return reply.code(409).send({ error: 'library already exists', message: '知识库分组名称已存在' });
+      }
+      throw error;
+    }
     const libraries = await loadDocumentLibraries();
 
     return {

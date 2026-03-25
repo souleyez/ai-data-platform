@@ -11,9 +11,10 @@ export default function DocumentsTable({
   libraries,
   itemLabelMap,
   libraryDrafts,
-  setLibraryDrafts,
+  onLibraryDraftChange,
   expandedLibraryEditorId,
-  setExpandedLibraryEditorId,
+  onOpenLibraryEditor,
+  onCloseLibraryEditor,
   assignmentSubmittingId,
   ignoreSubmittingId,
   updateDocumentLibraries,
@@ -139,7 +140,7 @@ export default function DocumentsTable({
                               className="filter-input"
                               style={{ minWidth: 160, maxWidth: 220 }}
                               value={draftValue}
-                              onChange={(event) => setLibraryDrafts((prev) => ({ ...prev, [item.id]: event.target.value }))}
+                              onChange={(event) => onLibraryDraftChange(item.id, event.target.value)}
                             >
                               {availableLibraries.map((library) => (
                                 <option key={library.key} value={library.key}>{library.label}</option>
@@ -151,7 +152,7 @@ export default function DocumentsTable({
                               disabled={!draftValue || assignmentSubmittingId === item.id}
                               onClick={async () => {
                                 await updateDocumentLibraries(item.id, [...groups, draftValue]);
-                                setExpandedLibraryEditorId('');
+                                onCloseLibraryEditor();
                               }}
                             >
                               {assignmentSubmittingId === item.id ? '保存中...' : '确认'}
@@ -159,14 +160,14 @@ export default function DocumentsTable({
                             <button
                               className="ghost-btn"
                               type="button"
-                              onClick={() => setExpandedLibraryEditorId('')}
+                              onClick={onCloseLibraryEditor}
                               disabled={assignmentSubmittingId === item.id}
                             >
                               取消
                             </button>
                           </>
                         ) : (
-                          <button className="ghost-btn compact-inline-btn" type="button" onClick={() => setExpandedLibraryEditorId(item.id)}>
+                          <button className="ghost-btn compact-inline-btn" type="button" onClick={() => onOpenLibraryEditor(item.id)}>
                             添加
                           </button>
                         )}

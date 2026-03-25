@@ -65,6 +65,8 @@ const LIBRARY_TERM_ALIASES: Array<{ pattern: RegExp; terms: string[] }> = [
   },
 ];
 
+const RESUME_LIBRARY_PATTERN = /(简历|resume|cv|候选人|人才|recruit|recruitment|candidate)/i;
+
 function toCategoryLabel(category?: string) {
   return CATEGORY_LABELS[category || 'general'] || '未分组';
 }
@@ -103,7 +105,35 @@ function expandLibraryTerms(library: DocumentLibrary) {
 
 function scoreLibrarySuggestion(doc: ParsedDocument, library: DocumentLibrary) {
   const effectiveCategory = getEffectiveCategoryKey(doc);
-  if (effectiveCategory === 'general' || doc.category === 'resume' || doc.schemaType === 'resume') {
+  const libraryText = [library.key, library.label, library.description].filter(Boolean).join(' ');
+  const isResumeDocument = doc.category === 'resume' || doc.schemaType === 'resume';
+
+  if (isResumeDocument) {
+    if (!RESUME_LIBRARY_PATTERN.test(libraryText)) {
+      return 0;
+    }
+
+    const evidence = [
+      doc.title,
+      doc.summary,
+      doc.excerpt,
+      ...(doc.topicTags || []),
+      ...(doc.groups || []),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    const libraryTerms = expandLibraryTerms(library);
+    const termScore = libraryTerms.reduce((score, term) => {
+      if (!term) return score;
+      if (evidence.includes(term)) return score + (term.length >= 4 ? 3 : 2);
+      return score;
+    }, 0);
+
+    return 12 + termScore;
+  }
+
+  if (effectiveCategory === 'general') {
     return 0;
   }
 

@@ -68,6 +68,23 @@ export type ReportOutputRecord = {
   downloadUrl?: string;
 };
 
+function resolveTemplateTypeFromKind(kind?: 'table' | 'page' | 'ppt' | 'pdf'): ReportTemplateType | null {
+  if (kind === 'table') return 'table';
+  if (kind === 'page') return 'static-page';
+  if (kind === 'ppt' || kind === 'pdf') return 'ppt';
+  return null;
+}
+
+function resolveOutputTypeLabel(kind?: 'table' | 'page' | 'ppt' | 'pdf', templateType?: ReportTemplateType) {
+  if (kind === 'table') return '表格';
+  if (kind === 'page') return '静态页';
+  if (kind === 'pdf') return 'PDF';
+  if (kind === 'ppt') return 'PPT';
+  if (templateType === 'table') return '表格';
+  if (templateType === 'static-page') return '静态页';
+  return 'PPT';
+}
+
 type PersistedState = {
   groups?: Array<Pick<ReportGroup, 'key' | 'label' | 'description' | 'triggerKeywords' | 'defaultTemplateKey' | 'templates' | 'referenceImages'>>;
   outputs?: ReportOutputRecord[];
@@ -282,7 +299,12 @@ export async function createReportOutput(input: {
   const group = state.groups.find((item) => item.key === input.groupKey);
   if (!group) throw new Error('report group not found');
 
-  const template = group.templates.find((item) => item.key === (input.templateKey || group.defaultTemplateKey)) || group.templates[0];
+  const preferredTemplateType = resolveTemplateTypeFromKind(input.kind);
+  const template =
+    (input.templateKey ? group.templates.find((item) => item.key === input.templateKey) : null)
+    || (preferredTemplateType ? group.templates.find((item) => item.type === preferredTemplateType) : null)
+    || group.templates.find((item) => item.key === group.defaultTemplateKey)
+    || group.templates[0];
   if (!template) throw new Error('report template not found');
 
   const createdAt = new Date().toISOString();

@@ -112,7 +112,9 @@ export async function createDocumentLibrary(input: { name: string; description?:
 
   const current = await loadDocumentLibraries();
   const existing = current.find((item) => item.label === label || item.key === slugifyLibraryName(label));
-  if (existing) return existing;
+  if (existing) {
+    throw new Error('library already exists');
+  }
 
   const created: DocumentLibrary = {
     key: slugifyLibraryName(label),

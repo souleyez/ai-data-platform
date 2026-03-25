@@ -234,6 +234,18 @@ export default function DocumentsPage() {
     setScanRootDraft('');
   };
 
+  const handleLibraryDraftChange = (itemId, nextValue) => {
+    setLibraryDrafts((current) => ({ ...current, [itemId]: nextValue }));
+  };
+
+  const openLibraryEditor = (itemId) => {
+    setExpandedLibraryEditorId(itemId);
+  };
+
+  const closeLibraryEditor = () => {
+    setExpandedLibraryEditorId('');
+  };
+
   const setPrimaryScanSource = async (scanRoot) => {
     if (!scanRoot) return;
     try {
@@ -311,10 +323,13 @@ export default function DocumentsPage() {
     }
   };
 
-  const libraries = useMemo(
-    () => sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []),
-    [data],
-  );
+  const libraries = useMemo(() => {
+    const sorted = sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []);
+    return sorted.filter((library) => {
+      const count = getLibraryDocumentCount(library, data?.items || [], sorted);
+      return count > 0 || library.key === activeLibrary;
+    });
+  }, [activeLibrary, data]);
   const libraryLabelMap = useMemo(
     () => new Map(libraries.map((item) => [item.key, item.label])),
     [libraries],
@@ -456,9 +471,10 @@ export default function DocumentsPage() {
               libraries={libraries}
               itemLabelMap={libraryLabelMap}
               libraryDrafts={libraryDrafts}
-              setLibraryDrafts={setLibraryDrafts}
+              onLibraryDraftChange={handleLibraryDraftChange}
               expandedLibraryEditorId={expandedLibraryEditorId}
-              setExpandedLibraryEditorId={setExpandedLibraryEditorId}
+              onOpenLibraryEditor={openLibraryEditor}
+              onCloseLibraryEditor={closeLibraryEditor}
               assignmentSubmittingId={assignmentSubmittingId}
               ignoreSubmittingId={ignoreSubmittingId}
               updateDocumentLibraries={updateDocumentLibraries}

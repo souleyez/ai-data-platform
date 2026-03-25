@@ -4,9 +4,24 @@ import { buildApiUrl } from '../lib/config';
 import { normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 
 async function requestJson(path, options) {
-  const response = await fetch(buildApiUrl(path), options);
+  const response = await fetch(buildApiUrl(path), {
+    cache: 'no-store',
+    ...(options || {}),
+  });
   if (!response.ok) {
-    throw new Error(`request failed: ${path}`);
+    let message = `request failed: ${path}`;
+    try {
+      const payload = await response.json();
+      message = payload?.message || payload?.error || message;
+    } catch {
+      try {
+        const text = await response.text();
+        if (text) message = text;
+      } catch {
+        // ignore
+      }
+    }
+    throw new Error(message);
   }
   return response.json();
 }
