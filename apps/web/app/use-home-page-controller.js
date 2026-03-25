@@ -30,6 +30,7 @@ export function useHomePageController() {
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
+  const [conversationState, setConversationState] = useState(null);
 
   async function loadDatasources() {
     try {
@@ -91,6 +92,7 @@ export function useHomePageController() {
     setReportItems([]);
     setSelectedReportId('');
     setInput('');
+    setConversationState(null);
   }
 
   function deleteReport(reportId) {
@@ -108,6 +110,7 @@ export function useHomePageController() {
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
+    setConversationState,
     setUploadLoading,
     uploadInputRef,
   };
@@ -121,6 +124,7 @@ export function useHomePageController() {
     isLoading,
     messages,
     panel,
+    conversationState,
     reportCollapsed,
     reportItems,
     selectedReportId,
@@ -135,6 +139,7 @@ export function useHomePageController() {
     deleteReport,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
+      conversationState,
       inputState: { isLoading, uploadLoading },
     }),
     resetConversation,

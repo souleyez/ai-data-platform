@@ -24,6 +24,12 @@ function env(name: string, fallback?: string) {
   return value && value.trim() ? value.trim() : fallback;
 }
 
+function getGatewayTimeoutMs() {
+  const parsed = Number(env('OPENCLAW_GATEWAY_TIMEOUT_MS', '45000'));
+  if (!Number.isFinite(parsed) || parsed < 3000) return 45000;
+  return parsed;
+}
+
 function hasUsableGatewayToken(token?: string) {
   const value = String(token || '').trim();
   if (!value) return false;
@@ -121,35 +127,48 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     headers['x-openclaw-agent-id'] = agentId;
   }
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model,
-      user: input.sessionUser,
-      temperature: 0.2,
-      messages: buildMessages(input),
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenClaw gateway request failed (${response.status}): ${text}`);
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        user: input.sessionUser,
+        temperature: 0.2,
+        messages: buildMessages(input),
+      }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OpenClaw gateway request failed (${response.status}): ${text}`);
+    }
+
+    const json = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+
+    const content = sanitizeModelContent(json.choices?.[0]?.message?.content || '');
+    if (!content) {
+      throw new Error('OpenClaw gateway returned empty content');
+    }
+
+    return {
+      content,
+      provider: 'openclaw-gateway',
+      model: model || 'openclaw',
+      raw: json,
+    };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`OpenClaw gateway request timed out after ${getGatewayTimeoutMs()}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const json = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-
-  const content = sanitizeModelContent(json.choices?.[0]?.message?.content || '');
-  if (!content) {
-    throw new Error('OpenClaw gateway returned empty content');
-  }
-
-  return {
-    content,
-    provider: 'openclaw-gateway',
-    model: model || 'openclaw',
-    raw: json,
-  };
 }

@@ -1,6 +1,9 @@
 function extractTimestamp(text) {
-  const match = String(text || '').match(/(\d{13})/);
-  return match ? Number(match[1]) : 0;
+  const valueText = String(text || '').split(/[\\/]/).pop() || '';
+  const match = valueText.match(/^(\d{13})(?:[-_.]|$)/);
+  if (!match) return 0;
+  const value = Number(match[1]);
+  return value >= 1500000000000 && value <= 4102444800000 ? value : 0;
 }
 
 export function extractDocumentTimestamp(item) {

@@ -11,10 +11,11 @@ function Get-ServiceState {
 
   $pidFile = Join-Path $runDir "$Name.pid"
   $pid = if (Test-Path $pidFile) { Get-Content $pidFile } else { $null }
-  $process = if ($pid) { Get-Process -Id ([int]$pid) -ErrorAction SilentlyContinue } else { $null }
+  $listener = if ($Port) { Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
+  $effectivePid = if ($listener) { [int]$listener.OwningProcess } elseif ($pid) { [int]$pid } else { $null }
+  $process = if ($effectivePid) { Get-Process -Id $effectivePid -ErrorAction SilentlyContinue } else { $null }
   $listening = if ($Port) {
-    $portState = Test-NetConnection 127.0.0.1 -Port $Port -WarningAction SilentlyContinue
-    [bool]$portState.TcpTestSucceeded
+    [bool]$listener
   } else {
     [bool]$process
   }

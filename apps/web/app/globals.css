@@ -798,3 +798,39 @@ th { color: var(--subtle); font-weight: 600; }
   .workbench-toolbar { align-items: flex-start; flex-direction: column; }
   .chat-composer-wrap { position: sticky; bottom: 0; }
 }
+
+.shared-report-shell {
+  min-height: 100vh;
+  padding: 32px 20px;
+  background:
+    radial-gradient(circle at top, rgba(20, 184, 166, 0.12), transparent 32%),
+    linear-gradient(180deg, #f8fafc, #eef6f7);
+}
+
+.shared-report-card {
+  max-width: 1040px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+}
+
+.shared-report-header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.shared-report-header h1 {
+  margin: 0;
+  font-size: 28px;
+  color: #0f172a;
+}
+
+.shared-report-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+}

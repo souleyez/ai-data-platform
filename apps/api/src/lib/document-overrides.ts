@@ -62,6 +62,23 @@ export async function saveDocumentOverrides(overrides: Record<string, DocumentOv
   return overrides;
 }
 
+export async function removeDocumentOverrides(filePaths: string[]) {
+  const current = await loadDocumentOverrides();
+  let changed = false;
+
+  for (const filePath of filePaths) {
+    if (!filePath || !Object.prototype.hasOwnProperty.call(current, filePath)) continue;
+    delete current[filePath];
+    changed = true;
+  }
+
+  if (changed) {
+    await saveDocumentOverrides(current);
+  }
+
+  return current;
+}
+
 export function applyDocumentOverrides(items: ParsedDocument[], overrides: Record<string, DocumentOverride>) {
   return items.map((item) => {
     const matched = overrides[item.path];

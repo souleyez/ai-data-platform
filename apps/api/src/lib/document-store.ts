@@ -1,9 +1,10 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseDocument, type ParsedDocument } from './document-parser.js';
+import { enhanceParsedDocumentsWithCloud } from './document-cloud-enrichment.js';
 import { loadDocumentCategoryConfig } from './document-config.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
-import { STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
+import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
 import { loadRetainedDocuments } from './retained-documents.js';
 
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || STORAGE_FILES_DIR;
@@ -42,9 +43,17 @@ type CachePayload = {
 type LoadParsedDocumentsResult = {
   exists: boolean;
   files: string[];
+  totalFiles?: number;
   items: ParsedDocument[];
   cacheHit: boolean;
 };
+
+function isPlatformInternalDocumentPath(filePath: string) {
+  const normalizedFilePath = path.resolve(String(filePath || '')).toLowerCase();
+  const normalizedRepoRoot = path.resolve(REPO_ROOT).toLowerCase();
+  const normalizedStorageFilesRoot = path.resolve(STORAGE_FILES_DIR).toLowerCase();
+  return normalizedFilePath.startsWith(normalizedRepoRoot) && !normalizedFilePath.startsWith(normalizedStorageFilesRoot);
+}
 
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
@@ -261,6 +270,45 @@ async function writeCache(payload: CachePayload) {
   await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+export async function removeDocumentsFromCache(filePaths: string[]) {
+  const targets = new Set(filePaths.filter(Boolean));
+  if (!targets.size) return;
+
+  const cache = await readCache();
+  if (!cache) return;
+
+  const nextItems = cache.items.filter((item) => !targets.has(item.path));
+  const removedCount = cache.items.length - nextItems.length;
+  if (removedCount <= 0) return;
+
+  await writeCache({
+    ...cache,
+    totalFiles: Math.max(0, (cache.totalFiles || cache.items.length) - removedCount),
+    items: nextItems,
+  });
+}
+
+export async function upsertDocumentsInCache(items: ParsedDocument[], scanRoot?: string | string[]) {
+  if (!items.length) return;
+
+  const cache = await readCache();
+  if (!cache) {
+    return;
+  }
+
+  const byPath = new Map(cache.items.map((item) => [item.path, item]));
+  for (const item of items) {
+    byPath.set(item.path, item);
+  }
+
+  const nextItems = dedupeDocuments(sortDocumentsByRecency([...byPath.values()]));
+  await writeCache({
+    ...cache,
+    items: nextItems,
+    totalFiles: Math.max(cache.totalFiles || cache.items.length, nextItems.length),
+  });
+}
+
 async function buildScanSignature(files: string[]) {
   const stats = await Promise.all(
     files.map(async (filePath) => {
@@ -269,6 +317,78 @@ async function buildScanSignature(files: string[]) {
     }),
   );
   return stats.sort().join('|');
+}
+
+function extractPathTimestamp(filePath: string) {
+  const baseName = path.basename(String(filePath || ''));
+  const match = baseName.match(/^(\d{13})(?:[-_.]|$)/);
+  if (!match) return 0;
+  const value = Number(match[1]);
+  return value >= 1500000000000 && value <= 4102444800000 ? value : 0;
+}
+
+async function sortFilesByRecency(filePaths: string[]) {
+  const ranked = await Promise.all(
+    filePaths.map(async (filePath) => {
+      const pathTimestamp = extractPathTimestamp(filePath);
+      if (pathTimestamp > 0) {
+        return { filePath, score: pathTimestamp };
+      }
+
+      try {
+        const stat = await fs.stat(filePath);
+        return { filePath, score: Math.floor(stat.mtimeMs) || 0 };
+      } catch {
+        return { filePath, score: 0 };
+      }
+    }),
+  );
+
+  return ranked
+    .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath))
+    .map((item) => item.filePath);
+}
+
+function sortDocumentsByRecency<T extends { path?: string; name?: string }>(items: T[]) {
+  return [...items].sort((a, b) => {
+    const left = Math.max(extractPathTimestamp(a.path || ''), extractPathTimestamp(a.name || ''));
+    const right = Math.max(extractPathTimestamp(b.path || ''), extractPathTimestamp(b.name || ''));
+    return right - left || String(a.path || a.name || '').localeCompare(String(b.path || b.name || ''));
+  });
+}
+
+function buildDeduplicationKey(item: ParsedDocument) {
+  const normalizedName = path.basename(String(item.name || item.path || ''))
+    .replace(/^~\$/, '')
+    .replace(/^\d{13}[-_.]/, '')
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const normalizedTitle = String(item.title || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const normalizedSummary = String(item.summary || '')
+    .slice(0, 120)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return `${item.category || 'general'}|${normalizedName}|${normalizedTitle || normalizedSummary}`;
+}
+
+function dedupeDocuments(items: ParsedDocument[]) {
+  const deduped: ParsedDocument[] = [];
+  const seen = new Set<string>();
+
+  for (const item of sortDocumentsByRecency(items)) {
+    const key = buildDeduplicationKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
 }
 
 async function resolveScanRoot(scanRoot?: string) {
@@ -295,7 +415,7 @@ async function getCurrentFiles(scanRoot?: string | string[]): Promise<{ exists: 
       }
     }),
   );
-  const files = Array.from(new Set(fileGroups.flat())).sort((a, b) => a.localeCompare(b));
+  const files = await sortFilesByRecency(Array.from(new Set(fileGroups.flat())));
   return {
     exists: files.length > 0,
     files,
@@ -304,12 +424,21 @@ async function getCurrentFiles(scanRoot?: string | string[]): Promise<{ exists: 
   };
 }
 
-async function parseFiles(filePaths: string[], scanRoot?: string | string[]) {
+async function parseFiles(
+  filePaths: string[],
+  scanRoot?: string | string[],
+  options?: { cloudEnhancement?: boolean; parseStage?: 'quick' | 'detailed' },
+) {
   const activeScanRoot = Array.isArray(scanRoot) ? scanRoot[0] : await resolveScanRoot(scanRoot);
   const categoryConfig = await loadDocumentCategoryConfig(activeScanRoot);
   const overrides = await loadDocumentOverrides();
-  const parsedItems = await Promise.all(filePaths.map((filePath) => parseDocument(filePath, categoryConfig)));
-  return applyDocumentOverrides(parsedItems, overrides).map(sanitizeParsedDocument);
+  const parsedItems = await Promise.all(
+    filePaths.map((filePath) => parseDocument(filePath, categoryConfig, { stage: options?.parseStage || 'detailed' })),
+  );
+  const cloudEnhancedItems = options?.cloudEnhancement === false
+    ? parsedItems
+    : await enhanceParsedDocumentsWithCloud(parsedItems);
+  return applyDocumentOverrides(cloudEnhancedItems, overrides).map(sanitizeParsedDocument);
 }
 
 async function mergeWithRetainedDocuments(items: ParsedDocument[]) {
@@ -331,35 +460,27 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
   const activeScanRoots = await resolveScanRoots(scanRoot);
   const cache = !forceRefresh ? await readCache() : null;
 
-  if (
-    cache
-    && sameScanRoots(cache.scanRoots || [cache.scanRoot], activeScanRoots)
-  ) {
+  if (cache) {
     const overrides = await loadDocumentOverrides();
-    const mergedItems = await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument));
-    return { exists: true, files: [], items: mergedItems.slice(0, limit), cacheHit: true };
+    const mergedItems = dedupeDocuments(sortDocumentsByRecency(
+      await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument)),
+    ));
+    return {
+      exists: true,
+      files: [],
+      totalFiles: cache.totalFiles || cache.items.length,
+      items: mergedItems.slice(0, limit),
+      cacheHit: sameScanRoots(cache.scanRoots || [cache.scanRoot], activeScanRoots),
+    };
   }
 
   const { exists, files, scanRoot: activeScanRoot, scanRoots: resolvedScanRoots } = await getCurrentFiles(activeScanRoots);
 
   if (!exists) {
-    return { exists, files, items: [], cacheHit: false };
+    return { exists, files, totalFiles: 0, items: [], cacheHit: false };
   }
 
   const scanSignature = await buildScanSignature(files);
-
-  if (!forceRefresh) {
-    const overrides = await loadDocumentOverrides();
-    if (
-      cache
-      && sameScanRoots(cache.scanRoots || [cache.scanRoot], resolvedScanRoots)
-      && cache.totalFiles === files.length
-      && cache.scanSignature === scanSignature
-    ) {
-      const mergedItems = await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument));
-      return { exists, files, items: mergedItems.slice(0, limit), cacheHit: true };
-    }
-  }
 
   const items = await parseFiles(files.slice(0, limit), resolvedScanRoots);
   await writeCache({
@@ -371,15 +492,20 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
     items,
   });
 
-  const mergedItems = await mergeWithRetainedDocuments(items);
-  return { exists, files, items: mergedItems, cacheHit: false };
+  const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
+  return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
 
-export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 200, scanRoot?: string | string[]): Promise<LoadParsedDocumentsResult> {
+export async function mergeParsedDocumentsForPaths(
+  filePaths: string[],
+  limit = 200,
+  scanRoot?: string | string[],
+  options?: { parseStage?: 'quick' | 'detailed'; cloudEnhancement?: boolean },
+): Promise<LoadParsedDocumentsResult> {
   const { exists, files, scanRoot: activeScanRoot, scanRoots: activeScanRoots } = await getCurrentFiles(scanRoot);
 
   if (!exists) {
-    return { exists, files, items: [], cacheHit: false };
+    return { exists, files, totalFiles: 0, items: [], cacheHit: false };
   }
 
   const normalizedPaths = [...new Set(filePaths)];
@@ -396,7 +522,14 @@ export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 
     return loadParsedDocuments(limit, true, activeScanRoot);
   }
 
-  const reparsedItems = await parseFiles(normalizedPaths.filter((filePath) => targetPaths.includes(filePath)), activeScanRoots);
+  const reparsedItems = await parseFiles(
+    normalizedPaths.filter((filePath) => targetPaths.includes(filePath)),
+    activeScanRoots,
+    {
+      cloudEnhancement: options?.cloudEnhancement ?? false,
+      parseStage: options?.parseStage || 'detailed',
+    },
+  );
   const reparsedByPath = new Map(reparsedItems.map((item) => [item.path, item]));
   const items = targetPaths
     .map((filePath) => reparsedByPath.get(filePath) || cachedByPath.get(filePath))
@@ -412,8 +545,8 @@ export async function mergeParsedDocumentsForPaths(filePaths: string[], limit = 
     items,
   });
 
-  const mergedItems = await mergeWithRetainedDocuments(items);
-  return { exists, files, items: mergedItems, cacheHit: false };
+  const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
+  return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
 
 export function buildDocumentId(filePath: string) {
@@ -573,6 +706,7 @@ export function matchDocumentsByPrompt(items: ParsedDocument[], prompt: string, 
   const explicitIdentifiers = extractExplicitIdentifiers(prompt);
 
   return items
+    .filter((item) => !isPlatformInternalDocumentPath(item.path))
     .map((item) => {
       const searchable = [item.name, item.title, item.summary, item.excerpt, (item.topicTags || []).join(' ')]
         .filter(Boolean)
@@ -596,6 +730,7 @@ export function matchDocumentEvidenceByPrompt(items: ParsedDocument[], prompt: s
   const explicitIdentifiers = extractExplicitIdentifiers(prompt);
 
   const ranked = items
+    .filter((item) => !isPlatformInternalDocumentPath(item.path))
     .flatMap((item) => {
       const docScore = scoreDocumentMatch(item, keywords, promptIntent);
       const searchable = [item.name, item.title, item.summary, item.excerpt, (item.topicTags || []).join(' ')]

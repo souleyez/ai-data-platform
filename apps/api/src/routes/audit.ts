@@ -10,6 +10,11 @@ import {
 } from '../lib/audit-center.js';
 
 export async function registerAuditRoutes(app: FastifyInstance) {
+  const disableAuditPolicyInDev =
+    process.env.DISABLE_AUDIT_POLICY_IN_DEV === undefined
+      ? process.env.NODE_ENV !== 'production'
+      : /^(1|true|yes)$/i.test(process.env.DISABLE_AUDIT_POLICY_IN_DEV);
+
   app.get('/audit', async () => {
     const snapshot = await buildAuditSnapshot();
     return {
@@ -18,7 +23,18 @@ export async function registerAuditRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/audit/run-policy', async () => runAuditPolicy());
+  app.post('/audit/run-policy', async () => {
+    if (disableAuditPolicyInDev) {
+      return {
+        status: 'skipped',
+        message: 'audit policy disabled in local development',
+        cleanedDocuments: 0,
+        cleanedCaptureTasks: 0,
+      };
+    }
+
+    return runAuditPolicy();
+  });
 
   app.post('/audit/capture-tasks/:id/pause', async (request, reply) => {
     const { id } = request.params as { id: string };

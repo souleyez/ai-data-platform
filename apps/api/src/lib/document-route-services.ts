@@ -2,9 +2,11 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { createDocumentLibrary, loadDocumentLibraries } from './document-libraries.js';
 import { saveDocumentCategoryConfig, loadDocumentCategoryConfig } from './document-config.js';
-import { saveDocumentOverride, saveDocumentSuggestion } from './document-overrides.js';
-import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from './document-store.js';
+import { removeDocumentOverrides, saveDocumentOverride, saveDocumentSuggestion } from './document-overrides.js';
+import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths, removeDocumentsFromCache } from './document-store.js';
 import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from './ingest-feedback.js';
+import { removeRetainedDocument } from './retained-documents.js';
+import { STORAGE_FILES_DIR } from './paths.js';
 
 type LoadedDocuments = Awaited<ReturnType<typeof loadParsedDocuments>>;
 type LoadedLibraries = Awaited<ReturnType<typeof loadDocumentLibraries>>;
@@ -95,15 +97,26 @@ function normalizeClusterLabel(value: string) {
 
 function collectClusterSeeds(item: ParsedDocumentItem) {
   const seeds = new Set<string>();
+  if (item.schemaType && item.schemaType !== 'generic') {
+    seeds.add(normalizeClusterLabel(item.schemaType));
+  }
   for (const tag of item.topicTags || []) {
     const normalized = normalizeClusterLabel(tag);
-    if (normalized.length >= 2) seeds.add(normalized);
+    if (normalized.length >= 3) seeds.add(normalized);
   }
+
+  const profileTokens = Object.values(item.structuredProfile || {})
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .map((value) => normalizeClusterLabel(String(value || '')))
+    .filter((token) => token.length >= 4)
+    .slice(0, 4);
+
+  for (const token of profileTokens) seeds.add(token);
 
   const titleTokens = String(item.title || item.name || '')
     .split(/[\s/\\|,，。；：（）【】\]-]+/)
     .map((token) => normalizeClusterLabel(token))
-    .filter((token) => token.length >= 3);
+    .filter((token) => token.length >= 4);
 
   for (const token of titleTokens.slice(0, 3)) seeds.add(token);
   return [...seeds];
@@ -257,13 +270,35 @@ export async function saveConfirmedDocumentGroups(updates: Array<{ id?: string; 
 export async function saveIgnoredDocuments(updates: Array<{ id?: string; ignored?: boolean }>) {
   const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
   const byId = await loadDocumentsById(config);
-  const results = [] as Array<{ id: string; ignored: boolean; confirmedAt: string }>;
+  const results = [] as Array<{ id: string; removed: boolean; deletedFile: boolean }>;
+  const removedPaths: string[] = [];
 
   for (const update of updates) {
     const found = update.id ? byId.get(update.id) : null;
-    if (!found || typeof update.ignored !== 'boolean') continue;
-    const saved = await saveDocumentOverride(found.path, { ignored: update.ignored });
-    results.push({ id: update.id as string, ignored: Boolean(saved.ignored), confirmedAt: saved.confirmedAt });
+    if (!found || update.ignored !== true) continue;
+
+    await removeRetainedDocument(found.path);
+    removedPaths.push(found.path);
+
+    const normalizedPath = path.resolve(found.path).toLowerCase();
+    const managedRoot = path.resolve(STORAGE_FILES_DIR).toLowerCase();
+    let deletedFile = false;
+
+    if (normalizedPath.startsWith(managedRoot)) {
+      try {
+        await fs.rm(found.path, { force: true });
+        deletedFile = true;
+      } catch {
+        deletedFile = false;
+      }
+    }
+
+    results.push({ id: update.id as string, removed: true, deletedFile });
+  }
+
+  if (removedPaths.length) {
+    await removeDocumentOverrides(removedPaths);
+    await removeDocumentsFromCache(removedPaths);
   }
 
   return results;
@@ -274,7 +309,20 @@ export async function reclusterUngroupedDocuments() {
   const { items } = await loadParsedDocuments(200, false, config.scanRoots);
   const libraries = await loadDocumentLibraries();
 
-  const candidates = items.filter((item) => !item.ignored && item.parseStatus === 'parsed' && !(item.confirmedGroups?.length));
+  const initialCandidates = items.filter((item) => !item.ignored && item.parseStatus === 'parsed' && !(item.confirmedGroups?.length));
+  const detailedCandidatePaths = initialCandidates
+    .filter((item) => item.parseStage !== 'detailed')
+    .map((item) => item.path)
+    .slice(0, 48);
+
+  const refreshedItems = detailedCandidatePaths.length
+    ? (await mergeParsedDocumentsForPaths(detailedCandidatePaths, 200, config.scanRoots, {
+      parseStage: 'detailed',
+      cloudEnhancement: true,
+    })).items
+    : items;
+
+  const candidates = refreshedItems.filter((item) => !item.ignored && item.parseStatus === 'parsed' && !(item.confirmedGroups?.length));
   const clusterBuckets = new Map<string, typeof candidates>();
   let suggestedCount = 0;
   let createdLibraryCount = 0;

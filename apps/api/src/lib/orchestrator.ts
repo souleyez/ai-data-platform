@@ -1,6 +1,7 @@
 import { buildDocumentId, loadParsedDocuments, matchDocumentEvidenceByPrompt, matchDocumentsByPrompt, matchResumeDocuments, type DocumentEvidenceMatch } from './document-store.js';
+import { retrieveKnowledgeMatches } from './document-retrieval.js';
 import { loadDocumentLibraries } from './document-libraries.js';
-import { buildBlockedPolicyAnswer, buildGeneralChatSystemPrompt, classifyChatPrompt } from './chat-policy.js';
+import { buildBlockedPolicyAnswer, buildGeneralChatSystemPrompt, classifyChatPrompt, looksLikeMemoryPreferenceRequest } from './chat-policy.js';
 import { resolveScenario, scenarios, type ScenarioKey } from './mock-data.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable, runOpenClawChat } from './openclaw-adapter.js';
 import type { ParsedDocument } from './document-parser.js';
@@ -9,6 +10,14 @@ import { createReportOutput, findReportGroupForPrompt, loadReportCenterState } f
 export type ChatRequestInput = {
   prompt: string;
   sessionUser?: string;
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  conversationState?: {
+    pendingKnowledgePrompt?: string;
+    pendingOutputClarification?: boolean;
+    pendingLibraries?: string[];
+    lastIntent?: string;
+    lastOutputType?: string;
+  };
 };
 
 type FormulaTable = {
@@ -50,6 +59,39 @@ type ChatOutput =
   | { type: 'table'; title: string; content?: string; table: FormulaTable }
   | { type: 'page'; title: string; content?: string; page: StaticPageOutput; format?: 'html' }
   | { type: 'ppt' | 'pdf'; title: string; content?: string; format: 'ppt' | 'pdf'; downloadUrl?: string };
+
+type ClarificationDecision = {
+  needsClarification: boolean;
+  question?: string;
+  mergedPrompt?: string;
+};
+
+const OUTPUT_FORMAT_CLARIFICATION_PREFIX = '请先确认这次要的输出形式';
+
+function buildConversationState(input: {
+  pendingKnowledgePrompt?: string;
+  pendingLibraries?: string[];
+  pendingOutputClarification?: boolean;
+  lastIntent?: string;
+  lastOutputType?: string;
+}) {
+  const pendingLibraries = (input.pendingLibraries || []).filter(Boolean);
+  const state = {
+    pendingKnowledgePrompt: String(input.pendingKnowledgePrompt || '').trim(),
+    pendingLibraries,
+    pendingOutputClarification: Boolean(input.pendingOutputClarification),
+    lastIntent: String(input.lastIntent || '').trim(),
+    lastOutputType: String(input.lastOutputType || '').trim(),
+  };
+
+  const hasValue = state.pendingKnowledgePrompt
+    || state.pendingOutputClarification
+    || state.pendingLibraries.length
+    || state.lastIntent
+    || state.lastOutputType;
+
+  return hasValue ? state : null;
+}
 
 type FormulaSegment =
   | 'human_infant'
@@ -509,6 +551,8 @@ function buildScopedSystemPrompt(scope: KnowledgeScope, extraLines: string[] = [
     '只能基于命中的知识库分组、命中文档和给定上下文回答。',
     '如果用户要求超出知识库范围的建议、执行动作、系统操作、联网调查或其他外部能力，必须拒绝，并明确说明“当前知识库未覆盖”。',
     '如果证据不足，只能回答“当前知识库未覆盖”或“不足以判断”，不要自由发挥，不要补充分组外常识。',
+    '请先以知识库证据为主回答；如果知识库证据不足，只能把云端模型的补充视为辅助说明，且不能盖过知识库结论。',
+    '回答尽量自然分段，不要使用 ---、***、=== 这类分隔符。',
     ...extraLines,
   ];
 
@@ -519,7 +563,7 @@ function buildMeta(scenarioKey: ScenarioKey, matchedDocs: ParsedDocument[], mode
   const scenario = scenarios[scenarioKey];
   const parts: string[] = [scenario.source];
   if (matchedDocs.length) parts.push(`命中文档 ${matchedDocs.length} 篇`);
-  parts.push(mode === 'openclaw' ? '分析链路：云端模型增强' : '分析链路：本地AI');
+  parts.push(mode === 'openclaw' ? '分析链路：云端模型增强' : '分析链路：云端未输出');
   return parts.join(' / ');
 }
 
@@ -547,6 +591,77 @@ function isKnowledgeReportPrompt(prompt: string) {
     .test(String(prompt || ''));
 }
 
+function detectOutputFormat(prompt: string) {
+  const text = String(prompt || '').trim();
+  if (!text) return '';
+  if (/(\u8868\u683c|\u8868\u5355|table|csv)/i.test(text)) return '表格';
+  if (/(\u6570\u636e\u53ef\u89c6\u5316|\u53ef\u89c6\u5316|\u56fe\u8868|\u4eea\u8868\u76d8|\u9759\u6001\u9875|page|dashboard|chart|visual)/i.test(text)) return '数据可视化静态页';
+  if (/\bppt\b/i.test(text)) return 'PPT';
+  if (/\bpdf\b/i.test(text)) return 'PDF';
+  if (/(\u666e\u901a\u56de\u7b54|\u76f4\u63a5\u56de\u7b54|\u7eaf\u6587\u672c|\u6587\u5b57\u7248|\u6458\u8981)/i.test(text)) return '普通回答';
+  return '';
+}
+
+function looksLikeClarificationReply(prompt: string) {
+  const text = String(prompt || '').trim();
+  if (!text) return false;
+  if (detectOutputFormat(text)) return true;
+  if (text.length <= 24) return true;
+  return /(\u597d|\u884c|\u53ef\u4ee5|\u7ee7\u7eed|\u5c31\u8fd9\u4e2a|\u7ed9.+\u770b|\u53ea\u770b|\u91cd\u70b9|\u52a0\u4e0a|\u8865\u5145|\u504f\u5411)/i.test(text);
+}
+
+function normalizeRecentHistory(chatHistory?: ChatRequestInput['chatHistory']) {
+  return (chatHistory || [])
+    .map((item) => ({
+      role: item.role === 'assistant' ? 'assistant' as const : 'user' as const,
+      content: String(item.content || '').trim(),
+    }))
+    .filter((item) => item.content)
+    .slice(-6);
+}
+
+function resolveClarificationDecision(
+  prompt: string,
+  chatHistory: ChatRequestInput['chatHistory'],
+  shouldClarifyCandidate: boolean,
+) : ClarificationDecision {
+  const history = normalizeRecentHistory(chatHistory);
+  const lastAssistant = [...history].reverse().find((item) => item.role === 'assistant');
+  const priorUser = [...history].reverse().find((item) => item.role === 'user');
+  const priorAskedForClarification = Boolean(
+    lastAssistant
+    && (
+      lastAssistant.content.includes(OUTPUT_FORMAT_CLARIFICATION_PREFIX)
+      || /(\u5c55\u73b0\u5f62\u5f0f|\u8f93\u51fa\u5f62\u5f0f|\u8f93\u51fa\u610f\u5411|\u8868\u683c\s*\/|\u6570\u636e\u53ef\u89c6\u5316\u9759\u6001\u9875|pdf|ppt|\u666e\u901a\u56de\u7b54)/i.test(lastAssistant.content)
+    )
+  );
+
+  if ((priorAskedForClarification || detectOutputFormat(prompt)) && priorUser) {
+    const format = detectOutputFormat(prompt) || '普通回答';
+    return {
+      needsClarification: false,
+      mergedPrompt: `${priorUser.content}\n输出形式：${format}\n补充说明：${prompt}`,
+    };
+  }
+
+  if (!shouldClarifyCandidate) {
+    return { needsClarification: false, mergedPrompt: prompt };
+  }
+
+  if (detectOutputFormat(prompt)) {
+    return { needsClarification: false, mergedPrompt: prompt };
+  }
+
+  return {
+    needsClarification: true,
+    question: [
+      `${OUTPUT_FORMAT_CLARIFICATION_PREFIX}。`,
+      '请直接回复一种形式：表格 / 数据可视化静态页 / PDF / PPT / 普通回答',
+    ].join('\n'),
+    mergedPrompt: prompt,
+  };
+}
+
 function looksLikeEncodingComplaint(content: string) {
   return /(\u4e71\u7801|\u8f93\u5165\u6cd5|\u7528\u82f1\u6587|\u91cd\u65b0\u6253\u5b57|\u622a\u56fe\u53d1\u7ed9\u6211)/i
     .test(String(content || ''));
@@ -557,29 +672,36 @@ function inferPreferredLibraryKeys(
   libraries: Array<{ key: string; label: string; description?: string }>,
 ) {
   const text = String(prompt || '').toLowerCase();
-  const matches = new Set<string>();
+  const scored = libraries
+    .map((library) => {
+      const haystack = `${library.key} ${library.label} ${library.description || ''}`.toLowerCase();
+      let score = 0;
 
-  for (const library of libraries) {
-    const haystack = `${library.key} ${library.label} ${library.description || ''}`.toLowerCase();
-    if (text.includes(library.key.toLowerCase()) || text.includes(library.label.toLowerCase())) {
-      matches.add(library.key);
-      continue;
-    }
-    if (/(\u5408\u540c|contract|\u6cd5\u52a1|\u6761\u6b3e|\u98ce\u9669)/i.test(text) && /(\u5408\u540c|contract)/i.test(haystack)) {
-      matches.add(library.key);
-    }
-    if (/(\u5976\u7c89|\u914d\u65b9|formula|\u8425\u517b)/i.test(text) && /(\u5976\u7c89|\u914d\u65b9|formula)/i.test(haystack)) {
-      matches.add(library.key);
-    }
-    if (/(\u80a0\u9053|gut)/i.test(text) && /(gut|\u80a0\u9053)/i.test(haystack)) {
-      matches.add(library.key);
-    }
-    if (/(\u8111|brain|\u8ba4\u77e5)/i.test(text) && /(brain|\u8111)/i.test(haystack)) {
-      matches.add(library.key);
-    }
-  }
+      if (text.includes(library.key.toLowerCase())) score += 8;
+      if (text.includes(library.label.toLowerCase())) score += 10;
 
-  return [...matches];
+      if (/(\u5408\u540c|contract|\u6cd5\u52a1|\u6761\u6b3e|\u56de\u6b3e|\u4ed8\u6b3e|\u534f\u8bae)/i.test(text) && /(\u5408\u540c|contract|\u6cd5\u52a1)/i.test(haystack)) {
+        score += 12;
+      }
+      if (/(\u5976\u7c89|\u914d\u65b9|formula|\u8425\u517b|\u83cc\u682a|\u76ca\u751f\u83cc)/i.test(text) && /(\u5976\u7c89|\u914d\u65b9|formula|\u8425\u517b|\u83cc\u682a|\u76ca\u751f\u83cc)/i.test(haystack)) {
+        score += 12;
+      }
+      if (/(\u80a0\u9053|gut|\u80a0\u80c3)/i.test(text) && /(gut|\u80a0\u9053|\u80a0\u80c3)/i.test(haystack)) {
+        score += 9;
+      }
+      if (/(\u8111|brain|\u8ba4\u77e5)/i.test(text) && /(brain|\u8111|\u8ba4\u77e5)/i.test(haystack)) {
+        score += 9;
+      }
+      if (/(\u8bba\u6587|paper|\u7814\u7a76|study|trial)/i.test(text) && /(\u8bba\u6587|paper|\u7814\u7a76|study|trial)/i.test(haystack)) {
+        score += 7;
+      }
+
+      return { key: library.key, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || left.key.localeCompare(right.key, 'zh-CN'));
+
+  return scored.slice(0, 3).map((item) => item.key);
 }
 
 function documentMatchesLibraryKey(item: ParsedDocument, key: string) {
@@ -646,7 +768,9 @@ function buildExpandedKnowledgeScope(
 
   const docGroupKeys = [...new Set(scopedDocs.flatMap((item) => getDocumentGroups(item)).filter(Boolean))];
   const libraryMap = new Map(libraries.map((item) => [item.key, item.label]));
-  const libraryKeys = docGroupKeys.length ? docGroupKeys : libraries.map((item) => item.key);
+  const libraryKeys = preferredLibraryKeys.length
+    ? preferredLibraryKeys
+    : (docGroupKeys.length ? docGroupKeys : libraries.map((item) => item.key));
   const libraryLabels = libraryKeys.map((key) => libraryMap.get(key) || key);
 
   return {
@@ -1158,9 +1282,9 @@ async function resolveFormulaSegment(
   gatewayReachable = false,
 ): Promise<FormulaSegmentDecision> {
   const localDecision = detectLocalFormulaSegment(prompt);
-  if (localDecision.confident && localDecision.segment) return localDecision;
-
-  const cloudDecision = await runCloudFormulaAssist(prompt, matchedDocs, sessionUser, gatewayReachable);
+  const cloudDecision = gatewayReachable
+    ? await runCloudFormulaAssist(prompt, matchedDocs, sessionUser, gatewayReachable)
+    : null;
   if (cloudDecision?.segment) {
     return {
       segment: cloudDecision.segment,
@@ -1169,6 +1293,8 @@ async function resolveFormulaSegment(
       notes: cloudDecision.notes?.slice(0, 3),
     };
   }
+
+  if (localDecision.confident && localDecision.segment) return localDecision;
 
   return {
     segment: localDecision.segment || null,
@@ -1401,6 +1527,16 @@ export function buildFallbackAnswer(
   return buildEvidenceDrivenAnswer(prompt, matchedDocs, evidenceMatches);
 }
 
+function buildCloudUnavailableAnswer(kind: 'general' | 'knowledge' | 'report' = 'general') {
+  if (kind === 'knowledge') {
+    return '当前云端模型暂时不可用或没有返回有效内容，本轮先不输出知识库结论。你可以稍后重试，或补充更明确的输出要求。';
+  }
+  if (kind === 'report') {
+    return '当前云端模型暂时不可用或没有返回有效内容，本轮先不生成报表/静态页。你可以稍后重试，或补充更明确的输出形式。';
+  }
+  return '当前云端模型暂时不可用。你可以稍后再试。';
+}
+
 function chooseScenario(prompt: string, matchedDocs: ParsedDocument[]): ScenarioKey {
   if (matchedDocs.length) {
     const contractCount = matchedDocs.filter((item) => item.category === 'contract').length;
@@ -1416,10 +1552,13 @@ function chooseScenario(prompt: string, matchedDocs: ParsedDocument[]): Scenario
 export async function runChatOrchestration(input: ChatRequestInput) {
   const prompt = input.prompt.trim();
   const { items } = await loadParsedDocuments();
-  const initialEvidenceMatches = matchDocumentEvidenceByPrompt(items, prompt);
-  const initialMatchedDocs = initialEvidenceMatches.length
-    ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()]
-    : matchDocumentsByPrompt(items, prompt);
+  const initialRetrieval = retrieveKnowledgeMatches(items, prompt, { docLimit: 18, evidenceLimit: 24 });
+  const initialEvidenceMatches = initialRetrieval.evidenceMatches;
+  const initialMatchedDocs = initialRetrieval.documents.length
+    ? initialRetrieval.documents
+    : initialEvidenceMatches.length
+      ? [...new Map(initialEvidenceMatches.map((entry) => [entry.item.path, entry.item])).values()]
+      : matchDocumentsByPrompt(items, prompt);
   const libraries = await loadDocumentLibraries();
   const scope = resolveKnowledgeScope(prompt, items, initialMatchedDocs, libraries);
   const reportState = await loadReportCenterState();
@@ -1735,7 +1874,19 @@ export async function runChatOrchestration(input: ChatRequestInput) {
 }
 
 export async function runChatOrchestrationV2(input: ChatRequestInput) {
-  const prompt = input.prompt.trim();
+  const rawPrompt = input.prompt.trim();
+  let prompt = rawPrompt;
+  const pendingConversationState = input.conversationState;
+  const pendingLibraryKeys = (pendingConversationState?.pendingLibraries || []).filter(Boolean);
+  const isClarificationContinuation = Boolean(
+    pendingConversationState?.pendingOutputClarification
+    && pendingConversationState.pendingKnowledgePrompt
+    && pendingLibraryKeys.length,
+  );
+  if (pendingConversationState?.pendingOutputClarification && pendingConversationState.pendingKnowledgePrompt) {
+    const format = detectOutputFormat(rawPrompt) || '普通回答';
+    prompt = `${pendingConversationState.pendingKnowledgePrompt}\n输出形式：${format}\n补充说明：${rawPrompt}`;
+  }
   const { items } = await loadParsedDocuments();
   const initialEvidenceMatches = matchDocumentEvidenceByPrompt(items, prompt);
   const initialMatchedDocs = initialEvidenceMatches.length
@@ -1745,22 +1896,97 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const reportState = await loadReportCenterState();
   const templateScopedGroup = findReportGroupForPrompt(reportState.groups, prompt);
   const baseScope = resolveKnowledgeScope(prompt, items, initialMatchedDocs, libraries);
-  const preferredLibraryKeys = [...new Set([...baseScope.libraryKeys, ...inferPreferredLibraryKeys(prompt, libraries)])];
+  const inferredLibraryKeys = inferPreferredLibraryKeys(prompt, libraries);
+  const preferredLibraryKeys = pendingLibraryKeys.length
+    ? pendingLibraryKeys
+    : inferredLibraryKeys.length
+      ? inferredLibraryKeys
+      : [...new Set(baseScope.libraryKeys)];
   const forceKnowledgeRoute = isKnowledgeReportPrompt(prompt);
-  const scope = forceKnowledgeRoute
+  const scope = (forceKnowledgeRoute || isClarificationContinuation)
     ? buildExpandedKnowledgeScope(prompt, items, initialMatchedDocs, libraries, preferredLibraryKeys)
     : baseScope;
   const matchedDocs = scope.scopedDocs;
-  const scopedEvidenceMatches = matchDocumentEvidenceByPrompt(matchedDocs, prompt);
+  const scopedRetrieval = retrieveKnowledgeMatches(matchedDocs, prompt, { docLimit: 18, evidenceLimit: 24 });
+  const scopedEvidenceMatches = scopedRetrieval.evidenceMatches.length
+    ? scopedRetrieval.evidenceMatches
+    : matchDocumentEvidenceByPrompt(matchedDocs, prompt);
   const referencePayload = buildReferencePayload(scopedEvidenceMatches);
   const contextBlocks = scopedEvidenceMatches.length ? buildEvidenceContext(scopedEvidenceMatches) : buildDocumentContext(matchedDocs);
   const strongDocScope = hasStrongDocumentScope(prompt, matchedDocs);
   const gatewayReachable = await isOpenClawGatewayReachable();
-  const hasKnowledgeScope = forceKnowledgeRoute || ((scope.hasScope && strongDocScope) || Boolean(templateScopedGroup));
-  const policy = classifyChatPrompt({
-    prompt,
-    hasKnowledgeScope,
-  });
+  const gatewayUsable = gatewayReachable || isOpenClawGatewayConfigured();
+  const hasKnowledgeScope = forceKnowledgeRoute
+    || isClarificationContinuation
+    || ((scope.hasScope && strongDocScope) || Boolean(templateScopedGroup));
+  const clarificationCandidate = !isClarificationContinuation
+    && hasKnowledgeScope
+    && /(\u62a5\u8868|\u8f93\u51fa|\u751f\u6210|\u98ce\u9669\u5206\u6790|\u5f52\u7eb3|\u603b\u7ed3|\u53ef\u89c6\u5316|\u56fe\u8868|\u9759\u6001\u9875|dashboard|report|page|table|pdf|ppt)/i.test(prompt);
+  const clarification = resolveClarificationDecision(prompt, input.chatHistory, clarificationCandidate);
+  prompt = clarification.mergedPrompt || prompt;
+
+  if (!clarification.needsClarification && prompt !== rawPrompt) {
+    return runChatOrchestrationV2({
+      prompt,
+      sessionUser: input.sessionUser,
+      chatHistory: [],
+      conversationState: pendingConversationState
+        ? {
+          ...pendingConversationState,
+          pendingOutputClarification: false,
+        }
+        : undefined,
+    });
+  }
+
+  if (clarification.needsClarification && clarification.question) {
+    const output: ChatOutput = { type: 'answer', content: clarification.question };
+    return {
+      mode: gatewayUsable ? 'openclaw' as const : 'fallback' as const,
+      intent: 'general' as const,
+      needsKnowledge: true,
+      libraries: buildLibraryPayload(scope),
+      output,
+      guard: {
+        requiresConfirmation: false,
+        reason: 'needs_output_clarification',
+      },
+      scenario: 'doc' as ScenarioKey,
+      traceId: `trace_${Date.now()}`,
+      message: {
+        role: 'assistant' as const,
+        content: clarification.question,
+        output,
+        meta: '知识库输出前补充需求',
+        references: [],
+      },
+      panel: scenarios.doc,
+      sources: [],
+      permissions: { mode: 'read-only' },
+      orchestration: {
+        mode: gatewayUsable ? 'openclaw' as const : 'fallback' as const,
+        docMatches: matchedDocs.length,
+        gatewayConfigured: gatewayUsable,
+      },
+      conversationState: {
+        pendingKnowledgePrompt: prompt,
+        pendingLibraries: buildLibraryPayload(scope).map((item) => item.key),
+        pendingOutputClarification: true,
+        lastIntent: 'report',
+        lastOutputType: '',
+      },
+      latencyMs: 120,
+    };
+  }
+  const memoryPreferenceRequest = looksLikeMemoryPreferenceRequest(prompt);
+  const policy = memoryPreferenceRequest
+    ? { mode: 'general' as const }
+    : hasKnowledgeScope || preferredLibraryKeys.length || scopedEvidenceMatches.length
+      ? { mode: 'knowledge' as const }
+      : classifyChatPrompt({
+        prompt,
+        hasKnowledgeScope,
+      });
   const libraryPayload = buildLibraryPayload(scope);
 
   if (policy.mode === 'blocked') {
@@ -1791,7 +2017,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       orchestration: {
         mode: 'fallback' as const,
         docMatches: 0,
-        gatewayConfigured: gatewayReachable,
+        gatewayConfigured: gatewayUsable,
       },
       latencyMs: 120,
     };
@@ -1837,7 +2063,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       orchestration: {
         mode: 'fallback' as const,
         docMatches: compareDocs.length,
-        gatewayConfigured: gatewayReachable,
+        gatewayConfigured: gatewayUsable,
       },
       latencyMs: 120,
     };
@@ -1846,8 +2072,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   if (policy.mode === 'general') {
     let content = '当前云端模型暂不可用。你可以继续进行普通问答和方案讨论，或稍后再试。';
     let mode: 'openclaw' | 'fallback' = 'fallback';
+    content = buildCloudUnavailableAnswer('general');
 
-    if (gatewayReachable) {
+    if (gatewayUsable) {
       try {
         const result = await runOpenClawChat({
           prompt,
@@ -1879,7 +2106,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         role: 'assistant' as const,
         content,
         output,
-        meta: mode === 'openclaw' ? '受控开放对话 / 云端模型' : '受控开放对话 / 本地AI兜底',
+        meta: mode === 'openclaw' ? '受控开放对话 / 云端模型' : '受控开放对话 / 云端未输出',
         references: [],
       },
       panel: scenarios.default,
@@ -1888,8 +2115,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       orchestration: {
         mode,
         docMatches: 0,
-        gatewayConfigured: gatewayReachable,
+        gatewayConfigured: gatewayUsable,
       },
+      conversationState: null,
       latencyMs: 120,
     };
   }
@@ -1922,20 +2150,21 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       orchestration: {
         mode: 'fallback' as const,
         docMatches: 0,
-        gatewayConfigured: gatewayReachable,
+        gatewayConfigured: gatewayUsable,
       },
+      conversationState: null,
       latencyMs: 120,
     };
   }
 
   if (isFormulaAdvicePrompt(prompt)) {
-    const segmentDecision = await resolveFormulaSegment(prompt, matchedDocs, input.sessionUser, gatewayReachable);
+    const segmentDecision = await resolveFormulaSegment(prompt, matchedDocs, input.sessionUser, gatewayUsable);
 
     if (!segmentDecision.segment) {
-      let content = buildFallbackAnswer(prompt, 'doc', matchedDocs, scopedEvidenceMatches);
+      let content = buildCloudUnavailableAnswer('knowledge');
       let mode: 'openclaw' | 'fallback' = 'fallback';
 
-      if (gatewayReachable) {
+      if (gatewayUsable) {
         try {
           const cloudResult = await runCloudDirectAnswer(prompt, matchedDocs, scope, input.sessionUser);
           content = cloudResult.content;
@@ -1971,8 +2200,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         orchestration: {
           mode,
           docMatches: matchedDocs.length,
-          gatewayConfigured: gatewayReachable,
+          gatewayConfigured: gatewayUsable,
         },
+        conversationState: null,
         latencyMs: 120,
       };
     }
@@ -2029,8 +2259,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       orchestration: {
         mode,
         docMatches: matchedDocs.length,
-        gatewayConfigured: gatewayReachable,
+        gatewayConfigured: gatewayUsable,
       },
+      conversationState: null,
       latencyMs: 120,
     };
   }
@@ -2041,8 +2272,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let orchestrationMode: 'openclaw' | 'fallback' = 'fallback';
   const wantsPageOutput = isVisualizationPrompt(prompt) || isPageReportPrompt(prompt);
   const wantsTableOutput = !wantsPageOutput && isTableReportPrompt(prompt);
+  const fallbackKind = wantsPageOutput || wantsTableOutput ? 'report' : 'knowledge';
 
-  if (gatewayReachable) {
+  if (gatewayUsable) {
     try {
       const result = await runOpenClawChat({
         prompt,
@@ -2054,23 +2286,25 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         ]),
       });
       if (looksLikeEncodingComplaint(result.content)) {
-        answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+        answer = buildCloudUnavailableAnswer(fallbackKind);
         orchestrationMode = 'fallback';
       } else {
         answer = result.content;
         orchestrationMode = 'openclaw';
       }
     } catch {
-      answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+      answer = buildCloudUnavailableAnswer(fallbackKind);
       orchestrationMode = 'fallback';
     }
   } else {
-    answer = buildFallbackAnswer(prompt, scenarioKey, matchedDocs, scopedEvidenceMatches);
+    answer = buildCloudUnavailableAnswer(fallbackKind);
   }
 
-  const output: ChatOutput = wantsPageOutput
-    ? buildStaticPageOutput(prompt, scope, matchedDocs, scopedEvidenceMatches)
-    : wantsTableOutput
+  const output: ChatOutput = orchestrationMode !== 'openclaw'
+    ? { type: 'answer', content: answer }
+    : wantsPageOutput
+      ? buildStaticPageOutput(prompt, scope, matchedDocs, scopedEvidenceMatches)
+      : wantsTableOutput
       ? {
           type: 'table',
           title: `${extractReadablePromptFocus(prompt)}表格`,
@@ -2120,6 +2354,13 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       mode: orchestrationMode,
       docMatches: matchedDocs.length,
       gatewayConfigured: gatewayReachable,
+    },
+    conversationState: {
+      pendingKnowledgePrompt: '',
+      pendingLibraries: libraryPayload.map((item) => item.key),
+      pendingOutputClarification: false,
+      lastIntent: (wantsPageOutput || wantsTableOutput) ? 'report' : 'knowledge_qa',
+      lastOutputType: output.type,
     },
     latencyMs: 120,
   };

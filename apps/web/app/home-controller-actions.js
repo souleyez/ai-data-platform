@@ -45,6 +45,17 @@ function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => [...prev, message]);
 }
 
+function buildRecentChatHistory(messages) {
+  return (messages || [])
+    .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+    .map((message) => ({
+      role: message.role,
+      content: String(message.content || '').trim(),
+    }))
+    .filter((message) => message.content)
+    .slice(-6);
+}
+
 export async function runCaptureAction(action, context) {
   const { setMessages, setSelectedManualLibraries, refreshHomeData } = context;
 
@@ -179,6 +190,7 @@ export async function runDocumentUpload(files, context) {
 
 export async function submitQuestion(value, context) {
   const {
+    conversationState,
     inputState,
     setActiveScenario,
     setInput,
@@ -187,8 +199,10 @@ export async function submitQuestion(value, context) {
     setPanel,
     setReportItems,
     setSelectedReportId,
+    setConversationState,
     refreshHomeData,
     setSelectedManualLibraries,
+    messages,
   } = context;
 
   const text = value.trim();
@@ -237,8 +251,9 @@ export async function submitQuestion(value, context) {
 
   setIsLoading(true);
   try {
-    const data = await sendChatPrompt(text);
+    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), conversationState);
     const normalized = normalizeChatResponse(data, scenarios.default);
+    setConversationState?.(normalized.conversationState || null);
     if (normalized.scenario) {
       setActiveScenario?.(normalized.scenario);
     }

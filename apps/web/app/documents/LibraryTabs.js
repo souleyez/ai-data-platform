@@ -7,10 +7,33 @@ export default function LibraryTabs({
   getLibraryDocumentCount,
   visibleItems,
   ungroupedCount,
+  createDraft,
+  onCreateDraftChange,
+  onCreateLibrary,
+  createSubmitting,
 }) {
   return (
     <section className="workbench-toolbar card">
-      <div className="workbench-toolbar-label">知识库分组</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="workbench-toolbar-label">知识库分组</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            className="filter-input"
+            style={{ minWidth: 180 }}
+            value={createDraft}
+            onChange={(event) => onCreateDraftChange(event.target.value)}
+            placeholder="新建分组名称"
+          />
+          <button
+            className="ghost-btn"
+            type="button"
+            onClick={onCreateLibrary}
+            disabled={createSubmitting || !createDraft.trim()}
+          >
+            {createSubmitting ? '创建中...' : '新建分组'}
+          </button>
+        </div>
+      </div>
       <div className="workbench-toolbar-tabs">
         {libraries.map((library) => (
           <button

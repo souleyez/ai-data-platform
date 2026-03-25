@@ -21,6 +21,7 @@ import {
   DEFAULT_SCAN_DIR,
   loadParsedDocuments,
   mergeParsedDocumentsForPaths,
+  upsertDocumentsInCache,
 } from '../lib/document-store.js';
 import {
   buildPreviewItemFromDocument,
@@ -73,6 +74,9 @@ function toListItem<T extends Record<string, unknown>>(item: T) {
     ignored?: boolean;
     retentionStatus?: string;
     riskLevel?: string;
+    parseStage?: string;
+    schemaType?: string;
+    structuredProfile?: Record<string, unknown>;
     categoryConfirmedAt?: string;
     retainedAt?: string;
     originalDeletedAt?: string;
@@ -98,6 +102,9 @@ function toListItem<T extends Record<string, unknown>>(item: T) {
     ignored: Boolean(source.ignored),
     retentionStatus: source.retentionStatus,
     riskLevel: source.riskLevel,
+    parseStage: source.parseStage,
+    schemaType: source.schemaType,
+    structuredProfile: source.structuredProfile,
     categoryConfirmedAt: source.categoryConfirmedAt,
     retainedAt: source.retainedAt,
     originalDeletedAt: source.originalDeletedAt,
@@ -175,31 +182,32 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
   app.get('/documents', async () => {
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { exists, files, items, cacheHit } = await loadParsedDocuments(200, false, config.scanRoots);
+    const { exists, files, totalFiles, items, cacheHit } = await loadParsedDocuments(200, false, config.scanRoots);
+    const visibleItems = items;
     const libraries = await loadDocumentLibraries();
 
-    const byExtension = items.reduce<Record<string, number>>((acc, item) => {
+    const byExtension = visibleItems.reduce<Record<string, number>>((acc, item) => {
       acc[item.ext] = (acc[item.ext] || 0) + 1;
       return acc;
     }, {});
 
-    const byCategory = items.reduce<Record<string, number>>((acc, item) => {
+    const byCategory = visibleItems.reduce<Record<string, number>>((acc, item) => {
       acc[item.category] = (acc[item.category] || 0) + 1;
       return acc;
     }, {});
 
-    const byBizCategory = items.reduce<Record<string, number>>((acc, item) => {
+    const byBizCategory = visibleItems.reduce<Record<string, number>>((acc, item) => {
       acc[item.bizCategory] = (acc[item.bizCategory] || 0) + 1;
       return acc;
     }, {});
 
-    const byStatus = items.reduce<Record<string, number>>((acc, item) => {
+    const byStatus = visibleItems.reduce<Record<string, number>>((acc, item) => {
       acc[item.parseStatus] = (acc[item.parseStatus] || 0) + 1;
       return acc;
     }, {});
 
     const libraryCounts = libraries.reduce<Record<string, number>>((acc, library) => {
-      acc[library.key] = items.filter((item) => documentMatchesLibrary(item, library)).length;
+      acc[library.key] = visibleItems.filter((item) => documentMatchesLibrary(item, library)).length;
       return acc;
     }, {});
 
@@ -208,12 +216,12 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       scanRoot: config.scanRoot,
       scanRoots: config.scanRoots,
       exists,
-      totalFiles: files.length,
+      totalFiles: totalFiles ?? files.length,
       byExtension,
       byCategory,
       byBizCategory,
       byStatus,
-      items: items.map((item) => toListItem({ ...item, id: buildDocumentId(item.path) })),
+      items: visibleItems.map((item) => toListItem({ ...item, id: buildDocumentId(item.path) })),
       capabilities: ['scan', 'summarize', 'classify'],
       cacheHit,
       lastScanAt: new Date().toISOString(),
@@ -243,7 +251,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'document not found' });
     }
 
-    const detailItem = found.fullText ? found : await parseDocument(found.path, documentConfig);
+    const detailItem = found.fullText && found.parseStage === 'detailed'
+      ? found
+      : await parseDocument(found.path, documentConfig, { stage: 'detailed' });
     const matchedFolders = Object.entries(documentConfig.categories)
       .filter(([, value]) => value.folders.some((folder) => folder && found.path.toLowerCase().includes(folder.toLowerCase())))
       .map(([key, value]) => ({ key, label: value.label, folders: value.folders }));
@@ -274,12 +284,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
   app.get('/documents-overview', async () => {
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    const { exists, files, items, cacheHit } = await loadParsedDocuments(200, false, config.scanRoots);
+    const { exists, files, totalFiles, items, cacheHit } = await loadParsedDocuments(200, false, config.scanRoots);
+    const visibleItems = items;
     const libraries = await loadDocumentLibraries();
 
     const summarizedLibraries = libraries
       .map((library) => {
-        const matchedItems = items.filter((item) => documentMatchesLibrary(item, library));
+        const matchedItems = visibleItems.filter((item) => documentMatchesLibrary(item, library));
         const lastUpdatedAt = matchedItems.reduce((latest, item) => Math.max(latest, extractDocumentTimestamp(item)), 0);
 
         return {
@@ -308,8 +319,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       scanRoot: config.scanRoot,
       scanRoots: config.scanRoots,
       exists,
-      totalFiles: files.length,
-      parsed: items.filter((item) => item.parseStatus === 'parsed').length,
+      totalFiles: totalFiles ?? files.length,
+      parsed: visibleItems.filter((item) => item.parseStatus === 'parsed').length,
       cacheHit,
       lastScanAt: new Date().toISOString(),
       libraries: summarizedLibraries,
@@ -322,12 +333,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       loadParsedDocuments(200, false, config.scanRoots),
       loadDocumentLibraries(),
     ]);
+    const visibleItems = items;
 
     return {
       mode: 'read-only',
       items: libraries.map((library) => ({
         ...library,
-        documentCount: items.filter((item) => documentMatchesLibrary(item, library)).length,
+        documentCount: visibleItems.filter((item) => documentMatchesLibrary(item, library)).length,
       })),
     };
   });
@@ -692,7 +704,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       status: 'saved',
       updatedCount: results.length,
       items: results,
-      message: `已更新 ${results.length} 条文档的忽略状态。`,
+      message: `已删除 ${results.length} 条文档索引。`,
     };
   });
 
@@ -728,12 +740,16 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     const libraries = await loadDocumentLibraries();
-    const { files, items } = await mergeParsedDocumentsForPaths(savedFiles.map((file) => file.path), 200, config.scanRoots);
-    const itemMap = new Map(items.map((item) => [item.path, item]));
     const ingestItems = [];
+    const quickParsedItems = [];
 
     for (const file of savedFiles) {
-      const parsed = itemMap.get(file.path);
+      let parsed = null;
+      try {
+        parsed = await parseDocument(file.path, config, { stage: 'quick' });
+      } catch {
+        parsed = null;
+      }
       if (!parsed) {
         ingestItems.push({
           id: Buffer.from(file.path).toString('base64url'),
@@ -746,6 +762,10 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       }
 
       const suggestedGroups = resolveSuggestedLibraryKeys(parsed, libraries);
+      quickParsedItems.push({
+        ...parsed,
+        suggestedGroups,
+      });
       if (suggestedGroups.length) {
         await saveDocumentSuggestion(parsed.path, { suggestedGroups });
         ingestItems.push(buildPreviewItemFromDocument({
@@ -758,6 +778,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       ingestItems.push(buildPreviewItemFromDocument(parsed, 'file', file.name, libraries));
     }
 
+    await upsertDocumentsInCache(quickParsedItems, config.scanRoots);
+
+    void mergeParsedDocumentsForPaths(
+      savedFiles.map((file) => file.path),
+      200,
+      config.scanRoots,
+      { parseStage: 'quick', cloudEnhancement: false },
+    ).catch(() => undefined);
+
     return {
       status: 'uploaded',
       mode: 'read-only',
@@ -767,8 +796,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       note,
       uploadedCount: savedFiles.length,
       uploadedFiles: savedFiles,
-      totalFiles: files.length,
-      message: `已成功接收 ${savedFiles.length} 个文件，并完成自动解析、索引更新与推荐知识库归组。`,
+      totalFiles: savedFiles.length,
+      message: `已成功接收 ${savedFiles.length} 个文件，并完成快速解析与索引更新；未分组文档可在后续详细解析后再次归组。`,
       summary: {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,
@@ -795,7 +824,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     return {
       mode: 'read-only',
       item: {
-        ...(found.fullText ? found : await parseDocument(found.path, documentConfig)),
+        ...((found.fullText && found.parseStage === 'detailed')
+          ? found
+          : await parseDocument(found.path, documentConfig, { stage: 'detailed' })),
         id,
       },
       meta: {

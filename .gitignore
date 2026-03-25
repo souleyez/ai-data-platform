@@ -24,3 +24,4 @@ apps/api/test/data/
 *.tgz
 __pycache__/
 *.pyc
+*.log

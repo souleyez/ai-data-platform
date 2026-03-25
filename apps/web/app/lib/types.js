@@ -55,6 +55,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     libraries: Array.isArray(data?.libraries) ? data.libraries : [],
     output,
     guard: data?.guard || null,
+    conversationState: data?.conversationState || null,
   };
 }
 

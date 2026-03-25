@@ -21,6 +21,14 @@ export async function fetchDatasources() {
   return normalizeDatasourceResponse(payload);
 }
 
+export async function createDocumentLibrary(name, description = '') {
+  return requestJson('/api/documents/libraries', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  });
+}
+
 export async function fetchCandidateSources() {
   const payload = await requestJson('/api/documents/candidate-sources');
   return Array.isArray(payload?.items) ? payload.items : [];

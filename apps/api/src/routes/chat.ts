@@ -3,7 +3,19 @@ import { runChatOrchestrationV2 } from '../lib/orchestrator.js';
 
 export async function registerChatRoutes(app: FastifyInstance) {
   app.post('/chat', async (request, reply) => {
-    const body = (request.body || {}) as { prompt?: string; promptBase64?: string; sessionUser?: string };
+    const body = (request.body || {}) as {
+      prompt?: string;
+      promptBase64?: string;
+      sessionUser?: string;
+      chatHistory?: Array<{ role?: string; content?: string }>;
+      conversationState?: {
+        pendingKnowledgePrompt?: string;
+        pendingOutputClarification?: boolean;
+        pendingLibraries?: string[];
+        lastIntent?: string;
+        lastOutputType?: string;
+      };
+    };
     let prompt = String(body.prompt || '').trim();
 
     if (body.promptBase64) {
@@ -21,6 +33,26 @@ export async function registerChatRoutes(app: FastifyInstance) {
     return runChatOrchestrationV2({
       prompt,
       sessionUser: body.sessionUser,
+      chatHistory: Array.isArray(body.chatHistory)
+        ? body.chatHistory
+          .map((item) => ({
+            role: item?.role === 'assistant' ? 'assistant' as const : 'user' as const,
+            content: String(item?.content || '').trim(),
+          }))
+          .filter((item) => item.content)
+          .slice(-6)
+        : [],
+      conversationState: body.conversationState && typeof body.conversationState === 'object'
+        ? {
+            pendingKnowledgePrompt: String(body.conversationState.pendingKnowledgePrompt || '').trim(),
+            pendingOutputClarification: Boolean(body.conversationState.pendingOutputClarification),
+            pendingLibraries: Array.isArray(body.conversationState.pendingLibraries)
+              ? body.conversationState.pendingLibraries.map((item) => String(item || '').trim()).filter(Boolean)
+              : [],
+            lastIntent: String(body.conversationState.lastIntent || '').trim(),
+            lastOutputType: String(body.conversationState.lastOutputType || '').trim(),
+          }
+        : undefined,
     });
   });
 }

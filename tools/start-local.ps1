@@ -9,7 +9,8 @@ function Start-ServiceProcess {
     [string]$Name,
     [string]$Workdir,
     [string]$Command,
-    [string]$PidFile
+    [string]$PidFile,
+    [Nullable[int]]$Port = $null
   )
 
   if (Test-Path $PidFile) {
@@ -21,10 +22,14 @@ function Start-ServiceProcess {
         return
       }
     }
+
+    Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
   }
 
   $stdout = Join-Path $runDir "$Name.out.log"
   $stderr = Join-Path $runDir "$Name.err.log"
+  Remove-Item $stdout -Force -ErrorAction SilentlyContinue
+  Remove-Item $stderr -Force -ErrorAction SilentlyContinue
   $proc = Start-Process -FilePath 'cmd.exe' `
     -ArgumentList '/c', $Command `
     -WorkingDirectory $Workdir `
@@ -34,6 +39,19 @@ function Start-ServiceProcess {
     -RedirectStandardError $stderr
 
   Set-Content -Path $PidFile -Value $proc.Id -Encoding ascii
+  if ($Port) {
+    $listener = $null
+    for ($i = 0; $i -lt 20; $i += 1) {
+      Start-Sleep -Milliseconds 300
+      $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($listener) {
+        Set-Content -Path $PidFile -Value $listener.OwningProcess -Encoding ascii
+        Write-Output "$Name started (PID $($listener.OwningProcess))"
+        return
+      }
+    }
+  }
+
   Write-Output "$Name started (PID $($proc.Id))"
 }
 
@@ -43,7 +61,8 @@ Start-ServiceProcess `
   -Name 'gateway' `
   -Workdir $root `
   -Command 'node tools\openclaw-local-gateway.mjs' `
-  -PidFile (Join-Path $runDir 'gateway.pid')
+  -PidFile (Join-Path $runDir 'gateway.pid') `
+  -Port 18789
 
 Start-Sleep -Seconds 2
 
@@ -51,7 +70,8 @@ Start-ServiceProcess `
   -Name 'api' `
   -Workdir (Join-Path $root 'apps\api') `
   -Command 'set ENABLE_PADDLE_UIE=1&& set PADDLE_UIE_PYTHON_BIN=C:\Users\soulzyn\develop\python-envs\paddle-uie-runtime310\Scripts\python.exe&& node --import tsx src\server.ts' `
-  -PidFile (Join-Path $runDir 'api.pid')
+  -PidFile (Join-Path $runDir 'api.pid') `
+  -Port 3100
 
 Start-Sleep -Seconds 3
 
@@ -67,7 +87,8 @@ Start-ServiceProcess `
   -Name 'web' `
   -Workdir (Join-Path $root 'apps\web') `
   -Command 'node_modules\.bin\next.CMD start -p 3002' `
-  -PidFile (Join-Path $runDir 'web.pid')
+  -PidFile (Join-Path $runDir 'web.pid') `
+  -Port 3002
 
 Start-Sleep -Seconds 5
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'status-local.ps1')

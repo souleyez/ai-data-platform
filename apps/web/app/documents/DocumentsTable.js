@@ -31,7 +31,7 @@ export default function DocumentsTable({
       <div className="panel-header">
         <div>
           <h3>文档列表</h3>
-          <p>扫描结果会直接归入知识库。需要调整时，可在这里手动补充分组或忽略文档。</p>
+          <p>扫描结果会直接归入知识库。需要调整时，可在这里手动补充分组或删除文档索引。</p>
         </div>
         <div className="table-pagination-summary">
           <span>{`第 ${currentPage} / ${totalPages} 页`}</span>
@@ -79,7 +79,7 @@ export default function DocumentsTable({
                         onClick={() => ignoreDocument(item.id)}
                         disabled={ignoreSubmittingId === item.id}
                       >
-                        {ignoreSubmittingId === item.id ? '处理中...' : '忽略'}
+                        {ignoreSubmittingId === item.id ? '删除中...' : '删除'}
                       </button>
                     </div>
                   </div>

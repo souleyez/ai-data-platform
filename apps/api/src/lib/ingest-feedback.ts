@@ -47,12 +47,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   order: '订单分析',
   service: '客服采集',
   inventory: '库存监控',
+  general: '未分组',
 };
 
 const LIBRARY_TERM_ALIASES: Array<{ pattern: RegExp; terms: string[] }> = [
   {
     pattern: /(奶粉|配方|formula|乳粉|婴配粉)/i,
-    terms: ['奶粉', '配方', '乳粉', '婴配粉', '婴幼儿配方', 'formula', 'infant', 'pediatric', 'nutrition', 'nutritional', 'probiotic', 'prebiotic', 'synbiotic', 'lactobacillus', 'bifidobacterium', 'hmo', 'hmos'],
+    terms: ['奶粉', '配方', '乳粉', '婴配粉', '婴幼儿配方', 'formula', 'infant', 'pediatric', 'nutrition', 'probiotic', 'prebiotic', 'synbiotic', 'lactobacillus', 'bifidobacterium', 'hmo', 'hmos'],
   },
   {
     pattern: /(肠道|gut|菌群|microbiome)/i,
@@ -65,7 +66,7 @@ const LIBRARY_TERM_ALIASES: Array<{ pattern: RegExp; terms: string[] }> = [
 ];
 
 function toCategoryLabel(category?: string) {
-  return CATEGORY_LABELS[category || 'paper'] || '学术论文';
+  return CATEGORY_LABELS[category || 'general'] || '未分组';
 }
 
 function getEffectiveCategoryKey(doc: ParsedDocument) {
@@ -85,7 +86,7 @@ function buildCategorySuggestion(doc: ParsedDocument) {
 function expandLibraryTerms(library: DocumentLibrary) {
   const baseTerms = [library.key, library.label, library.description]
     .filter(Boolean)
-    .flatMap((text) => String(text).toLowerCase().split(/[\s,，。/|()-]+/))
+    .flatMap((text) => String(text).toLowerCase().split(/[\s,，。|()-]+/))
     .filter((term) => term.length >= 2);
 
   const expanded = new Set(baseTerms);
@@ -102,7 +103,11 @@ function expandLibraryTerms(library: DocumentLibrary) {
 
 function scoreLibrarySuggestion(doc: ParsedDocument, library: DocumentLibrary) {
   const effectiveCategory = getEffectiveCategoryKey(doc);
-  if (library.isDefault && library.sourceCategoryKey === effectiveCategory) {
+  if (effectiveCategory === 'general' || doc.category === 'resume' || doc.schemaType === 'resume') {
+    return 0;
+  }
+
+  if (library.isDefault && library.sourceCategoryKey === effectiveCategory && effectiveCategory !== 'paper') {
     return 10;
   }
 
@@ -128,7 +133,13 @@ function scoreLibrarySuggestion(doc: ParsedDocument, library: DocumentLibrary) {
 export function resolveSuggestedLibraryKeys(doc: ParsedDocument, libraries: DocumentLibrary[] = []) {
   return libraries
     .map((library) => ({ library, score: scoreLibrarySuggestion(doc, library) }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => {
+      if (entry.score <= 0) return false;
+      if (entry.library.isDefault && entry.library.sourceCategoryKey === 'paper' && entry.score < 12) {
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
     .map((entry) => entry.library.key);
@@ -137,13 +148,12 @@ export function resolveSuggestedLibraryKeys(doc: ParsedDocument, libraries: Docu
 function buildGroupSuggestion(doc: ParsedDocument, libraries: DocumentLibrary[] = []) {
   const confirmedGroups = doc.confirmedGroups?.length ? doc.confirmedGroups : [];
   if (confirmedGroups.length) {
-    const labels = confirmedGroups.map((key) => libraries.find((item) => item.key === key)?.label || key);
     return {
       suggestedGroups: confirmedGroups.map((key) => ({
         key,
         label: libraries.find((item) => item.key === key)?.label || key,
       })),
-      basis: `已根据解析内容自动加入推荐知识库：${labels.join('、')}。`,
+      basis: `已确认加入知识库：${confirmedGroups.map((key) => libraries.find((item) => item.key === key)?.label || key).join('、')}。`,
       accepted: true,
     };
   }
@@ -182,6 +192,7 @@ function buildGroupSuggestion(doc: ParsedDocument, libraries: DocumentLibrary[] 
 function buildReason(doc: ParsedDocument) {
   if (doc.parseStatus === 'unsupported') return '文件已接收，但当前版本暂不支持该类型正文提取，建议后续人工确认分类。';
   if (doc.parseStatus === 'error') return '文件已接收，但本次解析失败；当前推荐主要依据文件名和可识别主题线索。';
+  if (doc.category === 'resume' || doc.schemaType === 'resume') return '检测到简历、候选人、工作经历等表达，建议先保留在未分组，后续再按用途细分。';
   if (doc.bizCategory === 'paper') return '检测到研究、实验、结论等表达，更适合作为学术论文资料管理。';
   if (doc.bizCategory === 'contract' || doc.category === 'contract') return '检测到合同、条款、付款或甲乙方等要素，更接近合同协议材料。';
   if (doc.bizCategory === 'daily') return '检测到日报、周报、复盘等周期性总结表达，更接近工作日报。';
@@ -190,7 +201,7 @@ function buildReason(doc: ParsedDocument) {
   if (doc.bizCategory === 'service') return '检测到客服、工单、投诉等信息，更适合作为客服采集资料管理。';
   if (doc.bizCategory === 'inventory') return '检测到库存、SKU、出入库等信息，更适合作为库存监控资料管理。';
   if (doc.topicTags?.length) return `检测到 ${doc.topicTags.slice(0, 3).join('、')} 等主题特征，便于后续继续整理。`;
-  return '当前依据文件名、摘要和正文特征完成了初步分类推荐。';
+  return '当前依据文件名、摘要和正文特征完成了初步分类；若暂无明确归组，建议先保留在未分组。';
 }
 
 export function buildPreviewItemFromDocument(

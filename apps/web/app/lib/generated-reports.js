@@ -1,6 +1,8 @@
 'use client';
 
-export const GENERATED_REPORTS_STORAGE_KEY = 'aidp-generated-reports-v5';
+import { createSharedReportPayload } from './shared-report-link.js';
+
+export const GENERATED_REPORTS_STORAGE_KEY = 'aidp-generated-reports-v6';
 
 function escapeHtml(value) {
   return String(value || '')
@@ -18,11 +20,11 @@ export function createGeneratedReportId() {
 function normalizeChartItems(items) {
   return Array.isArray(items)
     ? items
-        .map((item) => ({
-          label: item?.label || '',
-          value: Number(item?.value || 0),
-        }))
-        .filter((item) => item.label)
+      .map((item) => ({
+        label: item?.label || '',
+        value: Number(item?.value || 0),
+      }))
+      .filter((item) => item.label)
     : [];
 }
 
@@ -32,29 +34,29 @@ function normalizePage(page) {
     summary: page?.summary || '',
     cards: Array.isArray(page?.cards)
       ? page.cards
-          .map((card) => ({
-            label: card?.label || '',
-            value: card?.value || '',
-            note: card?.note || '',
-          }))
-          .filter((card) => card.label || card.value)
+        .map((card) => ({
+          label: card?.label || '',
+          value: card?.value || '',
+          note: card?.note || '',
+        }))
+        .filter((card) => card.label || card.value)
       : [],
     sections: Array.isArray(page?.sections)
       ? page.sections
-          .map((section) => ({
-            title: section?.title || '',
-            body: section?.body || '',
-            bullets: Array.isArray(section?.bullets) ? section.bullets.filter(Boolean) : [],
-          }))
-          .filter((section) => section.title || section.body || section.bullets.length)
+        .map((section) => ({
+          title: section?.title || '',
+          body: section?.body || '',
+          bullets: Array.isArray(section?.bullets) ? section.bullets.filter(Boolean) : [],
+        }))
+        .filter((section) => section.title || section.body || section.bullets.length)
       : [],
     charts: Array.isArray(page?.charts)
       ? page.charts
-          .map((chart) => ({
-            title: chart?.title || '',
-            items: normalizeChartItems(chart?.items),
-          }))
-          .filter((chart) => chart.title || chart.items.length)
+        .map((chart) => ({
+          title: chart?.title || '',
+          items: normalizeChartItems(chart?.items),
+        }))
+        .filter((chart) => chart.title || chart.items.length)
       : [],
   };
 }
@@ -70,7 +72,7 @@ export function createGeneratedReport({ response, message }) {
     output?.title ||
     message?.table?.title ||
     message?.title ||
-    (outputType === 'table' ? '生成表格报表' : '生成静态页面');
+    (outputType === 'table' ? '生成表格报表' : '生成静态分析页');
 
   return {
     id: createGeneratedReportId(),
@@ -96,9 +98,12 @@ export function loadGeneratedReports() {
     window.localStorage.removeItem('aidp-generated-reports-v2');
     window.localStorage.removeItem('aidp-generated-reports-v3');
     window.localStorage.removeItem('aidp-generated-reports-v4');
+    window.localStorage.removeItem('aidp-generated-reports-v5');
+
     const raw = window.localStorage.getItem(GENERATED_REPORTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
+
     return parsed.map((item) => ({
       id: item?.id || createGeneratedReportId(),
       title: item?.title || '生成报表',
@@ -128,9 +133,22 @@ export function saveGeneratedReports(items) {
   }
 }
 
-export function buildGeneratedReportLink(id) {
-  if (typeof window === 'undefined') return `/reports?generated=${encodeURIComponent(id)}`;
-  return `${window.location.origin}/reports?generated=${encodeURIComponent(id)}`;
+export function buildGeneratedReportLink(itemOrId) {
+  if (typeof window === 'undefined') {
+    if (typeof itemOrId === 'string') return `/reports?generated=${encodeURIComponent(itemOrId)}`;
+    if (itemOrId?.kind === 'page') {
+      return `/shared/report?payload=${encodeURIComponent(createSharedReportPayload(itemOrId))}`;
+    }
+    return `/reports?generated=${encodeURIComponent(itemOrId?.id || '')}`;
+  }
+
+  if (typeof itemOrId === 'string') {
+    return `${window.location.origin}/reports?generated=${encodeURIComponent(itemOrId)}`;
+  }
+  if (itemOrId?.kind === 'page') {
+    return `${window.location.origin}/shared/report?payload=${encodeURIComponent(createSharedReportPayload(itemOrId))}`;
+  }
+  return `${window.location.origin}/reports?generated=${encodeURIComponent(itemOrId?.id || '')}`;
 }
 
 export function formatGeneratedReportTime(value) {
@@ -146,7 +164,7 @@ export function formatGeneratedReportTime(value) {
 }
 
 export async function copyGeneratedReportLink(item) {
-  const link = buildGeneratedReportLink(item?.id || '');
+  const link = buildGeneratedReportLink(item);
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(link);
   }
@@ -157,7 +175,7 @@ export function getGeneratedReportActionLabel(item) {
   if (!item) return '查看';
   if (item.kind === 'table') return '下载表格';
   if (item.format === 'ppt' || item.format === 'pdf') return '下载文件';
-  if (item.kind === 'page') return '复制链接';
+  if (item.kind === 'page') return '复制静态页链接';
   return '查看';
 }
 
@@ -231,7 +249,7 @@ function buildPageHtml(item) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(item?.title || '生成静态页面')}</title>
+  <title>${escapeHtml(item?.title || '静态分析页')}</title>
   <style>
     body { font-family: "Microsoft YaHei", sans-serif; margin: 32px; color: #16202f; line-height: 1.7; background: #f8fafc; }
     h1, h2 { margin: 0 0 12px; }
@@ -252,7 +270,7 @@ function buildPageHtml(item) {
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(item?.title || '生成静态页面')}</h1>
+  <h1>${escapeHtml(item?.title || '静态分析页')}</h1>
   <div class="meta">生成时间：${escapeHtml(item?.createdAt || '')}</div>
   ${item?.content ? `<section class="section"><p>${escapeHtml(item.content)}</p></section>` : ''}
   ${cards ? `<div class="cards">${cards}</div>` : ''}

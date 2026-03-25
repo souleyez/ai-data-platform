@@ -10,6 +10,7 @@ import {
 import { formatDocumentBusinessResult } from '../lib/types';
 import {
   acceptDocumentGroupSuggestions,
+  createDocumentLibrary,
   fetchCandidateSources,
   fetchDatasources,
   fetchDocuments,
@@ -81,6 +82,8 @@ export default function DocumentsPage() {
   const [scanSourcesExpanded, setScanSourcesExpanded] = useState(false);
   const [recentNewIds, setRecentNewIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [libraryCreateDraft, setLibraryCreateDraft] = useState('');
+  const [libraryCreateSubmitting, setLibraryCreateSubmitting] = useState(false);
 
   const formatLocalTime = (value) => {
     const timestamp = Number(value || 0);
@@ -197,7 +200,7 @@ export default function DocumentsPage() {
       setIgnoreSubmittingId(itemId);
       await ignoreDocuments([{ id: itemId, ignored: true }]);
       await loadDocuments();
-      setScanMessage('文档已忽略，已从列表隐藏');
+      setScanMessage('文档索引已删除');
     } catch {
       setScanMessage('忽略文档失败，请稍后重试');
     } finally {
@@ -272,6 +275,24 @@ export default function DocumentsPage() {
       setScanMessage('更新知识库分组失败，请稍后重试');
     } finally {
       setAssignmentSubmittingId('');
+    }
+  };
+
+  const handleCreateLibrary = async () => {
+    const name = libraryCreateDraft.trim();
+    if (!name || libraryCreateSubmitting) return;
+    try {
+      setLibraryCreateSubmitting(true);
+      setScanMessage('');
+      await createDocumentLibrary(name);
+      setLibraryCreateDraft('');
+      await loadDocuments();
+      setActiveLibrary('all');
+      setScanMessage(`已新建知识库分组“${name}”`);
+    } catch {
+      setScanMessage('新建知识库分组失败，请稍后重试');
+    } finally {
+      setLibraryCreateSubmitting(false);
     }
   };
 
@@ -384,6 +405,10 @@ export default function DocumentsPage() {
               getLibraryDocumentCount={getLibraryDocumentCount}
               visibleItems={visibleItems}
               ungroupedCount={ungroupedCount}
+              createDraft={libraryCreateDraft}
+              onCreateDraftChange={setLibraryCreateDraft}
+              onCreateLibrary={handleCreateLibrary}
+              createSubmitting={libraryCreateSubmitting}
             />
 
             <ScanSourcesPanel

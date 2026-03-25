@@ -13,8 +13,8 @@ export type ParsedDocument = {
   ext: string;
   title: string;
   category: string;
-  bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
-  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
+  bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'general';
+  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'general';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   parseMethod?: string;
@@ -42,6 +42,11 @@ export type ParsedDocument = {
   retentionStatus?: 'structured-only';
   retainedAt?: string;
   originalDeletedAt?: string;
+  cloudStructuredAt?: string;
+  cloudStructuredModel?: string;
+  parseStage?: 'quick' | 'detailed';
+  schemaType?: 'generic' | 'contract' | 'resume' | 'paper' | 'formula' | 'technical' | 'report';
+  structuredProfile?: Record<string, unknown>;
 };
 
 export type EvidenceChunk = {
@@ -90,6 +95,10 @@ export type ResumeFields = {
   latestCompany?: string;
   skills?: string[];
   highlights?: string[];
+};
+
+export type ParseDocumentOptions = {
+  stage?: 'quick' | 'detailed';
 };
 
 const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
@@ -287,6 +296,82 @@ function flattenSpreadsheetRows(rows: unknown[][]) {
 async function readUtf8Text(filePath: string) {
   const buffer = await fs.readFile(filePath);
   return buffer.toString('utf8');
+}
+
+function hasUtf8Bom(buffer: Buffer) {
+  return buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
+}
+
+function hasUtf16LeBom(buffer: Buffer) {
+  return buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe;
+}
+
+function hasUtf16BeBom(buffer: Buffer) {
+  return buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff;
+}
+
+function scoreDecodedText(text: string) {
+  if (!text) return -1000;
+
+  const replacementCount = (text.match(/\uFFFD/g) || []).length;
+  const nullCount = (text.match(/\u0000/g) || []).length;
+  const controlCount = (text.match(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+  const cjkCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
+  const asciiWordCount = (text.match(/[A-Za-z0-9]/g) || []).length;
+  const whitespaceCount = (text.match(/\s/g) || []).length;
+  const mojibakeCount = (text.match(/[锟�鈥滐綇鍚堝悓鏂囨。绠€鍘]/g) || []).length;
+
+  return (cjkCount * 3)
+    + asciiWordCount
+    + whitespaceCount
+    - (replacementCount * 40)
+    - (nullCount * 30)
+    - (controlCount * 20)
+    - (mojibakeCount * 8);
+}
+
+async function readTextWithBestEffortEncoding(filePath: string) {
+  const buffer = await fs.readFile(filePath);
+
+  if (hasUtf8Bom(buffer)) {
+    return { text: new TextDecoder('utf-8').decode(buffer), encoding: 'utf8-bom' };
+  }
+
+  if (hasUtf16LeBom(buffer)) {
+    return { text: new TextDecoder('utf-16le').decode(buffer), encoding: 'utf16le' };
+  }
+
+  if (hasUtf16BeBom(buffer)) {
+    return { text: new TextDecoder('utf-16be').decode(buffer), encoding: 'utf16be' };
+  }
+
+  const candidates: Array<{ text: string; encoding: string }> = [
+    { text: buffer.toString('utf8'), encoding: 'utf8' },
+  ];
+
+  try {
+    candidates.push({ text: new TextDecoder('gb18030').decode(buffer), encoding: 'gb18030' });
+  } catch {
+    // ignore
+  }
+
+  try {
+    candidates.push({ text: new TextDecoder('utf-16le').decode(buffer), encoding: 'utf16le' });
+  } catch {
+    // ignore
+  }
+
+  try {
+    candidates.push({ text: new TextDecoder('utf-16be').decode(buffer), encoding: 'utf16be' });
+  } catch {
+    // ignore
+  }
+
+  const ranked = candidates
+    .map((candidate) => ({ ...candidate, score: scoreDecodedText(candidate.text) }))
+    .sort((left, right) => right.score - left.score);
+
+  return ranked[0] || { text: buffer.toString('utf8'), encoding: 'utf8' };
 }
 
 async function extractPdfTextWithPdfParse(filePath: string) {
@@ -942,13 +1027,15 @@ export function detectBizCategory(filePath: string, category: string, text = '',
   }
 
   const evidence = buildEvidence(filePath, text);
+  if (category === 'resume' || RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'general';
   if (scoreHints(evidence, ['发票', '票据', '凭据', 'invoice']) >= 4) return 'invoice';
   if (scoreHints(evidence, ['订单', '回款', '销售', 'order']) >= 4) return 'order';
   if (scoreHints(evidence, ['客服', '工单', '投诉', 'service']) >= 4) return 'service';
   if (scoreHints(evidence, ['库存', 'sku', '出入库', 'inventory']) >= 4) return 'inventory';
   if (category === 'contract' || scoreHints(evidence, CATEGORY_HINTS.contract) >= 4) return 'contract';
   if (category === 'report' || scoreHints(evidence, CATEGORY_HINTS.report) >= 4) return 'daily';
-  return 'paper';
+  if (category === 'paper' || scoreHints(evidence, CATEGORY_HINTS.paper) >= 5) return 'paper';
+  return 'general';
 }
 
 function normalizeResumeTextValue(value: string) {
@@ -1157,22 +1244,80 @@ function extractContractFields(text: string, category: string) {
   return { contractNo, amount, paymentTerms, duration };
 }
 
+function inferSchemaType(
+  category: string,
+  bizCategory: ParsedDocument['bizCategory'],
+  resumeFields?: ResumeFields,
+) {
+  if (resumeFields) return 'resume' as const;
+  if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
+  if (category === 'paper') return 'paper' as const;
+  if (bizCategory === 'daily') return 'report' as const;
+  if (category === 'technical') return 'technical' as const;
+  return 'generic' as const;
+}
+
+function buildStructuredProfile(input: {
+  schemaType: ParsedDocument['schemaType'];
+  title: string;
+  topicTags: string[];
+  summary: string;
+  contractFields?: ParsedDocument['contractFields'];
+  resumeFields?: ResumeFields;
+}) {
+  const base = {
+    title: input.title,
+    summary: input.summary,
+    topicTags: input.topicTags.slice(0, 8),
+  };
+
+  if (input.schemaType === 'contract') {
+    return {
+      ...base,
+      contractNo: input.contractFields?.contractNo || '',
+      amount: input.contractFields?.amount || '',
+      paymentTerms: input.contractFields?.paymentTerms || '',
+      duration: input.contractFields?.duration || '',
+    };
+  }
+
+  if (input.schemaType === 'resume') {
+    return {
+      ...base,
+      candidateName: input.resumeFields?.candidateName || '',
+      targetRole: input.resumeFields?.targetRole || '',
+      currentRole: input.resumeFields?.currentRole || '',
+      yearsOfExperience: input.resumeFields?.yearsOfExperience || '',
+      education: input.resumeFields?.education || '',
+      major: input.resumeFields?.major || '',
+      skills: input.resumeFields?.skills || [],
+      highlights: input.resumeFields?.highlights || [],
+    };
+  }
+
+  return base;
+}
+
 async function extractText(filePath: string, ext: string) {
   if (ext === '.txt' || ext === '.md' || ext === '.csv') {
-    const content = await readUtf8Text(filePath);
-    const parseMethod = ext === '.txt' ? 'text-utf8' : ext === '.md' ? 'markdown-utf8' : 'csv-utf8';
+    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
+    const parseMethod = ext === '.txt'
+      ? `text-${encoding}`
+      : ext === '.md'
+        ? `markdown-${encoding}`
+        : `csv-${encoding}`;
     return { status: 'parsed' as const, text: content, parseMethod };
   }
 
   if (ext === '.json') {
-    const content = await readUtf8Text(filePath);
+    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
     const parsed = JSON.parse(content);
-    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2), parseMethod: 'json-parse' };
+    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2), parseMethod: `json-${encoding}` };
   }
 
   if (ext === '.html' || ext === '.htm' || ext === '.xml') {
-    const content = await readUtf8Text(filePath);
-    return { status: 'parsed' as const, text: stripHtmlTags(content), parseMethod: 'html-strip' };
+    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
+    return { status: 'parsed' as const, text: stripHtmlTags(content), parseMethod: `html-${encoding}` };
   }
 
   if (ext === '.pdf') {
@@ -1212,8 +1357,8 @@ function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
   if (ext === '.txt') return 'text-utf8';
   if (ext === '.md') return 'markdown-utf8';
   if (ext === '.csv') return 'csv-utf8';
-  if (ext === '.json') return 'json-parse';
-  if (ext === '.html' || ext === '.htm' || ext === '.xml') return 'html-strip';
+  if (ext === '.json') return 'json-utf8';
+  if (ext === '.html' || ext === '.htm' || ext === '.xml') return 'html-utf8';
   if (ext === '.docx') return 'mammoth';
   if (ext === '.xlsx' || ext === '.xls') return 'xlsx-sheet-reader';
   if (ext === '.pdf') {
@@ -1224,9 +1369,14 @@ function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
   return 'unsupported';
 }
 
-export async function parseDocument(filePath: string, config?: DocumentCategoryConfig): Promise<ParsedDocument> {
+export async function parseDocument(
+  filePath: string,
+  config?: DocumentCategoryConfig,
+  options?: ParseDocumentOptions,
+): Promise<ParsedDocument> {
   const ext = path.extname(filePath).toLowerCase() || 'unknown';
   const name = path.basename(filePath);
+  const parseStage = options?.stage === 'quick' ? 'quick' : 'detailed';
 
   try {
     const { status, text, parseMethod: hintedMethod } = await extractText(filePath, ext);
@@ -1234,10 +1384,12 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
     const normalizedText = normalizeText(text);
     const category = detectCategory(filePath, normalizedText);
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
+    const unsupportedSummary = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls。';
 
     if (status === 'unsupported') {
       const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
       const groups = detectGroups(filePath, '', topicTags, config);
+      const schemaType = inferSchemaType(category, bizCategory);
       return {
         path: filePath,
         name,
@@ -1257,16 +1409,64 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
         intentSlots: {},
         topicTags,
         groups,
+        parseStage,
+        schemaType,
+        structuredProfile: buildStructuredProfile({
+          schemaType,
+          title: path.parse(name).name,
+          topicTags,
+          summary: unsupportedSummary,
+        }),
       };
     }
 
     const topicTags = detectTopicTags(`${name} ${normalizedText}`, category, bizCategory);
     const groups = detectGroups(filePath, normalizedText, topicTags, config);
+    const summary = summarize(normalizedText, '文档内容为空或暂未提取到文本。');
+    const excerptText = excerpt(normalizedText, '文档内容为空或暂未提取到文本。');
+    const inferredTitle = inferTitle(text, name);
+
+    if (parseStage === 'quick') {
+      const resumeFields = extractResumeFields(text.slice(0, 2400), inferredTitle);
+      const schemaType = inferSchemaType(category, bizCategory, resumeFields);
+      return {
+        path: filePath,
+        name,
+        ext,
+        title: inferredTitle,
+        category,
+        bizCategory,
+        parseStatus: 'parsed',
+        parseMethod,
+        summary,
+        excerpt: excerptText,
+        fullText: text,
+        extractedChars: normalizedText.length,
+        evidenceChunks: [],
+        entities: [],
+        claims: [],
+        intentSlots: {},
+        resumeFields,
+        riskLevel: detectRiskLevel(normalizedText, category),
+        topicTags,
+        groups,
+        parseStage,
+        schemaType,
+        structuredProfile: buildStructuredProfile({
+          schemaType,
+          title: inferredTitle,
+          topicTags,
+          summary,
+          resumeFields,
+        }),
+      };
+    }
+
     const evidenceChunks = splitEvidenceChunks(text);
     const contractFields = extractContractFields(normalizedText, category);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
-    const resumeFields = extractResumeFields(text, inferTitle(text, name), structured.entities, structured.claims);
-    const inferredTitle = inferTitle(text, name);
+    const resumeFields = extractResumeFields(text, inferredTitle, structured.entities, structured.claims);
+    const schemaType = inferSchemaType(category, bizCategory, resumeFields);
 
     return {
       path: filePath,
@@ -1290,12 +1490,23 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       topicTags,
       groups,
       contractFields,
+      parseStage,
+      schemaType,
+      structuredProfile: buildStructuredProfile({
+        schemaType,
+        title: inferredTitle,
+        topicTags,
+        summary,
+        contractFields,
+        resumeFields,
+      }),
     };
   } catch {
     const category = detectCategory(filePath);
     const bizCategory = detectBizCategory(filePath, category, '', config);
     const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
     const groups = detectGroups(filePath, '', topicTags, config);
+    const schemaType = inferSchemaType(category, bizCategory);
     const fallbackSummary = topicTags.length
       ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
       : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';
@@ -1319,6 +1530,14 @@ export async function parseDocument(filePath: string, config?: DocumentCategoryC
       intentSlots: {},
       topicTags,
       groups,
+      parseStage,
+      schemaType,
+      structuredProfile: buildStructuredProfile({
+        schemaType,
+        title: path.parse(name).name,
+        topicTags,
+        summary: fallbackSummary,
+      }),
     };
   }
 }

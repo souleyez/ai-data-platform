@@ -19,7 +19,7 @@ const PARSE_METHOD_LABELS = {
   'pdf-parse': 'PDF 文本',
   pypdf: 'PyPDF',
   'pdf-auto': 'PDF 自动解析',
-  'ocr-fallback': 'OCR fallback',
+  'ocr-fallback': 'OCR',
   unsupported: '暂不支持',
   error: '解析失败',
 };
@@ -32,6 +32,60 @@ function DetailCard({ title, children }) {
       </div>
       {children}
     </section>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div className="message-ref-item">
+      <strong>{label}</strong>
+      <span>{value || '-'}</span>
+    </div>
+  );
+}
+
+function joinValues(values) {
+  if (!Array.isArray(values) || !values.length) return '-';
+  return values.filter(Boolean).join('、');
+}
+
+function renderStructuredProfile(item) {
+  const profile = item?.structuredProfile || {};
+  const schemaType = item?.schemaType || 'generic';
+
+  if (schemaType === 'contract') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="合同编号" value={profile.contractNo || item?.contractFields?.contractNo} />
+        <DetailRow label="合同金额" value={profile.amount || item?.contractFields?.amount} />
+        <DetailRow label="付款条款" value={profile.paymentTerms || item?.contractFields?.paymentTerms} />
+        <DetailRow label="履约期限" value={profile.duration || item?.contractFields?.duration} />
+        <DetailRow label="主题标签" value={joinValues(profile.topicTags || item?.topicTags)} />
+      </div>
+    );
+  }
+
+  if (schemaType === 'resume') {
+    return (
+      <div className="message-ref-list">
+        <DetailRow label="候选人" value={profile.candidateName || item?.resumeFields?.candidateName} />
+        <DetailRow label="目标岗位" value={profile.targetRole || item?.resumeFields?.targetRole} />
+        <DetailRow label="当前岗位" value={profile.currentRole || item?.resumeFields?.currentRole} />
+        <DetailRow label="工作年限" value={profile.yearsOfExperience || item?.resumeFields?.yearsOfExperience} />
+        <DetailRow label="教育背景" value={profile.education || item?.resumeFields?.education} />
+        <DetailRow label="专业" value={profile.major || item?.resumeFields?.major} />
+        <DetailRow label="技能" value={joinValues(profile.skills || item?.resumeFields?.skills)} />
+        <DetailRow label="亮点" value={joinValues(profile.highlights || item?.resumeFields?.highlights)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="message-ref-list">
+      <DetailRow label="Schema 类型" value={schemaType} />
+      <DetailRow label="主题标签" value={joinValues(profile.topicTags || item?.topicTags)} />
+      <DetailRow label="摘要" value={profile.summary || item?.summary} />
+    </div>
   );
 }
 
@@ -74,12 +128,12 @@ export default function DocumentDetailPage() {
         const normalized = normalizeDatasourceResponse(json);
         if (normalized.items.length) setSidebarSources(normalized.items);
       } catch {
-        // keep local fallback
+        // keep fallback
       }
     }
 
-    loadDetail();
-    loadDatasources();
+    void loadDetail();
+    void loadDatasources();
   }, [documentId]);
 
   const currentGroups = useMemo(() => data?.confirmedGroups || data?.groups || [], [data]);
@@ -97,7 +151,7 @@ export default function DocumentDetailPage() {
         <header className="topbar">
           <div>
             <h2>文档详情</h2>
-            <p>以原文阅读为主，其它信息只保留必要摘要和结构化结果。</p>
+            <p>按文档类型展示结构化结果，原文和证据块保留在同一页。</p>
           </div>
           <div className="topbar-actions">
             <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
@@ -117,12 +171,14 @@ export default function DocumentDetailPage() {
                 </div>
               </div>
               <div className="message-refs">
-                <span className="source-chip">业务类：{getPrimaryCategoryLabel(meta?.bizCategory)}</span>
+                <span className="source-chip">业务分类：{getPrimaryCategoryLabel(meta?.bizCategory || data?.bizCategory)}</span>
                 <span className="source-chip">知识库：{currentGroups.length ? currentGroups.map(getDocumentGroupLabel).join('、') : '未分组'}</span>
                 <span className="source-chip">解析状态：{data.parseStatus || '-'}</span>
                 <span className="source-chip">解析方式：{PARSE_METHOD_LABELS[data.parseMethod] || data.parseMethod || '-'}</span>
+                <span className="source-chip">解析阶段：{data.parseStage || '-'}</span>
+                <span className="source-chip">Schema：{data.schemaType || 'generic'}</span>
                 <span className="source-chip">提取字符：{data.extractedChars ?? 0}</span>
-                {data.retentionStatus === 'structured-only' ? <span className="source-chip">仅保留结构化数据</span> : null}
+                {data.retentionStatus === 'structured-only' ? <span className="source-chip">仅保留结构化结果</span> : null}
               </div>
             </section>
 
@@ -132,7 +188,7 @@ export default function DocumentDetailPage() {
                   <div className="panel-header">
                     <div>
                       <h3>文档原文</h3>
-                      <p>这里显示当前可用于问答和输出的正文内容。</p>
+                      <p>当前用于检索、问答和生成输出的正文内容。</p>
                     </div>
                     <div style={{ minWidth: 260 }}>
                       <input
@@ -165,23 +221,17 @@ export default function DocumentDetailPage() {
                   <div className="summary-cell" style={{ maxWidth: 'none' }}>{data.summary || '-'}</div>
                 </DetailCard>
 
-                <DetailCard title="结构化结果">
-                  <div className="message-ref-list">
-                    <div className="message-ref-item"><strong>主题标签</strong><span>{data.topicTags?.join('、') || '-'}</span></div>
-                    <div className="message-ref-item"><strong>合同编号</strong><span>{data.contractFields?.contractNo || '-'}</span></div>
-                    <div className="message-ref-item"><strong>合同金额</strong><span>{data.contractFields?.amount || '-'}</span></div>
-                    <div className="message-ref-item"><strong>付款条款</strong><span>{data.contractFields?.paymentTerms || '-'}</span></div>
-                    <div className="message-ref-item"><strong>期限</strong><span>{data.contractFields?.duration || '-'}</span></div>
-                  </div>
+                <DetailCard title="结构化视图">
+                  {renderStructuredProfile(data)}
                 </DetailCard>
 
                 <DetailCard title="意图槽位">
                   <div className="message-ref-list">
-                    <div className="message-ref-item"><strong>人群</strong><span>{data.intentSlots?.audiences?.join('、') || '-'}</span></div>
-                    <div className="message-ref-item"><strong>成分</strong><span>{data.intentSlots?.ingredients?.join('、') || '-'}</span></div>
-                    <div className="message-ref-item"><strong>菌株</strong><span>{data.intentSlots?.strains?.join('、') || '-'}</span></div>
-                    <div className="message-ref-item"><strong>功效</strong><span>{data.intentSlots?.benefits?.join('、') || '-'}</span></div>
-                    <div className="message-ref-item"><strong>剂量/指标</strong><span>{[...(data.intentSlots?.doses || []), ...(data.intentSlots?.metrics || [])].join('、') || '-'}</span></div>
+                    <DetailRow label="人群" value={joinValues(data.intentSlots?.audiences)} />
+                    <DetailRow label="成分" value={joinValues(data.intentSlots?.ingredients)} />
+                    <DetailRow label="菌株" value={joinValues(data.intentSlots?.strains)} />
+                    <DetailRow label="功效" value={joinValues(data.intentSlots?.benefits)} />
+                    <DetailRow label="剂量 / 指标" value={joinValues([...(data.intentSlots?.doses || []), ...(data.intentSlots?.metrics || [])])} />
                   </div>
                 </DetailCard>
 
@@ -196,7 +246,7 @@ export default function DocumentDetailPage() {
                   </div>
                 </DetailCard>
 
-                <DetailCard title="关系/结论">
+                <DetailCard title="关系与结论">
                   <div className="message-ref-list">
                     {(data.claims || []).slice(0, 10).map((claim, index) => (
                       <div key={`${claim.subject}-${claim.predicate}-${claim.object}-${index}`} className="message-ref-item">
@@ -208,7 +258,7 @@ export default function DocumentDetailPage() {
                   </div>
                 </DetailCard>
 
-                <DetailCard title="证据片段">
+                <DetailCard title="证据块">
                   <div className="message-ref-list">
                     {(data.evidenceChunks || []).slice(0, 6).map((chunk) => (
                       <div key={chunk.id} className="message-ref-item">
@@ -216,7 +266,7 @@ export default function DocumentDetailPage() {
                         <span>{chunk.text}</span>
                       </div>
                     ))}
-                    {!data.evidenceChunks?.length ? <div className="page-note" style={{ marginBottom: 0 }}>当前没有切分出的证据片段。</div> : null}
+                    {!data.evidenceChunks?.length ? <div className="page-note" style={{ marginBottom: 0 }}>当前没有切分出的证据块。</div> : null}
                   </div>
                 </DetailCard>
               </aside>
