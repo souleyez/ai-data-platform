@@ -23,6 +23,7 @@ import {
   mergeParsedDocumentsForPaths,
   upsertDocumentsInCache,
 } from '../lib/document-store.js';
+import { enqueueDetailedParse, runDetailedParseBatch } from '../lib/document-deep-parse-queue.js';
 import {
   buildPreviewItemFromDocument,
   resolveSuggestedLibraryKeys,
@@ -80,6 +81,11 @@ function toListItem<T extends Record<string, unknown>>(item: T) {
     categoryConfirmedAt?: string;
     retainedAt?: string;
     originalDeletedAt?: string;
+    detailParseStatus?: string;
+    detailParseQueuedAt?: string;
+    detailParsedAt?: string;
+    detailParseAttempts?: number;
+    detailParseError?: string;
   };
 
   return {
@@ -108,6 +114,11 @@ function toListItem<T extends Record<string, unknown>>(item: T) {
     categoryConfirmedAt: source.categoryConfirmedAt,
     retainedAt: source.retainedAt,
     originalDeletedAt: source.originalDeletedAt,
+    detailParseStatus: source.detailParseStatus,
+    detailParseQueuedAt: source.detailParseQueuedAt,
+    detailParsedAt: source.detailParsedAt,
+    detailParseAttempts: source.detailParseAttempts,
+    detailParseError: source.detailParseError,
   };
 }
 
@@ -787,13 +798,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     await upsertDocumentsInCache(quickParsedItems, config.scanRoots);
-
-    void mergeParsedDocumentsForPaths(
-      savedFiles.map((file) => file.path),
-      200,
-      config.scanRoots,
-      { parseStage: 'quick', cloudEnhancement: false },
-    ).catch(() => undefined);
+    await enqueueDetailedParse(quickParsedItems.filter((item) => item.parseStatus === 'parsed').map((item) => item.path));
 
     return {
       status: 'uploaded',
@@ -812,6 +817,19 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         failedCount: ingestItems.filter((item) => item.status === 'failed').length,
       },
       ingestItems,
+    };
+  });
+
+  app.post('/documents/deep-parse/run', async (request) => {
+    const body = (request.body || {}) as { limit?: number };
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const result = await runDetailedParseBatch(Math.max(1, Math.min(24, Number(body.limit || 8))), config.scanRoots);
+
+    return {
+      status: 'completed',
+      mode: 'read-only',
+      ...result,
+      message: `已处理 ${result.processedCount} 条详细解析任务，成功 ${result.succeededCount} 条，失败 ${result.failedCount} 条。`,
     };
   });
 

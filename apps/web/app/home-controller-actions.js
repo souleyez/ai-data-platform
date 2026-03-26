@@ -1,8 +1,6 @@
 'use client';
 
 import {
-  createLoginCapture,
-  createWebCapture,
   saveChatGeneratedReport,
   saveDocumentGroups,
   sendChatPrompt,
@@ -20,14 +18,6 @@ import {
 import { createGeneratedReport } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
 
-function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
-  setSelectedManualLibraries((prev) => {
-    const next = { ...prev };
-    for (const item of ingestItems || []) next[item.id] = '';
-    return next;
-  });
-}
-
 function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => [...prev, message]);
 }
@@ -38,9 +28,7 @@ function buildRecentChatHistory(messages) {
       if (!(message?.role === 'user' || message?.role === 'assistant')) return false;
       if (message?.ingestFeedback || message?.credentialRequest) return false;
       const content = String(message?.content || '').trim();
-      if (!content) return false;
-      if (message?.role === 'assistant' && content.length < 2) return false;
-      return true;
+      return Boolean(content);
     })
     .map((message) => ({
       role: message.role,
@@ -49,86 +37,69 @@ function buildRecentChatHistory(messages) {
     .slice(-8);
 }
 
-export async function runCaptureAction(action, context) {
-  const { setMessages, setSelectedManualLibraries, refreshHomeData } = context;
+function buildKnowledgePlanningSource(inputValue, messages) {
+  const text = String(inputValue || '').trim();
+  if (text) return text;
 
-  const json = await createWebCapture({
-    url: action.url,
-    focus: action.focus,
-    note: action.note,
-    frequency: 'manual',
-  });
+  const history = buildRecentChatHistory(messages)
+    .map((item) => item.content)
+    .filter(Boolean)
+    .slice(-5);
 
-  const feedback = {
-    message: json?.message || '网页采集任务已创建。',
-    summary: json?.summary,
-    ingestItems: json?.ingestItems || [],
-  };
-
-  seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
-
-  appendAssistantMessage(setMessages, buildIngestChatMessage({
-    title: action.type === 'login_capture' ? '登录采集完成' : '网页采集完成',
-    content: buildSummaryText(feedback, feedback.message),
-    meta: action.url,
-    feedback,
-  }));
-
-  await refreshHomeData();
+  return history.join('\n');
 }
 
-export async function runLoginCaptureAction(action, credentials, context) {
-  const { setSelectedManualLibraries, refreshHomeData } = context;
-
-  const json = await createLoginCapture({
-    url: action.url,
-    focus: action.focus,
-    note: action.note,
-    ...(credentials || {}),
+function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
+  setSelectedManualLibraries((prev) => {
+    const next = { ...prev };
+    for (const item of ingestItems || []) {
+      next[item.id] = '';
+    }
+    return next;
   });
+}
 
-  if (json?.status === 'credential_required') {
-    return {
-      needsCredential: true,
-      message: buildCredentialRequestMessage({
-        url: action.url,
-        credentialRequest: json?.credentialRequest,
-      }),
-    };
+async function persistGeneratedReport(normalized, message, context) {
+  const { setReportItems, setSelectedReportId, loadReports } = context;
+  const generatedReport = createGeneratedReport({ response: normalized, message });
+  if (!generatedReport) return;
+
+  try {
+    const saved = await saveChatGeneratedReport({
+      groupKey: generatedReport.groupKey || normalized.libraries?.[0]?.key || '',
+      title: generatedReport.title,
+      kind: generatedReport.kind,
+      format: generatedReport.format,
+      content: generatedReport.content,
+      table: generatedReport.table,
+      page: generatedReport.page,
+      libraries: generatedReport.libraries,
+      downloadUrl: generatedReport.downloadUrl,
+    });
+    if (saved?.item) {
+      await loadReports?.();
+      setSelectedReportId?.(saved.item.id);
+      return;
+    }
+  } catch {
+    // Fall through to local optimistic list update.
   }
 
-  const feedback = {
-    message: json?.message || '登录采集已完成，内容已入库。',
-    summary: json?.summary,
-    ingestItems: json?.ingestItems || [],
-  };
-
-  seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
-  await refreshHomeData();
-
-  return {
-    needsCredential: false,
-    message: buildIngestChatMessage({
-      title: '登录采集完成',
-      content: buildSummaryText(feedback, feedback.message),
-      meta: action.url,
-      feedback,
-    }),
-  };
+  setReportItems?.((prev) => [generatedReport, ...prev]);
+  setSelectedReportId?.(generatedReport.id);
 }
 
 export async function runDocumentUpload(files, context) {
   const {
-    uploadInputRef,
+    defaultUploadNote,
     refreshHomeData,
     setMessages,
     setSelectedManualLibraries,
     setUploadLoading,
-    defaultUploadNote,
+    uploadInputRef,
   } = context;
 
   if (!files.length) return;
-
   setUploadLoading(true);
 
   try {
@@ -140,25 +111,28 @@ export async function runDocumentUpload(files, context) {
     await refreshHomeData();
 
     const feedback = {
-      message: json?.message || `已上传 ${json?.uploadedCount || files.length} 个文件。`,
+      message: json?.message || `已接收 ${json?.uploadedCount || files.length} 个文件。`,
       summary: json?.summary,
       ingestItems: json?.ingestItems || [],
     };
 
     seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
 
-    appendAssistantMessage(setMessages, buildIngestChatMessage({
-      title: '资料上传完成',
-      content: buildSummaryText(feedback, feedback.message),
-      meta: files.map((file) => file.name).join(' / '),
-      feedback,
-    }));
+    appendAssistantMessage(
+      setMessages,
+      buildIngestChatMessage({
+        title: '文档上传完成',
+        content: buildSummaryText(feedback, feedback.message),
+        meta: files.map((file) => file.name).join(' / '),
+        feedback,
+      }),
+    );
   } catch (error) {
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
-      title: '资料上传失败',
-      content: error instanceof Error ? error.message : '文档上传失败',
+      title: '文档上传失败',
+      content: error instanceof Error ? error.message : '文档上传失败，请稍后重试。',
       meta: files.map((file) => file.name).join(' / '),
     });
   } finally {
@@ -168,63 +142,120 @@ export async function runDocumentUpload(files, context) {
 }
 
 export async function submitQuestion(value, context) {
-  const {
-    inputState,
-    setInput,
-    setIsLoading,
-    setMessages,
-    setReportItems,
-    setSelectedReportId,
-    loadReports,
-    messages,
-  } = context;
+  const { inputState, messages, setInput, setIsLoading, setMessages } = context;
 
-  const text = value.trim();
-  if (!text || inputState.isLoading || inputState.uploadLoading) return;
+  const text = String(value || '').trim();
+  if (!text || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
 
   setMessages((prev) => [...prev, { id: createMessageId('user'), role: 'user', content: text }]);
   setInput('');
   setIsLoading(true);
 
   try {
-    const data = await sendChatPrompt(text, buildRecentChatHistory(messages));
-    const normalized = normalizeChatResponse(data, context.panel || null);
-
+    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), { mode: 'general' });
+    const normalized = normalizeChatResponse(data, null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
-
-    const generatedReport = createGeneratedReport({ response: normalized, message });
-    if (generatedReport) {
-      try {
-        const saved = await saveChatGeneratedReport({
-          groupKey: generatedReport.groupKey || normalized.libraries?.[0]?.key || '',
-          title: generatedReport.title,
-          kind: generatedReport.kind,
-          format: generatedReport.format,
-          content: generatedReport.content,
-          table: generatedReport.table,
-          page: generatedReport.page,
-          libraries: generatedReport.libraries,
-          downloadUrl: generatedReport.downloadUrl,
-        });
-        if (saved?.item) {
-          await loadReports?.();
-          setSelectedReportId?.(saved.item.id);
-        }
-      } catch {
-        setReportItems?.((prev) => [generatedReport, ...prev]);
-        setSelectedReportId?.(generatedReport.id);
-      }
-    }
-  } catch {
+    await persistGeneratedReport(normalized, message, context);
+  } catch (error) {
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
-      content: '当前对话接口暂时不可用，请稍后再试。',
-      meta: '来源：chat API / 错误回退',
+      content: error instanceof Error ? error.message : '当前云端问答暂时不可用，请稍后再试。',
+      meta: '云端问答未返回结果',
     });
   } finally {
     setIsLoading(false);
+  }
+}
+
+export async function submitKnowledgeOutputPlan(value, context) {
+  const {
+    inputState,
+    messages,
+    setKnowledgeOutputDraft,
+    setKnowledgeOutputLoading,
+    setKnowledgeOutputPlan,
+    setMessages,
+  } = context;
+
+  const planningSource = buildKnowledgePlanningSource(value, messages);
+  if (!planningSource || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
+
+  setKnowledgeOutputLoading(true);
+
+  try {
+    const data = await sendChatPrompt(planningSource, buildRecentChatHistory(messages), { mode: 'knowledge_plan' });
+    const planText = String(data?.knowledgePlan?.request || '').trim();
+
+    if (!planText) {
+      appendAssistantMessage(setMessages, {
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: '我还没有从最近几轮对话里整理出稳定的知识库输出需求。你可以先再补充一句核心目标，然后再点“按知识库输出”。',
+        meta: '知识库输出准备未形成需求',
+      });
+      setKnowledgeOutputPlan(null);
+      setKnowledgeOutputDraft('');
+      return;
+    }
+
+    setKnowledgeOutputPlan(data.knowledgePlan || null);
+    setKnowledgeOutputDraft(planText);
+  } catch (error) {
+    appendAssistantMessage(setMessages, {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: error instanceof Error ? error.message : '整理知识库输出需求失败，请稍后重试。',
+      meta: '知识库输出准备失败',
+    });
+    setKnowledgeOutputPlan(null);
+    setKnowledgeOutputDraft('');
+  } finally {
+    setKnowledgeOutputLoading(false);
+  }
+}
+
+export async function submitKnowledgeOutputConfirm(value, context) {
+  const {
+    inputState,
+    messages,
+    setKnowledgeOutputDraft,
+    setKnowledgeOutputLoading,
+    setKnowledgeOutputPlan,
+    setMessages,
+  } = context;
+
+  const text = String(value || '').trim();
+  if (!text || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
+
+  setKnowledgeOutputLoading(true);
+
+  try {
+    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
+      mode: 'knowledge_output',
+      confirmedRequest: text,
+    });
+    const normalized = normalizeChatResponse(data, null);
+    const message = {
+      ...normalized.message,
+      id: createMessageId('assistant'),
+      title: normalized.output?.type && normalized.output.type !== 'answer' ? '知识库输出结果' : '',
+    };
+
+    appendAssistantMessage(setMessages, message);
+    await persistGeneratedReport(normalized, message, context);
+    setKnowledgeOutputPlan(null);
+    setKnowledgeOutputDraft('');
+  } catch (error) {
+    appendAssistantMessage(setMessages, {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: error instanceof Error ? error.message : '按知识库输出失败，请稍后重试。',
+      meta: '知识库输出未完成',
+    });
+  } finally {
+    setKnowledgeOutputLoading(false);
   }
 }
 
@@ -238,7 +269,7 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
     try {
       await loadDocumentSnapshot();
     } catch {
-      // Ignore snapshot refresh failures so successful saves are not reported as failed.
+      // Ignore snapshot refresh errors when save already succeeded.
     }
     return true;
   } catch (error) {
@@ -246,7 +277,7 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
       id: createMessageId('assistant'),
       role: 'assistant',
       title: '知识库分组更新失败',
-      content: error instanceof Error ? error.message : '保存知识库分组失败',
+      content: error instanceof Error ? error.message : '保存知识库分组失败。',
     });
     return false;
   } finally {
@@ -257,64 +288,45 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
 export async function acceptIngestGroupSuggestion(itemId, context) {
   const { groupSaving, messages } = context;
   if (groupSaving) return;
-  const current = findIngestItem(messages, itemId);
-  const groups = (current?.groupSuggestion?.suggestedGroups || []).map((item) => item.key);
-  if (!groups.length) return;
-  await saveGroupsForIngestItem(itemId, groups, context);
+
+  const ingestItem = findIngestItem(messages, itemId);
+  if (!ingestItem?.suggestedGroups?.length) return;
+
+  await saveGroupsForIngestItem(itemId, ingestItem.suggestedGroups, context);
 }
 
 export async function assignIngestToSelectedLibrary(itemId, context) {
-  const { groupSaving, messages, selectedManualLibraries, setSelectedManualLibraries } = context;
+  const { groupSaving, messages, selectedManualLibraries } = context;
   if (groupSaving) return;
 
-  const selectedLibraryKey = selectedManualLibraries[itemId];
-  if (!selectedLibraryKey) return;
+  const library = String(selectedManualLibraries?.[itemId] || '').trim();
+  if (!library) return;
 
-  const current = findIngestItem(messages, itemId);
-  const existingGroups = current?.groupSuggestion?.suggestedGroups || [];
-  const groups = Array.from(new Set([
-    ...existingGroups.map((item) => item.key),
-    selectedLibraryKey,
-  ]));
+  const ingestItem = findIngestItem(messages, itemId);
+  const existing = Array.isArray(ingestItem?.groups) ? ingestItem.groups : [];
+  const nextGroups = Array.from(new Set([...existing, library]));
+  const ok = await saveGroupsForIngestItem(itemId, nextGroups, context);
+  if (!ok) return;
 
-  const saved = await saveGroupsForIngestItem(itemId, groups, context);
-  if (saved) {
-    setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: '' }));
-  }
+  context.setSelectedManualLibraries?.((prev) => ({ ...prev, [itemId]: '' }));
 }
 
 export async function submitCredentialForMessage(messageId, credentials, context) {
-  const { messages, setIsLoading, setMessages } = context;
-  const currentMessage = messages.find((message) => message.id === messageId);
-  const request = currentMessage?.credentialRequest;
-  if (!request?.url) return;
+  const { messages, setMessages } = context;
+  const target = (messages || []).find((item) => item.id === messageId);
+  if (!target?.credentialRequest) return;
 
-  const action = {
-    type: 'login_capture',
-    url: request.url,
-    focus: '正文、结构化要点、更新内容',
-    note: `登录采集 ${request.url}`,
-  };
+  setMessages((prev) =>
+    patchMessageById(prev, messageId, () => ({
+      ...target,
+      meta: '登录信息已提交，正在继续处理。',
+    })),
+  );
 
-  setIsLoading(true);
-  setMessages((prev) => patchMessageById(prev, messageId, (message) => ({
-    ...message,
-    content: '登录信息已安全提交，正在尝试登录并采集。',
-    credentialRequest: null,
-  })));
-
-  try {
-    const result = await runLoginCaptureAction(action, credentials, context);
-    appendAssistantMessage(setMessages, result.message);
-  } catch (error) {
-    appendAssistantMessage(setMessages, {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      title: '登录采集失败',
-      content: error instanceof Error ? error.message : '登录采集失败',
-      meta: request.url,
-    });
-  } finally {
-    setIsLoading(false);
-  }
+  appendAssistantMessage(setMessages, {
+    id: createMessageId('assistant'),
+    role: 'assistant',
+    content: '已收到登录信息。当前首页主流程不再自动触发网页采集，如需恢复这条能力，再单独接回。',
+    meta: buildCredentialRequestMessage({ url: target.credentialRequest.url, credentialRequest: target.credentialRequest }),
+  });
 }

@@ -38,24 +38,6 @@ export async function fetchReportsSnapshot() {
   return parseApiResponse(response, 'load reports failed');
 }
 
-export async function createWebCapture(payload) {
-  const response = await fetch(buildApiUrl('/api/web-captures'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response, 'create web capture failed');
-}
-
-export async function createLoginCapture(payload) {
-  const response = await fetch(buildApiUrl('/api/web-captures/login'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return parseApiResponse(response, 'login capture failed');
-}
-
 export async function uploadDocuments(formData) {
   const response = await fetch(buildApiUrl('/api/documents/upload'), {
     method: 'POST',
@@ -64,14 +46,20 @@ export async function uploadDocuments(formData) {
   return parseApiResponse(response, 'document upload failed');
 }
 
-export async function sendChatPrompt(prompt, chatHistory = []) {
+export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
   const promptBase64 = typeof window === 'undefined'
     ? ''
     : window.btoa(String.fromCharCode(...new TextEncoder().encode(prompt)));
   const response = await fetch(buildApiUrl('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, promptBase64, chatHistory }),
+    body: JSON.stringify({
+      prompt,
+      promptBase64,
+      chatHistory,
+      mode: options.mode || 'general',
+      confirmedRequest: options.confirmedRequest || '',
+    }),
   });
   return parseApiResponse(response, 'chat api failed');
 }

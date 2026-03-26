@@ -45,6 +45,11 @@ export type ParsedDocument = {
   cloudStructuredAt?: string;
   cloudStructuredModel?: string;
   parseStage?: 'quick' | 'detailed';
+  detailParseStatus?: 'queued' | 'processing' | 'succeeded' | 'failed';
+  detailParseQueuedAt?: string;
+  detailParsedAt?: string;
+  detailParseAttempts?: number;
+  detailParseError?: string;
   schemaType?: 'generic' | 'contract' | 'resume' | 'paper' | 'formula' | 'technical' | 'report';
   structuredProfile?: Record<string, unknown>;
 };
@@ -1411,6 +1416,11 @@ export async function parseDocument(
   const ext = path.extname(filePath).toLowerCase() || 'unknown';
   const name = path.basename(filePath);
   const parseStage = options?.stage === 'quick' ? 'quick' : 'detailed';
+  const now = new Date().toISOString();
+  const defaultDetailParseStatus = parseStage === 'quick' ? 'queued' : 'succeeded';
+  const defaultDetailQueuedAt = parseStage === 'quick' ? now : undefined;
+  const defaultDetailParsedAt = parseStage === 'detailed' ? now : undefined;
+  const defaultDetailAttempts = parseStage === 'detailed' ? 1 : 0;
 
   try {
     const { status, text, parseMethod: hintedMethod } = await extractText(filePath, ext);
@@ -1444,6 +1454,10 @@ export async function parseDocument(
         topicTags,
         groups,
         parseStage,
+        detailParseStatus: defaultDetailParseStatus,
+        detailParseQueuedAt: defaultDetailQueuedAt,
+        detailParsedAt: defaultDetailParsedAt,
+        detailParseAttempts: defaultDetailAttempts,
         schemaType,
         structuredProfile: buildStructuredProfile({
           schemaType,
@@ -1485,6 +1499,10 @@ export async function parseDocument(
         topicTags,
         groups,
         parseStage,
+        detailParseStatus: defaultDetailParseStatus,
+        detailParseQueuedAt: defaultDetailQueuedAt,
+        detailParsedAt: defaultDetailParsedAt,
+        detailParseAttempts: defaultDetailAttempts,
         schemaType,
         structuredProfile: buildStructuredProfile({
           schemaType,
@@ -1525,6 +1543,10 @@ export async function parseDocument(
       groups,
       contractFields,
       parseStage,
+      detailParseStatus: defaultDetailParseStatus,
+      detailParseQueuedAt: defaultDetailQueuedAt,
+      detailParsedAt: defaultDetailParsedAt,
+      detailParseAttempts: defaultDetailAttempts,
       schemaType,
       structuredProfile: buildStructuredProfile({
         schemaType,
@@ -1565,6 +1587,11 @@ export async function parseDocument(
       topicTags,
       groups,
       parseStage,
+      detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
+      detailParseQueuedAt: defaultDetailQueuedAt,
+      detailParsedAt: defaultDetailParsedAt,
+      detailParseAttempts: defaultDetailAttempts,
+      detailParseError: parseStage === 'detailed' ? 'parse-error' : undefined,
       schemaType,
       structuredProfile: buildStructuredProfile({
         schemaType,

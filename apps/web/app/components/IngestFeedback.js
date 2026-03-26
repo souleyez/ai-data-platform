@@ -66,7 +66,7 @@ export default function IngestFeedback({
                     {item.groupSuggestion?.suggestedGroups?.length ? (
                       item.groupSuggestion.suggestedGroups.map((group) => (
                         <span key={group.key} className="source-chip">
-                          {item.groupSuggestion?.accepted ? '已纳入知识库：' : '推荐知识库：'}
+                          {item.groupSuggestion?.accepted ? '已归入知识库：' : '推荐知识库：'}
                           {group.label}
                         </span>
                       ))
@@ -87,7 +87,7 @@ export default function IngestFeedback({
                         onClick={() => onAcceptGroupSuggestion?.(item.id)}
                         disabled={groupSaving}
                       >
-                        自动纳入推荐分组
+                        采纳推荐分组
                       </button>
                     </div>
                   ) : null}
@@ -111,10 +111,10 @@ export default function IngestFeedback({
                       onClick={() => onAssignLibrary?.(item.id)}
                       disabled={groupSaving || !selectedManualLibraries?.[item.id]}
                     >
-                      加入指定库
+                      加入指定分组
                     </button>
                     {!availableLibraries.length ? (
-                      <span style={{ fontSize: 13, color: '#64748b' }}>先去文档中心创建知识库分组</span>
+                      <span style={{ fontSize: 13, color: '#64748b' }}>先去文档中心创建知识库分组。</span>
                     ) : null}
                   </div>
                 </>

@@ -1,23 +1,26 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { fetchCaptureTasks, fetchDatasources, fetchDocumentsSnapshot, fetchReportsSnapshot, deleteReportOutput } from './home-api';
+import { deleteReportOutput, fetchDatasources, fetchDocumentsSnapshot, fetchReportsSnapshot } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
   acceptIngestGroupSuggestion,
   assignIngestToSelectedLibrary,
   runDocumentUpload,
+  submitKnowledgeOutputConfirm,
+  submitKnowledgeOutputPlan,
   submitCredentialForMessage,
   submitQuestion,
 } from './home-controller-actions';
 import { normalizeDatasourceResponse } from './lib/types';
 import { normalizeGeneratedReportRecord } from './lib/generated-reports';
-import { initialMessages, scenarios, sourceItems } from './lib/mock-data';
+import { initialMessages, sourceItems } from './lib/mock-data';
 
 const CHAT_HISTORY_STORAGE_KEY = 'aidp_home_chat_history_v1';
 
 function normalizeStoredMessages(raw) {
   if (!Array.isArray(raw) || !raw.length) return initialMessages;
+
   const items = raw
     .map((item, index) => ({
       id: String(item?.id || `history-${index}`),
@@ -33,6 +36,7 @@ function normalizeStoredMessages(raw) {
       if (item.role === 'assistant' && content.length < 2) return false;
       return true;
     });
+
   return items.length ? items : initialMessages;
 }
 
@@ -49,6 +53,7 @@ function loadStoredMessages() {
 
 function persistMessages(messages) {
   if (typeof window === 'undefined') return;
+
   try {
     const serialized = (Array.isArray(messages) ? messages : [])
       .filter((item) => {
@@ -59,7 +64,7 @@ function persistMessages(messages) {
         if (item?.role === 'assistant' && content.length < 2) return false;
         return true;
       })
-      .slice(-40)
+      .slice(-30)
       .map((item, index) => ({
         id: String(item?.id || `history-${index}`),
         role: item?.role === 'user' ? 'user' : 'assistant',
@@ -67,11 +72,11 @@ function persistMessages(messages) {
         content: typeof item?.content === 'string' ? item.content : '',
         meta: typeof item?.meta === 'string' ? item.meta : '',
         table: item?.table && typeof item.table === 'object' ? item.table : null,
-      }))
-      .filter((item) => item.content.trim());
+      }));
+
     window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(serialized));
   } catch {
-    // ignore storage failures
+    // Ignore local persistence failures.
   }
 }
 
@@ -80,7 +85,7 @@ function clearStoredMessages() {
   try {
     window.localStorage.removeItem(CHAT_HISTORY_STORAGE_KEY);
   } catch {
-    // ignore storage failures
+    // Ignore local persistence failures.
   }
 }
 
@@ -88,19 +93,26 @@ export function useHomePageController() {
   const [messages, setMessages] = useState(() => loadStoredMessages());
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
-  const [activeScenario, setActiveScenario] = useState('technical');
-  const [panel, setPanel] = useState(scenarios.technical || scenarios.default);
   const [reportCollapsed, setReportCollapsed] = useState(false);
   const [reportItems, setReportItems] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState('');
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
-  const [captureTasks, setCaptureTasks] = useState([]);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
+  const [knowledgeOutputLoading, setKnowledgeOutputLoading] = useState(false);
+  const [knowledgeOutputDraft, setKnowledgeOutputDraft] = useState('');
+  const [knowledgeOutputPlan, setKnowledgeOutputPlan] = useState(null);
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
+  const canPrepareKnowledgeOutput =
+    Boolean(String(input || '').trim()) ||
+    messages.some((message) => {
+      if (message?.role !== 'user' && message?.role !== 'assistant') return false;
+      if (message?.ingestFeedback || message?.credentialRequest) return false;
+      return Boolean(String(message?.content || '').trim());
+    });
 
   async function loadDatasources() {
     try {
@@ -108,16 +120,7 @@ export function useHomePageController() {
       const normalized = normalizeDatasourceResponse(json);
       if (normalized.items.length) setSidebarSources(normalized.items);
     } catch {
-      // keep local fallback
-    }
-  }
-
-  async function loadCaptureTasks() {
-    try {
-      const json = await fetchCaptureTasks();
-      setCaptureTasks(Array.isArray(json?.items) ? json.items : []);
-    } catch {
-      setCaptureTasks([]);
+      setSidebarSources(sourceItems);
     }
   }
 
@@ -125,9 +128,9 @@ export function useHomePageController() {
     try {
       const json = await fetchDocumentsSnapshot();
       const libraries = Array.isArray(json?.libraries) ? json.libraries : [];
-      const libraryDocumentTotal = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
+      const total = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
       setDocumentLibraries(libraries);
-      setDocumentTotal(libraryDocumentTotal || Number(json?.totalFiles || 0));
+      setDocumentTotal(total || Number(json?.totalFiles || 0));
     } catch {
       setDocumentLibraries([]);
       setDocumentTotal(0);
@@ -145,12 +148,11 @@ export function useHomePageController() {
   }
 
   async function refreshHomeData() {
-    await Promise.all([loadCaptureTasks(), loadDatasources(), loadDocumentSnapshot(), loadReports()]);
+    await Promise.all([loadDatasources(), loadDocumentSnapshot(), loadReports()]);
   }
 
   useEffect(() => {
     loadDatasources();
-    loadCaptureTasks();
     loadDocumentSnapshot();
     loadReports();
   }, []);
@@ -172,11 +174,10 @@ export function useHomePageController() {
   function resetConversation() {
     setMessages(initialMessages);
     clearStoredMessages();
-    setActiveScenario('technical');
-    setPanel(scenarios.technical || scenarios.default);
-    setReportCollapsed(false);
     setInput('');
-    loadReports();
+    setReportCollapsed(false);
+    setKnowledgeOutputDraft('');
+    setKnowledgeOutputPlan(null);
   }
 
   async function deleteReport(reportId) {
@@ -185,19 +186,21 @@ export function useHomePageController() {
       await deleteReportOutput(reportId);
       setReportItems((prev) => prev.filter((item) => item.id !== reportId));
     } catch {
-      // keep existing list on failure
+      // Keep existing list when deletion fails.
     }
   }
 
   const baseActionContext = {
     refreshHomeData,
+    loadDocumentSnapshot,
     loadReports,
-    setActiveScenario,
     setGroupSaving,
     setInput,
     setIsLoading,
+    setKnowledgeOutputDraft,
+    setKnowledgeOutputLoading,
+    setKnowledgeOutputPlan,
     setMessages,
-    setPanel,
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
@@ -206,14 +209,16 @@ export function useHomePageController() {
   };
 
   return {
-    captureTasks,
+    canPrepareKnowledgeOutput,
     documentLibraries,
     documentTotal,
     groupSaving,
     input,
     isLoading,
+    knowledgeOutputDraft,
+    knowledgeOutputLoading,
+    knowledgeOutputPlan,
     messages,
-    panel,
     reportCollapsed,
     reportItems,
     selectedReportId,
@@ -222,15 +227,28 @@ export function useHomePageController() {
     uploadInputRef,
     uploadLoading,
     setInput,
+    setKnowledgeOutputDraft,
+    setKnowledgeOutputPlan,
     setReportCollapsed,
-    setSelectedReportId,
     setSelectedManualLibraries,
+    setSelectedReportId,
     deleteReport,
+    resetConversation,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
-      inputState: { isLoading, uploadLoading },
+      inputState: { isLoading, uploadLoading, knowledgeOutputLoading },
+      messages,
     }),
-    resetConversation,
+    submitKnowledgeOutputPlan: (value) => submitKnowledgeOutputPlan(value, {
+      ...baseActionContext,
+      inputState: { isLoading, uploadLoading, knowledgeOutputLoading },
+      messages,
+    }),
+    submitKnowledgeOutputConfirm: (value) => submitKnowledgeOutputConfirm(value, {
+      ...baseActionContext,
+      inputState: { isLoading, uploadLoading, knowledgeOutputLoading },
+      messages,
+    }),
     runDocumentUpload: (files) => runDocumentUpload(files, {
       ...baseActionContext,
       defaultUploadNote: DEFAULT_UPLOAD_NOTE,

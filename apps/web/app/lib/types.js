@@ -44,8 +44,6 @@ export function normalizeChatResponse(data, fallbackPanel) {
   };
 
   return {
-    scenario: data?.scenario || 'default',
-    panel: data?.panel || fallbackPanel,
     message,
     sources: Array.isArray(data?.sources) ? data.sources : [],
     orchestration: message.orchestration,

@@ -4,6 +4,7 @@ import { createDocumentLibrary, loadDocumentLibraries } from './document-librari
 import { saveDocumentCategoryConfig, loadDocumentCategoryConfig } from './document-config.js';
 import { removeDocumentOverrides, saveDocumentOverride, saveDocumentSuggestion } from './document-overrides.js';
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths, removeDocumentsFromCache } from './document-store.js';
+import { enqueueDetailedParse, runDetailedParseBatch } from './document-deep-parse-queue.js';
 import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from './ingest-feedback.js';
 import { removeRetainedDocument } from './retained-documents.js';
 import { STORAGE_FILES_DIR } from './paths.js';
@@ -315,11 +316,16 @@ export async function reclusterUngroupedDocuments() {
     .map((item) => item.path)
     .slice(0, 48);
 
+  if (detailedCandidatePaths.length) {
+    await enqueueDetailedParse(detailedCandidatePaths);
+    await runDetailedParseBatch(detailedCandidatePaths.length, config.scanRoots);
+  }
+
   const refreshedItems = detailedCandidatePaths.length
     ? (await mergeParsedDocumentsForPaths(detailedCandidatePaths, 200, config.scanRoots, {
-      parseStage: 'detailed',
-      cloudEnhancement: true,
-    })).items
+        parseStage: 'detailed',
+        cloudEnhancement: true,
+      })).items
     : items;
 
   const candidates = refreshedItems.filter((item) => !item.ignored && item.parseStatus === 'parsed' && !(item.confirmedGroups?.length));

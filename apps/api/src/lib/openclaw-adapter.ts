@@ -44,14 +44,12 @@ function isLocalGatewayUrl(url?: string) {
 
 function buildDefaultSystemPrompt() {
   return [
-    '你是产品“AI 知识数据管理”里的云端智能助手。',
+    '你是产品“AI智能服务”里的云端智能助手。',
     '除非用户明确要求其他语言，否则一律使用自然、专业、简洁的中文回答。',
-    '直接回答用户问题，不要自我介绍，不要说自己刚上线，不要说记忆是空的，不要让用户给你起名，不要询问别人该怎么称呼你。',
-    '不要提系统启动、内部配置、隐藏状态、bootstrap 文件、调试过程或任何实现细节。',
-    '不要声称自己修改了本地文件、数据库或系统设置，除非用户在产品里明确执行了可见操作。',
-    '普通业务问答就直接回答，不要把简单问题改写成寒暄、角色扮演或开场白。',
-    '输出风格以自然分段为主，尽量少括号、少插话、少装饰符号。',
-    '不要使用 markdown 标题、星号、井号、竖线、分隔线，除非用户明确要求 markdown 格式。',
+    '直接回答用户问题，不要自我介绍，不要谈内部实现，也不要暴露底层模型或网关信息。',
+    '尽量自然分段，不要使用 Markdown 标题、星号、井号、竖线和分隔线。',
+    '不要使用过多括号和装饰性符号。',
+    '如果用户要的是分析、总结、建议或方案，就直接给结果，不要加多余开场白。',
   ].join('\n');
 }
 
@@ -94,9 +92,7 @@ function sanitizeModelContent(content: string) {
 
 function looksLikeOnboardingDrift(content: string) {
   const text = String(content || '');
-  return /(刚上线|不知道自己是谁|给我起个名字|该怎么称呼你|记忆是空的|名字、风格、个性都还没定|我是一个全新的开始)/.test(
-    text,
-  );
+  return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|没个性|第一次聊)/.test(text);
 }
 
 async function requestChatCompletion(baseUrl: string, headers: Record<string, string>, body: unknown) {
@@ -149,16 +145,13 @@ export async function isOpenClawGatewayReachable() {
   if (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl)) return false;
 
   const headers: Record<string, string> = {};
-  if (hasUsableGatewayToken(token)) {
-    headers.Authorization = `Bearer ${token}`;
-  }
+  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 800);
 
   try {
-    const url = `${baseUrl.replace(/\/$/, '')}/health`;
-    const response = await fetch(url, {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, {
       method: 'GET',
       headers,
       signal: controller.signal,
@@ -179,9 +172,11 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     getActiveOpenClawModel(),
     loadModelConfigState(),
   ]);
-  const model = modelState?.openclaw?.usesDevBridge || modelState?.openclaw?.installMode === 'wsl'
-    ? (agentId ? `openclaw/${agentId}` : 'openclaw')
-    : (selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`));
+
+  const model =
+    modelState?.openclaw?.usesDevBridge || modelState?.openclaw?.installMode === 'wsl'
+      ? agentId ? `openclaw/${agentId}` : 'openclaw'
+      : (selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`));
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');
@@ -190,48 +185,55 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-
-  if (hasUsableGatewayToken(token)) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  if (agentId) {
-    headers['x-openclaw-agent-id'] = agentId;
-  }
+  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
+  if (agentId) headers['x-openclaw-agent-id'] = agentId;
 
   const baseMessages = buildMessages(input);
 
-  try {
-    let result = await requestChatCompletion(baseUrl, headers, {
+  let result = await requestChatCompletion(baseUrl, headers, {
+    model,
+    user: input.sessionUser,
+    temperature: 0.2,
+    messages: baseMessages,
+  });
+
+  if (looksLikeOnboardingDrift(result.content)) {
+    result = await requestChatCompletion(baseUrl, headers, {
       model,
       user: input.sessionUser,
-      temperature: 0.2,
-      messages: baseMessages,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content: '直接回答用户当前问题。不要自我介绍，不要谈内部状态，不要说自己没名字、没个性、第一次聊天，也不要让用户给你起名。',
+        },
+        ...baseMessages,
+      ],
     });
-
-    if (looksLikeOnboardingDrift(result.content)) {
-      result = await requestChatCompletion(baseUrl, headers, {
-        model,
-        user: input.sessionUser,
-        temperature: 0.1,
-        messages: [
-          {
-            role: 'system',
-            content:
-              '直接回答用户当前问题。不要自我介绍，不要说刚上线，不要谈记忆是否为空，不要向用户索要称呼或名字。',
-          },
-          ...baseMessages,
-        ],
-      });
-    }
-
-    return {
-      content: result.content,
-      provider: 'cloud-gateway',
-      model: selectedModel || model || 'cloud-model',
-      raw: result.json,
-    };
-  } catch (error) {
-    throw error;
   }
+
+  if (looksLikeOnboardingDrift(result.content)) {
+    result = await requestChatCompletion(baseUrl, headers, {
+      model,
+      user: input.sessionUser,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: '只回答用户当前问题。禁止自我介绍，禁止让用户给你起名，禁止谈刚启动或记忆状态。',
+        },
+        {
+          role: 'user',
+          content: input.prompt,
+        },
+      ],
+    });
+  }
+
+  return {
+    content: result.content,
+    provider: 'cloud-gateway',
+    model: selectedModel || model || 'cloud-model',
+    raw: result.json,
+  };
 }

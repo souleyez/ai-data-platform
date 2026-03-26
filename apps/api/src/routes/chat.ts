@@ -7,6 +7,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
       prompt?: string;
       promptBase64?: string;
       sessionUser?: string;
+      mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+      confirmedRequest?: string;
       chatHistory?: Array<{ role?: string; content?: string }>;
     };
     let prompt = String(body.prompt || '').trim();
@@ -25,6 +27,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
 
     return runChatOrchestrationV2({
       prompt,
+      mode: body.mode || 'general',
+      confirmedRequest: typeof body.confirmedRequest === 'string' ? body.confirmedRequest : '',
       sessionUser: body.sessionUser,
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory

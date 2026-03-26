@@ -14,14 +14,12 @@ function sanitizeReadableText(content) {
     .trim();
 }
 
-function renderMessageParagraphs(content) {
+function renderParagraphs(content) {
   return sanitizeReadableText(content)
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part, index) => (
-      <p key={`message-paragraph-${index}`}>{part}</p>
-    ));
+    .map((part, index) => <p key={`paragraph-${index}`}>{part}</p>);
 }
 
 function FormulaTable({ table }) {
@@ -38,30 +36,18 @@ function FormulaTable({ table }) {
         <table className="formula-table">
           <thead>
             <tr>
-              {table.columns?.map((column) => (
-                <th key={column}>{column}</th>
-              ))}
+              {(table.columns || []).map((column) => <th key={column}>{column}</th>)}
             </tr>
           </thead>
           <tbody>
-            {table.rows?.map((row, rowIndex) => (
-              <tr key={`${table.title}-${rowIndex}`}>
-                {row.map((cell, cellIndex) => (
-                  <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
-                ))}
+            {(table.rows || []).map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {row.map((cell, cellIndex) => <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>)}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {table.notes?.length ? (
-        <div className="formula-table-notes">
-          {table.notes.map((note, index) => (
-            <div key={`${table.title}-note-${index}`}>{index + 1}. {note}</div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -76,11 +62,7 @@ function CredentialRequestCard({ request, onSubmit, disabled }) {
       onSubmit={(event) => {
         event.preventDefault();
         if (!username.trim() || !password) return;
-        onSubmit?.({
-          username: username.trim(),
-          password,
-          remember,
-        });
+        onSubmit?.({ username: username.trim(), password, remember });
         setPassword('');
       }}
       style={{
@@ -97,7 +79,7 @@ function CredentialRequestCard({ request, onSubmit, disabled }) {
       <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.6 }}>
         站点：{request.origin || request.url}
         <br />
-        账号密码不会写进聊天记录，只用于这次登录采集；勾选后会加密记住凭据。
+        账号密码不会写入聊天记录，只用于这次登录采集。
       </div>
       <input
         className="filter-input"
@@ -125,11 +107,86 @@ function CredentialRequestCard({ request, onSubmit, disabled }) {
       </label>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button className="primary-btn" type="submit" disabled={disabled || !username.trim() || !password}>
-          {disabled ? '登录采集中...' : '提交登录并采集'}
+          {disabled ? '提交中...' : '提交登录信息'}
         </button>
         {request.maskedUsername ? <span className="message-meta">已保存账号：{request.maskedUsername}</span> : null}
       </div>
     </form>
+  );
+}
+
+function KnowledgeOutputModal({
+  draft,
+  plan,
+  loading,
+  onDraftChange,
+  onConfirm,
+  onCancel,
+}) {
+  if (!draft) return null;
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 42, 0.38)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        zIndex: 90,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(760px, 100%)',
+          background: '#fff',
+          borderRadius: 22,
+          boxShadow: '0 25px 80px rgba(15, 23, 42, 0.28)',
+          padding: 24,
+          display: 'grid',
+          gap: 14,
+        }}
+      >
+        <div style={{ display: 'grid', gap: 6 }}>
+          <strong style={{ fontSize: 18 }}>按知识库输出确认</strong>
+          <span className="message-meta">
+            系统已根据最近 3 到 5 轮对话整理出一条需求。确认后会优先依据知识库内容进行输出，不足部分再做补充说明。
+          </span>
+          {Array.isArray(plan?.libraries) && plan.libraries.length ? (
+            <span className="message-meta">
+              当前优先知识库：{plan.libraries.map((item) => item.label || item.key).join('、')}
+            </span>
+          ) : null}
+        </div>
+
+        <textarea
+          value={draft}
+          onChange={(event) => onDraftChange?.(event.target.value)}
+          placeholder="你可以直接修改这条需求，再确认输出。"
+          style={{
+            minHeight: 180,
+            width: '100%',
+            borderRadius: 16,
+            border: '1px solid rgba(148, 163, 184, 0.35)',
+            padding: 14,
+            font: 'inherit',
+            resize: 'vertical',
+            outline: 'none',
+          }}
+        />
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="ghost-btn" type="button" onClick={onCancel} disabled={loading}>
+            取消
+          </button>
+          <button className="primary-btn" type="button" onClick={() => onConfirm?.(draft)} disabled={loading || !draft.trim()}>
+            {loading ? '输出中...' : '确认并输出'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -139,6 +196,14 @@ export default function ChatPanel({
   isLoading,
   onInputChange,
   onSubmit,
+  onPrepareKnowledgeOutput,
+  onConfirmKnowledgeOutput,
+  knowledgeOutputDraft,
+  knowledgeOutputLoading,
+  knowledgeOutputPlan,
+  onKnowledgeOutputDraftChange,
+  onCancelKnowledgeOutput,
+  canPrepareKnowledgeOutput,
   uploadInputRef,
   uploadLoading,
   onUploadFilesSelected,
@@ -156,18 +221,28 @@ export default function ChatPanel({
     const node = messagesRef.current;
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, knowledgeOutputLoading]);
 
   return (
     <div className="chat-panel card">
+      <KnowledgeOutputModal
+        draft={knowledgeOutputDraft}
+        plan={knowledgeOutputPlan}
+        loading={knowledgeOutputLoading}
+        onDraftChange={onKnowledgeOutputDraftChange}
+        onConfirm={onConfirmKnowledgeOutput}
+        onCancel={onCancelKnowledgeOutput}
+      />
+
       <div className="chat-messages" ref={messagesRef}>
         {messages.map((message, index) => (
           <div className={`message ${message.role}`} key={message.id || `${message.role}-${index}`}>
             {message.role === 'assistant' && <div className="avatar">AI</div>}
             <div className={`bubble ${message.role === 'user' ? 'user-bubble' : ''}`}>
               {message.title ? <strong>{message.title}</strong> : null}
-              <div className="message-content-block">{renderMessageParagraphs(message.content)}</div>
+              <div className="message-content-block">{renderParagraphs(message.content)}</div>
               {message.table ? <FormulaTable table={message.table} /> : null}
+
               {message.credentialRequest ? (
                 <CredentialRequestCard
                   request={message.credentialRequest}
@@ -175,6 +250,7 @@ export default function ChatPanel({
                   disabled={isLoading}
                 />
               ) : null}
+
               {message.ingestFeedback ? (
                 <IngestFeedback
                   feedback={message.ingestFeedback}
@@ -187,7 +263,9 @@ export default function ChatPanel({
                   fallbackLink
                 />
               ) : null}
+
               {message.meta ? <div className="message-meta">{message.meta}</div> : null}
+
               {message.references?.length ? (
                 <div className="message-ref-block">
                   <div className="message-ref-title">引用文档</div>
@@ -196,55 +274,22 @@ export default function ChatPanel({
                       <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
                     ))}
                   </div>
-                  <div className="message-ref-list">
-                    {message.references.map((ref) => (
-                      <div key={`${ref.id}-summary`} className="message-ref-item">
-                        <strong>{ref.name}</strong>
-                        <span>{ref.summary}</span>
-                        {Array.isArray(ref.evidence) && ref.evidence.length ? (
-                          <div style={{ display: 'grid', gap: 6 }}>
-                            {ref.evidence.map((snippet, snippetIndex) => (
-                              <span key={`${ref.id}-evidence-${snippetIndex}`}>证据：{snippet}</span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {Array.isArray(ref.structured) && ref.structured.length ? (
-                          <div style={{ display: 'grid', gap: 6 }}>
-                            {ref.structured.map((entry, entryIndex) => (
-                              <span key={`${ref.id}-structured-${entryIndex}`}>结构化：{entry}</span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {Array.isArray(ref.claims) && ref.claims.length ? (
-                          <div style={{ display: 'grid', gap: 6 }}>
-                            {ref.claims.map((entry, entryIndex) => (
-                              <span key={`${ref.id}-claim-${entryIndex}`}>关系：{entry}</span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <em>
-                          {ref.category === 'contract'
-                            ? `合同风险：${ref.riskLevel || 'unknown'}`
-                            : ref.category === 'technical'
-                              ? `技术主题：${(ref.topicTags || []).join('、') || '未识别'}`
-                              : ref.category}
-                        </em>
-                        {ref.parseMethod ? <em>解析来源：{ref.parseMethod}</em> : null}
-                      </div>
-                    ))}
-                  </div>
                 </div>
               ) : null}
+
               {message.sources?.length ? (
                 <div className="message-extra-block">
                   <div className="message-ref-title">数据来源</div>
                   <div className="message-refs">
                     {message.sources.map((source, sourceIndex) => (
-                      <span key={`${formatSourceLabel(source)}-${sourceIndex}`} className="source-chip">{formatSourceLabel(source)}</span>
+                      <span key={`${formatSourceLabel(source)}-${sourceIndex}`} className="source-chip">
+                        {formatSourceLabel(source)}
+                      </span>
                     ))}
                   </div>
                 </div>
               ) : null}
+
               {message.orchestration ? (
                 <div className="message-extra-block">
                   <div className="message-ref-title">分析状态</div>
@@ -256,7 +301,7 @@ export default function ChatPanel({
           </div>
         ))}
 
-        {isLoading ? (
+        {isLoading || knowledgeOutputLoading ? (
           <div className="message assistant">
             <div className="avatar">AI</div>
             <div className="bubble loading-bubble">
@@ -290,7 +335,14 @@ export default function ChatPanel({
           >
             {uploadLoading ? '上传解析中...' : '上传文件'}
           </button>
-          <span className="message-meta">你可以直接说“看订单趋势”或“生成一份合同风险清单”。</span>
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => onPrepareKnowledgeOutput?.(input)}
+            disabled={isLoading || knowledgeOutputLoading || uploadLoading || !canPrepareKnowledgeOutput}
+          >
+            按知识库输出
+          </button>
         </div>
 
         <div className="chat-input-row">
@@ -300,15 +352,13 @@ export default function ChatPanel({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                if (!isLoading) {
-                  onSubmit(input);
-                }
+                if (!isLoading && !knowledgeOutputLoading) onSubmit(input);
               }
             }}
-            placeholder="输入问题，或直接说明想看的数据；也可以发“采集 + 链接”或上传文件。"
+            placeholder="输入问题。普通对话会直接走云端模型，知识库输出请使用上方按钮。"
           />
-          <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
-            {isLoading ? '分析中...' : '发送'}
+          <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading || knowledgeOutputLoading}>
+            {isLoading ? '思考中...' : '发送'}
           </button>
         </div>
       </div>

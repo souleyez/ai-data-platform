@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseDocument, type ParsedDocument } from './document-parser.js';
 import { enhanceParsedDocumentsWithCloud } from './document-cloud-enrichment.js';
+import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
 import { loadDocumentCategoryConfig } from './document-config.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
@@ -438,7 +439,8 @@ async function parseFiles(
   const cloudEnhancedItems = options?.cloudEnhancement === false
     ? parsedItems
     : await enhanceParsedDocumentsWithCloud(parsedItems);
-  return applyDocumentOverrides(cloudEnhancedItems, overrides).map(sanitizeParsedDocument);
+  const overriddenItems = applyDocumentOverrides(cloudEnhancedItems, overrides).map(sanitizeParsedDocument);
+  return applyDetailedParseQueueMetadata(overriddenItems);
 }
 
 async function mergeWithRetainedDocuments(items: ParsedDocument[]) {
@@ -463,7 +465,9 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
   if (cache) {
     const overrides = await loadDocumentOverrides();
     const mergedItems = dedupeDocuments(sortDocumentsByRecency(
-      await mergeWithRetainedDocuments(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument)),
+      await mergeWithRetainedDocuments(
+        await applyDetailedParseQueueMetadata(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument)),
+      ),
     ));
     return {
       exists: true,
@@ -482,7 +486,11 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
 
   const scanSignature = await buildScanSignature(files);
 
-  const items = await parseFiles(files.slice(0, limit), resolvedScanRoots);
+  const items = await parseFiles(files.slice(0, limit), resolvedScanRoots, {
+    parseStage: 'quick',
+    cloudEnhancement: false,
+  });
+  await enqueueDetailedParse(items.filter((item) => item.parseStatus === 'parsed').map((item) => item.path));
   await writeCache({
     generatedAt: new Date().toISOString(),
     scanRoot: activeScanRoot,

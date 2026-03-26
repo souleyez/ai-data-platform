@@ -37,9 +37,13 @@ function getRuntimeLabel(openclaw) {
   return '未安装';
 }
 
-export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
+export default function Sidebar({
+  sourceItems = [],
+  currentPath = '/',
+  initialModelState = INITIAL_MODEL_STATE,
+}) {
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
-  const [modelState, setModelState] = useState(INITIAL_MODEL_STATE);
+  const [modelState, setModelState] = useState(initialModelState);
   const [modelBusy, setModelBusy] = useState(false);
   const [modelMessage, setModelMessage] = useState('');
 

@@ -39,6 +39,7 @@ export default function InsightPanel({
       <button className="ghost-btn insight-collapse-handle" onClick={onToggleCollapsed} type="button">
         收起
       </button>
+
       <div className="insight-panel-header">
         <div>
           <h3>生成报表列表</h3>
@@ -48,7 +49,7 @@ export default function InsightPanel({
       {!reportItems.length ? (
         <section className="card report-empty-card">
           <h4>还没有生成报表</h4>
-          <p>在左侧对话区提出报表需求后，这里会按列表沉淀结果。</p>
+          <p>左侧对话生成表格、静态页、PDF 或 PPT 后，这里会自动沉淀结果。</p>
         </section>
       ) : (
         <section className="report-center-list">
@@ -56,10 +57,7 @@ export default function InsightPanel({
             const expanded = item.id === selectedReportId;
 
             return (
-              <article
-                className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`}
-                key={item.id}
-              >
+              <article className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`} key={item.id}>
                 <button
                   className="report-list-trigger"
                   type="button"
@@ -71,18 +69,10 @@ export default function InsightPanel({
                 {expanded ? (
                   <div className="report-list-expanded">
                     <div className="report-list-actions">
-                      <button
-                        className="ghost-btn"
-                        type="button"
-                        onClick={() => void handlePrimaryAction(item)}
-                      >
+                      <button className="ghost-btn" type="button" onClick={() => void handlePrimaryAction(item)}>
                         {getGeneratedReportActionLabel(item)}
                       </button>
-                      <button
-                        className="ghost-btn"
-                        type="button"
-                        onClick={() => onDeleteReport?.(item.id)}
-                      >
+                      <button className="ghost-btn" type="button" onClick={() => onDeleteReport?.(item.id)}>
                         删除
                       </button>
                     </div>

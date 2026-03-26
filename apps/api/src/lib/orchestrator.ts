@@ -1,22 +1,18 @@
-import { scenarios, type ScenarioKey } from './mock-data.js';
 import { retrieveKnowledgeMatches } from './document-retrieval.js';
 import { documentMatchesLibrary, loadDocumentLibraries, type DocumentLibrary } from './document-libraries.js';
 import { loadParsedDocuments } from './document-store.js';
-import { findReportGroupForPrompt, loadReportCenterState, type ReportGroup, type ReportTemplateType } from './report-center.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable, runOpenClawChat } from './openclaw-adapter.js';
-import type { ParsedDocument } from './document-parser.js';
 
 export type ChatRequestInput = {
   prompt: string;
   sessionUser?: string;
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+  confirmedRequest?: string;
 };
 
 type ChatOutput =
-  | {
-      type: 'answer';
-      content: string;
-    }
+  | { type: 'answer'; content: string }
   | {
       type: 'table' | 'page' | 'pdf' | 'ppt';
       title: string;
@@ -38,19 +34,14 @@ type ChatOutput =
 
 type CandidateLibrary = {
   library: DocumentLibrary;
-  group?: ReportGroup;
   score: number;
 };
 
-type RetrievalLikeResult = ReturnType<typeof retrieveKnowledgeMatches>;
-
-function buildCloudUnavailableAnswer() {
-  return '当前云端模型暂时不可用，请稍后再试。';
-}
-
-function buildDefaultPanel() {
-  return scenarios.default;
-}
+type KnowledgePlan = {
+  request: string;
+  libraries: Array<{ key: string; label: string }>;
+  outputType: string;
+};
 
 function normalizeHistory(chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>) {
   return Array.isArray(chatHistory)
@@ -66,77 +57,212 @@ function normalizeHistory(chatHistory?: Array<{ role: 'user' | 'assistant'; cont
 
 function summarizeError(error: unknown) {
   const message = String(error instanceof Error ? error.message : error ?? '').trim();
-  if (!message) return 'unknown-error';
-  return message.replace(/\s+/g, ' ').slice(0, 240);
+  return message ? message.replace(/\s+/g, ' ').slice(0, 240) : 'unknown-error';
+}
+
+function buildCloudUnavailableAnswer() {
+  return '当前云端模型暂时不可用，请稍后再试。';
 }
 
 function normalizeText(value: string) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/\s+/g, '');
+  return String(value || '').toLowerCase().replace(/\s+/g, '');
 }
 
-function containsAny(text: string, keywords: string[]) {
-  return keywords.some((keyword) => keyword && text.includes(keyword));
-}
-
-function mentionsKnowledgeBase(prompt: string) {
-  const text = normalizeText(prompt);
-  return /(知识库|资料库|文档库|库里的|库内|基于知识库|根据知识库|按知识库|按库)/.test(text);
-}
-
-function mentionsReportOutput(prompt: string) {
-  const text = normalizeText(prompt);
-  return /(报表|表格|静态页|可视化页|分析页|pdf|ppt|报告|汇总页)/.test(text);
-}
-
-function detectExplicitOutputKind(prompt: string): 'table' | 'page' | 'pdf' | 'ppt' | null {
-  const text = normalizeText(prompt);
+function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt' | null {
   if (/(静态页|可视化页|分析页|页面)/.test(text)) return 'page';
-  if (/\bppt\b/.test(text)) return 'ppt';
-  if (/\bpdf\b/.test(text)) return 'pdf';
-  if (/(报表|表格|报告|汇总页)/.test(text)) return 'table';
+  if (/\bppt\b/i.test(text)) return 'ppt';
+  if (/\bpdf\b/i.test(text)) return 'pdf';
+  if (/(报表|表格|报告)/.test(text)) return 'table';
   return null;
 }
 
-function looksLikeKnowledgeReportPrompt(prompt: string) {
+function buildPromptForScoring(prompt: string, chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  const recent = chatHistory
+    .filter((item) => item.role === 'user')
+    .map((item) => item.content)
+    .slice(-3)
+    .join(' ');
+  return `${recent} ${prompt}`.trim();
+}
+
+function collectLibraryTerms(library: DocumentLibrary) {
+  return [library.key, library.label, library.description]
+    .filter(Boolean)
+    .map((value) => normalizeText(String(value)));
+}
+
+function scoreLibraryCandidate(prompt: string, library: DocumentLibrary) {
+  const rawText = String(prompt || '');
   const text = normalizeText(prompt);
-  if (!mentionsReportOutput(text)) return false;
-  if (mentionsKnowledgeBase(text)) return true;
-  return /(合同协议|奶粉配方|配方建议|简历|论文|技术文档|订单分析|库存监控|发票凭据|客服采集|工作日报)/.test(text);
+  let score = 0;
+
+  if (rawText.includes(library.label) || rawText.includes(library.key)) score += 28;
+
+  for (const term of collectLibraryTerms(library)) {
+    if (!term) continue;
+    if (text === term) score += 24;
+    else if (text.includes(term)) score += Math.min(18, Math.max(6, term.length * 2));
+  }
+
+  const libraryText = normalizeText(`${library.key} ${library.label} ${library.description || ''}`);
+  if (/(奶粉|配方|formula|营养|菌株)/.test(text) && /(奶粉|配方|formula)/.test(libraryText)) score += 18;
+  if (/(合同|条款|付款|回款|违约|法务|contract)/.test(text) && /(合同|contract)/.test(libraryText)) score += 16;
+  if (/(简历|候选人|招聘|应聘|resume|cv)/.test(text) && /(简历|resume|cv|候选人)/.test(libraryText)) score += 16;
+  if (/(论文|研究|实验|paper|study)/.test(text) && /(论文|paper|学术)/.test(libraryText)) score += 14;
+  if (/(技术|接口|部署|系统|api|architecture)/.test(text) && /(技术|接口|部署|api|technical)/.test(libraryText)) score += 14;
+
+  return score;
 }
 
-function templateTypeToOutputKind(type?: ReportTemplateType): 'table' | 'page' | 'ppt' {
-  if (type === 'static-page') return 'page';
-  if (type === 'ppt') return 'ppt';
-  return 'table';
+function collectLibraryMatches(prompt: string, libraries: DocumentLibrary[]) {
+  const candidates: CandidateLibrary[] = libraries
+    .map((library) => ({ library, score: scoreLibraryCandidate(prompt, library) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (!candidates.length) return [];
+  const topScore = candidates[0].score;
+  return candidates.filter((item) => item.score >= Math.max(10, topScore - 6)).slice(0, 4);
 }
 
-function buildReportTemplateInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt') {
+function buildKnowledgeRetrievalQuery(requestText: string, libraries: Array<{ key: string; label: string }>) {
+  const cleaned = String(requestText || '')
+    .replace(/请按|按照|基于|根据|围绕|针对/g, ' ')
+    .replace(/知识库|资料库|文档库|库内内容/g, ' ')
+    .replace(/输出|生成|做一份|给我一份/g, ' ')
+    .replace(/表格报表|表格|报表|静态页|可视化页|分析页|报告|pdf|ppt/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const libraryHint = libraries.map((item) => item.label).join(' ');
+  return [cleaned, libraryHint].filter(Boolean).join(' ').trim();
+}
+
+function buildKnowledgeContext(
+  requestText: string,
+  libraries: Array<{ key: string; label: string }>,
+  retrieval: ReturnType<typeof retrieveKnowledgeMatches> | { documents: any[]; evidenceMatches: any[] },
+) {
+  const documents = retrieval.documents.slice(0, 6);
+  const evidence = retrieval.evidenceMatches.slice(0, 8);
+
+  return [
+    `用户需求：${requestText}`,
+    `优先知识库：${libraries.map((item) => item.label).join('、') || '未明确'}`,
+    '',
+    '文档摘要：',
+    ...documents.map(
+      (item, index) =>
+        `${index + 1}. ${item.title || item.name}\n摘要：${item.summary || item.excerpt || '无摘要'}\n主题：${
+          (item.topicTags || []).join('、') || '未识别'
+        }`,
+    ),
+    '',
+    '高相关证据：',
+    ...evidence.map((item, index) => `${index + 1}. ${item.item.title || item.item.name}\n证据：${item.chunkText}`),
+  ].join('\n\n');
+}
+
+function buildLibraryFallbackRetrieval(scopedItems: any[]) {
+  const documents = scopedItems.slice(0, 6).map((item) => ({
+    ...item,
+    title: item.title || item.name || '未命名文档',
+  }));
+
+  const evidenceMatches = scopedItems
+    .flatMap((item) =>
+      (item.evidenceChunks || [])
+        .slice(0, 2)
+        .map((chunk: string) => ({
+          item,
+          chunkText: String(chunk || '').trim(),
+          score: 1,
+        })),
+    )
+    .filter((entry) => entry.chunkText)
+    .slice(0, 8);
+
+  return { documents, evidenceMatches };
+}
+
+function buildKnowledgePlanPrompt(prompt: string, chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  const recentTurns = chatHistory
+    .map((item) => `${item.role === 'user' ? '用户' : '助手'}：${item.content}`)
+    .slice(-5)
+    .join('\n');
+
+  return [
+    recentTurns ? `最近对话：\n${recentTurns}` : '',
+    `当前补充输入：${prompt}`,
+    '请把最近 3 到 5 轮对话整理成一条“按知识库输出”的执行需求。',
+    '要求：',
+    '1. 输出中文。',
+    '2. 只返回 JSON，不要解释，不要使用 Markdown。',
+    '3. JSON schema 为 {"request":"...", "outputType":"table|page|pdf|ppt"}。',
+    '4. request 必须是一句完整自然语言，清楚说明主题、输出形式和重点。',
+    '5. 如果无法判断输出形式，默认 outputType 为 table。',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function shouldFallbackToLocalPlan(planText: string) {
+  const text = String(planText || '').trim();
+  if (!text) return true;
+  return /(乱码|无法从当前对话|重新发送清晰|未能识别|看不清|无法判断)/.test(text);
+}
+
+function buildLocalKnowledgePlan(prompt: string, chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  const recentUserContent = chatHistory
+    .filter((item) => item.role === 'user')
+    .map((item) => item.content)
+    .slice(-3)
+    .join('，');
+
+  const source = [recentUserContent, prompt].filter(Boolean).join('，').replace(/\s+/g, ' ').trim();
+  const outputKind = detectOutputKind(source) || 'table';
+  const outputLabel = outputKind === 'page'
+    ? '静态页'
+    : outputKind === 'pdf'
+      ? 'PDF'
+      : outputKind === 'ppt'
+        ? 'PPT'
+        : '表格报表';
+
+  const request = source
+    ? `${source}，输出为${outputLabel}`
+    : `请基于当前对话整理知识库内容，输出为${outputLabel}`;
+
+  return {
+    request,
+    outputType: outputKind,
+  };
+}
+
+function buildReportInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt') {
   if (kind === 'page') {
     return [
-      'You must answer with valid JSON only.',
+      '你必须只输出 JSON。',
       'Schema:',
-      '{"title":"...", "content":"...", "page":{"summary":"...", "cards":[{"label":"...","value":"...","note":"..."}], "sections":[{"title":"...","body":"...","bullets":["..."]}], "charts":[{"title":"...","items":[{"label":"...","value":12}]}]}}',
-      'Keep the page concise, readable, and presentation-ready.',
-      'All text must be Chinese.',
+      '{"title":"...","content":"...","page":{"summary":"...","cards":[{"label":"...","value":"...","note":"..."}],"sections":[{"title":"...","body":"...","bullets":["..."]}],"charts":[{"title":"...","items":[{"label":"...","value":12}]}]}}',
+      '所有内容必须是中文。',
     ].join('\n');
   }
 
   if (kind === 'pdf' || kind === 'ppt') {
     return [
-      'You must answer with valid JSON only.',
+      '你必须只输出 JSON。',
       'Schema:',
-      '{"title":"...", "content":"...", "page":{"summary":"...", "sections":[{"title":"...","body":"...","bullets":["..."]}]}}',
-      'All text must be Chinese.',
+      '{"title":"...","content":"...","page":{"summary":"...","sections":[{"title":"...","body":"...","bullets":["..."]}]}}',
+      '所有内容必须是中文。',
     ].join('\n');
   }
 
   return [
-    'You must answer with valid JSON only.',
+    '你必须只输出 JSON。',
     'Schema:',
-    '{"title":"...", "content":"...", "table":{"title":"...", "subtitle":"...", "columns":["..."], "rows":[["...","..."]]}}',
-    'All text must be Chinese.',
+    '{"title":"...","content":"...","table":{"title":"...","subtitle":"...","columns":["..."],"rows":[["...","..."]]}}',
+    '所有内容必须是中文。',
   ].join('\n');
 }
 
@@ -154,6 +280,11 @@ function tryParseJsonPayload(content: string) {
   }
 }
 
+function sanitizeColumns(columns: unknown) {
+  if (!Array.isArray(columns)) return [];
+  return columns.map((column) => String(column || '').trim()).filter(Boolean);
+}
+
 function sanitizeRows(rows: unknown) {
   if (!Array.isArray(rows)) return [];
   return rows
@@ -161,14 +292,9 @@ function sanitizeRows(rows: unknown) {
     .map((row) => row.map((cell) => (cell == null ? '' : String(cell))));
 }
 
-function sanitizeColumns(columns: unknown) {
-  if (!Array.isArray(columns)) return [];
-  return columns.map((column) => String(column || '').trim()).filter(Boolean);
-}
-
-function buildFallbackTableOutput(title: string, content: string) {
+function buildFallbackTableOutput(title: string, content: string): ChatOutput {
   return {
-    type: 'table' as const,
+    type: 'table',
     title,
     content,
     format: 'csv',
@@ -176,23 +302,19 @@ function buildFallbackTableOutput(title: string, content: string) {
       title,
       subtitle: '根据知识库整理',
       columns: ['结论', '说明'],
-      rows: [[content, '请继续细化字段要求']],
+      rows: [[content, '如需更细字段，可以继续补充要求']],
     },
   };
 }
 
-function normalizeReportOutput(
-  requestedKind: 'table' | 'page' | 'pdf' | 'ppt',
-  prompt: string,
-  rawContent: string,
-) {
+function normalizeReportOutput(kind: 'table' | 'page' | 'pdf' | 'ppt', requestText: string, rawContent: string): ChatOutput {
   const parsed = tryParseJsonPayload(rawContent);
   const title = String(parsed?.title || '知识库输出结果').trim() || '知识库输出结果';
   const content = String(parsed?.content || rawContent || '').trim();
 
-  if (requestedKind === 'page') {
+  if (kind === 'page') {
     return {
-      type: 'page' as const,
+      type: 'page',
       title,
       content,
       format: 'html',
@@ -205,9 +327,9 @@ function normalizeReportOutput(
     };
   }
 
-  if (requestedKind === 'pdf') {
+  if (kind === 'pdf') {
     return {
-      type: 'pdf' as const,
+      type: 'pdf',
       title,
       content,
       format: 'pdf',
@@ -218,9 +340,9 @@ function normalizeReportOutput(
     };
   }
 
-  if (requestedKind === 'ppt') {
+  if (kind === 'ppt') {
     return {
-      type: 'ppt' as const,
+      type: 'ppt',
       title,
       content,
       format: 'ppt',
@@ -234,11 +356,11 @@ function normalizeReportOutput(
   const columns = sanitizeColumns(parsed?.table?.columns);
   const rows = sanitizeRows(parsed?.table?.rows);
   if (!columns.length || !rows.length) {
-    return buildFallbackTableOutput(title || prompt, content || rawContent);
+    return buildFallbackTableOutput(title || requestText, content || rawContent);
   }
 
   return {
-    type: 'table' as const,
+    type: 'table',
     title,
     content,
     format: 'csv',
@@ -251,143 +373,27 @@ function normalizeReportOutput(
   };
 }
 
-function collectLibraryTerms(library: DocumentLibrary, group?: ReportGroup) {
-  return [
-    library.key,
-    library.label,
-    library.description,
-    group?.label,
-    ...(group?.triggerKeywords || []),
-  ]
-    .filter(Boolean)
-    .map((value) => normalizeText(String(value)))
-    .filter(Boolean);
+function buildKnowledgePlanMessage() {
+  return '我已根据最近几轮对话整理出一条按知识库输出的需求。请先确认或修改，再执行输出。';
 }
 
-function scoreLibraryCandidate(prompt: string, library: DocumentLibrary, group?: ReportGroup) {
-  const text = normalizeText(prompt);
-  let score = 0;
-  for (const term of collectLibraryTerms(library, group)) {
-    if (!term) continue;
-    if (text === term) score += 30;
-    else if (text.includes(term)) score += Math.min(22, Math.max(8, term.length * 2));
+function buildKnowledgeMissMessage(libraries: Array<{ key: string; label: string }>) {
+  if (libraries.length) {
+    return `当前已尝试知识库：${libraries.map((item) => item.label).join('、')}。\n\n这次没有检索到足够的知识库证据，暂不生成结果。请换一种更明确的知识库表述，或先补充相关文档。`;
   }
-
-  if (group && findReportGroupForPrompt([group], prompt)) score += 18;
-  if (library.key === 'contract' && /(合同|条款|付款|回款|违约|法务)/.test(text)) score += 20;
-  if (/(奶粉|配方|菌株|营养|formula)/.test(text) && /(配方|formula|奶粉)/.test(normalizeText(`${library.key} ${library.label}`))) score += 22;
-  if (/(简历|候选人|应聘|招聘|resume|cv)/.test(text) && /(resume|简历)/.test(normalizeText(`${library.key} ${library.label}`))) score += 16;
-  if (/(论文|研究|实验|文献|paper|study)/.test(text) && /(paper|论文|学术)/.test(normalizeText(`${library.key} ${library.label}`))) score += 16;
-  if (/(技术|接口|部署|系统|方案|api|architecture)/.test(text) && /(technical|技术|接口|部署)/.test(normalizeText(`${library.key} ${library.label}`))) score += 16;
-
-  return score;
+  return '当前没有稳定命中的知识库，暂不生成结果。请先说明要基于哪个知识库输出。';
 }
 
-function collectLibraryMatches(
-  prompt: string,
-  groups: ReportGroup[],
-  documentLibraries: Awaited<ReturnType<typeof loadDocumentLibraries>>,
-) {
-  const candidates: CandidateLibrary[] = documentLibraries
-    .map((library) => {
-      const group = groups.find((item) => item.key === library.key);
-      return {
-        library,
-        group,
-        score: scoreLibraryCandidate(prompt, library, group),
-      };
-    })
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (!candidates.length) {
-    const reportGroup = findReportGroupForPrompt(groups, prompt);
-    if (!reportGroup) return [];
-    const library = documentLibraries.find((item) => item.key === reportGroup.key);
-    return library ? [{ library, group: reportGroup, score: 20 }] : [];
-  }
-
-  const topScore = candidates[0].score;
-  return candidates.filter((item) => item.score >= Math.max(12, topScore - 8)).slice(0, 4);
+function buildNoPlanMessage() {
+  return '这次还没有整理出稳定的知识库输出需求。请再补充一句更明确的目标，然后重新点击“按知识库输出”。';
 }
 
-function pickRequestedOutputKind(
-  prompt: string,
-  candidates: CandidateLibrary[],
-): 'table' | 'page' | 'pdf' | 'ppt' {
-  const explicit = detectExplicitOutputKind(prompt);
-  if (explicit) return explicit;
-
-  const templateType = candidates[0]?.group?.templates.find(
-    (item) => item.key === candidates[0]?.group?.defaultTemplateKey,
-  )?.type;
-  return templateTypeToOutputKind(templateType);
-}
-
-function buildKnowledgeRetrievalQuery(prompt: string, libraries: Array<{ key: string; label: string }>) {
-  const cleaned = String(prompt || '')
-    .replace(/请按|按照|基于|根据|围绕|针对/g, ' ')
-    .replace(/知识库|资料库|文档库|库内容|库里的|内容输出/g, ' ')
-    .replace(/输出|生成|做一份|给我一份|一份/g, ' ')
-    .replace(/表格报表|表格|报表|静态页|可视化页|分析页|报告|pdf|ppt/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const libraryHint = libraries.map((item) => item.label).join(' ');
-  const merged = [cleaned, libraryHint].filter(Boolean).join(' ').trim();
-  return merged || libraryHint || String(prompt || '').trim();
-}
-
-function buildKnowledgeContext(prompt: string, libraryLabels: string[], matches: ReturnType<typeof retrieveKnowledgeMatches>) {
-  const topDocuments = matches.documents.slice(0, 6);
-  const topEvidence = matches.evidenceMatches.slice(0, 8);
-  return [
-    `用户要求：${prompt}`,
-    `限定知识库：${libraryLabels.join('、') || '未明确指定'}`,
-    '',
-    '文档摘要：',
-    ...topDocuments.map(
-      (item, index) =>
-        `${index + 1}. ${item.title || item.name}\n摘要：${item.summary || item.excerpt || '无摘要'}\n主题：${
-          (item.topicTags || []).join('、') || '未识别'
-        }`,
-    ),
-    '',
-    '高相关证据：',
-    ...topEvidence.map(
-      (item, index) => `${index + 1}. ${item.item.title || item.item.name}\n证据：${item.chunkText}`,
-    ),
-  ].join('\n\n');
-}
-
-function buildLibraryFallbackRetrieval(items: ParsedDocument[]): RetrievalLikeResult {
-  const documents = [...items]
-    .sort((a, b) => {
-      const scoreA = (a.evidenceChunks?.length || 0) + (a.summary ? 4 : 0) + (a.parseStage === 'detailed' ? 6 : 0);
-      const scoreB = (b.evidenceChunks?.length || 0) + (b.summary ? 4 : 0) + (b.parseStage === 'detailed' ? 6 : 0);
-      return scoreB - scoreA;
-    })
-    .slice(0, 8);
-
-  const evidenceMatches = documents.flatMap((item) =>
-    (item.evidenceChunks || []).slice(0, 3).map((chunk, index) => ({
-      item,
-      chunkId: chunk.id || `${item.path}#fallback-${index}`,
-      chunkText: chunk.text,
-      score: Math.max(1, 20 - index),
-    })),
-  );
-
-  return {
-    documents,
-    evidenceMatches: evidenceMatches.slice(0, 12),
-    meta: {
-      stages: ['rule', 'rerank'],
-      vectorEnabled: false,
-      candidateCount: items.length,
-      rerankedCount: documents.length,
-    },
-  };
+function extractPlanningResult(rawContent: string, fallbackPrompt: string): { request: string; outputType: string } {
+  const parsed = tryParseJsonPayload(rawContent);
+  const request = String(parsed?.request || '').trim() || fallbackPrompt;
+  const detected = String(parsed?.outputType || '').trim().toLowerCase();
+  const outputType = detected === 'page' || detected === 'pdf' || detected === 'ppt' ? detected : 'table';
+  return { request, outputType };
 }
 
 export async function runChatOrchestrationV2(input: ChatRequestInput) {
@@ -396,23 +402,54 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const gatewayReachable = await isOpenClawGatewayReachable();
   const gatewayConfigured = gatewayReachable || isOpenClawGatewayConfigured();
   const traceId = `trace_${Date.now()}`;
+  const requestMode = input.mode || 'general';
 
   let mode: 'openclaw' | 'fallback' = 'fallback';
   let content = buildCloudUnavailableAnswer();
   let output: ChatOutput = { type: 'answer', content };
+  let intent: 'general' | 'report' = requestMode === 'general' ? 'general' : 'report';
   let libraries: Array<{ key: string; label: string }> = [];
   let fallbackReason = gatewayConfigured ? '' : 'cloud-gateway-not-configured';
+  let knowledgePlan: KnowledgePlan | null = null;
 
   if (gatewayConfigured) {
     try {
-      if (looksLikeKnowledgeReportPrompt(prompt)) {
-        const [reportState, documentLibraries, documentState] = await Promise.all([
-          loadReportCenterState(),
+      if (requestMode === 'knowledge_plan') {
+        const [documentLibraries, cloud] = await Promise.all([
+          loadDocumentLibraries(),
+          runOpenClawChat({
+            prompt: buildKnowledgePlanPrompt(prompt, chatHistory),
+            sessionUser: input.sessionUser,
+            chatHistory: [],
+          }),
+        ]);
+
+        const cloudPlan = extractPlanningResult(cloud.content, prompt);
+        const planning = shouldFallbackToLocalPlan(cloudPlan.request)
+          ? buildLocalKnowledgePlan(prompt, chatHistory)
+          : cloudPlan;
+        const matchedLibraries = collectLibraryMatches(buildPromptForScoring(planning.request, chatHistory), documentLibraries)
+          .map((item) => ({ key: item.library.key, label: item.library.label }));
+
+        knowledgePlan = {
+          request: planning.request,
+          libraries: matchedLibraries,
+          outputType: planning.outputType,
+        };
+
+        content = planning.request ? buildKnowledgePlanMessage() : buildNoPlanMessage();
+        output = { type: 'answer', content };
+        intent = 'report';
+        libraries = matchedLibraries;
+        mode = 'openclaw';
+      } else if (requestMode === 'knowledge_output') {
+        const requestText = String(input.confirmedRequest || prompt).trim();
+        const [documentLibraries, documentState] = await Promise.all([
           loadDocumentLibraries(),
           loadParsedDocuments(240, false),
         ]);
 
-        const candidates = collectLibraryMatches(prompt, reportState.groups, documentLibraries);
+        const candidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), documentLibraries);
         libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
 
         const scopedItems = candidates.length
@@ -421,52 +458,53 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
             )
           : [];
 
-        const retrievalQuery = buildKnowledgeRetrievalQuery(prompt, libraries);
-        let retrieval = retrieveKnowledgeMatches(scopedItems, retrievalQuery, { docLimit: 8, evidenceLimit: 10 });
-        if (!retrieval.documents.length && scopedItems.length) {
-          retrieval = buildLibraryFallbackRetrieval(scopedItems);
-        }
+        const retrieval = retrieveKnowledgeMatches(
+          scopedItems,
+          buildKnowledgeRetrievalQuery(requestText, libraries),
+          { docLimit: 8, evidenceLimit: 10 },
+        );
 
-        if (retrieval.documents.length) {
-          const requestedKind = pickRequestedOutputKind(prompt, candidates);
-          const knowledgeContext = buildKnowledgeContext(
-            prompt,
-            libraries.map((item) => item.label),
-            retrieval,
-          );
+        const effectiveRetrieval =
+          retrieval.documents.length || retrieval.evidenceMatches.length
+            ? retrieval
+            : buildLibraryFallbackRetrieval(scopedItems);
+
+        if (!effectiveRetrieval.documents.length) {
+          content = buildKnowledgeMissMessage(libraries);
+          output = { type: 'answer', content };
+          intent = 'report';
+          mode = 'openclaw';
+        } else {
+          const requestedKind = detectOutputKind(requestText) || 'table';
           const cloud = await runOpenClawChat({
-            prompt,
+            prompt: requestText,
             sessionUser: input.sessionUser,
             chatHistory,
-            contextBlocks: [knowledgeContext],
+            contextBlocks: [buildKnowledgeContext(requestText, libraries, effectiveRetrieval)],
             systemPrompt: [
-              '你是产品“AI 知识数据管理”里的云端智能助手。',
-              '用户明确要求按知识库内容输出结果。',
-              '必须以提供的知识库证据为主，不能脱离知识库自由发挥。',
-              '如果证据不足，只能补充有限推断，并明确哪些点来自知识库，哪些点是补充建议。',
-              buildReportTemplateInstruction(requestedKind),
+              '你是 AI智能服务 中负责按知识库生成结果的助手。',
+              '用户已经明确要求按知识库输出，请严格以提供的知识库证据为主。',
+              '不要脱离知识库自由发挥。',
+              '如果证据不足，只能有限补充，并在内容里保持克制。',
+              buildReportInstruction(requestedKind),
             ].join('\n'),
           });
 
-          content = cloud.content;
-          output = normalizeReportOutput(requestedKind, prompt, cloud.content);
-          mode = 'openclaw';
-        } else {
-          const libraryHint = libraries.length
-            ? `当前已尝试知识库：${libraries.map((item) => item.label).join('、')}`
-            : '当前没有稳定命中的知识库';
-          content = `${libraryHint}。\n\n这次没有检索到足够的知识库证据，暂不生成报表。请换一种更明确的知识库表述，或者先把相关文档加入对应知识库后再试。`;
-          output = { type: 'answer', content };
+          output = normalizeReportOutput(requestedKind, requestText, cloud.content);
+          content = output.content;
+          intent = 'report';
           mode = 'openclaw';
         }
       } else {
-        const result = await runOpenClawChat({
+        const cloud = await runOpenClawChat({
           prompt,
           sessionUser: input.sessionUser,
           chatHistory,
         });
-        content = result.content;
+
+        content = cloud.content;
         output = { type: 'answer', content };
+        intent = 'general';
         mode = 'openclaw';
       }
     } catch (error) {
@@ -480,15 +518,15 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
 
   return {
     mode,
-    intent: output.type === 'answer' ? ('general' as const) : ('report' as const),
-    needsKnowledge: libraries.length > 0,
+    intent,
+    needsKnowledge: requestMode !== 'general',
     libraries,
     output,
+    knowledgePlan,
     guard: {
       requiresConfirmation: false,
       reason: '',
     },
-    scenario: 'default' as ScenarioKey,
     traceId,
     message: {
       role: 'assistant' as const,
@@ -497,7 +535,6 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       meta: mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用',
       references: [],
     },
-    panel: buildDefaultPanel(),
     sources: [],
     permissions: { mode: 'read-only' as const },
     orchestration: {
