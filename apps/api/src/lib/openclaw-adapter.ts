@@ -1,4 +1,4 @@
-import { getActiveOpenClawModel } from './model-config.js';
+import { getActiveOpenClawModel, loadModelConfigState } from './model-config.js';
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -175,8 +175,13 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const baseUrl = env('OPENCLAW_GATEWAY_URL');
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
-  const selectedModel = (await getActiveOpenClawModel()) || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
-  const model = agentId ? `openclaw/${agentId}` : 'openclaw';
+  const [selectedModel, modelState] = await Promise.all([
+    getActiveOpenClawModel(),
+    loadModelConfigState(),
+  ]);
+  const model = modelState?.openclaw?.usesDevBridge || modelState?.openclaw?.installMode === 'wsl'
+    ? (agentId ? `openclaw/${agentId}` : 'openclaw')
+    : (selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`));
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');
