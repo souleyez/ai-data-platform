@@ -15,7 +15,7 @@ function buildTopSummary(documentTotal, documentLibraries) {
     .filter(Boolean)
     .join('、');
 
-  return `已管理文档 ${documentTotal} 份，知识库 ${libraryCount} 个${names ? `（${names}${libraryCount > 3 ? ' 等' : ''}）` : ''}。直接说明知识库需求，可定制数据报表、静态 PPT、研发计划等。`;
+  return `已管理文档 ${documentTotal} 份，知识库 ${libraryCount} 个${names ? `，包括 ${names}${libraryCount > 3 ? ' 等' : ''}` : ''}。直接说明知识库需求，可定制数据报表、静态 PPT、研发计划等。`;
 }
 
 export default function HomePage() {
@@ -54,7 +54,7 @@ export default function HomePage() {
       <main className="main-panel">
         <header className="topbar">
           <div className="topbar-title-row">
-            <h2>AI 知识库</h2>
+            <h2>AI智能服务</h2>
             <span className="topbar-inline-note">{topSummary}</span>
           </div>
         </header>

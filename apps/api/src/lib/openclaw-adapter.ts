@@ -175,7 +175,8 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const baseUrl = env('OPENCLAW_GATEWAY_URL');
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
-  const model = (await getActiveOpenClawModel()) || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+  const selectedModel = (await getActiveOpenClawModel()) || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+  const model = agentId ? `openclaw/${agentId}` : 'openclaw';
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');
@@ -222,7 +223,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     return {
       content: result.content,
       provider: 'cloud-gateway',
-      model: model || 'cloud-model',
+      model: selectedModel || model || 'cloud-model',
       raw: result.json,
     };
   } catch (error) {

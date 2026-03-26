@@ -140,7 +140,7 @@ export default function Sidebar({ sourceItems = [], currentPath = '/' }) {
       <div className="brand">
         <div className="brand-logo">AI</div>
         <div>
-          <h1>AI 知识数据管理</h1>
+          <h1>AI文档数据助理</h1>
           <p>个人知识库，采编写一站式解决</p>
         </div>
       </div>
