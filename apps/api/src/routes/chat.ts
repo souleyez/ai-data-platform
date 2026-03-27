@@ -36,7 +36,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
               key: String(item?.key || '').trim(),
               label: String(item?.label || '').trim(),
             }))
-            .filter((item) => item.key && item.label)
+            .filter((item) => item.key || item.label)
         : [],
       sessionUser: body.sessionUser,
       chatHistory: Array.isArray(body.chatHistory)

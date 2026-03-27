@@ -40,13 +40,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const preferredLibraries = Array.isArray(input.preferredLibraries)
     ? input.preferredLibraries
         .map((item) => ({ key: String(item?.key || '').trim(), label: String(item?.label || '').trim() }))
-        .filter((item) => item.key && item.label)
+        .filter((item) => item.key || item.label)
     : [];
 
   const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
-  const explicitCandidates = preferredKeys.size
+  const preferredLabels = new Set(preferredLibraries.map((item) => item.label));
+  const explicitCandidates = preferredKeys.size || preferredLabels.size
     ? documentLibraries
-        .filter((library) => preferredKeys.has(library.key))
+        .filter((library) => preferredKeys.has(library.key) || preferredLabels.has(library.label))
         .map((library, index) => ({ library, score: 100 - index }))
     : [];
   const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, input.chatHistory), documentLibraries);

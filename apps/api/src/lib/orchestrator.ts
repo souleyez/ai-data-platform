@@ -49,19 +49,27 @@ async function executeKnowledgePlan(
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
   sessionUser?: string,
 ) {
-  const [documentLibraries, cloud] = await Promise.all([
-    loadDocumentLibraries(),
-    runOpenClawChat({
+  const documentLibraries = await loadDocumentLibraries();
+  const localPlan = buildLocalKnowledgePlan(prompt, chatHistory);
+  let planning = localPlan;
+
+  try {
+    const cloud = await runOpenClawChat({
       prompt: buildKnowledgePlanPrompt(prompt, chatHistory),
       sessionUser,
       chatHistory: [],
-    }),
-  ]);
+    });
+    const cloudPlan = extractPlanningResult(cloud.content, localPlan.request);
+    if (!shouldFallbackToLocalPlan(cloudPlan.request)) {
+      planning = {
+        request: cloudPlan.request || localPlan.request,
+        outputType: (cloudPlan.outputType || localPlan.outputType) as 'table' | 'page' | 'pdf' | 'ppt',
+      };
+    }
+  } catch {
+    planning = localPlan;
+  }
 
-  const cloudPlan = extractPlanningResult(cloud.content, prompt);
-  const planning = shouldFallbackToLocalPlan(cloudPlan.request)
-    ? buildLocalKnowledgePlan(prompt, chatHistory)
-    : cloudPlan;
   const matchedLibraries = collectLibraryMatches(
     buildPromptForScoring(planning.request, chatHistory),
     documentLibraries,

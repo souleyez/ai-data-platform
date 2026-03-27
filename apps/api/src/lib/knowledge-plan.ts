@@ -12,14 +12,20 @@ export type KnowledgePlan = {
 };
 
 function normalizeText(value: string) {
-  return String(value || '').toLowerCase().replace(/\s+/g, '');
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[，。、“”"'‘’：:；;、!?（）()【】\[\]\-_/\\|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt' | null {
-  if (/(静态页|可视化页|分析页|页面)/.test(text)) return 'page';
-  if (/\bppt\b/i.test(text)) return 'ppt';
-  if (/\bpdf\b/i.test(text)) return 'pdf';
-  if (/(报表|表格|报告)/.test(text)) return 'table';
+  const normalized = normalizeText(text);
+  if (!normalized) return null;
+  if (/(静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|page)\b/.test(normalized)) return 'page';
+  if (/\bppt\b|演示稿|汇报稿|汇报提纲/.test(normalized)) return 'ppt';
+  if (/\bpdf\b|文档版|正式文档/.test(normalized)) return 'pdf';
+  if (/(报表|表格|对比表|清单|报告)/.test(normalized)) return 'table';
   return null;
 }
 
@@ -36,30 +42,36 @@ export function buildPromptForScoring(
 }
 
 function collectLibraryTerms(library: DocumentLibrary) {
-  return [library.key, library.label, library.description]
+  const terms = [library.key, library.label, library.description]
     .filter(Boolean)
     .map((value) => normalizeText(String(value)));
+  return [...new Set(terms.filter(Boolean))];
 }
 
 function scoreLibraryCandidate(prompt: string, library: DocumentLibrary) {
   const rawText = String(prompt || '');
   const text = normalizeText(prompt);
+  const libraryText = normalizeText(`${library.key} ${library.label} ${library.description || ''}`);
   let score = 0;
 
-  if (rawText.includes(library.label) || rawText.includes(library.key)) score += 28;
+  if (!text) return score;
+
+  if (library.label && rawText.includes(library.label)) score += 36;
+  if (library.key && rawText.includes(library.key)) score += 28;
 
   for (const term of collectLibraryTerms(library)) {
     if (!term) continue;
-    if (text === term) score += 24;
-    else if (text.includes(term)) score += Math.min(18, Math.max(6, term.length * 2));
+    if (text === term) score += 28;
+    else if (text.includes(term)) score += Math.min(20, Math.max(8, term.length * 2));
   }
 
-  const libraryText = normalizeText(`${library.key} ${library.label} ${library.description || ''}`);
-  if (/(奶粉|配方|formula|营养|菌株)/.test(text) && /(奶粉|配方|formula)/.test(libraryText)) score += 18;
-  if (/(合同|条款|付款|回款|违约|法务|contract)/.test(text) && /(合同|contract)/.test(libraryText)) score += 16;
-  if (/(简历|候选人|招聘|应聘|resume|cv)/.test(text) && /(简历|resume|cv|候选人)/.test(libraryText)) score += 16;
-  if (/(论文|研究|实验|paper|study)/.test(text) && /(论文|paper|学术)/.test(libraryText)) score += 14;
-  if (/(技术|接口|部署|系统|api|architecture)/.test(text) && /(技术|接口|部署|api|technical)/.test(libraryText)) score += 14;
+  if (/(奶粉|配方|营养|菌株|formula)/.test(text) && /(奶粉|配方|营养|formula)/.test(libraryText)) score += 18;
+  if (/(合同|条款|付款|回款|违约|法务|contract)/.test(text) && /(合同|contract)/.test(libraryText)) score += 18;
+  if (/(简历|候选人|招聘|应聘|resume|cv)/.test(text) && /(简历|resume|cv|候选人|人才)/.test(libraryText)) score += 18;
+  if (/(论文|研究|实验|paper|study|trial)/.test(text) && /(论文|paper|学术|research)/.test(libraryText)) score += 16;
+  if (/(技术|接口|部署|系统|架构|api|technical|integration)/.test(text) && /(技术|接口|部署|api|technical|iot)/.test(libraryText)) score += 16;
+  if (/(招标|投标|标书|采购|bids|tender)/.test(text) && /(招标|投标|标书|bids|tender)/.test(libraryText)) score += 18;
+  if (/(订单|库存|销量|平台|客诉|erp|经营)/.test(text) && /(订单|库存|销量|经营|erp|电商)/.test(libraryText)) score += 18;
 
   return score;
 }
@@ -72,7 +84,7 @@ export function collectLibraryMatches(prompt: string, libraries: DocumentLibrary
 
   if (!candidates.length) return [];
   const topScore = candidates[0].score;
-  return candidates.filter((item) => item.score >= Math.max(10, topScore - 6)).slice(0, 4);
+  return candidates.filter((item) => item.score >= Math.max(12, topScore - 8)).slice(0, 4);
 }
 
 export function buildKnowledgePlanPrompt(
@@ -89,11 +101,10 @@ export function buildKnowledgePlanPrompt(
     `当前补充输入：${prompt}`,
     '请把最近 3 到 5 轮对话整理成一条“按知识库输出”的执行需求。',
     '要求：',
-    '1. 输出中文。',
-    '2. 只返回 JSON，不要解释，不要使用 Markdown。',
-    '3. JSON schema 为 {"request":"...", "outputType":"table|page|pdf|ppt"}。',
-    '4. request 必须是一句完整自然语言，清楚说明主题、输出形式和重点。',
-    '5. 如果无法判断输出形式，默认 outputType 为 table。',
+    '1. 只返回 JSON，不要解释，不要 Markdown。',
+    '2. JSON schema 为 {"request":"...", "outputType":"table|page|pdf|ppt"}。',
+    '3. request 必须是一句完整中文，明确主题、输出形式和重点。',
+    '4. 如果不能稳定判断输出形式，outputType 默认为 table。',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -102,7 +113,7 @@ export function buildKnowledgePlanPrompt(
 export function shouldFallbackToLocalPlan(planText: string) {
   const text = String(planText || '').trim();
   if (!text) return true;
-  return /(乱码|无法从当前对话|重新发送清晰|未能识别|看不清|无法判断)/.test(text);
+  return /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|无法从当前输入|请提供具体|明确说明要整理的主题|无法提取有效需求|输入内容无法提取)/.test(text);
 }
 
 export function buildLocalKnowledgePlan(
@@ -113,9 +124,14 @@ export function buildLocalKnowledgePlan(
     .filter((item) => item.role === 'user')
     .map((item) => item.content)
     .slice(-3)
-    .join('，');
+    .join('；');
 
-  const source = [recentUserContent, prompt].filter(Boolean).join('，').replace(/\s+/g, ' ').trim();
+  const source = [recentUserContent, prompt]
+    .filter(Boolean)
+    .join('；')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   const outputKind = detectOutputKind(source) || 'table';
   const outputLabel = outputKind === 'page'
     ? '静态页'
@@ -126,8 +142,8 @@ export function buildLocalKnowledgePlan(
         : '表格报表';
 
   const request = source
-    ? `${source}，输出为${outputLabel}`
-    : `请基于当前对话整理知识库内容，输出为${outputLabel}`;
+    ? `${source}，输出形式为${outputLabel}`
+    : `请基于当前对话整理知识库内容，输出形式为${outputLabel}`;
 
   return {
     request,
@@ -136,11 +152,11 @@ export function buildLocalKnowledgePlan(
 }
 
 export function buildKnowledgePlanMessage() {
-  return '我已根据最近几轮对话整理出一条按知识库输出的需求。请先确认或修改，再执行输出。';
+  return '我已经根据最近几轮对话整理出一条按知识库输出的需求。请先确认或修改，再执行输出。';
 }
 
 export function buildNoPlanMessage() {
-  return '这次还没有整理出稳定的知识库输出需求。请再补充一句更明确的目标，然后重新点击“按知识库输出”。';
+  return '这次还没有整理出稳定的知识库输出需求。请补充一句更明确的目标，然后重新点击“按知识库输出”。';
 }
 
 export function extractPlanningResult(
@@ -153,7 +169,9 @@ export function extractPlanningResult(
     const candidate = fenced ? fenced[1].trim() : trimmed;
     const firstBrace = candidate.indexOf('{');
     const lastBrace = candidate.lastIndexOf('}');
-    const jsonText = firstBrace >= 0 && lastBrace > firstBrace ? candidate.slice(firstBrace, lastBrace + 1) : candidate;
+    const jsonText = firstBrace >= 0 && lastBrace > firstBrace
+      ? candidate.slice(firstBrace, lastBrace + 1)
+      : candidate;
     const parsed = JSON.parse(jsonText);
     const request = String(parsed?.request || '').trim() || fallbackPrompt;
     const detected = String(parsed?.outputType || '').trim().toLowerCase();
