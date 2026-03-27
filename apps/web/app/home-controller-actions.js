@@ -15,38 +15,12 @@ import {
   patchMessageById,
   patchMessagesWithIngestItems,
 } from './home-message-helpers';
+import { appendChatMessageKeepingLatestFailure, buildRecentChatHistory } from './lib/chat-memory';
 import { createGeneratedReport } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
 
 function appendAssistantMessage(setMessages, message) {
-  setMessages((prev) => [...prev, message]);
-}
-
-function buildRecentChatHistory(messages) {
-  return (messages || [])
-    .filter((message) => {
-      if (!(message?.role === 'user' || message?.role === 'assistant')) return false;
-      if (message?.ingestFeedback || message?.credentialRequest) return false;
-      const content = String(message?.content || '').trim();
-      return Boolean(content);
-    })
-    .map((message) => ({
-      role: message.role,
-      content: String(message.content || '').trim(),
-    }))
-    .slice(-8);
-}
-
-function buildKnowledgePlanningSource(inputValue, messages) {
-  const text = String(inputValue || '').trim();
-  if (text) return text;
-
-  const history = buildRecentChatHistory(messages)
-    .map((item) => item.content)
-    .filter(Boolean)
-    .slice(-5);
-
-  return history.join('\n');
+  setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, message));
 }
 
 function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
@@ -134,6 +108,7 @@ export async function runDocumentUpload(files, context) {
       title: '文档上传失败',
       content: error instanceof Error ? error.message : '文档上传失败，请稍后重试。',
       meta: files.map((file) => file.name).join(' / '),
+      messageType: 'system_failure',
     });
   } finally {
     if (uploadInputRef.current) uploadInputRef.current.value = '';
@@ -142,123 +117,36 @@ export async function runDocumentUpload(files, context) {
 }
 
 export async function submitQuestion(value, context) {
-  const { inputState, messages, setInput, setIsLoading, setMessages } = context;
+  const { inputState, messages, setConversationState, setInput, setIsLoading, setMessages } = context;
 
   const text = String(value || '').trim();
-  if (!text || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
+  if (!text || inputState.isLoading || inputState.uploadLoading) return;
 
   setMessages((prev) => [...prev, { id: createMessageId('user'), role: 'user', content: text }]);
   setInput('');
   setIsLoading(true);
 
   try {
-    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), { mode: 'general' });
+    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
+      mode: 'general',
+      conversationState: context.conversationState || null,
+    });
     const normalized = normalizeChatResponse(data, null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
+    setConversationState?.(normalized.conversationState || null);
     await persistGeneratedReport(normalized, message, context);
   } catch (error) {
+    setConversationState?.(null);
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
       content: error instanceof Error ? error.message : '当前云端问答暂时不可用，请稍后再试。',
       meta: '云端问答未返回结果',
+      messageType: 'system_failure',
     });
   } finally {
     setIsLoading(false);
-  }
-}
-
-export async function submitKnowledgeOutputPlan(value, context) {
-  const {
-    inputState,
-    messages,
-    setKnowledgeOutputDraft,
-    setKnowledgeOutputLoading,
-    setKnowledgeOutputPlan,
-    setMessages,
-  } = context;
-
-  const planningSource = buildKnowledgePlanningSource(value, messages);
-  if (!planningSource || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
-
-  setKnowledgeOutputLoading(true);
-
-  try {
-    const data = await sendChatPrompt(planningSource, buildRecentChatHistory(messages), { mode: 'knowledge_plan' });
-    const planText = String(data?.knowledgePlan?.request || '').trim();
-
-    if (!planText) {
-      appendAssistantMessage(setMessages, {
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: '我还没有从最近几轮对话里整理出稳定的知识库输出需求。你可以先再补充一句核心目标，然后再点“按知识库输出”。',
-        meta: '知识库输出准备未形成需求',
-      });
-      setKnowledgeOutputPlan(null);
-      setKnowledgeOutputDraft('');
-      return;
-    }
-
-    setKnowledgeOutputPlan(data.knowledgePlan || null);
-    setKnowledgeOutputDraft(planText);
-  } catch (error) {
-    appendAssistantMessage(setMessages, {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: error instanceof Error ? error.message : '整理知识库输出需求失败，请稍后重试。',
-      meta: '知识库输出准备失败',
-    });
-    setKnowledgeOutputPlan(null);
-    setKnowledgeOutputDraft('');
-  } finally {
-    setKnowledgeOutputLoading(false);
-  }
-}
-
-export async function submitKnowledgeOutputConfirm(value, context) {
-  const {
-    inputState,
-    messages,
-    setKnowledgeOutputDraft,
-    setKnowledgeOutputLoading,
-    setKnowledgeOutputPlan,
-    setMessages,
-  } = context;
-
-  const text = String(value || '').trim();
-  if (!text || inputState.isLoading || inputState.uploadLoading || inputState.knowledgeOutputLoading) return;
-
-  setKnowledgeOutputLoading(true);
-
-  try {
-    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
-      mode: 'knowledge_output',
-      confirmedRequest: text,
-      preferredLibraries: Array.isArray(context.knowledgeOutputPlan?.libraries)
-        ? context.knowledgeOutputPlan.libraries
-        : [],
-    });
-    const normalized = normalizeChatResponse(data, null);
-    const message = {
-      ...normalized.message,
-      id: createMessageId('assistant'),
-      title: normalized.output?.type && normalized.output.type !== 'answer' ? '知识库输出结果' : '',
-    };
-
-    appendAssistantMessage(setMessages, message);
-    await persistGeneratedReport(normalized, message, context);
-    setKnowledgeOutputPlan(null);
-    setKnowledgeOutputDraft('');
-  } catch (error) {
-    appendAssistantMessage(setMessages, {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: error instanceof Error ? error.message : '按知识库输出失败，请稍后重试。',
-      meta: '知识库输出未完成',
-    });
-  } finally {
-    setKnowledgeOutputLoading(false);
   }
 }
 
@@ -281,6 +169,7 @@ export async function saveGroupsForIngestItem(itemId, groups, context) {
       role: 'assistant',
       title: '知识库分组更新失败',
       content: error instanceof Error ? error.message : '保存知识库分组失败。',
+      messageType: 'system_failure',
     });
     return false;
   } finally {
@@ -329,7 +218,10 @@ export async function submitCredentialForMessage(messageId, credentials, context
   appendAssistantMessage(setMessages, {
     id: createMessageId('assistant'),
     role: 'assistant',
-    content: '已收到登录信息。当前首页主流程不再自动触发网页采集，如需恢复这条能力，再单独接回。',
-    meta: buildCredentialRequestMessage({ url: target.credentialRequest.url, credentialRequest: target.credentialRequest }),
+    content: '已收到登录信息。当前首页主流程不再自动触发网页采集，如需恢复这条能力，会在数据源工作台里继续管理。',
+    meta: buildCredentialRequestMessage({
+      url: target.credentialRequest.url,
+      credentialRequest: target.credentialRequest,
+    }),
   });
 }

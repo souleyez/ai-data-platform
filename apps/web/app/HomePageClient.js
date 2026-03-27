@@ -17,45 +17,37 @@ function buildTopSummary(documentTotal, documentLibraries) {
     .filter(Boolean)
     .join('、');
 
-  const libraryCount = libraries.length;
-  const prefix = `已管理文档 ${documentTotal} 份，知识库 ${libraryCount} 个`;
+  const prefix = `已管理文档 ${documentTotal} 份，知识库 ${libraries.length} 个`;
   if (!visibleNames) {
-    return `${prefix}。日常问题可直接对话，需要基于知识库生成内容时，请使用“按知识库输出”。`;
+    return `${prefix}。日常问题可直接对话；当你明确要求基于库内材料生成结果时，系统会自动补齐必要信息后再执行。`;
   }
 
-  return `${prefix}，当前重点包括 ${visibleNames}${libraryCount > 3 ? ' 等' : ''}。日常问题可直接对话，需要基于知识库生成内容时，请使用“按知识库输出”。`;
+  return `${prefix}，当前重点包括 ${visibleNames}${libraries.length > 3 ? ' 等' : ''}。日常问题可直接对话；当你明确要求基于库内材料生成结果时，系统会自动补齐必要信息后再执行。`;
 }
 
 export default function HomePageClient({ initialModelState }) {
   const {
-    canPrepareKnowledgeOutput,
     deleteReport,
     documentLibraries,
     documentTotal,
     groupSaving,
     input,
     isLoading,
-    knowledgeOutputDraft,
-    knowledgeOutputLoading,
-    knowledgeOutputPlan,
     messages,
     reportCollapsed,
     reportItems,
     selectedManualLibraries,
     selectedReportId,
     setInput,
-    setKnowledgeOutputDraft,
-    setKnowledgeOutputPlan,
     setReportCollapsed,
     setSelectedManualLibraries,
     setSelectedReportId,
     sidebarSources,
-    submitKnowledgeOutputConfirm,
-    submitKnowledgeOutputPlan,
     submitQuestion,
     uploadInputRef,
     uploadLoading,
     runDocumentUpload,
+    reviseReport,
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
     submitCredentialForMessage,
@@ -81,17 +73,6 @@ export default function HomePageClient({ initialModelState }) {
               isLoading={isLoading}
               onInputChange={setInput}
               onSubmit={submitQuestion}
-              onPrepareKnowledgeOutput={submitKnowledgeOutputPlan}
-              onConfirmKnowledgeOutput={submitKnowledgeOutputConfirm}
-              knowledgeOutputDraft={knowledgeOutputDraft}
-              knowledgeOutputLoading={knowledgeOutputLoading}
-              knowledgeOutputPlan={knowledgeOutputPlan}
-              onKnowledgeOutputDraftChange={setKnowledgeOutputDraft}
-              onCancelKnowledgeOutput={() => {
-                setKnowledgeOutputDraft('');
-                setKnowledgeOutputPlan(null);
-              }}
-              canPrepareKnowledgeOutput={canPrepareKnowledgeOutput}
               uploadInputRef={uploadInputRef}
               uploadLoading={uploadLoading}
               onUploadFilesSelected={runDocumentUpload}
@@ -113,6 +94,7 @@ export default function HomePageClient({ initialModelState }) {
               selectedReportId={selectedReportId}
               onSelectReport={setSelectedReportId}
               onDeleteReport={deleteReport}
+              onReviseReport={reviseReport}
             />
           </section>
         </section>

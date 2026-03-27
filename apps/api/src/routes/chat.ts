@@ -11,6 +11,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       confirmedRequest?: string;
       preferredLibraries?: Array<{ key?: string; label?: string }>;
       chatHistory?: Array<{ role?: string; content?: string }>;
+      conversationState?: unknown;
     };
     let prompt = String(body.prompt || '').trim();
 
@@ -39,6 +40,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
             .filter((item) => item.key || item.label)
         : [],
       sessionUser: body.sessionUser,
+      conversationState: body.conversationState ?? null,
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory
           .map((item) => ({

@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import { computeNextRunAt } from './datasource-schedule.js';
 
-export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp';
+export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp' | 'upload_public';
 export type DatasourceStatus = 'draft' | 'active' | 'paused' | 'error';
 export type DatasourceScheduleKind = 'manual' | 'daily' | 'weekly';
 export type DatasourceAuthMode = 'none' | 'credential' | 'manual_session' | 'database_password' | 'api_token';
@@ -75,6 +76,10 @@ const DATASOURCE_CONFIG_DIR = path.join(STORAGE_CONFIG_DIR, 'datasources');
 const DEFINITIONS_FILE = path.join(DATASOURCE_CONFIG_DIR, 'definitions.json');
 const RUNS_FILE = path.join(DATASOURCE_CONFIG_DIR, 'runs.json');
 
+function generateUploadToken() {
+  return `upl_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+}
+
 function normalizeTargetLibraries(items: DatasourceTargetLibrary[]) {
   const dedup = new Map<string, DatasourceTargetLibrary>();
   for (const item of items || []) {
@@ -120,15 +125,31 @@ function normalizeDefinition(item: Partial<DatasourceDefinition>): DatasourceDef
       origin: String(item.credentialRef.origin || '').trim(),
       updatedAt: item.credentialRef.updatedAt || '',
     } : null,
-    config: item.config && typeof item.config === 'object' ? item.config : {},
+    config: item.config && typeof item.config === 'object'
+      ? {
+          ...item.config,
+          ...(kind === 'upload_public'
+            ? {
+                uploadToken: String((item.config as Record<string, unknown>)?.uploadToken || '').trim() || generateUploadToken(),
+              }
+            : {}),
+        }
+      : (kind === 'upload_public' ? { uploadToken: generateUploadToken() } : {}),
     notes: String(item.notes || '').trim(),
     createdAt: item.createdAt || now,
     updatedAt: item.updatedAt || now,
     lastRunAt: item.lastRunAt || '',
-    nextRunAt: item.nextRunAt || '',
+    nextRunAt: item.nextRunAt || computeNextRunAt(item.schedule?.kind || 'manual', status),
     lastStatus: item.lastStatus || undefined,
     lastSummary: item.lastSummary || '',
   };
+}
+
+export async function findDatasourceDefinitionByUploadToken(token: string) {
+  const normalizedToken = String(token || '').trim();
+  if (!normalizedToken) return null;
+  const items = await readDefinitions();
+  return items.find((item) => item.kind === 'upload_public' && String(item.config?.uploadToken || '').trim() === normalizedToken) || null;
 }
 
 function normalizeRun(item: Partial<DatasourceRun>): DatasourceRun {
@@ -205,6 +226,7 @@ export async function upsertDatasourceDefinition(input: Partial<DatasourceDefini
     ...normalized,
     createdAt: index >= 0 ? items[index].createdAt : normalized.createdAt || now,
     updatedAt: now,
+    nextRunAt: normalized.nextRunAt || computeNextRunAt(normalized.schedule.kind, normalized.status),
   };
 
   if (index >= 0) items[index] = next;

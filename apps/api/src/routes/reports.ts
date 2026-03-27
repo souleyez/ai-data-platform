@@ -1,9 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  createSharedReportTemplate,
   createReportOutput,
   deleteReportOutput,
   loadReportCenterState,
+  reviseReportOutput,
+  updateSharedReportTemplate,
   updateReportGroupTemplate,
+  uploadSharedTemplateReference,
   uploadReportReferenceImage,
 } from '../lib/report-center.js';
 
@@ -13,14 +17,17 @@ export async function registerReportRoutes(app: FastifyInstance) {
 
     return {
       mode: 'read-only',
-      total: state.groups.length + state.outputs.length,
+      total: state.templates.length + state.outputs.length,
       groups: state.groups,
+      templates: state.templates,
       outputRecords: state.outputs,
       meta: {
         groups: state.groups.length,
-        templates: state.groups.reduce((acc, group) => acc + group.templates.length, 0),
+        templates: state.templates.length,
         outputs: state.outputs.length,
-        referenceImages: state.groups.reduce((acc, group) => acc + group.referenceImages.length, 0),
+        referenceImages:
+          state.groups.reduce((acc, group) => acc + group.referenceImages.length, 0)
+          + state.templates.reduce((acc, template) => acc + (template.referenceImages?.length || 0), 0),
       },
     };
   });
@@ -47,7 +54,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return {
       status: 'generated',
       item: record,
-      message: `已生成 ${record.groupLabel} 分组的 ${record.templateLabel} 报表。`,
+      message: `已生成 ${record.groupLabel} 的 ${record.templateLabel} 报表。`,
     };
   });
 
@@ -110,7 +117,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return {
       status: 'deleted',
       id,
-      message: '已删除报表',
+      message: '已删除报表。',
     };
   });
 
@@ -130,7 +137,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return {
       status: 'updated',
       item: result.group,
-      message: `已将 ${result.group.label} 分组的输出方式切换为 ${result.template.label}。`,
+      message: `已将 ${result.group.label} 的默认输出模板切换为 ${result.template.label}。`,
     };
   });
 
@@ -150,7 +157,72 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return {
       status: 'uploaded',
       item: uploaded,
-      message: `已上传参考样例 ${uploaded.originalName}。`,
+      message: `已上传参考文件 ${uploaded.originalName}。`,
+    };
+  });
+
+  app.post('/reports/template', async (request, reply) => {
+    const body = (request.body || {}) as {
+      label?: string;
+      type?: 'table' | 'static-page' | 'ppt' | 'document';
+      description?: string;
+      isDefault?: boolean;
+    };
+
+    const item = await createSharedReportTemplate({
+      label: String(body.label || '').trim(),
+      type: (body.type || 'table') as 'table' | 'static-page' | 'ppt' | 'document',
+      description: body.description,
+      isDefault: Boolean(body.isDefault),
+    });
+    return {
+      status: 'created',
+      item,
+      message: `已新增模板 ${item.label}`,
+    };
+  });
+
+  app.patch('/reports/template/:key', async (request, reply) => {
+    const key = String((request.params as { key?: string })?.key || '').trim();
+    if (!key) return reply.code(400).send({ error: 'key is required' });
+    const body = (request.body || {}) as {
+      label?: string;
+      description?: string;
+      isDefault?: boolean;
+    };
+    const item = await updateSharedReportTemplate(key, body);
+    return {
+      status: 'updated',
+      item,
+      message: `已更新模板 ${item.label}`,
+    };
+  });
+
+  app.post('/reports/template-reference', async (request, reply) => {
+    const file = await request.file();
+    const templateKey = String((request.query as { templateKey?: string })?.templateKey || '').trim();
+    if (!templateKey) return reply.code(400).send({ error: 'templateKey is required' });
+    if (!file) return reply.code(400).send({ error: 'sample file is required' });
+
+    const item = await uploadSharedTemplateReference(templateKey, file);
+    return {
+      status: 'uploaded',
+      item,
+      message: `已上传模板参考文件 ${item.originalName}`,
+    };
+  });
+
+  app.post('/reports/output/:id/revise', async (request, reply) => {
+    const id = String((request.params as { id?: string })?.id || '').trim();
+    const instruction = String(((request.body || {}) as { instruction?: string }).instruction || '').trim();
+    if (!id) return reply.code(400).send({ error: 'id is required' });
+    if (!instruction) return reply.code(400).send({ error: 'instruction is required' });
+
+    const item = await reviseReportOutput(id, instruction);
+    return {
+      status: 'revised',
+      item,
+      message: `已按要求更新 ${item.title}`,
     };
   });
 }

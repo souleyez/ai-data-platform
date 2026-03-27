@@ -1,9 +1,9 @@
 import {
-  buildTemplateEnvelope,
+  buildSharedTemplateEnvelope,
   loadReportCenterState,
   type ReportGroup,
-  type ReportGroupTemplate,
   type ReportTemplateEnvelope,
+  type SharedReportTemplate,
 } from './report-center.js';
 
 export type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
@@ -19,18 +19,19 @@ export type KnowledgeTemplateTaskHint =
 
 export type SelectedKnowledgeTemplate = {
   group: ReportGroup;
-  template: ReportGroupTemplate;
+  template: SharedReportTemplate;
   envelope: ReportTemplateEnvelope;
 };
 
-function mapOutputKindToTemplateType(kind: KnowledgeOutputKind): ReportGroupTemplate['type'] {
+function mapOutputKindToTemplateType(kind: KnowledgeOutputKind): SharedReportTemplate['type'] {
   if (kind === 'page') return 'static-page';
-  if (kind === 'pdf' || kind === 'ppt') return 'ppt';
+  if (kind === 'ppt') return 'ppt';
+  if (kind === 'pdf') return 'document';
   return 'table';
 }
 
-function buildTemplateEnvelopeInstruction(group: ReportGroup, template: ReportGroupTemplate) {
-  const envelope = buildTemplateEnvelope(group, template);
+function buildTemplateEnvelopeInstruction(group: ReportGroup, template: SharedReportTemplate) {
+  const envelope = buildSharedTemplateEnvelope(template);
   return [
     `Template: ${envelope.title}`,
     'Fixed structure:',
@@ -55,9 +56,9 @@ export async function buildKnowledgeTemplateInstruction(
     .filter((group) => libraryMap.has(group.key))
     .map((group) => {
       const template =
-        group.templates.find((item) => item.type === preferredType)
-        || group.templates.find((item) => item.key === group.defaultTemplateKey)
-        || group.templates[0];
+        state.templates.find((item) => item.type === preferredType && item.isDefault)
+        || state.templates.find((item) => item.type === preferredType)
+        || state.templates[0];
       if (!template) return '';
       return buildTemplateEnvelopeInstruction(group, template);
     })
@@ -81,14 +82,14 @@ export async function selectKnowledgeTemplates(
     .filter((group) => libraryMap.has(group.key))
     .map((group) => {
       const template =
-        group.templates.find((item) => item.type === preferredType)
-        || group.templates.find((item) => item.key === group.defaultTemplateKey)
-        || group.templates[0];
+        state.templates.find((item) => item.type === preferredType && item.isDefault)
+        || state.templates.find((item) => item.type === preferredType)
+        || state.templates[0];
       if (!template) return null;
       return {
         group,
         template,
-        envelope: buildTemplateEnvelope(group, template),
+        envelope: buildSharedTemplateEnvelope(template),
       };
     })
     .filter(Boolean) as SelectedKnowledgeTemplate[];
@@ -103,14 +104,19 @@ export function buildTemplateContextBlock(selectedTemplates: SelectedKnowledgeTe
       const variable = envelope.variableZones.map((item, index) => `${index + 1}. ${item}`).join('\n');
       const columns = envelope.tableColumns?.length ? `Preferred columns: ${envelope.tableColumns.join(' | ')}` : '';
       const sections = envelope.pageSections?.length ? `Preferred sections: ${envelope.pageSections.join(' | ')}` : '';
+      const referenceSummary = Array.isArray(template.referenceImages) && template.referenceImages.length
+        ? `Reference files: ${template.referenceImages.map((item) => item.originalName).slice(0, 6).join(' | ')}`
+        : '';
 
       return [
         `Knowledge base: ${group.label}`,
         `Template key: ${template.key}`,
         `Template type: ${template.type}`,
         `Template title: ${envelope.title}`,
+        `Template description: ${template.description}`,
         columns,
         sections,
+        referenceSummary,
         'Fixed structure:',
         fixed,
         'Variable zones:',
@@ -143,6 +149,8 @@ export function buildTemplateSearchHints(selectedTemplates: SelectedKnowledgeTem
       group.label,
       template.key,
       template.label,
+      template.description,
+      ...(Array.isArray(template.referenceImages) ? template.referenceImages.map((item) => item.originalName) : []),
       ...collectEnvelopeTerms(envelope),
     ]),
   )];

@@ -2,9 +2,11 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import {
   deleteDatasourceDefinition,
+  findDatasourceDefinitionByUploadToken,
   getDatasourceDefinition,
   listDatasourceDefinitions,
   listDatasourceRuns,
+  appendDatasourceRun,
   upsertDatasourceDefinition,
 } from '../lib/datasource-definitions.js';
 import {
@@ -24,6 +26,10 @@ import { buildDatasourceMeta, listDatasourceProviderSummaries } from '../lib/dat
 import { listDatasourcePresets } from '../lib/datasource-presets.js';
 import { sourceItems } from '../lib/mock-data.js';
 import { listWebCaptureTasks } from '../lib/web-capture.js';
+import { DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
+import { loadDocumentCategoryConfig } from '../lib/document-config.js';
+import { loadDocumentLibraries } from '../lib/document-libraries.js';
+import { ingestUploadedFiles, saveMultipartFiles } from '../lib/document-upload-ingest.js';
 
 function toDatasourceItem(item: any) {
   return {
@@ -36,6 +42,27 @@ function toDatasourceItem(item: any) {
 
 function toDocumentLabels(documentIds: string[]) {
   return (documentIds || []).map((value) => path.basename(String(value || ''))).filter(Boolean);
+}
+
+async function buildDocumentSummaryMap() {
+  const snapshot = await loadParsedDocuments(5000, false);
+  return new Map(
+    snapshot.items.map((item) => [
+      item.path,
+      {
+        id: item.path,
+        label: item.title || item.name || path.basename(item.path),
+        summary: item.summary || item.excerpt || '',
+      },
+    ]),
+  );
+}
+
+function toDocumentSummaries(documentIds: string[], summaryMap: Map<string, { id: string; label: string; summary: string }>) {
+  return (documentIds || [])
+    .map((value) => summaryMap.get(String(value || '').trim()))
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function buildLegacyDynamicItems(webTasks: Awaited<ReturnType<typeof listWebCaptureTasks>>) {
@@ -88,6 +115,98 @@ function buildLegacyDynamicItems(webTasks: Awaited<ReturnType<typeof listWebCapt
 }
 
 export async function registerDatasourceRoutes(app: FastifyInstance) {
+  app.get('/datasources/public/:token', async (request, reply) => {
+    const { token } = request.params as { token: string };
+    const definition = await findDatasourceDefinitionByUploadToken(token);
+    if (!definition) {
+      return reply.code(404).send({ error: 'datasource upload entry not found' });
+    }
+    if (definition.status === 'paused') {
+      return reply.code(403).send({ error: 'datasource upload entry is paused' });
+    }
+
+    return {
+      status: 'ready',
+      item: {
+        id: definition.id,
+        name: definition.name,
+        kind: definition.kind,
+        notes: definition.notes || '',
+        targetLibraries: definition.targetLibraries,
+      },
+    };
+  });
+
+  app.post('/datasources/public/:token/upload', async (request, reply) => {
+    const { token } = request.params as { token: string };
+    const definition = await findDatasourceDefinitionByUploadToken(token);
+    if (!definition) {
+      return reply.code(404).send({ error: 'datasource upload entry not found' });
+    }
+    if (definition.status === 'paused') {
+      return reply.code(403).send({ error: 'datasource upload entry is paused' });
+    }
+
+    const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const uploadDir = path.join(documentConfig.scanRoot, 'uploads');
+    const { files, fields } = await saveMultipartFiles(request.parts(), uploadDir);
+
+    if (!files.length) {
+      return reply.code(400).send({ error: 'no files uploaded' });
+    }
+
+    const libraries = await loadDocumentLibraries();
+    const ingestResult = await ingestUploadedFiles({
+      files,
+      documentConfig,
+      libraries,
+      preferredLibraryKeys: definition.targetLibraries.map((item) => item.key),
+    });
+
+    const finishedAt = new Date().toISOString();
+    const status = ingestResult.summary.failedCount
+      ? (ingestResult.summary.successCount ? 'partial' : 'failed')
+      : 'success';
+    const summary = `外部上传已接收 ${files.length} 个文件，入库 ${ingestResult.summary.successCount} 个，目标知识库：${definition.targetLibraries.map((item) => item.label).join('、') || '未绑定'}。`;
+
+    await appendDatasourceRun({
+      id: `run-${definition.id}-${Date.now()}`,
+      datasourceId: definition.id,
+      startedAt: finishedAt,
+      finishedAt,
+      status,
+      discoveredCount: files.length,
+      capturedCount: files.length,
+      ingestedCount: ingestResult.summary.successCount,
+      documentIds: ingestResult.parsedItems.map((item) => item.path),
+      libraryKeys: ingestResult.confirmedLibraryKeys.length ? ingestResult.confirmedLibraryKeys : definition.targetLibraries.map((item) => item.key),
+      summary,
+      errorMessage: ingestResult.summary.failedCount ? '部分文件快速解析失败。' : '',
+    });
+
+    await upsertDatasourceDefinition({
+      ...definition,
+      lastRunAt: finishedAt,
+      lastStatus: status,
+      lastSummary: summary,
+    });
+
+    return {
+      status: 'uploaded',
+      datasource: {
+        id: definition.id,
+        name: definition.name,
+        targetLibraries: definition.targetLibraries,
+      },
+      note: fields.note || '',
+      uploadedCount: files.length,
+      uploadedFiles: files,
+      summary: ingestResult.summary,
+      ingestItems: ingestResult.ingestItems,
+      message: summary,
+    };
+  });
+
   app.get('/datasources/credentials', async () => {
     const items = await listDatasourceCredentials();
     return {
@@ -191,9 +310,10 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
 
   app.get('/datasources/runs', async (request) => {
     const query = (request.query || {}) as { datasourceId?: string };
-    const [items, definitions] = await Promise.all([
+    const [items, definitions, documentSummaryMap] = await Promise.all([
       listDatasourceRuns(String(query.datasourceId || '').trim() || undefined),
       listDatasourceDefinitions(),
+      buildDocumentSummaryMap(),
     ]);
     const definitionMap = new Map(definitions.map((item) => [item.id, item]));
     return {
@@ -204,6 +324,7 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
         libraryLabels: (definitionMap.get(item.datasourceId)?.targetLibraries || [])
           .map((entry) => entry.label),
         documentLabels: toDocumentLabels(item.documentIds),
+        documentSummaries: toDocumentSummaries(item.documentIds, documentSummaryMap),
       })),
     };
   });
@@ -318,11 +439,12 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/datasources', async () => {
-    const [webTasks, providerSummaries, providerMeta, presetCatalog] = await Promise.all([
+    const [webTasks, providerSummaries, providerMeta, presetCatalog, documentSummaryMap] = await Promise.all([
       listWebCaptureTasks(),
       listDatasourceProviderSummaries(),
       buildDatasourceMeta(),
       Promise.resolve(listDatasourcePresets()),
+      buildDocumentSummaryMap(),
     ]);
 
     const latestCaptureAt = webTasks
@@ -365,6 +487,9 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
               documentLabels: item.runtime.documentLabels?.length
                 ? item.runtime.documentLabels
                 : toDocumentLabels(item.runtime.documentIds || []),
+              documentSummaries: item.runtime.documentSummaries?.length
+                ? item.runtime.documentSummaries
+                : toDocumentSummaries(item.runtime.documentIds || [], documentSummaryMap),
             }
           : item.runtime,
       })),

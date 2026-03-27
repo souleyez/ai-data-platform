@@ -1,4 +1,4 @@
-import { createWriteStream } from 'node:fs';
+﻿import { createWriteStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -29,7 +29,7 @@ import {
   buildPreviewItemFromDocument,
   resolveSuggestedLibraryKeys,
 } from '../lib/ingest-feedback.js';
-import { saveDocumentOverride, saveDocumentSuggestion } from '../lib/document-overrides.js';
+import { saveDocumentOverride } from '../lib/document-overrides.js';
 import {
   acceptDocumentSuggestions,
   addDocumentScanSource,
@@ -782,15 +782,18 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       }
 
       const suggestedGroups = resolveSuggestedLibraryKeys(parsed, libraries);
+      const confirmedGroups = suggestedGroups.length ? suggestedGroups : parsed.confirmedGroups;
       quickParsedItems.push({
         ...parsed,
         suggestedGroups,
+        confirmedGroups,
       });
       if (suggestedGroups.length) {
-        await saveDocumentSuggestion(parsed.path, { suggestedGroups });
+        await saveDocumentOverride(parsed.path, { groups: suggestedGroups });
         ingestItems.push(buildPreviewItemFromDocument({
           ...parsed,
-          suggestedGroups,
+          suggestedGroups: [],
+          confirmedGroups,
         }, 'file', file.name, libraries));
         continue;
       }

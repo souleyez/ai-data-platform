@@ -11,6 +11,7 @@ export type DatasourceCapability =
   | 'discover'
   | 'extract'
   | 'ingest'
+  | 'upload-submit'
   | 'login'
   | 'database-read'
   | 'erp-sync'
@@ -29,6 +30,11 @@ export type DatasourceProviderRuntime = {
   ingestedCount?: number;
   documentIds?: string[];
   documentLabels?: string[];
+  documentSummaries?: Array<{
+    id: string;
+    label: string;
+    summary: string;
+  }>;
 };
 
 export type DatasourceProviderSummary = {
@@ -41,6 +47,7 @@ export type DatasourceProviderSummary = {
   capabilities: DatasourceCapability[];
   notes?: string;
   executionHints?: string[];
+  publicPath?: string;
   runtime?: DatasourceProviderRuntime | null;
 };
 

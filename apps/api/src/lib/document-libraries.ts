@@ -102,7 +102,6 @@ export async function loadDocumentLibraries() {
 
   const defaultLibraries = buildDefaultLibraries(categoryConfig.categories, categoryConfig.updatedAt);
   const merged = mergeLibraries(defaultLibraries, stored, derived);
-
   return merged.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 }
 
@@ -124,7 +123,8 @@ export async function createDocumentLibrary(input: { name: string; description?:
   };
 
   await writeLibrariesFile([...current, created]);
-  return created;
+  const nextLibraries = await loadDocumentLibraries();
+  return nextLibraries.find((item) => item.key === created.key) || created;
 }
 
 export async function deleteDocumentLibrary(key: string) {
@@ -135,7 +135,6 @@ export async function deleteDocumentLibrary(key: string) {
   }
   const filtered = current.filter((item) => item.key !== key);
   await writeLibrariesFile(filtered);
-
   const overrides = await loadDocumentOverrides();
   const nextOverrides = Object.fromEntries(
     Object.entries(overrides).map(([filePath, item]) => {

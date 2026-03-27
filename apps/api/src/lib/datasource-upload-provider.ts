@@ -1,5 +1,4 @@
 import type { DatasourceDefinition, DatasourceRun } from './datasource-definitions.js';
-import { buildErpExecutionPlan } from './datasource-erp-connector.js';
 import type { DatasourceProvider, DatasourceProviderSummary } from './datasource-provider.js';
 
 function pickLatestRun(runs: DatasourceRun[]) {
@@ -10,23 +9,15 @@ function toDocumentLabels(documentIds: string[]) {
   return (documentIds || []).map((value) => String(value || '').split(/[\\/]/).at(-1) || '').filter(Boolean);
 }
 
-function buildCapabilities(definition: DatasourceDefinition) {
-  const capabilities = ['erp-sync', 'ingest', 'schedule'] as const;
-  if (definition.authMode === 'credential' || definition.authMode === 'manual_session' || definition.authMode === 'api_token') {
-    return [...capabilities, 'login'] as const;
-  }
-  return capabilities;
-}
-
-export const erpDatasourceProvider: DatasourceProvider = {
-  kind: 'erp',
-  capabilities: ['erp-sync', 'ingest', 'schedule'],
+export const uploadDatasourceProvider: DatasourceProvider = {
+  kind: 'upload_public',
+  capabilities: ['ingest', 'upload-submit'],
   supports(definition) {
-    return definition.kind === 'erp';
+    return definition.kind === 'upload_public';
   },
   async summarize(definition, runs) {
     const latestRun = pickLatestRun(runs);
-    const plan = buildErpExecutionPlan(definition);
+    const token = String(definition.config?.uploadToken || '').trim();
     const summary: DatasourceProviderSummary = {
       id: definition.id,
       name: definition.name,
@@ -34,13 +25,10 @@ export const erpDatasourceProvider: DatasourceProvider = {
       status: definition.status,
       schedule: definition.schedule.kind,
       targetLibraries: definition.targetLibraries,
-      capabilities: [...buildCapabilities(definition)],
-      executionHints: [
-        `认证方式：${plan.authKind}`,
-        `业务模块：${plan.modules.join('、')}`,
-        `连接提示：${plan.endpointHints.join('、')}`,
-      ],
+      capabilities: ['ingest', 'upload-submit'],
       notes: definition.notes || '',
+      executionHints: ['适合外部客户、合作方、供应商通过固定链接主动提交材料'],
+      publicPath: token ? `/datasource-upload/${token}` : '',
       runtime: latestRun
         ? {
             datasourceId: definition.id,
@@ -63,7 +51,7 @@ export const erpDatasourceProvider: DatasourceProvider = {
             lastRunAt: definition.lastRunAt || '',
             nextRunAt: definition.nextRunAt || '',
             lastStatus: definition.lastStatus || 'idle',
-            lastSummary: definition.lastSummary || '',
+            lastSummary: definition.lastSummary || '等待外部提交资料',
             discoveredCount: 0,
             capturedCount: 0,
             ingestedCount: 0,

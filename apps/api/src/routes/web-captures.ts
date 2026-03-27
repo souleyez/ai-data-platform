@@ -7,7 +7,8 @@ import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { syncWebCaptureTaskToDatasource } from '../lib/datasource-web-bridge.js';
 import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
 import { parseDocument } from '../lib/document-parser.js';
-import { buildFailedPreviewItem, buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
+import { buildFailedPreviewItem, buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from '../lib/ingest-feedback.js';
+import { saveDocumentOverride } from '../lib/document-overrides.js';
 
 function normalizeTargetLibraries(value: unknown): DatasourceTargetLibrary[] {
   if (!Array.isArray(value)) return [];
@@ -79,7 +80,15 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
       const libraries = await loadDocumentLibraries();
       const parsed = await parseDocument(task.documentPath, config);
-      ingestItems = [buildPreviewItemFromDocument(parsed, 'url', undefined, libraries)];
+      const nextGroups = resolveSuggestedLibraryKeys(parsed, libraries);
+      if (nextGroups.length) {
+        await saveDocumentOverride(parsed.path, { groups: nextGroups });
+      }
+      ingestItems = [buildPreviewItemFromDocument({
+        ...parsed,
+        suggestedGroups: [],
+        confirmedGroups: nextGroups.length ? nextGroups : parsed.confirmedGroups,
+      }, 'url', undefined, libraries)];
     } else {
       ingestItems = [buildFailedPreviewItem({
         id: task.id,
@@ -180,7 +189,15 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
       const libraries = await loadDocumentLibraries();
       const parsed = await parseDocument(task.documentPath, config);
-      ingestItems = [buildPreviewItemFromDocument(parsed, 'url', undefined, libraries)];
+      const nextGroups = resolveSuggestedLibraryKeys(parsed, libraries);
+      if (nextGroups.length) {
+        await saveDocumentOverride(parsed.path, { groups: nextGroups });
+      }
+      ingestItems = [buildPreviewItemFromDocument({
+        ...parsed,
+        suggestedGroups: [],
+        confirmedGroups: nextGroups.length ? nextGroups : parsed.confirmedGroups,
+      }, 'url', undefined, libraries)];
     } else {
       ingestItems = [buildFailedPreviewItem({
         id: task.id,

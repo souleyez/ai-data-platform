@@ -53,7 +53,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     libraries: Array.isArray(data?.libraries) ? data.libraries : [],
     output,
     guard: data?.guard || null,
-    conversationState: null,
+    conversationState: data?.conversationState || null,
   };
 }
 
@@ -160,6 +160,7 @@ export function normalizeReportsResponse(data) {
     mode: data?.mode || 'read-only',
     total: data?.total || 0,
     groups: Array.isArray(data?.groups) ? data.groups : [],
+    templates: Array.isArray(data?.templates) ? data.templates : [],
     fixedTemplates: Array.isArray(data?.fixedTemplates) ? data.fixedTemplates : [],
     staticPageTemplates: Array.isArray(data?.staticPageTemplates) ? data.staticPageTemplates : [],
     activePages: Array.isArray(data?.activePages) ? data.activePages : [],

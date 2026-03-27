@@ -91,7 +91,7 @@ function sanitizeModelContent(content: string) {
 
 function looksLikeOnboardingDrift(content: string) {
   const text = String(content || '');
-  return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|第一\u6b21聊天)/.test(text);
+  return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|第一次聊天)/.test(text);
 }
 
 async function requestChatCompletion(baseUrl: string, headers: Record<string, string>, body: unknown) {

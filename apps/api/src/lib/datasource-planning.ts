@@ -26,12 +26,24 @@ function buildDatasourceIdSeed(value: string) {
   return createHash('sha1').update(value).digest('hex').slice(0, 10);
 }
 
+function hasAny(text: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
 function detectKind(prompt: string): DatasourceKind {
   const text = normalizeText(prompt);
-  if (/(数据库|mysql|postgres|postgresql|sqlserver|oracle|clickhouse|sqlite)/.test(text)) return 'database';
-  if (/(erp|订单后台|客诉后台|crm|sap|金蝶|用友|服务工单)/.test(text)) return 'erp';
-  if (/(登录|账号|密码|cookie|会话|后台网站|需要登录)/.test(text)) return 'web_login';
-  if (/(持续采集|定期采集|发现链接|公开网站|公告网站|站点列表|招标网站|论文网站)/.test(text)) return 'web_discovery';
+  if (hasAny(text, [/mysql/, /postgres/, /postgresql/, /sqlserver/, /oracle/, /clickhouse/, /sqlite/, /数据库/])) {
+    return 'database';
+  }
+  if (hasAny(text, [/erp/, /crm/, /sap/, /金蝶/, /用友/, /订单后台/, /客诉后台/, /工单后台/])) {
+    return 'erp';
+  }
+  if (hasAny(text, [/登录/, /账号/, /密码/, /cookie/, /会话/, /后台网站/, /需要登录/])) {
+    return 'web_login';
+  }
+  if (hasAny(text, [/持续采集/, /定期采集/, /发现链接/, /公开网站/, /公告网站/, /站点列表/, /招标网站/, /论文网站/])) {
+    return 'web_discovery';
+  }
   return 'web_public';
 }
 
@@ -39,15 +51,19 @@ function detectAuthMode(prompt: string, kind: DatasourceKind): DatasourceAuthMod
   const text = normalizeText(prompt);
   if (kind === 'database') return 'database_password';
   if (kind === 'erp') return 'credential';
-  if (/(token|apikey|api密钥)/.test(text)) return 'api_token';
-  if (/(登录|账号|密码|cookie|会话)/.test(text)) return 'credential';
+  if (hasAny(text, [/token/, /apikey/, /api密钥/])) return 'api_token';
+  if (hasAny(text, [/登录/, /账号/, /密码/, /cookie/, /会话/])) return 'credential';
   return 'none';
 }
 
 function detectSchedule(prompt: string) {
   const text = normalizeText(prompt);
-  if (/(每周|weekly|一周一次)/.test(text)) return { kind: 'weekly' as const, timezone: 'Asia/Shanghai', maxItemsPerRun: 20 };
-  if (/(每天|每日|daily|定时|定期)/.test(text)) return { kind: 'daily' as const, timezone: 'Asia/Shanghai', maxItemsPerRun: 20 };
+  if (hasAny(text, [/每周/, /weekly/, /一周一次/])) {
+    return { kind: 'weekly' as const, timezone: 'Asia/Shanghai', maxItemsPerRun: 20 };
+  }
+  if (hasAny(text, [/每天/, /每日/, /daily/, /定时/, /定期/])) {
+    return { kind: 'daily' as const, timezone: 'Asia/Shanghai', maxItemsPerRun: 20 };
+  }
   return { kind: 'manual' as const, timezone: 'Asia/Shanghai', maxItemsPerRun: 10 };
 }
 
@@ -61,8 +77,8 @@ function matchPresets(prompt: string, presets: DatasourcePreset[]) {
         const term = normalizeText(field);
         if (term && text.includes(term)) score += 10;
       }
-      if (preset.category === 'bids' && /(招标|投标|标书|采购|中标)/.test(text)) score += 12;
-      if (preset.category === 'academic' && /(论文|研究|学术|文献|期刊|公开资料)/.test(text)) score += 12;
+      if (preset.category === 'bids' && hasAny(text, [/招标/, /投标/, /标书/, /采购/, /中标/])) score += 12;
+      if (preset.category === 'academic' && hasAny(text, [/论文/, /研究/, /学术/, /文献/, /期刊/, /公开资料/])) score += 12;
       return { preset, score };
     })
     .filter((item) => item.score > 0)
@@ -75,30 +91,27 @@ function inferDatabaseObjects(prompt: string) {
   const text = normalizeText(prompt);
   const tables = new Set<string>();
   const views = new Set<string>();
-  if (/(订单|order)/.test(text)) tables.add('orders');
-  if (/(客诉|投诉|complaint)/.test(text)) tables.add('complaints');
-  if (/(库存|inventory)/.test(text)) tables.add('inventory');
-  if (/(回款|payment|收款)/.test(text)) tables.add('payments');
-  if (/(发票|invoice)/.test(text)) tables.add('invoices');
-  if (/(客户|customer)/.test(text)) tables.add('customers');
-  if (/(商品|sku|product)/.test(text)) tables.add('products');
-  if (/(视图|view)/.test(text)) views.add('business_view');
-  return {
-    tables: Array.from(tables),
-    views: Array.from(views),
-  };
+  if (hasAny(text, [/订单/, /order/])) tables.add('orders');
+  if (hasAny(text, [/客诉/, /投诉/, /complaint/])) tables.add('complaints');
+  if (hasAny(text, [/库存/, /inventory/])) tables.add('inventory');
+  if (hasAny(text, [/回款/, /payment/, /收款/])) tables.add('payments');
+  if (hasAny(text, [/发票/, /invoice/])) tables.add('invoices');
+  if (hasAny(text, [/客户/, /customer/])) tables.add('customers');
+  if (hasAny(text, [/商品/, /sku/, /product/])) tables.add('products');
+  if (hasAny(text, [/视图/, /view/])) views.add('business_view');
+  return { tables: Array.from(tables), views: Array.from(views) };
 }
 
 function inferErpModules(prompt: string) {
   const text = normalizeText(prompt);
   const modules = new Set<string>();
-  if (/(订单|order)/.test(text)) modules.add('orders');
-  if (/(客诉|售后|complaint)/.test(text)) modules.add('complaints');
-  if (/(库存|inventory|备货)/.test(text)) modules.add('inventory');
-  if (/(物流|delivery|发货)/.test(text)) modules.add('deliveries');
-  if (/(客户|customer)/.test(text)) modules.add('customers');
-  if (/(产品|商品|sku)/.test(text)) modules.add('products');
-  if (/(回款|payment|收款)/.test(text)) modules.add('payments');
+  if (hasAny(text, [/订单/, /order/])) modules.add('orders');
+  if (hasAny(text, [/客诉/, /售后/, /complaint/])) modules.add('complaints');
+  if (hasAny(text, [/库存/, /inventory/, /备货/])) modules.add('inventory');
+  if (hasAny(text, [/物流/, /delivery/, /发货/])) modules.add('deliveries');
+  if (hasAny(text, [/客户/, /customer/])) modules.add('customers');
+  if (hasAny(text, [/产品/, /商品/, /sku/])) modules.add('products');
+  if (hasAny(text, [/回款/, /payment/, /收款/])) modules.add('payments');
   return Array.from(modules);
 }
 
@@ -114,7 +127,6 @@ function buildFallbackTargetLibraries(
       mode: index === 0 ? 'primary' : 'secondary',
     }));
   }
-
   const presetLibraries = presetMatches.flatMap((preset) => preset.suggestedLibraries || []);
   if (presetLibraries.length) {
     return presetLibraries.map((item, index) => ({
@@ -123,11 +135,9 @@ function buildFallbackTargetLibraries(
       mode: index === 0 ? 'primary' : 'secondary',
     }));
   }
-
-  if (/(招标|投标|标书|采购)/.test(prompt)) {
+  if (hasAny(prompt, [/招标/, /投标/, /标书/, /采购/])) {
     return [{ key: 'bids', label: 'bids', mode: 'primary' }];
   }
-
   return [{ key: 'ungrouped', label: '未分组', mode: 'primary' }];
 }
 
@@ -170,16 +180,26 @@ function parseCloudPlan(raw: string) {
 
 function looksLikeBrokenPlan(parsed: Record<string, unknown> | null) {
   if (!parsed) return true;
-  const name = String(parsed.name || '').trim();
-  return !name;
+  return !String(parsed.name || '').trim();
+}
+
+async function tryCloudPlanning(prompt: string, libraries: Array<{ key: string; label: string }>, presets: DatasourcePreset[]) {
+  const planning = runOpenClawChat({
+    prompt: buildPlanningPrompt(prompt, libraries, presets),
+    systemPrompt: [
+      '你是数据源配置助手。',
+      '你的任务是把自然语言采集需求转换成结构化数据源配置草案。',
+      '不要输出解释，只返回严格 JSON。',
+      '如果用户要持续采集公开站点列表页和详情页，优先使用 web_discovery。',
+      '如果提到数据库、SQL、表、视图，使用 database。',
+      '如果提到 ERP、订单后台、客诉后台、CRM，使用 erp。',
+    ].join('\n'),
+  });
+  return Promise.race([planning, new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000))]);
 }
 
 export async function planDatasourceFromPrompt(prompt: string) {
-  const [libraries, presets] = await Promise.all([
-    loadDocumentLibraries(),
-    Promise.resolve(listDatasourcePresets()),
-  ]);
-
+  const [libraries, presets] = await Promise.all([loadDocumentLibraries(), Promise.resolve(listDatasourcePresets())]);
   const libraryMatches = collectLibraryMatches(prompt, libraries);
   const presetMatches = matchPresets(prompt, presets);
   const fallbackKind = detectKind(prompt);
@@ -208,25 +228,19 @@ export async function planDatasourceFromPrompt(prompt: string) {
     },
     notes: prompt,
     suggestedPresetIds: presetMatches.map((item) => item.id),
-    explanation: '已按当前需求生成数据源草案，可继续编辑后保存。',
+    explanation: '已根据当前需求生成一份数据源草案，你可以继续修改后保存。',
   };
 
+  const canTrustFallback = fallbackKind === 'database' || fallbackKind === 'erp' || fallbackTargets[0]?.key === 'bids' || presetMatches.length > 0;
+  if (canTrustFallback) return fallbackDraft;
+
   try {
-    const result = await runOpenClawChat({
-      prompt: buildPlanningPrompt(
-        prompt,
-        libraries.map((item) => ({ key: item.key, label: item.label })),
-        presets,
-      ),
-      systemPrompt: [
-        '你是数据源配置助手。',
-        '你的任务是把自然语言采集需求转换成结构化数据源配置草案。',
-        '不要输出解释，只返回严格 JSON。',
-        '如果用户要持续采集公开站点列表页和详情页，优先使用 web_discovery。',
-        '如果提到数据库、SQL、表、视图，使用 database。',
-        '如果提到 ERP、订单后台、客诉后台、CRM，使用 erp。',
-      ].join('\n'),
-    });
+    const result = await tryCloudPlanning(
+      prompt,
+      libraries.map((item) => ({ key: item.key, label: item.label })),
+      presets,
+    );
+    if (!result) return fallbackDraft;
     const parsed = parseCloudPlan(result.content);
     if (looksLikeBrokenPlan(parsed)) return fallbackDraft;
 
@@ -234,14 +248,14 @@ export async function planDatasourceFromPrompt(prompt: string) {
     const targetLibraries = Array.isArray(cloudPlan.targetLibraries)
       ? cloudPlan.targetLibraries
           .map((item, index) => ({
-            key: String((item as { key?: string })?.key || '').trim(),
-            label: String((item as { label?: string })?.label || '').trim(),
-            mode: ((item as { mode?: string })?.mode === 'secondary' || index > 0 ? 'secondary' : 'primary') as 'primary' | 'secondary',
+            key: String(item?.key || '').trim(),
+            label: String(item?.label || '').trim(),
+            mode: (String(item?.mode || '') === 'secondary' || index > 0 ? 'secondary' : 'primary') as 'primary' | 'secondary',
           }))
           .filter((item) => item.key && item.label)
       : fallbackTargets;
 
-    const config = (cloudPlan.config && typeof cloudPlan.config === 'object') ? cloudPlan.config as Record<string, unknown> : {};
+    const config = cloudPlan.config && typeof cloudPlan.config === 'object' ? cloudPlan.config : {};
     return {
       name: String(cloudPlan.name || fallbackDraft.name).trim() || fallbackDraft.name,
       kind: (['web_public', 'web_login', 'web_discovery', 'database', 'erp'].includes(String(cloudPlan.kind))
@@ -259,9 +273,9 @@ export async function planDatasourceFromPrompt(prompt: string) {
       targetLibraries: targetLibraries.length ? targetLibraries : fallbackTargets,
       config: {
         ...(fallbackDraft.config || {}),
-        ...config,
+        ...(config as Record<string, unknown>),
       },
-      notes: String(config.notes || fallbackDraft.notes).trim() || fallbackDraft.notes,
+      notes: String((config as Record<string, unknown>).notes || fallbackDraft.notes).trim() || fallbackDraft.notes,
       suggestedPresetIds: presetMatches.map((item) => item.id),
       explanation: '已根据自然语言需求整理出可执行的数据源草案。',
     } satisfies DatasourcePlanDraft;

@@ -7,11 +7,12 @@ import {
 import { databaseDatasourceProvider } from './datasource-database-provider.js';
 import { erpDatasourceProvider } from './datasource-erp-provider.js';
 import type { DatasourceProviderSummary } from './datasource-provider.js';
+import { uploadDatasourceProvider } from './datasource-upload-provider.js';
 import { buildDatasourceSummaryFromWebCaptureTask } from './datasource-web-bridge.js';
 import { webDatasourceProvider } from './datasource-web-provider.js';
 import { listWebCaptureTasks } from './web-capture.js';
 
-const PROVIDERS = [webDatasourceProvider, databaseDatasourceProvider, erpDatasourceProvider];
+const PROVIDERS = [webDatasourceProvider, uploadDatasourceProvider, databaseDatasourceProvider, erpDatasourceProvider];
 
 function pickProvider(definition: DatasourceDefinition) {
   return PROVIDERS.find((provider) => provider.supports(definition)) || null;

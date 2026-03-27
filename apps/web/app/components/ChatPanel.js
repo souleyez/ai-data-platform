@@ -115,95 +115,12 @@ function CredentialRequestCard({ request, onSubmit, disabled }) {
   );
 }
 
-function KnowledgeOutputModal({
-  draft,
-  plan,
-  loading,
-  onDraftChange,
-  onConfirm,
-  onCancel,
-}) {
-  if (!draft) return null;
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15, 23, 42, 0.38)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-        zIndex: 90,
-      }}
-    >
-      <div
-        style={{
-          width: 'min(760px, 100%)',
-          background: '#fff',
-          borderRadius: 22,
-          boxShadow: '0 25px 80px rgba(15, 23, 42, 0.28)',
-          padding: 24,
-          display: 'grid',
-          gap: 14,
-        }}
-      >
-        <div style={{ display: 'grid', gap: 6 }}>
-          <strong style={{ fontSize: 18 }}>按知识库输出确认</strong>
-          <span className="message-meta">
-            系统已根据最近 3 到 5 轮对话整理出一条需求。确认后会优先依据知识库内容进行输出，不足部分再做补充说明。
-          </span>
-          {Array.isArray(plan?.libraries) && plan.libraries.length ? (
-            <span className="message-meta">
-              当前优先知识库：{plan.libraries.map((item) => item.label || item.key).join('、')}
-            </span>
-          ) : null}
-        </div>
-
-        <textarea
-          value={draft}
-          onChange={(event) => onDraftChange?.(event.target.value)}
-          placeholder="你可以直接修改这条需求，再确认输出。"
-          style={{
-            minHeight: 180,
-            width: '100%',
-            borderRadius: 16,
-            border: '1px solid rgba(148, 163, 184, 0.35)',
-            padding: 14,
-            font: 'inherit',
-            resize: 'vertical',
-            outline: 'none',
-          }}
-        />
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button className="ghost-btn" type="button" onClick={onCancel} disabled={loading}>
-            取消
-          </button>
-          <button className="primary-btn" type="button" onClick={() => onConfirm?.(draft)} disabled={loading || !draft.trim()}>
-            {loading ? '输出中...' : '确认并输出'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function ChatPanel({
   messages,
   input,
   isLoading,
   onInputChange,
   onSubmit,
-  onPrepareKnowledgeOutput,
-  onConfirmKnowledgeOutput,
-  knowledgeOutputDraft,
-  knowledgeOutputLoading,
-  knowledgeOutputPlan,
-  onKnowledgeOutputDraftChange,
-  onCancelKnowledgeOutput,
-  canPrepareKnowledgeOutput,
   uploadInputRef,
   uploadLoading,
   onUploadFilesSelected,
@@ -221,19 +138,10 @@ export default function ChatPanel({
     const node = messagesRef.current;
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
-  }, [messages, isLoading, knowledgeOutputLoading]);
+  }, [messages, isLoading]);
 
   return (
     <div className="chat-panel card">
-      <KnowledgeOutputModal
-        draft={knowledgeOutputDraft}
-        plan={knowledgeOutputPlan}
-        loading={knowledgeOutputLoading}
-        onDraftChange={onKnowledgeOutputDraftChange}
-        onConfirm={onConfirmKnowledgeOutput}
-        onCancel={onCancelKnowledgeOutput}
-      />
-
       <div className="chat-messages" ref={messagesRef}>
         {messages.map((message, index) => (
           <div className={`message ${message.role}`} key={message.id || `${message.role}-${index}`}>
@@ -301,7 +209,7 @@ export default function ChatPanel({
           </div>
         ))}
 
-        {isLoading || knowledgeOutputLoading ? (
+        {isLoading ? (
           <div className="message assistant">
             <div className="avatar">AI</div>
             <div className="bubble loading-bubble">
@@ -335,14 +243,6 @@ export default function ChatPanel({
           >
             {uploadLoading ? '上传解析中...' : '上传文件'}
           </button>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => onPrepareKnowledgeOutput?.(input)}
-            disabled={isLoading || knowledgeOutputLoading || uploadLoading || !canPrepareKnowledgeOutput}
-          >
-            按知识库输出
-          </button>
         </div>
 
         <div className="chat-input-row">
@@ -352,12 +252,12 @@ export default function ChatPanel({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                if (!isLoading && !knowledgeOutputLoading) onSubmit(input);
+                if (!isLoading) onSubmit(input);
               }
             }}
-            placeholder="输入问题。普通对话会直接走云端模型，知识库输出请使用上方按钮。"
+            placeholder="输入问题。系统会先正常问答；当你明确要求基于库内文件产出结果时，会自动补充必要信息后再按库输出。"
           />
-          <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading || knowledgeOutputLoading}>
+          <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
             {isLoading ? '思考中...' : '发送'}
           </button>
         </div>

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { buildApiUrl } from '../lib/config';
+import { appendSystemMemoryEntry } from '../lib/chat-memory';
 import { sourceItems } from '../lib/mock-data';
 
 const EMPTY_FORM = {
@@ -36,6 +37,7 @@ const KIND_LABELS = {
   web_discovery: '关联发现',
   database: '数据库',
   erp: 'ERP后台',
+  upload_public: '外部资料上传',
 };
 
 const AUTH_LABELS = {
@@ -46,14 +48,30 @@ const AUTH_LABELS = {
   api_token: 'API Token',
 };
 
-const STATUS_LABELS = { active: '运行中', paused: '已暂停', draft: '草稿', error: '异常' };
-const RUN_STATUS_LABELS = { running: '执行中', success: '成功', partial: '部分完成', failed: '失败' };
-const SCHEDULE_LABELS = { manual: '手动', daily: '每日', weekly: '每周' };
+const STATUS_LABELS = {
+  active: '运行中',
+  paused: '已暂停',
+  draft: '草稿',
+  error: '异常',
+};
+
+const RUN_STATUS_LABELS = {
+  running: '执行中',
+  success: '成功',
+  partial: '部分完成',
+  failed: '失败',
+};
+
+const SCHEDULE_LABELS = {
+  manual: '手动',
+  daily: '每日',
+  weekly: '每周',
+};
 
 function formatDateTime(value) {
   if (!value) return '暂无';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return String(value);
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
     day: '2-digit',
@@ -65,7 +83,7 @@ function formatDateTime(value) {
 function formatRelative(value) {
   if (!value) return '暂无';
   const delta = Date.now() - new Date(value).getTime();
-  if (Number.isNaN(delta)) return value;
+  if (Number.isNaN(delta)) return String(value);
   const minutes = Math.round(delta / 60000);
   if (minutes < 1) return '刚刚';
   if (minutes < 60) return `${minutes} 分钟前`;
@@ -78,7 +96,7 @@ function formatRelative(value) {
 function splitValues(value) {
   return String(value || '')
     .split(/[,\n，]/)
-    .map((entry) => entry.trim())
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 
@@ -105,14 +123,13 @@ function buildSidebarSources(managedItems, legacyItems) {
     name: item.name,
     status: item.status === 'active' ? 'success' : item.status === 'error' ? 'warning' : 'idle',
   }));
-  return normalizedManaged.length
-    ? normalizedManaged
-    : sourceItems.concat(
-        (legacyItems || []).slice(0, 4).map((item) => ({
-          name: item.name,
-          status: item.status === 'connected' ? 'success' : item.status === 'warning' ? 'warning' : 'idle',
-        })),
-      );
+  if (normalizedManaged.length) return normalizedManaged;
+  return sourceItems.concat(
+    (legacyItems || []).slice(0, 4).map((item) => ({
+      name: item.name,
+      status: item.status === 'connected' ? 'success' : item.status === 'warning' ? 'warning' : 'idle',
+    })),
+  );
 }
 
 function buildFormFromDefinition(item) {
@@ -122,7 +139,7 @@ function buildFormFromDefinition(item) {
     name: item.name || '',
     kind: item.kind || 'web_public',
     authMode: item.authMode || 'none',
-    scheduleKind: item.schedule?.kind || item.schedule || 'manual',
+    scheduleKind: item.schedule?.kind || 'manual',
     maxItemsPerRun: String(item.schedule?.maxItemsPerRun || 20),
     targetKeys: toTargetKeyString(item.targetLibraries),
     url: String(item.config?.url || item.config?.baseUrl || ''),
@@ -175,6 +192,21 @@ function hasCredentialSecret(secret) {
   );
 }
 
+function rememberDatasourceFeedback(title, content, meta = '') {
+  const combined = [title, content, meta].filter(Boolean).join('\n');
+  const isFailure =
+    /失败|异常|不可用|错误|超时/.test(combined) ||
+    /failed|error|unavailable|timeout/i.test(combined);
+
+  appendSystemMemoryEntry({
+    title,
+    content,
+    meta,
+    memoryContent: [title, content, meta ? `相关对象：${meta}` : ''].filter(Boolean).join('。'),
+    messageType: isFailure ? 'system_failure' : 'system_feedback',
+  });
+}
+
 function StatCard({ label, value, subtle }) {
   return (
     <div className="stat-card">
@@ -189,9 +221,19 @@ function DatasourceTag({ children, tone = 'neutral-tag' }) {
   return <span className={`tag ${tone}`}>{children}</span>;
 }
 
+function RequiredLabel({ children }) {
+  return (
+    <span>
+      {children}
+      <span style={{ color: '#b42318', marginLeft: 4 }}>*</span>
+    </span>
+  );
+}
+
 export default function DatasourcesPage() {
   const [legacyData, setLegacyData] = useState(null);
   const [managed, setManaged] = useState([]);
+  const [managedMeta, setManagedMeta] = useState({ total: 0, active: 0, paused: 0, errors: 0, latestRunAt: '' });
   const [definitions, setDefinitions] = useState([]);
   const [runs, setRuns] = useState([]);
   const [libraries, setLibraries] = useState([]);
@@ -204,9 +246,10 @@ export default function DatasourcesPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
+  const syncedMessageRef = useRef('');
+  const syncedErrorRef = useRef('');
 
   async function load() {
-    setError('');
     const [legacyResponse, managedResponse, definitionsResponse, runsResponse, overviewResponse, credentialsResponse] = await Promise.all([
       fetch(buildApiUrl('/api/datasources'), { cache: 'no-store' }),
       fetch(buildApiUrl('/api/datasources/managed'), { cache: 'no-store' }),
@@ -231,6 +274,7 @@ export default function DatasourcesPage() {
 
     setLegacyData(legacyJson);
     setManaged(Array.isArray(managedJson.items) ? managedJson.items : []);
+    setManagedMeta(managedJson.meta || { total: 0, active: 0, paused: 0, errors: 0, latestRunAt: '' });
     setDefinitions(Array.isArray(definitionsJson.items) ? definitionsJson.items : []);
     setRuns(Array.isArray(runsJson.items) ? runsJson.items : []);
     setLibraries(Array.isArray(overviewJson.libraries) ? overviewJson.libraries : []);
@@ -239,21 +283,22 @@ export default function DatasourcesPage() {
 
   useEffect(() => {
     let alive = true;
-    async function bootstrap() {
+    async function bootstrap(showLoading) {
       try {
-        setLoading(true);
+        if (alive) setError('');
+        if (alive && showLoading) setLoading(true);
         await load();
       } catch (loadError) {
         if (!alive) return;
         setError(loadError instanceof Error ? loadError.message : '数据源工作台加载失败');
       } finally {
-        if (alive) setLoading(false);
+        if (alive && showLoading) setLoading(false);
       }
     }
 
-    bootstrap();
+    bootstrap(true);
     const timer = setInterval(() => {
-      bootstrap();
+      bootstrap(false);
     }, 15000);
     return () => {
       alive = false;
@@ -261,15 +306,40 @@ export default function DatasourcesPage() {
     };
   }, []);
 
-  const sidebarSources = useMemo(() => buildSidebarSources(managed, legacyData?.items || []), [legacyData, managed]);
-  const presetCatalog = legacyData?.presetCatalog || [];
-  const providerMeta = legacyData?.providerMeta || { total: 0, active: 0, paused: 0, errors: 0, latestRunAt: '' };
-  const recentRuns = runs.slice(0, 8);
+  useEffect(() => {
+    const text = String(message || '').trim();
+    if (!text || syncedMessageRef.current === text) return;
+    syncedMessageRef.current = text;
+    rememberDatasourceFeedback('数据源系统反馈', text, form.name || planPrompt || '数据源工作台');
+  }, [form.name, message, planPrompt]);
+
+  useEffect(() => {
+    const text = String(error || '').trim();
+    if (!text || syncedErrorRef.current === text) return;
+    syncedErrorRef.current = text;
+    rememberDatasourceFeedback('数据源系统异常', text, form.name || planPrompt || '数据源工作台');
+  }, [error, form.name, planPrompt]);
+
   const definitionMap = useMemo(() => new Map(definitions.map((item) => [item.id, item])), [definitions]);
-  const selectedCredential = credentials.find((item) => item.id === form.credentialId) || null;
+  const presetCatalog = legacyData?.presetCatalog || [];
+  const sidebarSources = useMemo(() => buildSidebarSources(managed, legacyData?.items || []), [legacyData, managed]);
+  const recentRuns = useMemo(() => runs.slice(0, 10), [runs]);
 
   function updateForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function handleCopyPublicPath(item) {
+    const publicPath = String(item?.publicPath || '').trim();
+    if (!publicPath) return;
+    const url = `${window.location.origin}${publicPath}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage(`已复制外部上传链接：${item.name}`);
+      rememberDatasourceFeedback('外部上传链接已复制', `${item.name} 的外部上传链接已复制，可直接发给外部用户提交资料。`, item.name);
+    } catch {
+      setError('复制外部上传链接失败，请手动复制。');
+    }
   }
 
   function toggleTargetLibrary(key) {
@@ -282,10 +352,10 @@ export default function DatasourcesPage() {
   }
 
   function resetComposer() {
-    setForm(EMPTY_FORM);
     setPlanPrompt('');
-    setMessage('');
+    setForm(EMPTY_FORM);
     setError('');
+    setMessage('');
   }
 
   function applyPreset(preset) {
@@ -294,25 +364,32 @@ export default function DatasourcesPage() {
       ...EMPTY_FORM,
       name: preset.name,
       kind: preset.kind,
-      authMode: preset.authMode,
+      authMode: preset.authMode || 'none',
       scheduleKind: 'weekly',
       maxItemsPerRun: String(preset.config?.maxItemsPerRun || 20),
       targetKeys: presetLibraries,
       url: preset.baseUrl || '',
       focus: preset.focus || '',
       notes: preset.description || '',
-      siteHints: preset.name,
+      siteHints: preset.name || '',
     });
-    setPlanPrompt(`请围绕 ${preset.name} 建立一个持续采集任务，优先采集 ${preset.focus}`);
-    setMessage(`已把 ${preset.name} 预置站点填入工作栏，可继续编辑后保存。`);
+    setPlanPrompt(`请围绕 ${preset.name} 建立持续采集任务，重点采集 ${preset.focus || preset.name}，并优先落到对应知识库。`);
+    setMessage(`已将 ${preset.name} 的预置配置填入工作栏，你可以直接保存，也可以继续补充采集范围与认证信息。`);
   }
 
   async function createOrReuseCredential(currentForm) {
     if (currentForm.authMode === 'none') return null;
+
     if (currentForm.credentialId) {
       const existing = credentials.find((item) => item.id === currentForm.credentialId);
       return existing
-        ? { id: existing.id, kind: existing.kind, label: existing.label, origin: existing.origin || '', updatedAt: existing.updatedAt }
+        ? {
+            id: existing.id,
+            kind: existing.kind,
+            label: existing.label,
+            origin: existing.origin || '',
+            updatedAt: existing.updatedAt,
+          }
         : null;
     }
 
@@ -344,7 +421,11 @@ export default function DatasourcesPage() {
       .map((key, index) => {
         const library = libraryMap.get(key);
         if (!library) return null;
-        return { key: library.key, label: library.label, mode: index === 0 ? 'primary' : 'secondary' };
+        return {
+          key: library.key,
+          label: library.label,
+          mode: index === 0 ? 'primary' : 'secondary',
+        };
       })
       .filter(Boolean);
 
@@ -352,7 +433,7 @@ export default function DatasourcesPage() {
       id: currentForm.id || undefined,
       name: currentForm.name.trim(),
       kind: currentForm.kind,
-      status: currentForm.id ? (definitionMap.get(currentForm.id)?.status || 'draft') : 'draft',
+      status: currentForm.id ? definitionMap.get(currentForm.id)?.status || 'draft' : 'draft',
       authMode: currentForm.authMode,
       targetLibraries,
       schedule: {
@@ -402,9 +483,17 @@ export default function DatasourcesPage() {
       setError('');
       setMessage('');
       const json = await persistDefinitionWithForm(form);
-      setMessage(json?.item?.id ? `${form.id ? '已更新' : '已创建'}数据源：${json.item.name}` : '数据源已保存。');
+      const nextMessage = form.id ? `已更新数据源：${json.item?.name || form.name}` : `已创建数据源：${json.item?.name || form.name}`;
+      setMessage(nextMessage);
+      rememberDatasourceFeedback(
+        form.id ? '数据源已更新' : '数据源已创建',
+        `${json.item?.name || form.name} 已保存，目标知识库：${(json.item?.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}`,
+        json.item?.kind || form.kind,
+      );
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : '保存数据源失败');
+      const nextError = saveError instanceof Error ? saveError.message : '保存数据源失败';
+      setError(nextError);
+      rememberDatasourceFeedback('数据源保存失败', nextError, form.name || form.url || '');
     } finally {
       setSaving(false);
     }
@@ -423,19 +512,22 @@ export default function DatasourcesPage() {
 
   async function handlePlan() {
     if (!planPrompt.trim()) {
-      setError('请先输入采集需求，再让模型整理。');
+      setError('请先输入采集需求。');
       return;
     }
-
     try {
       setPlanning(true);
       setError('');
       setMessage('');
       const json = await planOnce();
       setForm(buildFormFromDraft(json.draft || {}));
-      setMessage(json?.draft?.explanation || '已根据自然语言需求整理出数据源配置草案。');
+      const nextMessage = json?.draft?.explanation || '已整理出一份数据源草案，你可以继续修改后保存。';
+      setMessage(nextMessage);
+      rememberDatasourceFeedback('采集需求已整理', nextMessage, planPrompt);
     } catch (planError) {
-      setError(planError instanceof Error ? planError.message : '采集需求整理失败');
+      const nextError = planError instanceof Error ? planError.message : '采集需求整理失败';
+      setError(nextError);
+      rememberDatasourceFeedback('采集需求整理失败', nextError, planPrompt);
     } finally {
       setPlanning(false);
     }
@@ -443,7 +535,7 @@ export default function DatasourcesPage() {
 
   async function handlePlanAndSave() {
     if (!planPrompt.trim()) {
-      setError('请先输入采集需求，再一键整理并保存。');
+      setError('请先输入采集需求。');
       return;
     }
 
@@ -455,9 +547,17 @@ export default function DatasourcesPage() {
       const json = await planOnce();
       const nextForm = buildFormFromDraft(json.draft || {});
       const saved = await persistDefinitionWithForm(nextForm);
-      setMessage(saved?.item?.name ? `已根据需求创建数据源：${saved.item.name}` : '已根据需求创建数据源。');
+      const nextMessage = `已整理并保存数据源：${saved?.item?.name || nextForm.name || '未命名数据源'}`;
+      setMessage(nextMessage);
+      rememberDatasourceFeedback(
+        '采集需求已整理并保存',
+        `${saved?.item?.name || nextForm.name || '未命名数据源'} 已保存到数据源工作台，目标知识库：${(saved?.item?.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}`,
+        saved?.item?.kind || nextForm.kind,
+      );
     } catch (planError) {
-      setError(planError instanceof Error ? planError.message : '整理并保存失败');
+      const nextError = planError instanceof Error ? planError.message : '采集需求整理失败';
+      setError(nextError);
+      rememberDatasourceFeedback('采集需求整理或保存失败', nextError, planPrompt);
     } finally {
       setPlanning(false);
       setSaving(false);
@@ -465,7 +565,7 @@ export default function DatasourcesPage() {
   }
 
   async function handleManagedAction(item, action) {
-    const actionUrls = {
+    const urlMap = {
       run: `/api/datasources/definitions/${encodeURIComponent(item.id)}/run`,
       activate: `/api/datasources/definitions/${encodeURIComponent(item.id)}/activate`,
       pause: `/api/datasources/definitions/${encodeURIComponent(item.id)}/pause`,
@@ -476,24 +576,30 @@ export default function DatasourcesPage() {
       setBusyId(`${item.id}:${action}`);
       setError('');
       setMessage('');
-      const response = await fetch(buildApiUrl(actionUrls[action]), {
+      const response = await fetch(buildApiUrl(urlMap[action]), {
         method: action === 'delete' ? 'DELETE' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: action === 'delete' ? undefined : '{}',
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || '数据源操作失败');
-      const messages = {
-        run: '已触发一次采集执行。',
-        activate: '数据源已启用。',
-        pause: '数据源已暂停。',
-        delete: '数据源已删除。',
-      };
-      setMessage(messages[action]);
       await load();
-      if (action === 'delete' && form.id === item.id) setForm(EMPTY_FORM);
+
+      const nextMessage =
+        action === 'run'
+          ? `已触发采集：${item.name}`
+          : action === 'activate'
+            ? `已启用数据源：${item.name}`
+            : action === 'pause'
+              ? `已暂停数据源：${item.name}`
+              : `已删除数据源：${item.name}`;
+      setMessage(nextMessage);
+      rememberDatasourceFeedback('数据源状态更新', nextMessage, item.name);
+      if (action === 'delete') resetComposer();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : '数据源操作失败');
+      const nextError = actionError instanceof Error ? actionError.message : '数据源操作失败';
+      setError(nextError);
+      rememberDatasourceFeedback('数据源操作失败', nextError, item.name);
     } finally {
       setBusyId('');
     }
@@ -510,12 +616,19 @@ export default function DatasourcesPage() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || '删除凭据失败');
       await load();
+      setMessage(`已删除凭据：${json?.item?.label || id}`);
+      rememberDatasourceFeedback('数据源凭据已删除', `${json?.item?.label || id} 已从凭据库移除。`, id);
       if (form.credentialId === id) {
-        updateForm({ credentialId: '', credentialLabel: '', credentialOrigin: '', credentialNotes: '' });
+        updateForm({
+          credentialId: '',
+          credentialLabel: '',
+          credentialOrigin: '',
+        });
       }
-      setMessage('凭据已删除。');
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : '删除凭据失败');
+      const nextError = deleteError instanceof Error ? deleteError.message : '删除凭据失败';
+      setError(nextError);
+      rememberDatasourceFeedback('数据源凭据删除失败', nextError, id);
     } finally {
       setBusyId('');
     }
@@ -525,298 +638,406 @@ export default function DatasourcesPage() {
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/datasources" />
       <main className="main-panel">
-        <header className="topbar">
+        <div className="topbar">
           <div>
-            <h2>数据源工作台</h2>
-            <p>统一管理公开站点、登录站点、数据库和 ERP 采集。所有采集成果都会落成文档，并进入后台深度解析。</p>
+            <div className="topbar-title-row">
+              <h2>数据源工作台</h2>
+              <span className="topbar-inline-note">
+                统一管理公开网页、登录网页、数据库和 ERP 采集任务，结果自动落到指定知识库并走后台深度解析。
+              </span>
+            </div>
+            <p>先用自然语言整理采集需求，再确认目标知识库、认证信息和执行频率。采集状态、运行记录和最近入库成果会持续沉淀在这里。</p>
           </div>
           <div className="topbar-actions">
-            <button className="ghost-btn" type="button" onClick={() => void load()}>刷新状态</button>
-            <button className="primary-btn" type="button" onClick={resetComposer}>新建数据源</button>
+            <button className="ghost-btn" type="button" onClick={resetComposer}>清空工作栏</button>
           </div>
-        </header>
+        </div>
 
-        {error ? <div className="datasource-message datasource-error">{error}</div> : null}
         {message ? <div className="datasource-message datasource-success">{message}</div> : null}
+        {error ? <div className="datasource-message datasource-error">{error}</div> : null}
 
         {loading ? (
-          <p>正在加载数据源工作台...</p>
+          <section className="card documents-card">
+            <div className="loading-bubble">
+              <span className="loading-dot"></span>
+              <span className="loading-dot"></span>
+              <span className="loading-dot"></span>
+            </div>
+          </section>
         ) : (
-          <section className="homepage-grid">
-            <section className="documents-grid three-columns">
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>运行概览</h3>
-                    <p>采集定义、启停状态和最近执行情况一眼可见。</p>
-                  </div>
-                </div>
-                <div className="summary-grid">
-                  <StatCard label="已管理数据源" value={String(providerMeta.total || 0)} subtle="统一走数据源总线" />
-                  <StatCard label="运行中" value={String(providerMeta.active || 0)} subtle="按计划自动执行" />
-                  <StatCard label="已暂停" value={String(providerMeta.paused || 0)} subtle="可随时恢复" />
-                  <StatCard label="最近执行" value={providerMeta.latestRunAt ? formatDateTime(providerMeta.latestRunAt) : '暂无'} subtle={formatRelative(providerMeta.latestRunAt)} />
-                </div>
-              </section>
-
-              <section className="card documents-card datasource-hero-card" style={{ gridColumn: 'span 2' }}>
+          <section className="documents-layout">
+            <section className="documents-grid two-columns datasource-workbench-grid">
+              {false ? <section className="card documents-card datasource-hero-card">
                 <div className="panel-header">
                   <div>
                     <h3>自然语言整理采集需求</h3>
-                    <p>先输入采集目标，系统会把需求整理成结构化草案，再由你确认目标知识库、认证方式和执行频率。</p>
+                    <p>直接输入采集目标、站点、认证方式、目标知识库和采集频率，系统会先整理出草案，再由你修改后保存。</p>
                   </div>
+                  <DatasourceTag>{managedMeta.active || 0} 个运行中</DatasourceTag>
                 </div>
-                <textarea className="datasource-plan-input" rows={4} value={planPrompt} onChange={(event) => setPlanPrompt(event.target.value)} placeholder="例如：每周抓取中国政府采购网里医疗设备相关的招标公告，落到 bids 知识库。" />
+                <textarea
+                  className="datasource-plan-input"
+                  rows={5}
+                  value={planPrompt}
+                  onChange={(event) => setPlanPrompt(event.target.value)}
+                  placeholder="例如：每周抓取中国政府采购网里和医疗设备相关的招标公告，落到 bids 知识库。"
+                />
                 <div className="datasource-inline-actions">
-                  <button className="primary-btn" type="button" disabled={planning} onClick={handlePlan}>{planning ? '整理中...' : '让模型整理需求'}</button>
-                  <button className="ghost-btn" type="button" disabled={planning || saving} onClick={handlePlanAndSave}>{planning || saving ? '处理中...' : '整理并保存'}</button>
-                  <span className="datasource-inline-note">默认优先绑定知识库，并保持文档中心走后台解析，不阻塞页面。</span>
+                  <button className="primary-btn" type="button" disabled={planning} onClick={handlePlan}>
+                    {planning ? '整理中...' : '整理草案'}
+                  </button>
+                  <button className="ghost-btn" type="button" disabled={planning || saving} onClick={handlePlanAndSave}>
+                    {planning || saving ? '处理中...' : '整理并保存'}
+                  </button>
+                  <span className="datasource-inline-note">整理结果会自动回填到下面的配置工作栏，不会影响文档中心打开速度。</span>
                 </div>
-              </section>
-            </section>
+              </section> : null}
 
-            <section className="documents-grid two-columns datasource-workbench-grid">
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
-                    <h3>数据源配置工作栏</h3>
-                    <p>在一个工作栏里完成网址、认证、目标知识库、执行频率、关键词和站点提示。</p>
+                    <h3>{form.id ? '编辑数据源' : '新建数据源'}</h3>
+                    <p>在一个工作栏里完成数据源配置、知识库绑定、认证和采集频率设置。</p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {form.id ? <DatasourceTag tone="success-tag">编辑中</DatasourceTag> : null}
+                    <button className="primary-btn" type="button" disabled={saving} onClick={handleSave}>
+                      {saving ? '保存中...' : form.id ? '保存更新' : '创建数据源'}
+                    </button>
                   </div>
                 </div>
 
                 <div className="datasource-form-grid">
-                  <label className="datasource-field"><span>数据源名称</span><input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} placeholder="例如：华南医疗招标公告" /></label>
-                  <label className="datasource-field"><span>采集类型</span><select value={form.kind} onChange={(event) => updateForm({ kind: event.target.value })}>{Object.entries(KIND_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                  <label className="datasource-field"><span>认证方式</span><select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value, credentialId: '' })}>{Object.entries(AUTH_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                  <label className="datasource-field"><span>执行频率</span><select value={form.scheduleKind} onChange={(event) => updateForm({ scheduleKind: event.target.value })}>{Object.entries(SCHEDULE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                  <label className="datasource-field datasource-field-span"><span>入口地址 / 连接串</span><input value={form.url} onChange={(event) => updateForm({ url: event.target.value })} placeholder="https://example.com/list 或 postgres://..." /></label>
-                  <label className="datasource-field datasource-field-span"><span>采集重点</span><textarea rows={3} value={form.focus} onChange={(event) => updateForm({ focus: event.target.value })} placeholder="描述正文范围、列表页与详情页关系、数据库字段或 ERP 模块。" /></label>
-                  <label className="datasource-field"><span>单次采集上限</span><input value={form.maxItemsPerRun} onChange={(event) => updateForm({ maxItemsPerRun: event.target.value })} placeholder="20" /></label>
-                  <label className="datasource-field"><span>站点提示</span><input value={form.siteHints} onChange={(event) => updateForm({ siteHints: event.target.value })} placeholder="例如：招标公告、详情页、项目编号" /></label>
-                  <label className="datasource-field datasource-field-span"><span>关键词</span><input value={form.keywords} onChange={(event) => updateForm({ keywords: event.target.value })} placeholder="用逗号分隔，例如：医疗设备，监护仪，招标公告" /></label>
-                  <label className="datasource-field datasource-field-span"><span>备注</span><textarea rows={3} value={form.notes} onChange={(event) => updateForm({ notes: event.target.value })} placeholder="补充采集边界、账号范围、数据库视图说明等。" /></label>
+                  <label className="datasource-field">
+                    <RequiredLabel>数据源名称</RequiredLabel>
+                    <input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} placeholder="例如：政府采购医疗设备公告" />
+                  </label>
+                  <label className="datasource-field">
+                    <RequiredLabel>数据源类型</RequiredLabel>
+                    <select value={form.kind} onChange={(event) => updateForm({ kind: event.target.value })}>
+                      {Object.entries(KIND_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="datasource-field">
+                    <span>认证方式</span>
+                    <select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value })}>
+                      {Object.entries(AUTH_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="datasource-field">
+                    <span>采集频率</span>
+                    <select value={form.scheduleKind} onChange={(event) => updateForm({ scheduleKind: event.target.value })}>
+                      {Object.entries(SCHEDULE_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>入口地址 / 连接地址</span>
+                    <input value={form.url} onChange={(event) => updateForm({ url: event.target.value })} placeholder="https://example.com 或 postgres://..." />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>采集重点</span>
+                    <input value={form.focus} onChange={(event) => updateForm({ focus: event.target.value })} placeholder="例如：招标公告、订单、客诉、IOT 方案、论文全文" />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>关键词</span>
+                    <input value={form.keywords} onChange={(event) => updateForm({ keywords: event.target.value })} placeholder="用逗号分隔，例如：医疗设备，体外诊断" />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>站点提示 / 表名 / 模块提示</span>
+                    <input value={form.siteHints} onChange={(event) => updateForm({ siteHints: event.target.value })} placeholder="例如：listing-detail，orders，complaints，inventory" />
+                  </label>
+                  <label className="datasource-field">
+                    <span>每次最大条数</span>
+                    <input value={form.maxItemsPerRun} onChange={(event) => updateForm({ maxItemsPerRun: event.target.value })} />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>备注</span>
+                    <textarea rows={3} value={form.notes} onChange={(event) => updateForm({ notes: event.target.value })} placeholder="补充抓取范围、排除规则、更新时间要求等。" />
+                  </label>
                 </div>
 
-                {form.authMode !== 'none' ? (
-                  <div className="datasource-credential-box">
-                    <div className="datasource-subtitle">认证信息</div>
-                    <p className="datasource-subtle">可以复用已有凭据，也可以直接录入新的凭据后随数据源一起保存。接口不会返回凭据明文。</p>
-                    <div className="datasource-form-grid">
-                      <label className="datasource-field datasource-field-span">
-                        <span>选择已有凭据</span>
-                        <select
-                          value={form.credentialId}
-                          onChange={(event) => {
-                            const nextId = event.target.value;
-                            const existing = credentials.find((item) => item.id === nextId);
-                            updateForm({
-                              credentialId: nextId,
-                              credentialLabel: existing?.label || '',
-                              credentialOrigin: existing?.origin || '',
-                              credentialNotes: existing?.notes || '',
-                              credentialUsername: '',
-                              credentialPassword: '',
-                              credentialToken: '',
-                              credentialConnectionString: '',
-                              credentialCookies: '',
-                              credentialHeaders: '',
-                            });
-                          }}
-                        >
-                          <option value="">不选，使用下面新录入的凭据</option>
-                          {credentials.filter((item) => item.kind === form.authMode).map((item) => <option key={item.id} value={item.id}>{item.label} / {item.secretHints.join('/')}</option>)}
-                        </select>
-                      </label>
-                      <label className="datasource-field"><span>凭据标签</span><input value={form.credentialLabel} onChange={(event) => updateForm({ credentialLabel: event.target.value, credentialId: '' })} placeholder="例如：采购平台账号" /></label>
-                      <label className="datasource-field"><span>凭据来源</span><input value={form.credentialOrigin} onChange={(event) => updateForm({ credentialOrigin: event.target.value, credentialId: '' })} placeholder="例如：1Password / 手动录入" /></label>
-                      <label className="datasource-field datasource-field-span"><span>凭据备注</span><input value={form.credentialNotes} onChange={(event) => updateForm({ credentialNotes: event.target.value, credentialId: '' })} placeholder="记录用途、归属或风险边界" /></label>
-                      {(form.authMode === 'credential' || form.authMode === 'database_password') ? (
-                        <>
-                          <label className="datasource-field"><span>登录账号</span><input value={form.credentialUsername} onChange={(event) => updateForm({ credentialUsername: event.target.value, credentialId: '' })} placeholder="example_user" /></label>
-                          <label className="datasource-field"><span>密码</span><input type="password" value={form.credentialPassword} onChange={(event) => updateForm({ credentialPassword: event.target.value, credentialId: '' })} placeholder="******" /></label>
-                        </>
-                      ) : null}
-                      {form.authMode === 'database_password' ? <label className="datasource-field datasource-field-span"><span>数据库连接串</span><input value={form.credentialConnectionString} onChange={(event) => updateForm({ credentialConnectionString: event.target.value, credentialId: '' })} placeholder="postgres://user:password@host:5432/db" /></label> : null}
-                      {form.authMode === 'api_token' ? <label className="datasource-field datasource-field-span"><span>API Token</span><input type="password" value={form.credentialToken} onChange={(event) => updateForm({ credentialToken: event.target.value, credentialId: '' })} placeholder="sk-..." /></label> : null}
-                      {form.authMode === 'manual_session' ? (
-                        <>
-                          <label className="datasource-field datasource-field-span"><span>Cookies</span><textarea rows={3} value={form.credentialCookies} onChange={(event) => updateForm({ credentialCookies: event.target.value, credentialId: '' })} placeholder="session=...; token=..." /></label>
-                          <label className="datasource-field datasource-field-span"><span>Headers</span><textarea rows={3} value={form.credentialHeaders} onChange={(event) => updateForm({ credentialHeaders: event.target.value, credentialId: '' })} placeholder={'Authorization: Bearer ...\nX-Requested-With: XMLHttpRequest'} /></label>
-                        </>
-                      ) : null}
-                    </div>
-                    {selectedCredential ? <div className="datasource-inline-note">已选凭据：{selectedCredential.label} / {selectedCredential.secretHints.join('/')}</div> : null}
-                  </div>
-                ) : null}
-
-                <div className="datasource-library-picker">
-                  <div className="datasource-subtitle">目标知识库 / 文档库</div>
-                  <p className="datasource-subtle">新建数据源时必须绑定至少一个目标知识库。采集结果会直接落库，并继续走后台深度解析。</p>
-                  <div className="datasource-library-grid">
-                    {libraries.map((library) => {
-                      const selected = form.targetKeys.includes(library.key);
-                      return (
-                        <button key={library.key} type="button" className={`datasource-library-chip ${selected ? 'active' : ''}`} onClick={() => toggleTargetLibrary(library.key)}>
-                          <span>{library.label}</span>
-                          <small>{library.documentCount || 0} 篇文档</small>
-                        </button>
-                      );
-                    })}
+                <div className="panel-header" style={{ marginTop: 20 }}>
+                  <div>
+                    <h3><RequiredLabel>目标知识库</RequiredLabel></h3>
+                    <p>采集结果会直接进入选中的知识库，并自动进入日常后台深度解析线。</p>
                   </div>
                 </div>
+                <div className="datasource-library-grid">
+                  {libraries.map((library) => {
+                    const selected = form.targetKeys.includes(library.key);
+                    return (
+                      <button
+                        key={library.key}
+                        type="button"
+                        className={`datasource-library-chip ${selected ? 'active' : ''}`}
+                        onClick={() => toggleTargetLibrary(library.key)}
+                      >
+                        <span>{library.label}</span>
+                        <span>{library.documentCount || 0} 份</span>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                <div className="datasource-inline-actions">
-                  <button className="primary-btn" type="button" disabled={saving} onClick={handleSave}>{saving ? '保存中...' : form.id ? '保存更新' : '保存数据源'}</button>
-                  <button className="ghost-btn" type="button" disabled={saving} onClick={resetComposer}>清空工作栏</button>
-                  <span className="datasource-inline-note">当前数据源已经接到定义、运行记录、知识库绑定主总线，不会影响文档中心打开速度。</span>
+                <div className="panel-header" style={{ marginTop: 20 }}>
+                  <div>
+                    <h3>认证与凭据</h3>
+                    <p>可直接引用已保存凭据，也可以在这里录入新凭据。页面只显示元信息，不回显敏感内容。</p>
+                  </div>
+                </div>
+                <div className="datasource-form-grid">
+                  <label className="datasource-field">
+                    <span>已保存凭据</span>
+                    <select value={form.credentialId} onChange={(event) => updateForm({ credentialId: event.target.value })}>
+                      <option value="">不使用已保存凭据</option>
+                      {credentials.map((credential) => (
+                        <option key={credential.id} value={credential.id}>{credential.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="datasource-field">
+                    <span>新凭据名称</span>
+                    <input value={form.credentialLabel} onChange={(event) => updateForm({ credentialLabel: event.target.value })} placeholder="例如：政府采购登录账号" />
+                  </label>
+                  <label className="datasource-field">
+                    <span>凭据来源</span>
+                    <input value={form.credentialOrigin} onChange={(event) => updateForm({ credentialOrigin: event.target.value })} placeholder="例如：manual / browser / db" />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>凭据备注</span>
+                    <input value={form.credentialNotes} onChange={(event) => updateForm({ credentialNotes: event.target.value })} placeholder="例如：只读账号，仅用于订单与客诉采集" />
+                  </label>
+                  <label className="datasource-field">
+                    <span>用户名</span>
+                    <input value={form.credentialUsername} onChange={(event) => updateForm({ credentialUsername: event.target.value })} />
+                  </label>
+                  <label className="datasource-field">
+                    <span>密码</span>
+                    <input type="password" value={form.credentialPassword} onChange={(event) => updateForm({ credentialPassword: event.target.value })} />
+                  </label>
+                  <label className="datasource-field">
+                    <span>API Token</span>
+                    <input value={form.credentialToken} onChange={(event) => updateForm({ credentialToken: event.target.value })} />
+                  </label>
+                  <label className="datasource-field">
+                    <span>数据库连接串</span>
+                    <input value={form.credentialConnectionString} onChange={(event) => updateForm({ credentialConnectionString: event.target.value })} />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>Cookies</span>
+                    <textarea rows={3} value={form.credentialCookies} onChange={(event) => updateForm({ credentialCookies: event.target.value })} />
+                  </label>
+                  <label className="datasource-field datasource-field-span">
+                    <span>Headers</span>
+                    <textarea rows={3} value={form.credentialHeaders} onChange={(event) => updateForm({ credentialHeaders: event.target.value })} placeholder="一行一个 Header，例如：Authorization: Bearer xxx" />
+                  </label>
+                </div>
+
+                <div className="datasource-inline-actions" style={{ marginTop: 20 }}>
+                  <button className="primary-btn" type="button" disabled={saving} onClick={handleSave}>
+                    {saving ? '保存中...' : form.id ? '保存更新' : '创建数据源'}
+                  </button>
+                  {form.id ? (
+                    <button className="ghost-btn" type="button" onClick={() => setForm(EMPTY_FORM)}>
+                      新建另一条
+                    </button>
+                  ) : null}
+                  <span className="datasource-inline-note">
+                    当前会优先保留文档中心性能，采集与深度解析继续走后台任务。
+                  </span>
                 </div>
               </section>
 
-              <section className="card documents-card">
+              {false ? <section className="card documents-card">
                 <div className="panel-header">
                   <div>
                     <h3>已保存凭据</h3>
-                    <p>管理登录账号、数据库连接和会话凭据。列表只显示标签和提示，不返回明文。</p>
+                    <p>只显示元信息和密钥提示，方便复用而不暴露敏感内容。</p>
                   </div>
                 </div>
-                <div className="datasource-managed-list">
-                  {credentials.length ? credentials.map((item) => (
-                    <article key={item.id} className="datasource-managed-card">
-                      <div className="datasource-managed-head">
-                        <div>
-                          <h4>{item.label}</h4>
-                          <div className="datasource-managed-meta">
-                            <DatasourceTag>{AUTH_LABELS[item.kind] || item.kind}</DatasourceTag>
-                            {item.origin ? <DatasourceTag tone="neutral-tag">{item.origin}</DatasourceTag> : null}
+                {credentials.length ? (
+                  <div className="datasource-managed-list">
+                    {credentials.map((credential) => (
+                      <article key={credential.id} className="datasource-managed-card">
+                        <div className="datasource-managed-head">
+                          <div className="datasource-managed-info">
+                            <strong>{credential.label}</strong>
+                            <div className="datasource-managed-meta">
+                              <span>{AUTH_LABELS[credential.kind] || credential.kind}</span>
+                              <span>{credential.origin || 'manual'}</span>
+                              <span>更新于 {formatDateTime(credential.updatedAt)}</span>
+                            </div>
+                            <div className="datasource-managed-meta">
+                              <span>密钥内容：{credential.secretHints?.join(' / ') || '无'}</span>
+                            </div>
+                          </div>
+                          <div className="datasource-managed-actions">
+                            <button
+                              className="ghost-btn"
+                              type="button"
+                              disabled={busyId === `credential:${credential.id}`}
+                              onClick={() => updateForm({
+                                credentialId: credential.id,
+                                credentialLabel: credential.label,
+                                credentialOrigin: credential.origin || '',
+                              })}
+                            >
+                              选用
+                            </button>
+                            <button
+                              className="ghost-btn"
+                              type="button"
+                              disabled={busyId === `credential:${credential.id}`}
+                              onClick={() => handleDeleteCredential(credential.id)}
+                            >
+                              删除
+                            </button>
                           </div>
                         </div>
-                        <button className="ghost-btn" type="button" disabled={busyId === `credential:${item.id}`} onClick={() => void handleDeleteCredential(item.id)}>{busyId === `credential:${item.id}` ? '删除中...' : '删除'}</button>
-                      </div>
-                      <div className="datasource-managed-info">
-                        <span>提示：{(item.secretHints || []).join(' / ') || '无'}</span>
-                        <span>更新时间：{formatDateTime(item.updatedAt)}</span>
-                      </div>
-                      {item.notes ? <p className="datasource-run-summary">{item.notes}</p> : null}
-                    </article>
-                  )) : (
-                    <div className="report-empty-card">
-                      <h4>还没有已保存凭据</h4>
-                      <p>可以在左侧工作栏里直接录入凭据，保存数据源时会一并写入凭据库。</p>
-                    </div>
-                  )}
-                </div>
-              </section>
-            </section>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="report-empty-card">还没有保存凭据。你可以在工作栏里录入认证信息并保存。</div>
+                )}
+                {form.credentialId ? (
+                  <div className="datasource-inline-note" style={{ marginTop: 12 }}>
+                    当前已选凭据：{credentials.find((item) => item.id === form.credentialId)?.label || form.credentialId}
+                  </div>
+                ) : null}
+              </section> : null}
 
-            <section className="documents-grid two-columns datasource-workbench-grid">
-              <section className="card documents-card">
+              {false ? <section className="card documents-card">
                 <div className="panel-header">
                   <div>
                     <h3>预置站点</h3>
-                    <p>公开招投标站点和公开学术平台可直接套用，后续再微调配置。</p>
+                    <p>快速套用公开招投标和国际公开学术站点，减少手工配置成本。</p>
                   </div>
                 </div>
                 <div className="datasource-preset-list">
                   {presetCatalog.map((preset) => (
                     <article key={preset.id} className="datasource-preset-card">
-                      <div className="datasource-preset-meta">
-                        <DatasourceTag tone={preset.category === 'bids' ? 'danger' : 'up-tag'}>
-                          {preset.category === 'bids' ? '招投标' : '公开学术'}
-                        </DatasourceTag>
-                        <DatasourceTag>{KIND_LABELS[preset.kind] || preset.kind}</DatasourceTag>
+                      <div className="datasource-managed-head">
+                        <div className="datasource-managed-info">
+                          <strong>{preset.name}</strong>
+                          <div className="datasource-preset-meta">
+                            <span>{KIND_LABELS[preset.kind] || preset.kind}</span>
+                            <span>{preset.authority}</span>
+                            <span>{preset.baseUrl}</span>
+                          </div>
+                          <p>{preset.description}</p>
+                        </div>
+                        <button className="ghost-btn" type="button" onClick={() => applyPreset(preset)}>套用</button>
                       </div>
-                      <h4>{preset.name}</h4>
-                      <p>{preset.description}</p>
                       <div className="datasource-preset-foot">
-                        <span>{preset.baseUrl}</span>
-                        <button className="ghost-btn" type="button" onClick={() => applyPreset(preset)}>套用到工作栏</button>
+                        <span>重点：{preset.focus}</span>
+                        <span>推荐知识库：{(preset.suggestedLibraries || []).map((item) => item.label).join('、') || '未指定'}</span>
                       </div>
                     </article>
                   ))}
                 </div>
-              </section>
+              </section> : null}
 
               <section className="card documents-card">
                 <div className="panel-header">
                   <div>
                     <h3>已管理数据源</h3>
-                    <p>查看启停状态、绑定知识库、上次与下次采集，并支持手动执行或编辑。</p>
+                    <p>在同一列表里查看状态、知识库归属、最近运行和直接操作。</p>
                   </div>
                 </div>
-                <div className="datasource-managed-list">
-                  {managed.length ? managed.map((item) => (
-                    <article key={item.id} className="datasource-managed-card">
-                      <div className="datasource-managed-head">
-                        <div>
-                          <h4>{item.name}</h4>
-                          <div className="datasource-managed-meta">
-                            <DatasourceTag tone={item.status === 'active' ? 'up-tag' : item.status === 'error' ? 'danger' : 'neutral-tag'}>
-                              {STATUS_LABELS[item.status] || item.status}
-                            </DatasourceTag>
-                            <DatasourceTag>{KIND_LABELS[item.kind] || item.kind}</DatasourceTag>
+                {managed.length ? (
+                  <div className="datasource-managed-list">
+                    {managed.map((item) => (
+                      <article key={item.id} className="datasource-managed-card">
+                        <div className="datasource-managed-head">
+                          <div className="datasource-managed-info">
+                            <strong>{item.name}</strong>
+                            <div className="datasource-managed-meta">
+                              <span>{KIND_LABELS[item.kind] || item.kind}</span>
+                              <span>{STATUS_LABELS[item.status] || item.status}</span>
+                              <span>{item.scheduleLabel || SCHEDULE_LABELS[item.schedule?.kind] || '手动'}</span>
+                            </div>
+                            <div className="datasource-managed-meta">
+                              <span>知识库：{(item.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}</span>
+                              <span>最近：{formatRelative(item.lastRunAt)}</span>
+                            </div>
+                            {item.lastSummary ? <p>{item.lastSummary}</p> : null}
+                          </div>
+                          <div className="datasource-managed-actions">
+                            <button className="ghost-btn" type="button" onClick={() => setForm(buildFormFromDefinition(definitionMap.get(item.id) || item))}>编辑</button>
+                            {item.publicPath ? (
+                              <button className="ghost-btn" type="button" onClick={() => handleCopyPublicPath(item)}>复制外链</button>
+                            ) : (
+                              <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:run`} onClick={() => handleManagedAction(item, 'run')}>立即采集</button>
+                            )}
+                            {item.status === 'active' ? (
+                              <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:pause`} onClick={() => handleManagedAction(item, 'pause')}>暂停</button>
+                            ) : (
+                              <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:activate`} onClick={() => handleManagedAction(item, 'activate')}>启用</button>
+                            )}
+                            <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:delete`} onClick={() => handleManagedAction(item, 'delete')}>删除</button>
                           </div>
                         </div>
-                        <button className="ghost-btn" type="button" onClick={() => setForm(buildFormFromDefinition(definitionMap.get(item.id) || item))}>编辑</button>
-                      </div>
-                      <div className="datasource-managed-info">
-                        <span>目标库：{(item.targetLibraries || []).map((entry) => entry.label).join('，') || '未绑定'}</span>
-                        <span>频率：{SCHEDULE_LABELS[item.schedule] || item.schedule || '手动'}</span>
-                        <span>上次：{item.runtime?.lastRunAt ? formatDateTime(item.runtime.lastRunAt) : '暂无'}</span>
-                        <span>下次：{item.runtime?.nextRunAt ? formatDateTime(item.runtime.nextRunAt) : '未安排'}</span>
-                      </div>
-                      <div className="datasource-managed-actions">
-                        <button className="primary-btn" type="button" disabled={busyId === `${item.id}:run`} onClick={() => handleManagedAction(item, 'run')}>{busyId === `${item.id}:run` ? '执行中...' : '立即采集'}</button>
-                        {item.status === 'active' ? (
-                          <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:pause`} onClick={() => handleManagedAction(item, 'pause')}>暂停</button>
-                        ) : (
-                          <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:activate`} onClick={() => handleManagedAction(item, 'activate')}>启用</button>
-                        )}
-                        <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:delete`} onClick={() => handleManagedAction(item, 'delete')}>删除</button>
-                      </div>
-                    </article>
-                  )) : (
-                    <div className="report-empty-card">
-                      <h4>还没有正式纳管的数据源</h4>
-                      <p>先用自然语言生成草案，或从预置站点开始，再保存为数据源定义。</p>
-                    </div>
-                  )}
-                </div>
-              </section>
-            </section>
-
-            <section className="card documents-card">
-              <div className="panel-header">
-                <div>
-                  <h3>最近运行记录</h3>
-                  <p>采集状态、发现数量、入库数量和异常原因会在这里汇总。</p>
-                </div>
-              </div>
-              <div className="datasource-run-list">
-                {recentRuns.length ? recentRuns.map((run) => (
-                  <article key={run.id} className="datasource-run-card">
-                    <div className="datasource-run-head">
-                      <div className="datasource-subtitle">{run.datasourceId}</div>
-                      <DatasourceTag tone={run.status === 'success' ? 'up-tag' : run.status === 'failed' ? 'danger' : 'neutral-tag'}>
-                        {RUN_STATUS_LABELS[run.status] || run.status}
-                      </DatasourceTag>
-                    </div>
-                    <div className="datasource-managed-info">
-                      <span>开始：{formatDateTime(run.startedAt)}</span>
-                      <span>结束：{run.finishedAt ? formatDateTime(run.finishedAt) : '进行中'}</span>
-                      <span>发现：{run.discoveredCount}</span>
-                      <span>采集：{run.capturedCount}</span>
-                      <span>入库：{run.ingestedCount}</span>
-                    </div>
-                    {run.summary ? <p className="datasource-run-summary">{run.summary}</p> : null}
-                    {run.errorMessage ? <p className="datasource-run-error">{run.errorMessage}</p> : null}
-                  </article>
-                )) : (
-                  <div className="report-empty-card">
-                    <h4>还没有执行记录</h4>
-                    <p>启用数据源后，采集状态、下次执行和落库结果会自动在这里沉淀。</p>
+                      </article>
+                    ))}
                   </div>
+                ) : (
+                  <div className="report-empty-card">还没有已管理数据源。你可以先通过上面的自然语言描述整理一条采集需求。</div>
                 )}
-              </div>
+              </section>
+
+              {false ? <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>最近运行记录</h3>
+                    <p>查看执行状态、采集数量、落库结果和最近入库成果摘要。</p>
+                  </div>
+                </div>
+                {recentRuns.length ? (
+                  <div className="datasource-run-list">
+                    {recentRuns.map((run) => (
+                      <article key={run.id} className="datasource-run-card">
+                        <div className="datasource-run-head">
+                          <strong>{run.datasourceName || run.datasourceId}</strong>
+                          <DatasourceTag tone={run.status === 'success' ? 'success-tag' : run.status === 'failed' ? 'danger-tag' : 'neutral-tag'}>
+                            {RUN_STATUS_LABELS[run.status] || run.status}
+                          </DatasourceTag>
+                        </div>
+                        <div className="datasource-managed-meta">
+                          <span>开始：{formatDateTime(run.startedAt)}</span>
+                          <span>结束：{formatDateTime(run.finishedAt)}</span>
+                          <span>知识库：{(run.libraryLabels || []).join('、') || '未绑定'}</span>
+                        </div>
+                        <div className="datasource-managed-meta">
+                          <span>发现 {run.discoveredCount || 0}</span>
+                          <span>采集 {run.capturedCount || 0}</span>
+                          <span>入库 {run.ingestedCount || 0}</span>
+                        </div>
+                        {run.summary ? <div className="datasource-run-summary">{run.summary}</div> : null}
+                        {run.documentSummaries?.length ? (
+                          <div className="capture-result-list">
+                            {run.documentSummaries.map((doc) => (
+                              <div key={doc.id} className="capture-result-item">
+                                <strong>{doc.label}</strong>
+                                {doc.summary ? <p>{doc.summary}</p> : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        {run.errorMessage ? <div className="datasource-run-error">{run.errorMessage}</div> : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="report-empty-card">还没有运行记录。保存一条数据源后即可触发采集并在这里查看结果。</div>
+                )}
+              </section> : null}
             </section>
           </section>
         )}

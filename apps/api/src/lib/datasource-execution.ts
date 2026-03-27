@@ -5,6 +5,7 @@ import {
   type DatasourceDefinition,
   type DatasourceRun,
 } from './datasource-definitions.js';
+import { computeNextRunAt } from './datasource-schedule.js';
 import {
   buildDatasourceRunFromWebCaptureTask,
   syncWebCaptureTaskToDatasource,
@@ -52,6 +53,7 @@ async function persistDefinitionRunState(
     lastRunAt: new Date().toISOString(),
     lastStatus: status,
     lastSummary: summary,
+    nextRunAt: computeNextRunAt(definition.schedule.kind, definition.status),
   });
 }
 
@@ -101,6 +103,7 @@ export async function activateDatasourceDefinition(id: string) {
   return upsertDatasourceDefinition({
     ...definition,
     status: 'active',
+    nextRunAt: computeNextRunAt(definition.schedule.kind, 'active'),
   });
 }
 
@@ -118,12 +121,23 @@ export async function pauseDatasourceDefinition(id: string) {
   return upsertDatasourceDefinition({
     ...definition,
     status: 'paused',
+    nextRunAt: '',
   });
 }
 
 export async function runDatasourceDefinition(id: string) {
   const definition = await getDatasourceDefinition(id);
   if (!definition) throw new Error('datasource definition not found');
+
+  if (definition.kind === 'upload_public') {
+    const summary = `外部资料上传入口已就绪，可通过固定链接向 ${(definition.targetLibraries || []).map((item) => item.label).join('、') || '目标知识库'} 提交材料。`;
+    const run = await appendDatasourceRun({
+      ...buildSyntheticRun(definition, 'partial', summary),
+      summary,
+    });
+    const nextDefinition = await persistDefinitionRunState(definition, 'partial', summary);
+    return { definition: nextDefinition, task: null, run };
+  }
 
   if (definition.kind === 'database') {
     const plan = buildDatabaseExecutionPlan(definition);

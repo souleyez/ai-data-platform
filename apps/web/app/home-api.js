@@ -60,6 +60,7 @@ export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
       mode: options.mode || 'general',
       confirmedRequest: options.confirmedRequest || '',
       preferredLibraries: Array.isArray(options.preferredLibraries) ? options.preferredLibraries : [],
+      conversationState: options.conversationState || null,
     }),
   });
   return parseApiResponse(response, 'chat api failed');
@@ -88,4 +89,13 @@ export async function deleteReportOutput(reportId) {
     method: 'DELETE',
   });
   return parseApiResponse(response, 'delete report failed');
+}
+
+export async function reviseReportOutput(reportId, instruction) {
+  const response = await fetch(buildApiUrl(`/api/reports/output/${encodeURIComponent(reportId)}/revise`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instruction }),
+  });
+  return parseApiResponse(response, 'revise report failed');
 }

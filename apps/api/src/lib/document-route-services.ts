@@ -136,7 +136,7 @@ export async function autoAssignSuggestedLibraries(items: ParsedDocumentItem[], 
 
     if (!suggestedGroups.length) continue;
 
-    await saveDocumentSuggestion(item.path, { suggestedGroups });
+    await saveDocumentOverride(item.path, { groups: suggestedGroups });
     updatedCount += 1;
   }
 
@@ -340,7 +340,7 @@ export async function reclusterUngroupedDocuments() {
     });
 
     if (matched.length) {
-      await saveDocumentSuggestion(item.path, { suggestedGroups: matched });
+      await saveDocumentOverride(item.path, { groups: matched });
       suggestedCount += 1;
       continue;
     }
@@ -363,7 +363,7 @@ export async function reclusterUngroupedDocuments() {
     }
     for (const item of bucket) {
       if (item.confirmedGroups?.length || assignedClusterDocPaths.has(item.path)) continue;
-      await saveDocumentSuggestion(item.path, { suggestedGroups: [created.key] });
+      await saveDocumentOverride(item.path, { groups: [created.key] });
       assignedClusterDocPaths.add(item.path);
     }
   }
