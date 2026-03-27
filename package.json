@@ -15,6 +15,7 @@
     "local:status": "powershell -ExecutionPolicy Bypass -File tools/status-local.ps1",
     "smoke:local": "node tools/smoke-local.mjs",
     "smoke:local:cloud": "node tools/smoke-local.mjs --with-cloud",
+    "seed:default-samples": "node tools/seed-default-samples.mjs",
     "deploy:remote": "powershell -ExecutionPolicy Bypass -File tools/deploy-remote.ps1",
     "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
     "test": "corepack pnpm --filter api test",
