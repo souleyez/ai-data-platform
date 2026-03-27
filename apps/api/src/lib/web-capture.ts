@@ -927,6 +927,50 @@ export async function createAndRunWebCaptureTask(input: {
   return executedTask;
 }
 
+export async function upsertWebCaptureTask(input: {
+  id?: string;
+  url: string;
+  focus?: string;
+  frequency?: WebCaptureFrequency;
+  note?: string;
+  maxItems?: number;
+  credentialRef?: string;
+  credentialLabel?: string;
+  captureStatus?: 'active' | 'paused';
+  loginMode?: 'none' | 'credential';
+}) {
+  const now = new Date().toISOString();
+  const existingItems = await readTasks();
+  const normalizedUrl = normalizeUrl(input.url);
+  const existing = existingItems.find((item) => item.id === input.id || normalizeUrl(item.url) === normalizedUrl);
+  const task: WebCaptureTask = {
+    ...existing,
+    id: existing?.id || input.id || buildTaskId(input.url),
+    url: input.url,
+    focus: input.focus?.trim() || existing?.focus || '正文、关键信息、技术要点',
+    frequency: input.frequency || existing?.frequency || 'daily',
+    note: input.note?.trim() || existing?.note || '',
+    maxItems: normalizeMaxItems(input.maxItems ?? existing?.maxItems),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    captureStatus: input.captureStatus || existing?.captureStatus || 'active',
+    loginMode: input.loginMode || existing?.loginMode || (input.credentialRef || existing?.credentialRef ? 'credential' : 'none'),
+    credentialRef: input.credentialRef ?? existing?.credentialRef ?? '',
+    credentialLabel: input.credentialLabel ?? existing?.credentialLabel ?? '',
+    nextRunAt: (input.captureStatus || existing?.captureStatus || 'active') === 'paused'
+      ? ''
+      : computeNextRunAt({
+          frequency: input.frequency || existing?.frequency || 'daily',
+          lastRunAt: existing?.lastRunAt,
+          createdAt: existing?.createdAt || now,
+        }),
+  };
+
+  const nextItems = [task, ...existingItems.filter((item) => item.id !== task.id)];
+  await writeTasks(nextItems);
+  return task;
+}
+
 export async function runDueWebCaptureTasks(now = new Date()) {
   const nowIso = now.toISOString();
   const items = await readTasks();

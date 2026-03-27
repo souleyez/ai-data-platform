@@ -1,4 +1,27 @@
+import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import {
+  deleteDatasourceDefinition,
+  getDatasourceDefinition,
+  listDatasourceDefinitions,
+  listDatasourceRuns,
+  upsertDatasourceDefinition,
+} from '../lib/datasource-definitions.js';
+import {
+  deleteDatasourceCredential,
+  getDatasourceCredential,
+  listDatasourceCredentials,
+  upsertDatasourceCredential,
+} from '../lib/datasource-credentials.js';
+import {
+  activateDatasourceDefinition,
+  deleteDatasourceExecutionArtifacts,
+  pauseDatasourceDefinition,
+  runDatasourceDefinition,
+} from '../lib/datasource-execution.js';
+import { planDatasourceFromPrompt } from '../lib/datasource-planning.js';
+import { buildDatasourceMeta, listDatasourceProviderSummaries } from '../lib/datasource-service.js';
+import { listDatasourcePresets } from '../lib/datasource-presets.js';
 import { sourceItems } from '../lib/mock-data.js';
 import { listWebCaptureTasks } from '../lib/web-capture.js';
 
@@ -11,74 +34,306 @@ function toDatasourceItem(item: any) {
   };
 }
 
+function toDocumentLabels(documentIds: string[]) {
+  return (documentIds || []).map((value) => path.basename(String(value || ''))).filter(Boolean);
+}
+
+function buildLegacyDynamicItems(webTasks: Awaited<ReturnType<typeof listWebCaptureTasks>>) {
+  const scheduledTasks = webTasks.filter((task) => task.frequency !== 'manual');
+  const successfulTasks = webTasks.filter((task) => task.lastStatus === 'success');
+  const failedTasks = webTasks.filter((task) => task.lastStatus === 'error');
+
+  return [
+    {
+      id: 'web-fixed',
+      name: `固定网页抓取${webTasks.length ? `（${webTasks.length}）` : ''}`,
+      type: 'web',
+      status: successfulTasks.length ? 'connected' : webTasks.length ? 'warning' : 'idle',
+      mode: scheduledTasks.length ? 'active' : webTasks.length ? 'standby' : 'standby',
+      updateMode: '定时抓取 / 手动补抓',
+      capability: '固定网页、知识站点与专题页面持续采集',
+      group: '在线采集',
+    },
+    {
+      id: 'knowledge-sites',
+      name: '公开学术站点采集',
+      type: 'web',
+      status: successfulTasks.length ? 'connected' : webTasks.length ? 'warning' : 'idle',
+      mode: scheduledTasks.length ? 'active' : webTasks.length ? 'standby' : 'standby',
+      updateMode: '定时拉取 / 增量更新',
+      capability: 'PubMed Central、arXiv、DOAJ、WHO IRIS 等公开站点采集',
+      group: '在线采集',
+    },
+    {
+      id: 'db-access',
+      name: '数据库接入',
+      type: 'database',
+      status: 'connected',
+      mode: 'read-only',
+      updateMode: '定时同步 / 查询拉取',
+      capability: '结构化数据库、业务台账、查询视图只读接入',
+      group: '业务系统',
+    },
+    {
+      id: 'erp-orders',
+      name: 'ERP 订单后台数据接入',
+      type: 'database',
+      status: 'connected',
+      mode: 'read-only',
+      updateMode: '定时同步',
+      capability: '订单、回款、客诉、库存等业务数据接入',
+      group: '业务系统',
+    },
+  ].map(toDatasourceItem);
+}
+
 export async function registerDatasourceRoutes(app: FastifyInstance) {
+  app.get('/datasources/credentials', async () => {
+    const items = await listDatasourceCredentials();
+    return {
+      total: items.length,
+      items,
+    };
+  });
+
+  app.post('/datasources/credentials', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>;
+    try {
+      const saved = await upsertDatasourceCredential({
+        ...body,
+        id: String(body.id || '').trim() || `cred-${Date.now()}`,
+      });
+      return {
+        status: 'saved',
+        item: saved,
+      };
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : 'failed to save datasource credential',
+      });
+    }
+  });
+
+  app.patch('/datasources/credentials/:id', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const body = (request.body || {}) as Record<string, unknown>;
+    const id = String(params.id || '').trim();
+    const existing = id ? await getDatasourceCredential(id) : null;
+    if (!existing) {
+      return reply.code(404).send({ error: 'datasource credential not found' });
+    }
+
+    try {
+      const saved = await upsertDatasourceCredential({
+        ...body,
+        id,
+        label: String(body.label || existing.label || '').trim(),
+        kind: (['credential', 'manual_session', 'database_password', 'api_token'].includes(String(body.kind || existing.kind || 'credential'))
+          ? String(body.kind || existing.kind || 'credential')
+          : 'credential') as 'credential' | 'manual_session' | 'database_password' | 'api_token',
+      });
+      return {
+        status: 'saved',
+        item: saved,
+      };
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : 'failed to update datasource credential',
+      });
+    }
+  });
+
+  app.delete('/datasources/credentials/:id', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    const removed = id ? await deleteDatasourceCredential(id) : null;
+    if (!removed) {
+      return reply.code(404).send({ error: 'datasource credential not found' });
+    }
+    return {
+      status: 'deleted',
+      item: removed,
+    };
+  });
+
+  app.post('/datasources/plan', async (request, reply) => {
+    const body = (request.body || {}) as { prompt?: string };
+    const prompt = String(body.prompt || '').trim();
+    if (!prompt) {
+      return reply.code(400).send({ error: 'prompt is required' });
+    }
+    const draft = await planDatasourceFromPrompt(prompt);
+    return {
+      status: 'planned',
+      draft,
+    };
+  });
+
+  app.get('/datasources/managed', async () => {
+    const [items, meta] = await Promise.all([
+      listDatasourceProviderSummaries(),
+      buildDatasourceMeta(),
+    ]);
+    return {
+      total: items.length,
+      items,
+      meta,
+    };
+  });
+
+  app.get('/datasources/definitions', async () => {
+    const items = await listDatasourceDefinitions();
+    return {
+      total: items.length,
+      items,
+    };
+  });
+
+  app.get('/datasources/runs', async (request) => {
+    const query = (request.query || {}) as { datasourceId?: string };
+    const [items, definitions] = await Promise.all([
+      listDatasourceRuns(String(query.datasourceId || '').trim() || undefined),
+      listDatasourceDefinitions(),
+    ]);
+    const definitionMap = new Map(definitions.map((item) => [item.id, item]));
+    return {
+      total: items.length,
+      items: items.map((item) => ({
+        ...item,
+        datasourceName: definitionMap.get(item.datasourceId)?.name || item.datasourceId,
+        libraryLabels: (definitionMap.get(item.datasourceId)?.targetLibraries || [])
+          .map((entry) => entry.label),
+        documentLabels: toDocumentLabels(item.documentIds),
+      })),
+    };
+  });
+
+  app.post('/datasources/definitions', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>;
+    try {
+      const saved = await upsertDatasourceDefinition({
+        ...body,
+        id: String(body.id || '').trim() || `ds-${Date.now()}`,
+      });
+      return {
+        status: 'saved',
+        item: saved,
+      };
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : 'failed to save datasource definition',
+      });
+    }
+  });
+
+  app.patch('/datasources/definitions/:id', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const body = (request.body || {}) as Record<string, unknown>;
+    const id = String(params.id || '').trim();
+    const existing = id ? await getDatasourceDefinition(id) : null;
+    if (!existing) {
+      return reply.code(404).send({ error: 'datasource definition not found' });
+    }
+
+    try {
+      const saved = await upsertDatasourceDefinition({
+        ...existing,
+        ...body,
+        id,
+      });
+      return {
+        status: 'saved',
+        item: saved,
+      };
+    } catch (error) {
+      return reply.code(400).send({
+        error: error instanceof Error ? error.message : 'failed to update datasource definition',
+      });
+    }
+  });
+
+  app.delete('/datasources/definitions/:id', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    const existing = id ? await getDatasourceDefinition(id) : null;
+    if (existing) {
+      await deleteDatasourceExecutionArtifacts(existing);
+    }
+    const removed = id ? await deleteDatasourceDefinition(id) : null;
+    if (!removed) {
+      return reply.code(404).send({ error: 'datasource definition not found' });
+    }
+    return {
+      status: 'deleted',
+      item: removed,
+    };
+  });
+
+  app.post('/datasources/definitions/:id/run', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    try {
+      const result = await runDatasourceDefinition(id);
+      return {
+        status: 'executed',
+        ...result,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed to run datasource definition';
+      const code = /not found/i.test(message) ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/datasources/definitions/:id/activate', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    try {
+      const item = await activateDatasourceDefinition(id);
+      return {
+        status: 'active',
+        item,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed to activate datasource definition';
+      const code = /not found/i.test(message) ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/datasources/definitions/:id/pause', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    try {
+      const item = await pauseDatasourceDefinition(id);
+      return {
+        status: 'paused',
+        item,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed to pause datasource definition';
+      const code = /not found/i.test(message) ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
   app.get('/datasources', async () => {
-    const webTasks = await listWebCaptureTasks();
-    const scheduledTasks = webTasks.filter((task) => task.frequency !== 'manual');
-    const successfulTasks = webTasks.filter((task) => task.lastStatus === 'success');
-    const failedTasks = webTasks.filter((task) => task.lastStatus === 'error');
+    const [webTasks, providerSummaries, providerMeta, presetCatalog] = await Promise.all([
+      listWebCaptureTasks(),
+      listDatasourceProviderSummaries(),
+      buildDatasourceMeta(),
+      Promise.resolve(listDatasourcePresets()),
+    ]);
+
     const latestCaptureAt = webTasks
       .map((task) => task.lastRunAt || '')
       .filter(Boolean)
       .sort()
       .at(-1) || '';
 
-    const dynamicItems = [
-      {
-        id: 'web-fixed',
-        name: `固定网页抓取${webTasks.length ? `（${webTasks.length}）` : ''}`,
-        type: 'web',
-        status: successfulTasks.length ? 'connected' : webTasks.length ? 'warning' : 'idle',
-        mode: scheduledTasks.length ? 'active' : webTasks.length ? 'standby' : 'standby',
-        updateMode: '定时抓取 / 手动补抓',
-        capability: '固定网页、知识站点与专题页面持续采集',
-        group: '在线采集',
-      },
-      {
-        id: 'knowledge-sites',
-        name: '固定学术站点采集',
-        type: 'web',
-        status: successfulTasks.length ? 'connected' : webTasks.length ? 'warning' : 'idle',
-        mode: scheduledTasks.length ? 'active' : webTasks.length ? 'standby' : 'standby',
-        updateMode: '定时拉取 / 增量更新',
-        capability: 'PubMed Central、arXiv、DOAJ、WHO IRIS 等公开权威学术站点采集',
-        group: '在线采集',
-      },
-      {
-        id: 'db-access',
-        name: '数据库接入',
-        type: 'database',
-        status: 'connected',
-        mode: 'read-only',
-        updateMode: '定时同步 / 查询拉取',
-        capability: '结构化数据库、业务台账、查询视图只读接入',
-        group: '业务系统',
-      },
-      {
-        id: 'erp-orders',
-        name: 'ERP 订单后台数据接入',
-        type: 'database',
-        status: 'connected',
-        mode: 'read-only',
-        updateMode: '定时同步',
-        capability: '订单、回款、客户交易流水更新',
-        group: '业务系统',
-      },
-      {
-        id: 'crawler-ingest',
-        name: '爬虫数据接入',
-        type: 'crawler',
-        status: failedTasks.length ? 'warning' : webTasks.length ? 'connected' : 'idle',
-        mode: scheduledTasks.length ? 'active' : webTasks.length ? 'standby' : 'standby',
-        updateMode: '任务驱动 / 周期运行',
-        capability: '外部站点、专题页面与监测对象批量采集',
-        group: '在线采集',
-      },
-    ].map(toDatasourceItem);
-
-    const items = [...sourceItems.map(toDatasourceItem), ...dynamicItems];
-    const activeItems = items.filter((item) => item.mode === 'active' || item.status === 'connected');
-    const captureTasks = webTasks.slice(0, 8).map((task) => ({
+    const legacyItems = [...sourceItems.map(toDatasourceItem), ...buildLegacyDynamicItems(webTasks)];
+    const activeItems = legacyItems.filter((item) => item.mode === 'active' || item.status === 'connected');
+    const captureTasks = webTasks.slice(0, 12).map((task) => ({
       id: task.id,
       title: task.title || task.url,
       url: task.url,
@@ -93,24 +348,38 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       note: task.note || '',
       collectedCount: task.lastCollectedCount || 0,
       collectedItems: task.lastCollectedItems || [],
+      captureStatus: task.captureStatus || 'active',
     }));
 
     return {
       mode: 'read-only',
-      total: items.length,
-      items,
+      total: legacyItems.length,
+      items: legacyItems,
       activeItems,
       captureTasks,
+      managedDatasources: providerSummaries.map((item) => ({
+        ...item,
+        runtime: item.runtime
+          ? {
+              ...item.runtime,
+              documentLabels: item.runtime.documentLabels?.length
+                ? item.runtime.documentLabels
+                : toDocumentLabels(item.runtime.documentIds || []),
+            }
+          : item.runtime,
+      })),
+      providerMeta,
+      presetCatalog,
       meta: {
-        connected: items.filter((item) => item.status === 'connected').length,
-        warning: items.filter((item) => item.status === 'warning').length,
-        idle: items.filter((item) => item.status === 'idle').length,
+        connected: legacyItems.filter((item) => item.status === 'connected').length,
+        warning: legacyItems.filter((item) => item.status === 'warning').length,
+        idle: legacyItems.filter((item) => item.status === 'idle').length,
         active: activeItems.length,
         webTasks: webTasks.length,
         latestCaptureAt,
-        captureSuccess: successfulTasks.length,
-        captureError: failedTasks.length,
-        captureScheduled: scheduledTasks.length,
+        captureSuccess: webTasks.filter((item) => item.lastStatus === 'success').length,
+        captureError: webTasks.filter((item) => item.lastStatus === 'error').length,
+        captureScheduled: webTasks.filter((item) => item.frequency !== 'manual').length,
       },
     };
   });

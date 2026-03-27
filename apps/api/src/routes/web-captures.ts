@@ -1,11 +1,33 @@
 import type { FastifyInstance } from 'fastify';
+import type { DatasourceTargetLibrary } from '../lib/datasource-definitions.js';
 import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
 import { buildWebCaptureCredentialSummary, loadWebCaptureCredential, saveWebCaptureCredential } from '../lib/web-capture-credentials.js';
 import { loadDocumentCategoryConfig } from '../lib/document-config.js';
 import { loadDocumentLibraries } from '../lib/document-libraries.js';
+import { syncWebCaptureTaskToDatasource } from '../lib/datasource-web-bridge.js';
 import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
 import { parseDocument } from '../lib/document-parser.js';
 import { buildFailedPreviewItem, buildPreviewItemFromDocument } from '../lib/ingest-feedback.js';
+
+function normalizeTargetLibraries(value: unknown): DatasourceTargetLibrary[] {
+  if (!Array.isArray(value)) return [];
+  const dedup = new Map<string, DatasourceTargetLibrary>();
+  for (const item of value) {
+    const key = String((item as { key?: string })?.key || '').trim();
+    const label = String((item as { label?: string })?.label || '').trim();
+    if (!key || !label) continue;
+    dedup.set(key, {
+      key,
+      label,
+      mode: (item as { mode?: string })?.mode === 'secondary' ? 'secondary' : 'primary',
+    });
+  }
+  const items = Array.from(dedup.values());
+  if (!items.some((item) => item.mode === 'primary') && items[0]) {
+    items[0].mode = 'primary';
+  }
+  return items;
+}
 
 export async function registerWebCaptureRoutes(app: FastifyInstance) {
   app.get('/web-captures', async () => {
@@ -29,6 +51,8 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       frequency?: WebCaptureFrequency;
       note?: string;
       maxItems?: number;
+      datasourceName?: string;
+      targetLibraries?: DatasourceTargetLibrary[];
     };
 
     const url = String(body.url || '').trim();
@@ -42,6 +66,11 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       frequency: (['manual', 'daily', 'weekly'].includes(String(body.frequency)) ? body.frequency : 'daily') as WebCaptureFrequency,
       note: String(body.note || '').trim(),
       maxItems: Number(body.maxItems || 5),
+    });
+    await syncWebCaptureTaskToDatasource(task, {
+      name: String(body.datasourceName || '').trim(),
+      targetLibraries: normalizeTargetLibraries(body.targetLibraries),
+      notes: String(body.note || '').trim(),
     });
 
     let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
@@ -85,6 +114,8 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       password?: string;
       remember?: boolean;
       maxItems?: number;
+      datasourceName?: string;
+      targetLibraries?: DatasourceTargetLibrary[];
     };
 
     const url = String(body.url || '').trim();
@@ -137,6 +168,11 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       credentialRef: remember || (!username && !password && stored.id) ? stored.id : '',
       credentialLabel: stored.maskedUsername,
     });
+    await syncWebCaptureTaskToDatasource(task, {
+      name: String(body.datasourceName || '').trim(),
+      targetLibraries: normalizeTargetLibraries(body.targetLibraries),
+      notes: String(body.note || '').trim(),
+    });
 
     let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
 
@@ -177,6 +213,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
 
   app.post('/web-captures/run-due', async () => {
     const result = await runDueWebCaptureTasks();
+    await Promise.all(result.items.map((item) => syncWebCaptureTaskToDatasource(item)));
     return {
       status: result.executedCount ? 'processed' : 'idle',
       ...result,
