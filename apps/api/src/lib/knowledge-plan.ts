@@ -113,7 +113,12 @@ export function buildKnowledgePlanPrompt(
 export function shouldFallbackToLocalPlan(planText: string) {
   const text = String(planText || '').trim();
   if (!text) return true;
-  return /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|无法从当前输入|请提供具体|明确说明要整理的主题|无法提取有效需求|输入内容无法提取)/.test(text);
+  const questionMarks = (text.match(/\?/g) || []).length;
+  const hasTooManyQuestionMarks = questionMarks >= 4 || (text.length > 0 && questionMarks / text.length >= 0.2);
+  return (
+    hasTooManyQuestionMarks ||
+    /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|无法从当前输入|请提供具体|明确说明要整理的主题|无法提取有效需求|无法提取有效业务需求|输入内容无法提取|无效数据)/.test(text)
+  );
 }
 
 export function buildLocalKnowledgePlan(

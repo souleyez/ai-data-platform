@@ -44,7 +44,7 @@ function isLocalGatewayUrl(url?: string) {
 
 function buildDefaultSystemPrompt() {
   return [
-    '你是产品“AI智能服务”里的云端智能助手。',
+    '你是产品“AI智能服务”中的云端智能助手。',
     '除非用户明确要求其他语言，否则一律使用自然、专业、简洁的中文回答。',
     '直接回答用户问题，不要自我介绍，不要谈内部实现，也不要暴露底层模型或网关信息。',
     '尽量自然分段，不要使用 Markdown 标题、星号、井号、竖线和分隔线。',
@@ -54,20 +54,19 @@ function buildDefaultSystemPrompt() {
 }
 
 function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
+  const context = (input.contextBlocks || []).filter(Boolean);
+  const systemParts = [input.systemPrompt || buildDefaultSystemPrompt()];
+
+  if (context.length) {
+    systemParts.push(['以下是与当前请求相关的知识库上下文，请优先参考：', context.join('\n\n')].join('\n\n'));
+  }
+
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: input.systemPrompt || buildDefaultSystemPrompt(),
+      content: systemParts.filter(Boolean).join('\n\n'),
     },
   ];
-
-  const context = (input.contextBlocks || []).filter(Boolean);
-  if (context.length) {
-    messages.push({
-      role: 'system',
-      content: ['以下是与当前请求相关的知识库上下文，请优先参考：', context.join('\n\n')].join('\n\n'),
-    });
-  }
 
   for (const item of input.chatHistory || []) {
     const role = item?.role === 'assistant' ? 'assistant' : 'user';
@@ -92,7 +91,7 @@ function sanitizeModelContent(content: string) {
 
 function looksLikeOnboardingDrift(content: string) {
   const text = String(content || '');
-  return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|没个性|第一次聊)/.test(text);
+  return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|第一\u6b21聊天)/.test(text);
 }
 
 async function requestChatCompletion(baseUrl: string, headers: Record<string, string>, body: unknown) {
