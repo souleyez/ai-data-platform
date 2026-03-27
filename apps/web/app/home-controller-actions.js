@@ -235,6 +235,9 @@ export async function submitKnowledgeOutputConfirm(value, context) {
     const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
       mode: 'knowledge_output',
       confirmedRequest: text,
+      preferredLibraries: Array.isArray(context.knowledgeOutputPlan?.libraries)
+        ? context.knowledgeOutputPlan.libraries
+        : [],
     });
     const normalized = normalizeChatResponse(data, null);
     const message = {

@@ -16,6 +16,7 @@ import { runOpenClawChat } from './openclaw-adapter.js';
 export type KnowledgeExecutionInput = {
   prompt: string;
   confirmedRequest?: string;
+  preferredLibraries?: Array<{ key: string; label: string }>;
   sessionUser?: string;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
 };
@@ -36,7 +37,20 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     loadParsedDocuments(240, false),
   ]);
 
-  const candidates = collectLibraryMatches(buildPromptForScoring(requestText, input.chatHistory), documentLibraries);
+  const preferredLibraries = Array.isArray(input.preferredLibraries)
+    ? input.preferredLibraries
+        .map((item) => ({ key: String(item?.key || '').trim(), label: String(item?.label || '').trim() }))
+        .filter((item) => item.key && item.label)
+    : [];
+
+  const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
+  const explicitCandidates = preferredKeys.size
+    ? documentLibraries
+        .filter((library) => preferredKeys.has(library.key))
+        .map((library, index) => ({ library, score: 100 - index }))
+    : [];
+  const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, input.chatHistory), documentLibraries);
+  const candidates = explicitCandidates.length ? explicitCandidates : scoredCandidates;
   const libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
   const selectedTemplates = await selectKnowledgeTemplates(libraries, requestedKind);
   const templateTaskHint = inferTemplateTaskHint(selectedTemplates, requestedKind);

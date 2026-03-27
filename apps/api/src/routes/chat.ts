@@ -9,6 +9,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       sessionUser?: string;
       mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
       confirmedRequest?: string;
+      preferredLibraries?: Array<{ key?: string; label?: string }>;
       chatHistory?: Array<{ role?: string; content?: string }>;
     };
     let prompt = String(body.prompt || '').trim();
@@ -29,6 +30,14 @@ export async function registerChatRoutes(app: FastifyInstance) {
       prompt,
       mode: body.mode || 'general',
       confirmedRequest: typeof body.confirmedRequest === 'string' ? body.confirmedRequest : '',
+      preferredLibraries: Array.isArray(body.preferredLibraries)
+        ? body.preferredLibraries
+            .map((item) => ({
+              key: String(item?.key || '').trim(),
+              label: String(item?.label || '').trim(),
+            }))
+            .filter((item) => item.key && item.label)
+        : [],
       sessionUser: body.sessionUser,
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory

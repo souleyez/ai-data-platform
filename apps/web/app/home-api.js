@@ -59,6 +59,7 @@ export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
       chatHistory,
       mode: options.mode || 'general',
       confirmedRequest: options.confirmedRequest || '',
+      preferredLibraries: Array.isArray(options.preferredLibraries) ? options.preferredLibraries : [],
     }),
   });
   return parseApiResponse(response, 'chat api failed');

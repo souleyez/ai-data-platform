@@ -20,6 +20,7 @@ export type ChatRequestInput = {
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
   confirmedRequest?: string;
+  preferredLibraries?: Array<{ key: string; label: string }>;
 };
 
 function normalizeHistory(chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>) {
@@ -115,6 +116,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         const result = await executeKnowledgeOutput({
           prompt,
           confirmedRequest: input.confirmedRequest,
+          preferredLibraries: input.preferredLibraries,
           sessionUser: input.sessionUser,
           chatHistory,
         });
