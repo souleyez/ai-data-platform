@@ -6,7 +6,7 @@ import { createDocumentLibrary, loadDocumentLibraries, type DocumentLibrary } fr
 import { saveDocumentOverride } from './document-overrides.js';
 import { parseDocument } from './document-parser.js';
 import { REPO_ROOT, STORAGE_FILES_DIR } from './paths.js';
-import { createReportOutput, loadReportCenterState } from './report-center.js';
+import { createReportOutput, deleteReportOutput, loadReportCenterState } from './report-center.js';
 import { loadParsedDocuments, upsertDocumentsInCache } from './document-store.js';
 
 type SampleDocDefinition = {
@@ -131,12 +131,39 @@ const DEFAULT_SAMPLE_OUTPUTS: SampleOutputDefinition[] = [
       ],
       charts: [
         {
-          title: '\u5e73\u53f0 GMV \u5bf9\u6bd4',
+          title: '\u5e73\u53f0 GMV \u67f1\u72b6\u5bf9\u6bd4',
           items: [
             { label: 'Tmall', value: 34 },
             { label: 'JD', value: 21 },
             { label: 'Douyin', value: 29 },
             { label: 'Pinduoduo', value: 16 },
+          ],
+        },
+        {
+          title: '\u54c1\u7c7b\u9500\u552e\u5360\u6bd4\u997c\u56fe',
+          items: [
+            { label: '\u8033\u673a', value: 28 },
+            { label: '\u667a\u80fd\u624b\u8868', value: 24 },
+            { label: '\u667a\u80fd\u97f3\u7bb1', value: 18 },
+            { label: '\u667a\u80fd\u63d2\u5ea7', value: 14 },
+            { label: '\u5176\u4ed6', value: 16 },
+          ],
+        },
+        {
+          title: '\u8fd1\u4e09\u4e2a\u6708 GMV \u8d8b\u52bf',
+          items: [
+            { label: '2026-01', value: 76 },
+            { label: '2026-02', value: 81 },
+            { label: '2026-03', value: 88 },
+          ],
+        },
+        {
+          title: '\u5e93\u5b58\u98ce\u9669 SKU \u67f1\u72b6\u6392\u540d',
+          items: [
+            { label: '\u8033\u673a Pro', value: 68 },
+            { label: '\u667a\u80fd\u63d2\u5ea7\u53cc\u53e3', value: 61 },
+            { label: '\u667a\u80fd\u97f3\u7bb1 Mini', value: 57 },
+            { label: '\u513f\u7ae5\u624b\u8868 Lite', value: 49 },
           ],
         },
       ],
@@ -227,12 +254,30 @@ const DEFAULT_SAMPLE_OUTPUTS: SampleOutputDefinition[] = [
       ],
       charts: [
         {
-          title: '\u6838\u5fc3\u4ef7\u503c\u5206\u5e03',
+          title: '\u6838\u5fc3\u4ef7\u503c\u5360\u6bd4\u997c\u56fe',
           items: [
             { label: '\u5e93\u5b58\u53ef\u89c6\u5316', value: 32 },
             { label: '\u544a\u8b66\u54cd\u5e94', value: 27 },
             { label: '\u8bbe\u5907\u63a5\u5165', value: 21 },
             { label: '\u8fd0\u7ef4\u6548\u7387', value: 20 },
+          ],
+        },
+        {
+          title: '\u6a21\u5757\u5efa\u8bbe\u8fdb\u5ea6\u67f1\u72b6\u56fe',
+          items: [
+            { label: '\u611f\u77e5\u63a5\u5165', value: 85 },
+            { label: '\u8fb9\u7f18\u7f51\u5173', value: 72 },
+            { label: '\u89c4\u5219\u5f15\u64ce', value: 66 },
+            { label: '\u53ef\u89c6\u5316\u5927\u5c4f', value: 58 },
+          ],
+        },
+        {
+          title: '\u9879\u76ee\u4ea4\u4ed8\u91cc\u7a0b\u7891\u8d8b\u52bf',
+          items: [
+            { label: 'M1', value: 25 },
+            { label: 'M2', value: 52 },
+            { label: 'M3', value: 78 },
+            { label: 'M4', value: 100 },
           ],
         },
       ],
@@ -293,10 +338,13 @@ async function ensureSampleDocuments(libraryMap: Record<string, DocumentLibrary>
 
 async function ensureSampleOutputs(libraryMap: Record<string, DocumentLibrary>) {
   const state = await loadReportCenterState();
-  const existingTitles = new Set((state.outputs || []).map((item) => item.title));
+  const existingRecords = new Map((state.outputs || []).map((item) => [item.title, item]));
 
   for (const output of DEFAULT_SAMPLE_OUTPUTS) {
-    if (existingTitles.has(output.title)) continue;
+    const existing = existingRecords.get(output.title);
+    if (existing) {
+      await deleteReportOutput(existing.id);
+    }
     const library = libraryMap[output.groupLabel];
     await createReportOutput({
       groupKey: library.key,
