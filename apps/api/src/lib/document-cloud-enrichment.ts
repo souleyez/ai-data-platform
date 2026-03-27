@@ -1,11 +1,14 @@
 import type {
+  ResumeFields,
   EvidenceChunk,
   IntentSlots,
   ParsedDocument,
   StructuredClaim,
   StructuredEntity,
 } from './document-parser.js';
-import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
+import { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
+import { isOpenClawGatewayConfigured } from './openclaw-adapter.js';
+import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
 
 type CloudEvidenceBlock = {
   title?: string;
@@ -215,16 +218,10 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
     return item;
   }
 
-  const result = await runOpenClawChat({
+  const result = await runDocumentAdvancedParse({
     prompt: buildDocumentContext(item),
-    systemPrompt: [
-      'You are a document-structuring assistant for a private enterprise knowledge base.',
-      'Return strict JSON only. No markdown. No explanation.',
-      'Use this schema:',
-      '{"summary":"","topicTags":[],"riskLevel":"low|medium|high","evidenceBlocks":[{"title":"","text":""}],"entities":[{"text":"","type":"","confidence":0.8,"evidenceText":""}],"claims":[{"subject":"","predicate":"","object":"","confidence":0.8,"evidenceText":""}],"intentSlots":{"audiences":[],"ingredients":[],"strains":[],"benefits":[],"doses":[],"organizations":[],"metrics":[]}}',
-      'Do not invent facts. Keep 3-8 high-value evidence blocks. Prefer professional signals for contracts, formulas, technical documents and research papers.',
-    ].join(' '),
   });
+  if (!result) return item;
   const structured = extractJsonObject(result.content);
   if (!structured) return item;
 
@@ -234,8 +231,17 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
   const topicTags = uniqStrings([...(item.topicTags || []), ...(structured.topicTags || [])]).slice(0, 16);
   const intentSlots = mergeIntentSlots(item.intentSlots, structured.intentSlots);
   const summary = sanitizeText(structured.summary, 500) || item.summary;
+  const schemaDerived = deriveSchemaProfile({
+    category: item.category,
+    bizCategory: item.bizCategory,
+    title: item.title || item.name,
+    topicTags,
+    summary,
+    contractFields: item.contractFields,
+    resumeFields: item.resumeFields as ResumeFields | undefined,
+  });
 
-  return {
+  return refreshDerivedSchemaProfile({
     ...item,
     parseMethod: item.parseMethod?.includes('openclaw') ? item.parseMethod : `${item.parseMethod || 'parsed'}+openclaw`,
     parseStage: 'detailed',
@@ -247,13 +253,22 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
     claims,
     intentSlots,
     riskLevel: structured.riskLevel || item.riskLevel,
+    schemaType: schemaDerived.schemaType,
+    structuredProfile: schemaDerived.structuredProfile,
     cloudStructuredAt: new Date().toISOString(),
     cloudStructuredModel: result.model,
-  };
+  });
 }
 
 export async function enhanceParsedDocumentsWithCloud(items: ParsedDocument[]) {
-  if (!CLOUD_ENRICH_ENABLED || CLOUD_ENRICH_MAX_PER_BATCH <= 0 || !isOpenClawGatewayConfigured()) {
+  const providerMode = getDocumentAdvancedParseProviderMode();
+  if (
+    !CLOUD_ENRICH_ENABLED
+    || CLOUD_ENRICH_MAX_PER_BATCH <= 0
+    || providerMode === 'disabled'
+    || providerMode === 'openclaw-skill'
+    || !isOpenClawGatewayConfigured()
+  ) {
     return items;
   }
 

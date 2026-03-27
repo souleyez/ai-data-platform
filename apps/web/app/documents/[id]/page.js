@@ -10,10 +10,15 @@ import { getDocumentGroupLabel, getPrimaryCategoryLabel } from '../../lib/docume
 
 const PARSE_METHOD_LABELS = {
   'text-utf8': 'UTF-8 文本',
+  'text-utf8-bom': 'UTF-8 文本',
+  'text-gb18030': 'GB18030 文本',
+  'text-utf16le': 'UTF-16 LE 文本',
+  'text-utf16be': 'UTF-16 BE 文本',
   'markdown-utf8': 'Markdown',
+  'markdown-gb18030': 'Markdown',
   'csv-utf8': 'CSV',
   'json-parse': 'JSON',
-  'html-strip': 'HTML 清洗',
+  'html-strip': 'HTML 提取',
   mammoth: 'DOCX 提取',
   'xlsx-sheet-reader': '表格读取',
   'pdf-parse': 'PDF 文本',
@@ -47,6 +52,22 @@ function DetailRow({ label, value }) {
 function joinValues(values) {
   if (!Array.isArray(values) || !values.length) return '-';
   return values.filter(Boolean).join('、');
+}
+
+function getDetailStatusLabel(item) {
+  if (item.parseStage === 'detailed') return '进阶解析完成';
+  switch (item.detailParseStatus) {
+    case 'queued':
+      return '已进入进阶解析队列';
+    case 'processing':
+      return '进阶解析进行中';
+    case 'failed':
+      return '进阶解析失败';
+    case 'succeeded':
+      return '进阶解析完成';
+    default:
+      return '仅完成快速解析';
+  }
 }
 
 function renderStructuredProfile(item) {
@@ -83,7 +104,7 @@ function renderStructuredProfile(item) {
   if (schemaType === 'formula') {
     return (
       <div className="message-ref-list">
-        <DetailRow label="领域" value="奶粉配方" />
+        <DetailRow label="文档类型" value="奶粉配方 / 营养资料" />
         <DetailRow label="关注主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
         <DetailRow label="摘要" value={profile.summary || item?.summary} />
       </div>
@@ -93,7 +114,7 @@ function renderStructuredProfile(item) {
   if (schemaType === 'paper') {
     return (
       <div className="message-ref-list">
-        <DetailRow label="领域" value="学术论文" />
+        <DetailRow label="文档类型" value="学术论文" />
         <DetailRow label="研究主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
         <DetailRow label="摘要" value={profile.summary || item?.summary} />
       </div>
@@ -103,7 +124,7 @@ function renderStructuredProfile(item) {
   if (schemaType === 'technical') {
     return (
       <div className="message-ref-list">
-        <DetailRow label="领域" value="技术文档" />
+        <DetailRow label="文档类型" value="技术文档" />
         <DetailRow label="关注主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
         <DetailRow label="摘要" value={profile.summary || item?.summary} />
       </div>
@@ -113,7 +134,7 @@ function renderStructuredProfile(item) {
   if (schemaType === 'report') {
     return (
       <div className="message-ref-list">
-        <DetailRow label="领域" value="业务报表" />
+        <DetailRow label="文档类型" value="业务报表" />
         <DetailRow label="报告主题" value={joinValues(profile.focus || profile.topicTags || item?.topicTags)} />
         <DetailRow label="摘要" value={profile.summary || item?.summary} />
       </div>
@@ -191,7 +212,7 @@ export default function DocumentDetailPage() {
         <header className="topbar">
           <div>
             <h2>文档详情</h2>
-            <p>按文档类型展示结构化结果，原文和证据块保留在同一页。</p>
+            <p>快速解析负责尽快入库，进阶解析负责补充高质量结构化结果和证据块。</p>
           </div>
           <div className="topbar-actions">
             <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
@@ -216,7 +237,7 @@ export default function DocumentDetailPage() {
                 <span className="source-chip">解析状态：{data.parseStatus || '-'}</span>
                 <span className="source-chip">解析方式：{PARSE_METHOD_LABELS[data.parseMethod] || data.parseMethod || '-'}</span>
                 <span className="source-chip">解析阶段：{data.parseStage || '-'}</span>
-                <span className="source-chip">Schema：{data.schemaType || 'generic'}</span>
+                <span className="source-chip">结构类型：{data.schemaType || 'generic'}</span>
                 <span className="source-chip">提取字符：{data.extractedChars ?? 0}</span>
                 {data.retentionStatus === 'structured-only' ? <span className="source-chip">仅保留结构化结果</span> : null}
               </div>
@@ -257,6 +278,19 @@ export default function DocumentDetailPage() {
               </div>
 
               <aside className="document-reader-aside">
+                <DetailCard title="解析进度">
+                  <div className="message-ref-list">
+                    <DetailRow label="当前阶段" value={data.parseStage === 'detailed' ? '进阶解析' : '快速解析'} />
+                    <DetailRow label="进阶状态" value={getDetailStatusLabel(data)} />
+                    <DetailRow label="任务入队时间" value={data.detailParseQueuedAt || '-'} />
+                    <DetailRow label="完成时间" value={data.detailParsedAt || '-'} />
+                    <DetailRow label="云端增强时间" value={data.cloudStructuredAt || '-'} />
+                    <DetailRow label="云端增强模型" value={data.cloudStructuredModel || '-'} />
+                    <DetailRow label="尝试次数" value={String(data.detailParseAttempts ?? 0)} />
+                    {data.detailParseError ? <DetailRow label="失败原因" value={data.detailParseError} /> : null}
+                  </div>
+                </DetailCard>
+
                 <DetailCard title="摘要">
                   <div className="summary-cell" style={{ maxWidth: 'none' }}>{data.summary || '-'}</div>
                 </DetailCard>

@@ -1,5 +1,37 @@
 'use client';
 
+function renderParseStage(item, parseMethodLabels) {
+  const methodLabel = parseMethodLabels[item.parseMethod] || item.parseMethod || '-';
+  const stageLabel = item.parseStage === 'detailed' ? '进阶解析' : '快速解析';
+  const detailStatusLabel = (() => {
+    switch (item.detailParseStatus) {
+      case 'queued':
+        return '深度任务待处理';
+      case 'processing':
+        return '深度任务处理中';
+      case 'failed':
+        return '深度任务失败';
+      case 'succeeded':
+        return '深度任务完成';
+      default:
+        return '';
+    }
+  })();
+
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <span>{item.parseStatus || '-'}</span>
+      <span style={{ fontSize: 12, color: '#64748b' }}>{methodLabel}</span>
+      <span style={{ fontSize: 12, color: '#64748b' }}>{stageLabel}</span>
+      {detailStatusLabel ? (
+        <span style={{ fontSize: 12, color: item.detailParseStatus === 'failed' ? '#b91c1c' : '#475569' }}>
+          {detailStatusLabel}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export default function DocumentsTable({
   currentPage,
   totalPages,
@@ -32,7 +64,7 @@ export default function DocumentsTable({
       <div className="panel-header">
         <div>
           <h3>文档列表</h3>
-          <p>扫描结果会直接归入知识库。需要调整时，可在这里手动补充分组或删除文档索引。</p>
+          <p>上传后先进入快速解析，进阶解析会在后台继续完成。你可以在这里调整分组或删除文档索引。</p>
         </div>
         <div className="table-pagination-summary">
           <span>{`第 ${currentPage} / ${totalPages} 页`}</span>
@@ -71,7 +103,9 @@ export default function DocumentsTable({
                   <div style={{ display: 'grid', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                       <a href={`/documents/${item.id}`}>{item.name}</a>
-                      {recentNewIds.includes(item.id) ? <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span> : null}
+                      {recentNewIds.includes(item.id) ? (
+                        <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span>
+                      ) : null}
                     </div>
                     <div>
                       <button
@@ -177,12 +211,7 @@ export default function DocumentsTable({
                 </td>
 
                 <td className="summary-cell">
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <span>{item.parseStatus}</span>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>
-                      {parseMethodLabels[item.parseMethod] || item.parseMethod || '-'}
-                    </span>
-                  </div>
+                  {renderParseStage(item, parseMethodLabels)}
                 </td>
                 <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
                 <td className="summary-cell excerpt-cell">{item.summary}</td>

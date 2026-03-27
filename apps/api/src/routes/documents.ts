@@ -24,6 +24,7 @@ import {
   upsertDocumentsInCache,
 } from '../lib/document-store.js';
 import { enqueueDetailedParse, runDetailedParseBatch } from '../lib/document-deep-parse-queue.js';
+import { loadDocumentVectorIndexMeta, rebuildDocumentVectorIndex } from '../lib/document-vector-index.js';
 import {
   buildPreviewItemFromDocument,
   resolveSuggestedLibraryKeys,
@@ -830,6 +831,27 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       mode: 'read-only',
       ...result,
       message: `已处理 ${result.processedCount} 条详细解析任务，成功 ${result.succeededCount} 条，失败 ${result.failedCount} 条。`,
+    };
+  });
+
+  app.get('/documents/vector-index/meta', async () => {
+    const meta = await loadDocumentVectorIndexMeta();
+    return {
+      mode: 'read-only',
+      ...meta,
+    };
+  });
+
+  app.post('/documents/vector-index/rebuild', async () => {
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const { items } = await loadParsedDocuments(200, false, config.scanRoots);
+    const result = await rebuildDocumentVectorIndex(items);
+
+    return {
+      status: 'completed',
+      mode: 'read-only',
+      ...result,
+      message: `已重建向量化候选索引，覆盖 ${result.documentCount} 份详细解析文档，共生成 ${result.recordCount} 条向量记录。`,
     };
   });
 

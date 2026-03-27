@@ -1,11 +1,14 @@
-import { promises as fs } from 'node:fs';
+﻿import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
+import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
 import { buildAugmentedEnv, getOcrMyPdfCommandCandidates, getPythonCommandCandidates } from './runtime-executables.js';
 import { extractWithUIEWorker } from './uie-process-client.js';
+
+export { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-schema.js';
 
 export type ParsedDocument = {
   path: string;
@@ -1047,17 +1050,6 @@ function normalizeResumeTextValue(value: string) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-function isLikelyResumePersonName(value: string) {
-  const text = normalizeResumeTextValue(value);
-  if (!text) return false;
-  if (/@/.test(text)) return false;
-  if (/\d{5,}/.test(text)) return false;
-  if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
-  if (/^[A-Za-z][A-Za-z\s.-]{1,40}$/.test(text)) return true;
-  if (/^[\u4e00-\u9fff·]{2,12}$/.test(text)) return true;
-  return false;
-}
-
 function inferResumeNameFromTitle(title: string) {
   const normalized = String(title || '')
     .replace(/^\d{10,}-/, '')
@@ -1249,94 +1241,6 @@ function extractContractFields(text: string, category: string) {
   return { contractNo, amount, paymentTerms, duration };
 }
 
-function inferSchemaType(
-  category: string,
-  bizCategory: ParsedDocument['bizCategory'],
-  resumeFields?: ResumeFields,
-  topicTags: string[] = [],
-) {
-  if (resumeFields) return 'resume' as const;
-  if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
-  if (topicTags.includes('奶粉配方')) return 'formula' as const;
-  if (category === 'report' || bizCategory === 'daily') return 'report' as const;
-  if (category === 'technical') return 'technical' as const;
-  if (category === 'paper' || bizCategory === 'paper') return 'paper' as const;
-  return 'generic' as const;
-}
-
-function buildStructuredProfile(input: {
-  schemaType: ParsedDocument['schemaType'];
-  title: string;
-  topicTags: string[];
-  summary: string;
-  contractFields?: ParsedDocument['contractFields'];
-  resumeFields?: ResumeFields;
-}) {
-  const base = {
-    title: input.title,
-    summary: input.summary,
-    topicTags: input.topicTags.slice(0, 8),
-  };
-
-  if (input.schemaType === 'contract') {
-    return {
-      ...base,
-      contractNo: input.contractFields?.contractNo || '',
-      amount: input.contractFields?.amount || '',
-      paymentTerms: input.contractFields?.paymentTerms || '',
-      duration: input.contractFields?.duration || '',
-    };
-  }
-
-  if (input.schemaType === 'resume') {
-    return {
-      ...base,
-      candidateName: input.resumeFields?.candidateName || '',
-      targetRole: input.resumeFields?.targetRole || '',
-      currentRole: input.resumeFields?.currentRole || '',
-      yearsOfExperience: input.resumeFields?.yearsOfExperience || '',
-      education: input.resumeFields?.education || '',
-      major: input.resumeFields?.major || '',
-      skills: input.resumeFields?.skills || [],
-      highlights: input.resumeFields?.highlights || [],
-    };
-  }
-
-  if (input.schemaType === 'formula') {
-    return {
-      ...base,
-      domain: 'formula',
-      focus: input.topicTags.filter((tag) => ['奶粉配方', '益生菌', '营养强化'].includes(tag)),
-    };
-  }
-
-  if (input.schemaType === 'paper') {
-    return {
-      ...base,
-      domain: 'paper',
-      focus: input.topicTags.slice(0, 4),
-    };
-  }
-
-  if (input.schemaType === 'technical') {
-    return {
-      ...base,
-      domain: 'technical',
-      focus: input.topicTags.slice(0, 4),
-    };
-  }
-
-  if (input.schemaType === 'report') {
-    return {
-      ...base,
-      domain: 'report',
-      focus: input.topicTags.slice(0, 4),
-    };
-  }
-
-  return base;
-}
-
 async function extractText(filePath: string, ext: string) {
   if (ext === '.txt' || ext === '.md' || ext === '.csv') {
     const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
@@ -1476,7 +1380,7 @@ export async function parseDocument(
 
     if (parseStage === 'quick') {
       const resumeFields = extractResumeFields(text.slice(0, 2400), inferredTitle);
-      const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags);
+      const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
       return {
         path: filePath,
         name,
@@ -1518,7 +1422,7 @@ export async function parseDocument(
     const contractFields = extractContractFields(normalizedText, category);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
     const resumeFields = extractResumeFields(text, inferredTitle, structured.entities, structured.claims);
-    const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags);
+    const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
 
     return {
       path: filePath,

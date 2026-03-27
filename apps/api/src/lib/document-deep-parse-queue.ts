@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { mergeParsedDocumentsForPaths } from './document-store.js';
 import { STORAGE_CACHE_DIR } from './paths.js';
+import { upsertDocumentVectorIndex } from './document-vector-index.js';
 
 type QueueStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
 
@@ -22,6 +23,9 @@ type DeepParseQueuePayload = {
 };
 
 const QUEUE_FILE = path.join(STORAGE_CACHE_DIR, 'document-deep-parse-queue.json');
+const LOCK_TTL_MS = 5 * 60 * 1000;
+
+let activeLock: { owner: string; acquiredAt: number } | null = null;
 
 async function ensureQueueDir() {
   await fs.mkdir(STORAGE_CACHE_DIR, { recursive: true });
@@ -31,9 +35,31 @@ async function readQueue(): Promise<DeepParseQueuePayload> {
   try {
     const raw = await fs.readFile(QUEUE_FILE, 'utf8');
     const parsed = JSON.parse(raw) as DeepParseQueuePayload;
+    const now = Date.now();
+    const hasFreshLock = Boolean(activeLock && now - activeLock.acquiredAt < LOCK_TTL_MS);
+
+    const items = (Array.isArray(parsed.items) ? parsed.items : []).map((item) => {
+      if (item.status !== 'processing') return item;
+      if (!hasFreshLock) {
+        return {
+          ...item,
+          status: 'queued' as const,
+          error: undefined,
+        };
+      }
+      const lastAttemptAt = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
+      if (lastAttemptAt && Number.isFinite(lastAttemptAt) && now - lastAttemptAt < LOCK_TTL_MS) {
+        return item;
+      }
+      return {
+        ...item,
+        status: 'queued' as const,
+        error: undefined,
+      };
+    });
     return {
       updatedAt: parsed.updatedAt || new Date().toISOString(),
-      items: Array.isArray(parsed.items) ? parsed.items : [],
+      items,
     };
   } catch {
     return {
@@ -48,8 +74,36 @@ async function writeQueue(payload: DeepParseQueuePayload) {
   await fs.writeFile(QUEUE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
+async function acquireLock() {
+  const now = Date.now();
+  const owner = `${process.pid}-${now}`;
+  if (activeLock && now - activeLock.acquiredAt < LOCK_TTL_MS) {
+    return null;
+  }
+  activeLock = { owner, acquiredAt: now };
+  return owner;
+}
+
+async function releaseLock(owner: string | null) {
+  if (!owner) return;
+  if (activeLock?.owner === owner) activeLock = null;
+}
+
 function normalizeQueuePath(filePath: string) {
   return path.resolve(String(filePath || ''));
+}
+
+function extractQueuePriority(item: DeepParseQueueItem) {
+  const normalizedPath = normalizeQueuePath(item.path).toLowerCase();
+  const uploadBoost = normalizedPath.includes(`${path.sep}storage${path.sep}files${path.sep}uploads${path.sep}`.toLowerCase())
+    ? 10_000_000_000_000
+    : 0;
+  const baseName = path.basename(String(item.path || ''));
+  const timestampMatch = baseName.match(/^(\d{13})(?:[-_.]|$)/);
+  const pathTimestamp = timestampMatch ? Number(timestampMatch[1]) : 0;
+  if (pathTimestamp > 0) return uploadBoost + pathTimestamp;
+  const queuedAt = item.queuedAt ? Date.parse(item.queuedAt) : 0;
+  return uploadBoost + (Number.isFinite(queuedAt) ? queuedAt : 0);
 }
 
 export async function enqueueDetailedParse(filePaths: string[]) {
@@ -106,37 +160,53 @@ export async function applyDetailedParseQueueMetadata(items: ParsedDocument[]) {
 }
 
 export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
-  const queue = await readQueue();
-  const queued = queue.items.filter((item) => item.status === 'queued').slice(0, Math.max(1, limit));
-  if (!queued.length) {
-    return { processedCount: 0, succeededCount: 0, failedCount: 0 };
+  const lockOwner = await acquireLock();
+  if (!lockOwner) {
+    return {
+      processedCount: 0,
+      succeededCount: 0,
+      failedCount: 0,
+      message: 'deep-parse-already-running',
+    };
   }
 
-  const now = new Date().toISOString();
-  const processingPaths = new Set(queued.map((item) => normalizeQueuePath(item.path)));
-  const markedItems = queue.items.map((item) =>
-    processingPaths.has(normalizeQueuePath(item.path))
-      ? {
-          ...item,
-          status: 'processing' as const,
-          lastAttemptAt: now,
-          attempts: Number(item.attempts || 0) + 1,
-          error: undefined,
-        }
-      : item,
-  );
-
-  await writeQueue({
-    updatedAt: now,
-    items: markedItems,
-  });
-
   try {
-    await mergeParsedDocumentsForPaths(
+    const queue = await readQueue();
+    const queued = queue.items
+      .filter((item) => item.status === 'queued')
+      .sort((left, right) => extractQueuePriority(right) - extractQueuePriority(left))
+      .slice(0, Math.max(1, limit));
+    if (!queued.length) {
+      return { processedCount: 0, succeededCount: 0, failedCount: 0 };
+    }
+
+    const now = new Date().toISOString();
+    const processingPaths = new Set(queued.map((item) => normalizeQueuePath(item.path)));
+    const markedItems = queue.items.map((item) =>
+      processingPaths.has(normalizeQueuePath(item.path))
+        ? {
+            ...item,
+            status: 'processing' as const,
+            lastAttemptAt: now,
+            attempts: Number(item.attempts || 0) + 1,
+            error: undefined,
+          }
+        : item,
+    );
+
+    await writeQueue({
+      updatedAt: now,
+      items: markedItems,
+    });
+
+    const parseResult = await mergeParsedDocumentsForPaths(
       queued.map((item) => item.path),
       200,
       scanRoots,
       { parseStage: 'detailed', cloudEnhancement: true },
+    );
+    await upsertDocumentVectorIndex(
+      parseResult.items.filter((item) => processingPaths.has(normalizeQueuePath(item.path))),
     );
 
     const afterSuccess = await readQueue();
@@ -165,26 +235,37 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'deep-parse-failed';
-    const afterFailure = await readQueue();
-    const items = afterFailure.items.map((item) =>
-      processingPaths.has(normalizeQueuePath(item.path))
-        ? {
-            ...item,
-            status: 'failed' as const,
-            error: String(reason).slice(0, 240),
-          }
-        : item,
+    const queue = await readQueue();
+    const processingPaths = new Set(
+      queue.items
+        .filter((item) => item.status === 'processing')
+        .slice(0, Math.max(1, limit))
+        .map((item) => normalizeQueuePath(item.path)),
     );
 
-    await writeQueue({
-      updatedAt: new Date().toISOString(),
-      items,
-    });
+    if (processingPaths.size) {
+      const items = queue.items.map((item) =>
+        processingPaths.has(normalizeQueuePath(item.path))
+          ? {
+              ...item,
+              status: 'failed' as const,
+              error: String(reason).slice(0, 240),
+            }
+          : item,
+      );
+
+      await writeQueue({
+        updatedAt: new Date().toISOString(),
+        items,
+      });
+    }
 
     return {
-      processedCount: queued.length,
+      processedCount: processingPaths.size,
       succeededCount: 0,
-      failedCount: queued.length,
+      failedCount: processingPaths.size,
     };
+  } finally {
+    await releaseLock(lockOwner);
   }
 }

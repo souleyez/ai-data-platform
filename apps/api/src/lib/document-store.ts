@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { parseDocument, type ParsedDocument } from './document-parser.js';
+import { parseDocument, refreshDerivedSchemaProfile, type ParsedDocument } from './document-parser.js';
 import { enhanceParsedDocumentsWithCloud } from './document-cloud-enrichment.js';
 import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
 import { loadDocumentCategoryConfig } from './document-config.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
+import { upsertDocumentVectorIndex } from './document-vector-index.js';
 import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
 import { loadRetainedDocuments } from './retained-documents.js';
 
@@ -48,6 +49,10 @@ type LoadParsedDocumentsResult = {
   items: ParsedDocument[];
   cacheHit: boolean;
 };
+
+let vectorSyncPromise: Promise<void> | null = null;
+let lastVectorSyncAt = 0;
+const VECTOR_SYNC_DEBOUNCE_MS = Math.max(30_000, Number(process.env.DOCUMENT_VECTOR_SYNC_DEBOUNCE_MS || 120_000));
 
 function isPlatformInternalDocumentPath(filePath: string) {
   const normalizedFilePath = path.resolve(String(filePath || '')).toLowerCase();
@@ -151,8 +156,26 @@ function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
     ...uniqStrings(item.intentSlots?.doses).filter((value) => !isStrictDoseCandidate(value)).map((value) => `dose:${value.toLowerCase()}`),
   ]);
 
+  const lowerPath = String(item.path || '').toLowerCase();
+  const lowerName = String(item.name || '').toLowerCase();
+  const forceGenericNoise =
+    lowerPath.includes('\\ai-data-platform\\docs\\')
+    || lowerPath.includes('\\packages\\')
+    || lowerPath.includes('\\node_modules\\')
+    || lowerName === 'readme.md'
+    || lowerName === 'prd.md'
+    || /(?:小说|大纲|剧情|设定|人物小传)/.test(item.name || '');
+  const schemaType = forceGenericNoise ? 'generic' : item.schemaType;
+  const category = forceGenericNoise && (item.category === 'report' || item.category === 'technical' || item.category === 'contract')
+    ? 'general'
+    : item.category;
+  const bizCategory = forceGenericNoise ? 'general' : item.bizCategory;
+
   return {
     ...item,
+    schemaType,
+    category,
+    bizCategory,
     claims: (item.claims || [])
       .map((claim) => ({
         ...claim,
@@ -180,7 +203,7 @@ function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
       organizations: uniqStrings(item.intentSlots?.organizations),
       metrics: uniqStrings(item.intentSlots?.metrics),
     },
-    resumeFields: sanitizeResumeFields(item.resumeFields),
+    resumeFields: schemaType === 'resume' ? sanitizeResumeFields(item.resumeFields) : undefined,
   };
 }
 
@@ -439,7 +462,9 @@ async function parseFiles(
   const cloudEnhancedItems = options?.cloudEnhancement === false
     ? parsedItems
     : await enhanceParsedDocumentsWithCloud(parsedItems);
-  const overriddenItems = applyDocumentOverrides(cloudEnhancedItems, overrides).map(sanitizeParsedDocument);
+  const overriddenItems = applyDocumentOverrides(cloudEnhancedItems, overrides)
+    .map((item) => refreshDerivedSchemaProfile(item))
+    .map(sanitizeParsedDocument);
   return applyDetailedParseQueueMetadata(overriddenItems);
 }
 
@@ -458,17 +483,45 @@ async function mergeWithRetainedDocuments(items: ParsedDocument[]) {
   return Array.from(byPath.values());
 }
 
+function scheduleVectorIndexSync(items: ParsedDocument[]) {
+  const now = Date.now();
+  if (vectorSyncPromise || now - lastVectorSyncAt < VECTOR_SYNC_DEBOUNCE_MS) {
+    return;
+  }
+
+  const candidates = items.filter((item) => item.parseStatus === 'parsed' && item.parseStage === 'detailed');
+  if (!candidates.length) return;
+
+  lastVectorSyncAt = now;
+  vectorSyncPromise = upsertDocumentVectorIndex(candidates)
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      vectorSyncPromise = null;
+    });
+}
+
 export async function loadParsedDocuments(limit = 200, forceRefresh = false, scanRoot?: string | string[]): Promise<LoadParsedDocumentsResult> {
   const activeScanRoots = await resolveScanRoots(scanRoot);
   const cache = !forceRefresh ? await readCache() : null;
 
   if (cache) {
+    await enqueueDetailedParse(
+      cache.items
+        .filter((item) => item.parseStatus === 'parsed' && item.parseStage !== 'detailed')
+        .map((item) => item.path),
+    );
     const overrides = await loadDocumentOverrides();
     const mergedItems = dedupeDocuments(sortDocumentsByRecency(
       await mergeWithRetainedDocuments(
-        await applyDetailedParseQueueMetadata(applyDocumentOverrides(cache.items, overrides).map(sanitizeParsedDocument)),
+        await applyDetailedParseQueueMetadata(
+          applyDocumentOverrides(cache.items, overrides)
+            .map((item) => refreshDerivedSchemaProfile(item))
+            .map(sanitizeParsedDocument),
+        ),
       ),
     ));
+    scheduleVectorIndexSync(mergedItems);
     return {
       exists: true,
       files: [],
@@ -501,6 +554,7 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
   });
 
   const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
+  scheduleVectorIndexSync(mergedItems);
   return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
 
@@ -517,31 +571,31 @@ export async function mergeParsedDocumentsForPaths(
   }
 
   const normalizedPaths = [...new Set(filePaths)];
-  const targetPaths = files.slice(0, limit);
   const cache = await readCache();
 
   if (!cache || JSON.stringify(cache.scanRoots || [cache.scanRoot]) !== JSON.stringify(activeScanRoots)) {
     return loadParsedDocuments(limit, true, activeScanRoots);
   }
 
-  const cachedByPath = new Map(cache.items.map((item) => [item.path, item]));
-  const missingTargetPath = targetPaths.some((filePath) => !normalizedPaths.includes(filePath) && !cachedByPath.has(filePath));
-  if (missingTargetPath) {
-    return loadParsedDocuments(limit, true, activeScanRoot);
-  }
-
   const reparsedItems = await parseFiles(
-    normalizedPaths.filter((filePath) => targetPaths.includes(filePath)),
+    normalizedPaths.filter((filePath) => files.includes(filePath)),
     activeScanRoots,
     {
       cloudEnhancement: options?.cloudEnhancement ?? false,
       parseStage: options?.parseStage || 'detailed',
     },
   );
-  const reparsedByPath = new Map(reparsedItems.map((item) => [item.path, item]));
-  const items = targetPaths
-    .map((filePath) => reparsedByPath.get(filePath) || cachedByPath.get(filePath))
-    .filter(Boolean) as ParsedDocument[];
+
+  const mergedByPath = new Map(cache.items.map((item) => [item.path, refreshDerivedSchemaProfile(item)]));
+  for (const item of reparsedItems) {
+    mergedByPath.set(item.path, item);
+  }
+
+  const items = dedupeDocuments(
+    sortDocumentsByRecency(
+      [...mergedByPath.values()].filter((item) => files.includes(item.path)),
+    ),
+  );
 
   const scanSignature = await buildScanSignature(files);
   await writeCache({
@@ -554,6 +608,7 @@ export async function mergeParsedDocumentsForPaths(
   });
 
   const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
+  scheduleVectorIndexSync(mergedItems);
   return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
 
