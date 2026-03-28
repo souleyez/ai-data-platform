@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildDocumentAdvancedParseSystemPrompt,
   getDocumentAdvancedParseProvider,
   getDocumentAdvancedParseProviderMode,
   resolveDocumentAdvancedParseProviderMode,
@@ -32,8 +33,20 @@ test('disabled provider should return null without touching external services', 
   assert.equal(result, null);
 });
 
-test('openclaw-skill provider should stay project-side and return null until integrated', async () => {
+test('buildDocumentAdvancedParseSystemPrompt should include workspace skill contract for openclaw-skill mode', async () => {
+  const chatPrompt = await buildDocumentAdvancedParseSystemPrompt('openclaw-chat');
+  const skillPrompt = await buildDocumentAdvancedParseSystemPrompt('openclaw-skill');
+
+  assert.match(chatPrompt, /document-structuring assistant/i);
+  assert.doesNotMatch(chatPrompt, /Workspace skill: document-deep-parse/);
+  assert.match(skillPrompt, /Workspace skill: document-deep-parse/);
+  assert.match(skillPrompt, /Document Deep Parse/);
+  assert.match(skillPrompt, /Output Schema/);
+});
+
+test('openclaw-skill provider should stay project-side and return null when gateway is not configured', async () => {
   const provider = getDocumentAdvancedParseProvider('openclaw-skill');
+  assert.equal(provider.mode, 'openclaw-skill');
   const result = await provider.run({ prompt: 'skill prompt' });
   assert.equal(result, null);
 });

@@ -1,4 +1,5 @@
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
+import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type DocumentAdvancedParseRequest = {
   prompt: string;
@@ -7,7 +8,7 @@ export type DocumentAdvancedParseRequest = {
 export type DocumentAdvancedParseResponse = {
   content: string;
   model: string;
-  provider: 'openclaw-chat';
+  provider: 'openclaw-chat' | 'openclaw-skill';
 };
 
 export type DocumentAdvancedParseProviderMode =
@@ -30,6 +31,28 @@ function buildSystemPrompt() {
     'Keep 3-8 high-value evidence blocks.',
     'Prefer professional signals for contracts, formulas, technical documents, resumes, and research papers.',
   ].join(' ');
+}
+
+export async function buildDocumentAdvancedParseSystemPrompt(
+  mode: Extract<DocumentAdvancedParseProviderMode, 'openclaw-chat' | 'openclaw-skill'> = 'openclaw-chat',
+) {
+  if (mode !== 'openclaw-skill') return buildSystemPrompt();
+
+  const skillInstruction = await loadWorkspaceSkillBundle('document-deep-parse', [
+    'references/output-schema.md',
+  ]);
+
+  return [
+    buildSystemPrompt(),
+    skillInstruction
+      ? [
+          'Follow the project-side workspace skill below as the authoritative deep-parse contract.',
+          skillInstruction,
+        ].join('\n\n')
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function resolveDocumentAdvancedParseProviderMode(
@@ -58,9 +81,10 @@ function buildOpenClawChatProvider(): DocumentAdvancedParseProvider {
         return null;
       }
 
+      const systemPrompt = await buildDocumentAdvancedParseSystemPrompt('openclaw-chat');
       const result = await runOpenClawChat({
         prompt: request.prompt,
-        systemPrompt: buildSystemPrompt(),
+        systemPrompt,
       });
 
       return {
@@ -75,10 +99,22 @@ function buildOpenClawChatProvider(): DocumentAdvancedParseProvider {
 function buildOpenClawSkillProvider(): DocumentAdvancedParseProvider {
   return {
     mode: 'openclaw-skill',
-    async run() {
-      // Reserved for project-side workspace skill integration.
-      // We deliberately keep this branch outside OpenClaw core so upgrades remain frictionless.
-      return null;
+    async run(request) {
+      if (!isOpenClawGatewayConfigured()) {
+        return null;
+      }
+
+      const systemPrompt = await buildDocumentAdvancedParseSystemPrompt('openclaw-skill');
+      const result = await runOpenClawChat({
+        prompt: request.prompt,
+        systemPrompt,
+      });
+
+      return {
+        content: result.content,
+        model: result.model,
+        provider: 'openclaw-skill',
+      };
     },
   };
 }
