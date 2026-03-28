@@ -15,7 +15,7 @@ function makeGroup(overrides: Partial<ReportGroup>): ReportGroup {
     key: 'resume',
     label: '人才简历库',
     description: '简历知识库',
-    triggerKeywords: ['简历'],
+    triggerKeywords: ['简历', '候选人'],
     defaultTemplateKey: 'shared-table-default',
     templates: [],
     referenceImages: [],
@@ -39,9 +39,9 @@ function makeTemplate(overrides: Partial<SharedReportTemplate>): SharedReportTem
 function makeSelectedTemplate(overrides?: {
   group?: Partial<ReportGroup>;
   template?: Partial<SharedReportTemplate>;
-}) : SelectedKnowledgeTemplate {
-  const group = makeGroup(overrides?.group);
-  const template = makeTemplate(overrides?.template);
+}): SelectedKnowledgeTemplate {
+  const group = makeGroup(overrides?.group || {});
+  const template = makeTemplate(overrides?.template || {});
   return {
     group,
     template,
@@ -51,6 +51,7 @@ function makeSelectedTemplate(overrides?: {
       variableZones: ['可变区域A'],
       outputHint: template.description,
       tableColumns: ['列A', '列B'],
+      pageSections: ['摘要', '重点分析'],
     },
   };
 }
@@ -64,7 +65,12 @@ test('inferTemplateTaskHint should identify resume, bids and order template task
   assert.equal(
     inferTemplateTaskHint([
       makeSelectedTemplate({
-        group: { key: 'bids', label: '标书知识库' },
+        group: {
+          key: 'bids',
+          label: '标书知识库',
+          description: '标书知识库',
+          triggerKeywords: ['标书', '招标', '投标'],
+        },
         template: { key: 'bids-table-template', label: '标书应答表格' },
       }),
     ], 'table'),
@@ -74,7 +80,12 @@ test('inferTemplateTaskHint should identify resume, bids and order template task
   assert.equal(
     inferTemplateTaskHint([
       makeSelectedTemplate({
-        group: { key: 'order', label: '订单分析' },
+        group: {
+          key: 'order',
+          label: '订单分析',
+          description: '订单经营知识库',
+          triggerKeywords: ['订单', '销售', '库存'],
+        },
         template: { key: 'order-static-template', label: '订单经营静态页', type: 'static-page' },
       }),
     ], 'page'),
@@ -82,10 +93,10 @@ test('inferTemplateTaskHint should identify resume, bids and order template task
   );
 });
 
-test('adaptSelectedTemplatesForRequest should switch resume envelope to company-project table when request is explicit', () => {
+test('adaptSelectedTemplatesForRequest should switch resume company table envelope when request is explicit', () => {
   const adapted = adaptSelectedTemplatesForRequest(
     [makeSelectedTemplate()],
-    '基于人才简历库按公司维度整理 IT 项目信息并输出表格',
+    '基于人才简历库中全部时间范围的简历，按公司维度整理涉及公司的IT项目信息，输出表格。',
   );
 
   assert.equal(adapted[0]?.envelope.title, '简历 IT 项目公司维度表');
@@ -97,6 +108,31 @@ test('adaptSelectedTemplatesForRequest should switch resume envelope to company-
     '技术栈/系统关键词',
     '时间线',
     '证据来源',
+  ]);
+});
+
+test('adaptSelectedTemplatesForRequest should switch resume skill page envelope when request is skill dashboard', () => {
+  const adapted = adaptSelectedTemplatesForRequest(
+    [
+      makeSelectedTemplate({
+        template: {
+          key: 'resume-page-template',
+          type: 'static-page',
+          label: '数据可视化静态页',
+        },
+      }),
+    ],
+    '请基于人才简历库按技能维度生成数据可视化静态页。',
+  );
+
+  assert.equal(adapted[0]?.envelope.title, '简历技能维度静态页');
+  assert.deepEqual(adapted[0]?.envelope.pageSections, [
+    '技能概览',
+    '技能分布',
+    '候选人覆盖',
+    '公司关联',
+    '项目关联',
+    'AI综合分析',
   ]);
 });
 
@@ -126,7 +162,7 @@ test('buildTemplateSearchHints and context block should include envelope structu
 });
 
 test('selectSharedTemplateForGroup should prefer semantic matches over generic defaults', () => {
-  const group = makeGroup();
+  const group = makeGroup({});
   const genericDefault = makeTemplate({
     key: 'shared-table-default',
     label: '默认结构化表格',
@@ -141,6 +177,5 @@ test('selectSharedTemplateForGroup should prefer semantic matches over generic d
   });
 
   const selected = selectSharedTemplateForGroup([genericDefault, resumeTemplate], group, 'table');
-
   assert.equal(selected?.key, 'resume-table-template');
 });

@@ -65,7 +65,7 @@ test('buildSharedTemplateEnvelope should return order sections for order static 
       key: 'order-static-template',
       label: '订单经营静态页',
       type: 'static-page',
-      description: '适用于多平台订单经营分析的可视化静态页',
+      description: '适用于多平台订单经营分析的数据可视化静态页',
     }),
   );
 
