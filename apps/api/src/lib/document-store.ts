@@ -652,10 +652,10 @@ function extractStrongKeywords(keywords: string[]) {
     return explicitIdKeywords;
   }
 
-  return keywords.filter((keyword) => {
-    if (GENERIC_STOPWORDS.has(keyword)) return false;
-    return keyword.length >= 4;
-  });
+  // Chinese natural-language prompts can produce long mojibake-like tokens after ingestion
+  // or terminal round-trips. Using them as hard filters drops every candidate before scoring.
+  // Keep strong gating only for explicit identifiers / stable ASCII keywords.
+  return [];
 }
 
 function containsAnyKeyword(text: string, keywords: string[]) {
