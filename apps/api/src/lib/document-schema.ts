@@ -1,4 +1,4 @@
-﻿import type { ParsedDocument, ResumeFields } from './document-parser.js';
+import type { ParsedDocument, ResumeFields } from './document-parser.js';
 
 export function includesAnyText(text: string, keywords: string[]) {
   const haystack = String(text || '').toLowerCase();

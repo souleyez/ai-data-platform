@@ -1,0 +1,4 @@
+interface:
+  display_name: "Datasource Body Extract"
+  short_description: "Extract and denoise webpage body text for datasource ingestion."
+  default_prompt: "Use $datasource-body-extract to extract clean body text, remove page noise, and prepare source-grounded content for datasource ingestion."

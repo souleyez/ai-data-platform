@@ -9,7 +9,7 @@ import { searchDocumentVectorIndex } from './document-vector-index.js';
 import { STORAGE_FILES_DIR } from './paths.js';
 
 export type RetrievalStage = 'rule' | 'vector' | 'rerank';
-export type RetrievalIntent = 'generic' | 'formula' | 'paper' | 'technical' | 'contract' | 'resume';
+export type RetrievalIntent = 'generic' | 'formula' | 'paper' | 'technical' | 'contract' | 'resume' | 'iot';
 export type TemplateTask =
   | 'general'
   | 'resume-comparison'
@@ -17,10 +17,14 @@ export type TemplateTask =
   | 'formula-static-page'
   | 'bids-table'
   | 'bids-static-page'
+  | 'paper-table'
+  | 'paper-static-page'
   | 'paper-summary'
   | 'technical-summary'
   | 'contract-risk'
   | 'order-static-page'
+  | 'iot-table'
+  | 'iot-static-page'
   | 'static-page';
 
 export type RetrievalResult = {
@@ -83,6 +87,9 @@ function expandPromptBySchema(prompt: string) {
   if (containsAny(normalized, ['technical', '技术', 'api', 'sdk', 'deploy', 'deployment', 'architecture', 'integration', '接口', '部署'])) {
     expansions.push('technical api sdk deployment architecture integration technical-summary 技术 接口 部署 架构 集成 模块');
   }
+  if (containsAny(normalized, ['iot', '物联网', '设备', '网关', '平台', '传感', '解决方案'])) {
+    expansions.push('iot scenario module gateway device sensor platform interface integration value deployment 物联网 场景 模块 网关 设备 传感 平台 接口 集成 价值');
+  }
   if (containsAny(normalized, ['contract', '合同', '条款', 'payment', 'breach', 'legal'])) {
     expansions.push('contract clause payment breach obligation legal 合同 条款 付款 回款 违约 法务');
   }
@@ -112,6 +119,12 @@ function detectTemplateTask(prompt: string): TemplateTask {
   if (containsAny(text, ['bid', 'bids', 'tender', 'rfp', 'proposal', '标书', '招标', '投标']) && containsAny(text, ['table', 'response', 'risk', 'section', 'materials', 'report', '表格', '应答'])) {
     return 'bids-table';
   }
+  if (containsAny(text, ['paper', 'study', 'journal', '论文', '研究', '期刊']) && containsAny(text, ['static page', 'static-page', 'dashboard', '静态页', '可视化页'])) {
+    return 'paper-static-page';
+  }
+  if (containsAny(text, ['paper', 'study', 'journal', '论文', '研究', '期刊']) && containsAny(text, ['table', 'report', '表格', '表'])) {
+    return 'paper-table';
+  }
   if (containsAny(text, ['formula', '配方', '奶粉', '益生菌', '菌株']) && containsAny(text, ['static page', 'static-page', 'dashboard', '静态页', '可视化页'])) {
     return 'formula-static-page';
   }
@@ -123,6 +136,12 @@ function detectTemplateTask(prompt: string): TemplateTask {
   }
   if (containsAny(text, ['contract', '合同', '条款']) && containsAny(text, ['table', 'risk', '表格', '风险'])) {
     return 'contract-risk';
+  }
+  if (containsAny(text, ['iot', '物联网', '设备', '网关', '平台', '解决方案']) && containsAny(text, ['static page', 'static-page', 'dashboard', '静态页', '可视化页'])) {
+    return 'iot-static-page';
+  }
+  if (containsAny(text, ['iot', '物联网', '设备', '网关', '平台', '解决方案']) && containsAny(text, ['table', 'report', '表格', '表'])) {
+    return 'iot-table';
   }
   if (containsAny(text, ['technical', '技术', 'api', 'sdk', 'deployment', 'architecture', '接口', '部署'])) {
     return 'technical-summary';
@@ -151,6 +170,7 @@ function detectRetrievalIntent(prompt: string): RetrievalIntent {
     formula: containsAny(text, ['formula', '配方', '奶粉', '益生菌', '菌株', 'ingredient', 'strain', 'hmo', 'nutrition']) ? 2 : 0,
     paper: containsAny(text, ['paper', '论文', '研究', 'study', 'trial', 'randomized', 'placebo', 'abstract', 'methods', 'results', 'journal']) ? 2 : 0,
     technical: containsAny(text, ['technical', '技术', 'api', 'sdk', 'deploy', 'deployment', 'architecture', 'integration', '接口', '部署']) ? 2 : 0,
+    iot: containsAny(text, ['iot', '物联网', '设备', '网关', '平台', '传感', '解决方案']) ? 2 : 0,
     contract: containsAny(text, ['contract', '合同', 'clause', '条款', 'payment', 'legal']) ? 2 : 0,
     resume: containsAny(text, ['resume', 'cv', 'candidate', 'talent', '简历', '候选人']) ? 2 : 0,
   };
@@ -163,6 +183,9 @@ function detectRetrievalIntent(prompt: string): RetrievalIntent {
   }
   if (containsAny(text, ['api', 'sdk', 'deployment', 'architecture', 'integration', '接口', '部署'])) {
     signalScore.technical += 3;
+  }
+  if (containsAny(text, ['iot', '物联网', 'device', 'gateway', 'sensor', '设备', '网关', '传感', '平台'])) {
+    signalScore.iot += 3;
   }
 
   const ranked = Object.entries(signalScore).sort((left, right) => right[1] - left[1]);
@@ -232,10 +255,11 @@ function scoreCandidatePreference(item: ParsedDocument, templateTask: TemplateTa
 
   if (templateTask === 'technical-summary' && item.schemaType === 'technical') score += 12;
   if (templateTask === 'technical-summary' && isStoredKnowledgeDocument(item)) score += 18;
-  if (templateTask === 'paper-summary' && isPurePaperCandidate(item)) score += 12;
+  if ((templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') && isPurePaperCandidate(item)) score += 12;
   if (templateTask === 'resume-comparison' && item.schemaType === 'resume') score += 12;
   if ((templateTask === 'formula-table' || templateTask === 'formula-static-page') && item.schemaType === 'formula') score += 12;
   if ((templateTask === 'bids-table' || templateTask === 'bids-static-page') && matchesTemplateTask(item, templateTask)) score += 14;
+  if ((templateTask === 'iot-static-page' || templateTask === 'iot-table') && isIotTemplateCandidate(item)) score += 14;
 
   return score;
 }
@@ -292,6 +316,15 @@ function isOrderTemplateCandidate(item: ParsedDocument) {
   return isStoredKnowledgeDocument(item) || isHighValueKnowledgeDocument(item);
 }
 
+function isIotTemplateCandidate(item: ParsedDocument) {
+  const text = `${(item.confirmedGroups || []).join(' ')} ${(item.groups || []).join(' ')} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
+  return (
+    (String(item.bizCategory || '') === 'iot' || item.schemaType === 'technical' || item.category === 'technical')
+    && /(iot|物联网|设备|网关|传感|平台|解决方案)/.test(text)
+    && isHighValueKnowledgeDocument(item)
+  );
+}
+
 function isBidTemplateCandidate(item: ParsedDocument) {
   const text = `${(item.confirmedGroups || []).join(' ')} ${(item.groups || []).join(' ')} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
   return /(bids?|tender|rfp|proposal|标书|招标|投标)/.test(text) && isHighValueKnowledgeDocument(item);
@@ -300,10 +333,11 @@ function isBidTemplateCandidate(item: ParsedDocument) {
 function matchesTemplateTask(item: ParsedDocument, templateTask: TemplateTask) {
   if (templateTask === 'resume-comparison') return isReliableResumeCandidate(item);
   if (templateTask === 'formula-table' || templateTask === 'formula-static-page') return item.schemaType === 'formula';
-  if (templateTask === 'paper-summary') return isPurePaperCandidate(item);
+  if (templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') return isPurePaperCandidate(item);
   if (templateTask === 'technical-summary') return item.schemaType === 'technical';
   if (templateTask === 'contract-risk') return item.schemaType === 'contract';
   if (templateTask === 'order-static-page') return isOrderTemplateCandidate(item);
+  if (templateTask === 'iot-static-page' || templateTask === 'iot-table') return isIotTemplateCandidate(item);
   if (templateTask === 'bids-table' || templateTask === 'bids-static-page') return isBidTemplateCandidate(item);
   return true;
 }
@@ -315,7 +349,7 @@ function selectTemplateCandidates(items: ParsedDocument[], templateTask: Templat
   if (templateTask === 'formula-table' || templateTask === 'formula-static-page') {
     return items.filter((item) => item.schemaType === 'formula').sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
   }
-  if (templateTask === 'paper-summary') {
+  if (templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') {
     const purePaper = items.filter((item) => isPurePaperCandidate(item));
     if (purePaper.length) return purePaper.sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
     return items.filter((item) => isPaperLikeDocument(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
@@ -327,6 +361,9 @@ function selectTemplateCandidates(items: ParsedDocument[], templateTask: Templat
   }
   if (templateTask === 'order-static-page') {
     return items.filter((item) => isOrderTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
+  }
+  if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
+    return items.filter((item) => isIotTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
   }
   if (templateTask === 'bids-table' || templateTask === 'bids-static-page') {
     return items.filter((item) => isBidTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
@@ -341,8 +378,12 @@ function preselectDocumentsByTemplateTask(items: ParsedDocument[], templateTask:
   if (
     templateTask === 'resume-comparison'
     || templateTask === 'paper-summary'
+    || templateTask === 'paper-static-page'
+    || templateTask === 'paper-table'
     || templateTask === 'technical-summary'
     || templateTask === 'order-static-page'
+    || templateTask === 'iot-static-page'
+    || templateTask === 'iot-table'
     || templateTask === 'bids-table'
     || templateTask === 'bids-static-page'
   ) {
@@ -379,6 +420,7 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
   if (intent !== 'generic') {
     if (item.schemaType === intent) score += 22;
     else if (intent === 'paper' && item.schemaType === 'formula') score -= 30;
+    else if (intent === 'iot' && !isIotTemplateCandidate(item) && item.schemaType !== 'technical') score -= 14;
     else if (intent === 'technical' && item.schemaType === 'formula') score -= 18;
     else if (intent === 'formula' && (item.schemaType === 'paper' || item.schemaType === 'technical')) score -= 10;
     else if (intent === 'contract' && item.schemaType !== 'contract') score -= 10;
@@ -398,6 +440,12 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
     if (hasFormulaLibraryBias(item)) score -= 12;
   }
 
+  if (intent === 'iot') {
+    if (isIotTemplateCandidate(item)) score += 16;
+    if (containsAny(text, ['iot', '物联网', 'device', 'gateway', 'sensor', '设备', '网关', '传感', '平台']) && isIotTemplateCandidate(item)) score += 10;
+    if (item.schemaType === 'formula') score -= 12;
+  }
+
   if (templateTask === 'resume-comparison') {
     score += item.schemaType === 'resume' ? 24 : -24;
   } else if (templateTask === 'formula-table' || templateTask === 'formula-static-page') {
@@ -408,9 +456,12 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
   } else if (templateTask === 'technical-summary') {
     if (item.schemaType === 'technical') score += 16;
     else if (item.schemaType === 'formula') score -= 12;
-  } else if (templateTask === 'paper-summary') {
+  } else if (templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') {
     if (isPurePaperCandidate(item)) score += 18;
     else if (hasFormulaLibraryBias(item)) score -= 16;
+  } else if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
+    if (isIotTemplateCandidate(item)) score += 18;
+    else if (item.schemaType === 'formula') score -= 14;
   } else if (templateTask === 'bids-table' || templateTask === 'bids-static-page') {
     score += isBidTemplateCandidate(item) ? 22 : -14;
   }
@@ -443,7 +494,8 @@ function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: Tem
     if (/(forecast|inventory|sales|replenishment|restock|yoy|mom|inventory-index|platform|gmv|sell-through)/i.test(profileText)) score += 10;
   }
   if (templateTask === 'technical-summary' && /(interfacetype|deploymentmode|integrationsignals|modulesignals|metricsignals)/i.test(profileText)) score += 10;
-  if (templateTask === 'paper-summary' && /(methodology|subjecttype|resultsignals|metricsignals|publicationsignals)/i.test(profileText)) score += 10;
+  if ((templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') && /(methodology|subjecttype|resultsignals|metricsignals|publicationsignals)/i.test(profileText)) score += 10;
+  if ((templateTask === 'iot-static-page' || templateTask === 'iot-table') && /(interfacetype|deploymentmode|integrationsignals|modulesignals|metricsignals|valuesignals|benefitsignals)/i.test(profileText)) score += 12;
   return score;
 }
 
@@ -460,9 +512,12 @@ function scoreEvidenceTemplateFit(entry: DocumentEvidenceMatch, prompt: string, 
     score += item.schemaType === 'resume' ? 10 : -20;
     if (isResumeCompanyProjectPrompt(prompt) && containsAny(chunkText, ['company', 'project', 'system', 'platform', 'api', 'implementation', 'development', 'architecture', '技术', '项目', '系统', '平台', '接口', '开发', '实施', '架构'])) score += 14;
     if (containsAny(chunkText, ['education', 'company', 'skill', 'experience', '学历', '公司', '能力'])) score += 8;
-  } else if (templateTask === 'paper-summary') {
+  } else if (templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') {
     score += isPurePaperCandidate(item) ? 10 : -12;
     if (containsAny(chunkText, ['method', 'result', 'conclusion', 'abstract', '方法', '结果', '结论'])) score += 8;
+  } else if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
+    score += isIotTemplateCandidate(item) ? 10 : -12;
+    if (containsAny(chunkText, ['iot', '物联网', 'device', 'gateway', 'sensor', 'module', 'platform', 'api', 'integration', '场景', '模块', '网关', '设备', '平台', '接口', '集成'])) score += 10;
   } else if (templateTask === 'technical-summary') {
     score += item.schemaType === 'technical' ? 8 : -8;
     if (containsAny(chunkText, ['api', 'deployment', 'integration', 'module', '接口', '部署', '集成', '模块'])) score += 8;
@@ -545,11 +600,15 @@ function finalizeDocuments(documents: ParsedDocument[], intent: RetrievalIntent,
     const orderDocs = documents.filter((item) => isOrderTemplateCandidate(item));
     return orderDocs.slice(0, limit);
   }
+  if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
+    const iotDocs = documents.filter((item) => isIotTemplateCandidate(item));
+    return (iotDocs.length ? iotDocs : documents).slice(0, limit);
+  }
   if (templateTask === 'bids-table' || templateTask === 'bids-static-page') {
     const bidDocs = documents.filter((item) => isBidTemplateCandidate(item));
     return bidDocs.slice(0, limit);
   }
-  if (templateTask === 'paper-summary') {
+  if (templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') {
     const papers = documents.filter((item) => isPurePaperCandidate(item));
     return (papers.length ? papers : documents).slice(0, limit);
   }

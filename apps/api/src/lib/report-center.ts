@@ -1,4 +1,4 @@
-﻿import { createWriteStream } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -7,6 +7,7 @@ import { loadDocumentLibraries } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
 import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
+import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
 
@@ -65,6 +66,7 @@ export type ReportDynamicSource = {
   enabled: boolean;
   request: string;
   outputType: 'table' | 'page' | 'ppt' | 'pdf';
+  conceptMode?: boolean;
   templateKey?: string;
   templateLabel?: string;
   timeRange?: string;
@@ -303,6 +305,9 @@ function normalizeDynamicSource(
   },
 ): ReportDynamicSource | null {
   const enabled = Boolean(dynamicSource?.enabled) || fallback.kind === 'page';
+  const outputType = (dynamicSource?.outputType || fallback.kind || 'page') as 'table' | 'page' | 'ppt' | 'pdf';
+  const conceptMode = Boolean(dynamicSource?.conceptMode)
+    || (outputType === 'page' && !String(dynamicSource?.templateKey || '').trim());
   const libraries = Array.isArray(dynamicSource?.libraries) && dynamicSource?.libraries.length
     ? dynamicSource.libraries
     : Array.isArray(fallback.libraries)
@@ -314,9 +319,10 @@ function normalizeDynamicSource(
   return {
     enabled: true,
     request: String(dynamicSource?.request || fallback.request || '').trim(),
-    outputType: (dynamicSource?.outputType || fallback.kind || 'page') as 'table' | 'page' | 'ppt' | 'pdf',
-    templateKey: String(dynamicSource?.templateKey || fallback.templateKey || '').trim(),
-    templateLabel: String(dynamicSource?.templateLabel || fallback.templateLabel || '').trim(),
+    outputType,
+    conceptMode,
+    templateKey: conceptMode ? '' : String(dynamicSource?.templateKey || fallback.templateKey || '').trim(),
+    templateLabel: conceptMode ? '' : String(dynamicSource?.templateLabel || fallback.templateLabel || '').trim(),
     timeRange: String(dynamicSource?.timeRange || '').trim(),
     contentFocus: String(dynamicSource?.contentFocus || '').trim(),
     libraries: libraries
@@ -331,6 +337,24 @@ function normalizeDynamicSource(
     sourceDocumentCount: Number(dynamicSource?.sourceDocumentCount || 0),
     sourceUpdatedAt: String(dynamicSource?.sourceUpdatedAt || '').trim(),
   };
+}
+
+function buildConceptPageEnvelope(group: ReportGroup | null, requestText: string) {
+  const baseEnvelope: ReportTemplateEnvelope = {
+    title: '数据可视化静态页',
+    fixedStructure: [
+      '页面结构由当前知识库意图和证据决定，优先组织成可直接阅读和转发的业务页面。',
+      '优先展示摘要、指标卡片、重点分析、图表和结论，不强制套用共享模板骨架。',
+      '页面内容必须以当前库内资料为依据，不补造库外事实。',
+    ],
+    variableZones: ['页面标题', '卡片指标', '重点分节', '图表分布', '行动建议', 'AI综合分析'],
+    outputHint: 'Concept page generated from current knowledge evidence.',
+    pageSections: ['摘要', '核心指标', '重点分析', '行动建议', 'AI综合分析'],
+  };
+
+  return group
+    ? adaptTemplateEnvelopeForRequest(group, baseEnvelope, 'page', requestText)
+    : baseEnvelope;
 }
 
 function buildDocumentTimestamp(item: {
@@ -438,7 +462,8 @@ function buildDynamicSectionBody(
 
 function buildDynamicPageRecord(
   record: ReportOutputRecord,
-  template: SharedReportTemplate,
+  group: ReportGroup | null,
+  template: SharedReportTemplate | null,
   documents: Array<Record<string, unknown>>,
 ) {
   const source = normalizeDynamicSource(record.dynamicSource, {
@@ -458,7 +483,9 @@ function buildDynamicPageRecord(
   const rankedDocuments = query
     ? matchDocumentsByPrompt(scopedDocuments as ParsedDocument[], query, Math.min(scopedDocuments.length, 30))
     : scopedDocuments;
-  const latestDocuments = [...rankedDocuments].sort((left, right) => buildDocumentTimestamp(right as never) - buildDocumentTimestamp(left as never));
+  const latestDocuments = [...(rankedDocuments.length ? rankedDocuments : scopedDocuments)].sort(
+    (left, right) => buildDocumentTimestamp(right as never) - buildDocumentTimestamp(left as never),
+  );
 
   const topSchemas = countTopValues(latestDocuments.map((item) => String(item.schemaType || item.category || 'generic')));
   const topTopics = countTopValues(latestDocuments.flatMap((item) => Array.isArray(item.topicTags) ? item.topicTags : []));
@@ -474,7 +501,17 @@ function buildDynamicPageRecord(
     return record;
   }
 
-  const envelope = buildSharedTemplateEnvelope(template);
+  const conceptMode = Boolean(source.conceptMode) || !String(source.templateKey || '').trim();
+  const envelope = conceptMode
+    ? buildConceptPageEnvelope(group, source.request || record.title || record.summary || '')
+    : group && template
+      ? adaptTemplateEnvelopeForRequest(group, buildSharedTemplateEnvelope(template), 'page', source.request || record.title || record.summary || '')
+      : template
+        ? buildSharedTemplateEnvelope(template)
+        : buildConceptPageEnvelope(group, source.request || record.title || record.summary || '');
+  const displayTemplateLabel = conceptMode
+    ? '数据可视化静态页'
+    : (source.templateLabel || template?.label || record.templateLabel || '数据可视化静态页');
   const summary = latestDocuments.length
     ? `当前已基于 ${latestDocuments.length} 份库内资料生成动态页面，其中 ${detailedCount} 份已完成进阶解析。主要主题包括 ${topTopics.map(([name]) => name).slice(0, 4).join('、') || '暂无明确主题'}。`
     : '当前知识库中暂无符合条件的资料，页面保持空状态。';
@@ -494,7 +531,7 @@ function buildDynamicPageRecord(
   return attachLocalReportAnalysis({
     ...record,
     content: summary,
-    summary: `${record.templateLabel} 已按当前知识库内容动态刷新。`,
+    summary: `${displayTemplateLabel} 已按当前知识库内容动态刷新。`,
     page: {
       summary,
       cards: [
@@ -518,8 +555,9 @@ function buildDynamicPageRecord(
     dynamicSource: {
       ...source,
       outputType: 'page',
-      templateKey: source.templateKey || template.key,
-      templateLabel: source.templateLabel || template.label,
+      conceptMode,
+      templateKey: conceptMode ? '' : (source.templateKey || template?.key || ''),
+      templateLabel: conceptMode ? '' : (source.templateLabel || template?.label || ''),
       lastRenderedAt: new Date().toISOString(),
       sourceFingerprint,
       sourceDocumentCount: latestDocuments.length,
@@ -592,6 +630,16 @@ function isOrderLibrary(label: string, key: string) {
 function isBidLibrary(label: string, key: string) {
   const text = `${label} ${key}`.toLowerCase();
   return text.includes('bids') || text.includes('bid') || text.includes('tender') || text.includes('标书') || text.includes('招标') || text.includes('投标');
+}
+
+function isPaperLibrary(label: string, key: string) {
+  const text = `${label} ${key}`.toLowerCase();
+  return text.includes('paper') || text.includes('论文') || text.includes('学术') || text.includes('研究');
+}
+
+function isIotLibrary(label: string, key: string) {
+  const text = `${label} ${key}`.toLowerCase();
+  return text.includes('iot') || text.includes('物联网') || text.includes('设备') || text.includes('网关') || text.includes('解决方案');
 }
 
 function buildTemplatesForLibrary(label: string, key: string) {
@@ -706,6 +754,68 @@ function buildTemplatesForLibrary(label: string, key: string) {
           label: '标书汇报提纲',
           type: 'ppt' as const,
           description: '输出适合投标汇报使用的结构化提纲。',
+          supported: true,
+        },
+      ],
+    };
+  }
+
+  if (isPaperLibrary(label, key)) {
+    return {
+      defaultTemplateKey: `${key}-static-page`,
+      triggerKeywords: [label, 'paper', '论文', '学术', '研究', '期刊', '文献'],
+      description: `${label} 分组固定以论文综述静态页为主。`,
+      templates: [
+        {
+          key: `${key}-static-page`,
+          label: '论文综述静态页',
+          type: 'static-page' as const,
+          description: '按研究主题、方法设计、核心结论、关键指标和局限性输出可视化综述页面。',
+          supported: true,
+        },
+        {
+          key: `${key}-table`,
+          label: '论文结论表格',
+          type: 'table' as const,
+          description: '按论文标题、研究对象、方法设计、核心结论、关键指标和证据来源输出结构化表格。',
+          supported: true,
+        },
+        {
+          key: `${key}-ppt`,
+          label: '论文汇报提纲',
+          type: 'ppt' as const,
+          description: '输出适合论文汇报和研究复盘的结构化提纲。',
+          supported: true,
+        },
+      ],
+    };
+  }
+
+  if (isIotLibrary(label, key)) {
+    return {
+      defaultTemplateKey: `${key}-static-page`,
+      triggerKeywords: [label, 'iot', '物联网', '设备', '网关', '平台', '解决方案'],
+      description: `${label} 分组固定以 IOT 方案静态页为主。`,
+      templates: [
+        {
+          key: `${key}-static-page`,
+          label: 'IOT解决方案静态页',
+          type: 'static-page' as const,
+          description: '按方案概览、核心模块、平台与接口、实施路径、业务价值和风险提示输出可视化静态页。',
+          supported: true,
+        },
+        {
+          key: `${key}-table`,
+          label: 'IOT方案表格',
+          type: 'table' as const,
+          description: '按模块、能力说明、设备网关、平台接口、实施要点和证据来源输出结构化表格。',
+          supported: true,
+        },
+        {
+          key: `${key}-ppt`,
+          label: 'IOT方案汇报提纲',
+          type: 'ppt' as const,
+          description: '输出适合方案汇报和售前讲解的结构化提纲。',
           supported: true,
         },
       ],
@@ -832,6 +942,16 @@ function looksLikeFormulaTemplate(template: SharedReportTemplate) {
   return text.includes('配方') || text.includes('奶粉') || text.includes('formula');
 }
 
+function looksLikePaperTemplate(template: SharedReportTemplate) {
+  const text = `${template.label} ${template.description || ''}`.toLowerCase();
+  return text.includes('paper') || text.includes('论文') || text.includes('学术') || text.includes('研究');
+}
+
+function looksLikeIotTemplate(template: SharedReportTemplate) {
+  const text = `${template.label} ${template.description || ''}`.toLowerCase();
+  return text.includes('iot') || text.includes('物联网') || text.includes('设备') || text.includes('网关') || text.includes('解决方案');
+}
+
 export function buildSharedTemplateEnvelope(template: SharedReportTemplate): ReportTemplateEnvelope {
   if (template.type === 'static-page') {
     if (looksLikeOrderTemplate(template)) {
@@ -873,6 +993,34 @@ export function buildSharedTemplateEnvelope(template: SharedReportTemplate): Rep
         variableZones: ['方案摘要', '核心成分与菌株', '适用人群', '作用归纳', '证据说明', 'AI综合分析'],
         outputHint: template.description,
         pageSections: ['方案摘要', '核心成分', '适用人群', '作用机制', '证据依据', 'AI综合分析'],
+      };
+    }
+
+    if (looksLikePaperTemplate(template)) {
+      return {
+        title: template.label,
+        fixedStructure: [
+          '页面结构稳定，优先呈现研究概览、方法设计、核心结论、关键指标、局限与风险。',
+          '内容应适合研究复盘、团队讨论和学术资料转发，不写成聊天回复。',
+          '证据优先来自知识库论文正文、摘要和结构化解析结果。',
+        ],
+        variableZones: ['研究主题摘要', '方法设计与样本信息', '核心结论', '关键指标与证据', '局限与风险', 'AI综合分析'],
+        outputHint: template.description,
+        pageSections: ['研究概览', '方法设计', '核心结论', '关键指标与证据', '局限与风险', 'AI综合分析'],
+      };
+    }
+
+    if (looksLikeIotTemplate(template)) {
+      return {
+        title: template.label,
+        fixedStructure: [
+          '页面结构稳定，优先呈现方案概览、核心模块、平台与接口、实施路径、业务价值和风险提示。',
+          '内容适合方案交流、售前讲解和内部评审，不要写成聊天回复。',
+          '证据优先来自知识库中的设备、平台、接口和实施材料。',
+        ],
+        variableZones: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值', 'AI综合分析'],
+        outputHint: template.description,
+        pageSections: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值', 'AI综合分析'],
       };
     }
 
@@ -959,6 +1107,34 @@ export function buildSharedTemplateEnvelope(template: SharedReportTemplate): Rep
     };
   }
 
+  if (looksLikePaperTemplate(template)) {
+    return {
+      title: template.label,
+      fixedStructure: [
+        '输出必须保持表格化，优先包含论文标题、研究对象、方法设计、核心结论、关键指标、证据来源。',
+        '每一行对应一篇论文或一条稳定研究结论，不要把多篇论文混在同一行。',
+        '证据优先来自论文摘要、正文证据块和结构化解析结果。',
+      ],
+      variableZones: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源', 'AI综合分析'],
+      outputHint: template.description,
+      tableColumns: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源'],
+    };
+  }
+
+  if (looksLikeIotTemplate(template)) {
+    return {
+      title: template.label,
+      fixedStructure: [
+        '输出必须保持表格化，优先包含模块、能力说明、设备/网关、平台/接口、实施要点、证据来源。',
+        '每一行对应一个稳定模块或方案单元，不要把多个模块混在同一行。',
+        '证据优先来自知识库中的方案材料、接口说明和实施资料。',
+      ],
+      variableZones: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源', 'AI综合分析'],
+      outputHint: template.description,
+      tableColumns: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源'],
+    };
+  }
+
   return {
     title: template.label,
     fixedStructure: [
@@ -1016,6 +1192,34 @@ export function buildTemplateEnvelope(group: ReportGroup, template: ReportGroupT
       };
     }
 
+    if (isPaperLibrary(group.label, group.key)) {
+      return {
+        title: `${group.label} 论文结论模板`,
+        fixedStructure: [
+          '列结构应稳定，优先包含论文标题、研究对象、方法设计、核心结论、关键指标、证据来源。',
+          '每一行对应一篇论文或一条稳定研究结论，不要把多篇论文混在一行。',
+          '证据优先来自知识库中的论文摘要、正文证据块和结构化解析结果。',
+        ],
+        variableZones: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源'],
+        outputHint: '输出应适合论文综述、研究复盘和资料研读。',
+        tableColumns: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源'],
+      };
+    }
+
+    if (isIotLibrary(group.label, group.key)) {
+      return {
+        title: `${group.label} IOT方案表格模板`,
+        fixedStructure: [
+          '列结构应稳定，优先包含模块、能力说明、设备/网关、平台/接口、实施要点、证据来源。',
+          '每一行对应一个稳定方案模块，不要把多个模块混在同一行。',
+          '证据优先来自知识库中的方案资料、接口材料和实施说明。',
+        ],
+        variableZones: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源'],
+        outputHint: '输出应适合方案梳理、售前交流和项目评审。',
+        tableColumns: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源'],
+      };
+    }
+
     return {
       title: `${group.label} 表格模板`,
       fixedStructure: [
@@ -1055,6 +1259,34 @@ export function buildTemplateEnvelope(group: ReportGroup, template: ReportGroupT
         variableZones: ['项目摘要', '时间节点', '关键要求', '风险与待补材料', '证据引用细节'],
         outputHint: '输出应适合团队内部传阅，用于快速判断是否进入正式标书编制。',
         pageSections: ['项目概况', '资格条件', '关键时间节点', '应答重点', '风险提醒'],
+      };
+    }
+
+    if (isPaperLibrary(group.label, group.key)) {
+      return {
+        title: `${group.label} 论文综述静态页模板`,
+        fixedStructure: [
+          '页面结构稳定，优先包含研究概览、方法设计、核心结论、关键指标与证据、局限与风险。',
+          '内容应适合论文研读和团队复盘，不写成聊天回复。',
+          '证据优先来自知识库中的论文正文和结构化解析结果。',
+        ],
+        variableZones: ['研究主题摘要', '方法设计与样本信息', '核心结论', '关键指标与证据', '局限与风险'],
+        outputHint: '输出应适合研究复盘、论文综述和知识分享。',
+        pageSections: ['研究概览', '方法设计', '核心结论', '关键指标与证据', '局限与风险'],
+      };
+    }
+
+    if (isIotLibrary(group.label, group.key)) {
+      return {
+        title: `${group.label} IOT方案静态页模板`,
+        fixedStructure: [
+          '页面结构稳定，优先包含方案概览、核心模块、平台与接口、实施路径、业务价值和风险提示。',
+          '内容适合方案讲解、售前交流和内部评审，不要写成聊天回复。',
+          '证据优先来自知识库中的方案材料、设备说明和平台接口资料。',
+        ],
+        variableZones: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值'],
+        outputHint: '输出应适合方案汇报、售前展示和项目讨论。',
+        pageSections: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值'],
       };
     }
 
@@ -1148,6 +1380,30 @@ function reconcileOutputRecords(outputs: ReportOutputRecord[], groups: ReportGro
   return { outputs: nextOutputs, changed };
 }
 
+function normalizeReportGroupToken(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase();
+}
+
+export function resolveReportGroup(groups: ReportGroup[], groupKeyOrLabel: string) {
+  const raw = String(groupKeyOrLabel || '').trim();
+  if (!raw) return null;
+
+  const normalized = normalizeReportGroupToken(raw);
+  return groups.find((group) => {
+    const key = String(group.key || '').trim();
+    const label = String(group.label || '').trim();
+    return (
+      key === raw
+      || label === raw
+      || normalizeReportGroupToken(key) === normalized
+      || normalizeReportGroupToken(label) === normalized
+    );
+  }) || null;
+}
+
 async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutputRecord[], templates?: SharedReportTemplate[]) {
   await writeState({
     groups: groups.map((group) => ({
@@ -1196,13 +1452,19 @@ export async function loadReportCenterState() {
     const documentState = await loadParsedDocuments(400, false);
     nextOutputs = nextOutputs.map((item) => {
       if (!(item.kind === 'page' && item.dynamicSource?.enabled)) return item;
-      const template =
-        templates.find((entry) => entry.key === (item.dynamicSource?.templateKey || item.templateKey))
-        || templates.find((entry) => entry.key === item.templateKey)
-        || templates.find((entry) => entry.type === 'static-page' && entry.isDefault)
-        || templates.find((entry) => entry.type === 'static-page');
-      if (!template) return item;
-      const refreshed = buildDynamicPageRecord(item, template, documentState.items as Array<Record<string, unknown>>);
+      const conceptMode = Boolean(item.dynamicSource?.conceptMode)
+        || !String(item.dynamicSource?.templateKey || '').trim();
+      const template = conceptMode
+        ? null
+        : templates.find((entry) => entry.key === (item.dynamicSource?.templateKey || item.templateKey))
+          || templates.find((entry) => entry.key === item.templateKey)
+          || templates.find((entry) => entry.type === 'static-page' && entry.isDefault)
+          || templates.find((entry) => entry.type === 'static-page');
+      if (!template && !conceptMode) return item;
+      const group =
+        resolveReportGroup(groups, item.groupKey)
+        || resolveReportGroup(groups, item.groupLabel);
+      const refreshed = buildDynamicPageRecord(item, group || null, template || null, documentState.items as Array<Record<string, unknown>>);
       if (JSON.stringify({
         content: refreshed.content,
         summary: refreshed.summary,
@@ -1242,7 +1504,7 @@ export async function createReportOutput(input: {
   dynamicSource?: Partial<ReportDynamicSource> | null;
 }) {
   const state = await loadReportCenterState();
-  const group = state.groups.find((item) => item.key === input.groupKey);
+  const group = resolveReportGroup(state.groups, input.groupKey);
   if (!group) throw new Error('report group not found');
 
   const preferredTemplateType = resolveTemplateTypeFromKind(input.kind) || 'static-page';
@@ -1333,7 +1595,7 @@ export async function deleteReportOutput(outputId: string) {
 
 export async function updateReportGroupTemplate(groupKey: string, templateKey: string) {
   const state = await loadReportCenterState();
-  const group = state.groups.find((item) => item.key === groupKey);
+  const group = resolveReportGroup(state.groups, groupKey);
   if (!group) throw new Error('report group not found');
 
   const template = group.templates.find((item) => item.key === templateKey);
@@ -1350,7 +1612,7 @@ function sanitizeFileName(fileName: string) {
 
 export async function uploadReportReferenceImage(groupKey: string, file: MultipartFile) {
   const state = await loadReportCenterState();
-  const group = state.groups.find((item) => item.key === groupKey);
+  const group = resolveReportGroup(state.groups, groupKey);
   if (!group) throw new Error('report group not found');
 
   await ensureDirs();
@@ -1483,8 +1745,14 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
     || state.templates.find((item) => item.type === resolveTemplateTypeFromKind(record.kind))
     || state.templates[0];
   if (!template) throw new Error('shared report template not found');
+  const group =
+    resolveReportGroup(state.groups, record.groupKey)
+    || resolveReportGroup(state.groups, record.groupLabel);
+  const conceptMode = record.kind === 'page' && Boolean(record.dynamicSource?.conceptMode);
 
-  const envelope = buildSharedTemplateEnvelope(template);
+  const envelope = conceptMode
+    ? buildConceptPageEnvelope(group || null, normalizedInstruction || record.title || '')
+    : buildSharedTemplateEnvelope(template);
   const currentMaterial = [
     record.content ? `当前正文：${record.content}` : '',
     record.table ? `当前表格：\n${summarizeTableForAnalysis(record.table)}` : '',
@@ -1510,7 +1778,7 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
         '你是企业知识分析助手。',
         '请在不脱离当前报表主题和知识库范围的前提下，根据用户要求调整已生成报表。',
         '优先保持既有输出形式不变，只调整结构、重点和表达。',
-        `模板标题：${envelope.title}`,
+        conceptMode ? '当前静态页使用概念供料模式，不需要强制贴合共享模板。' : `模板标题：${envelope.title}`,
         `固定结构：${envelope.fixedStructure.join('；')}`,
         `可变区域：${envelope.variableZones.join('；')}`,
         `输出提示：${envelope.outputHint}`,

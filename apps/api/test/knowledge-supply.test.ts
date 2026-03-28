@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildKnowledgeChatHistory, prepareKnowledgeRetrieval } from '../src/lib/knowledge-supply.js';
+import {
+  buildConceptPageSupplyBlock,
+  buildKnowledgeChatHistory,
+  prepareKnowledgeRetrieval,
+} from '../src/lib/knowledge-supply.js';
 
 test('buildKnowledgeChatHistory should drop short operational feedback and keep relevant dialogue', () => {
   const history = buildKnowledgeChatHistory(
@@ -68,4 +72,86 @@ test('prepareKnowledgeRetrieval should produce fallback metadata and chunk ids w
   assert.equal(supply.effectiveRetrieval.meta.rerankedCount, 2);
   assert.equal(supply.effectiveRetrieval.documents.length, 2);
   assert.ok(supply.effectiveRetrieval.evidenceMatches.every((item) => item.chunkId.startsWith('fallback-')));
+});
+
+test('buildConceptPageSupplyBlock should provide structure hints for resume company pages', () => {
+  const block = buildConceptPageSupplyBlock({
+    requestText: '基于人才简历知识库，按公司维度输出数据可视化静态页',
+    libraries: [{ key: 'resume', label: '人才简历' }],
+    retrieval: {
+      documents: [
+        {
+          path: 'C:\\tmp\\resume-1.txt',
+          name: 'resume-1.txt',
+          title: 'Resume 1',
+          ext: '.txt',
+          summary: 'A company-side ERP project.',
+          excerpt: '',
+          category: 'resume',
+          bizCategory: 'general',
+          parseStatus: 'success',
+          extractedChars: 120,
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          topicTags: ['ERP', '交付'],
+          structuredProfile: {
+            candidateName: '张三',
+            latestCompany: '甲公司',
+            companies: ['甲公司'],
+            itProjectHighlights: ['ERP 升级项目'],
+            skills: ['Java', 'ERP'],
+          },
+        } as any,
+      ],
+      evidenceMatches: [],
+      meta: { candidateCount: 1, rerankedCount: 1 },
+    } as any,
+    templateTaskHint: 'resume-comparison',
+  });
+
+  assert.match(block, /Concept page supply:/);
+  assert.match(block, /Primary grouping dimension: company/);
+  assert.match(block, /Recommended sections:/);
+  assert.match(block, /公司概览/);
+  assert.match(block, /Recommended cards:/);
+  assert.match(block, /Grouping hints:/);
+});
+
+test('buildConceptPageSupplyBlock should provide paper result sections when paper task is selected', () => {
+  const block = buildConceptPageSupplyBlock({
+    requestText: '请基于学术论文知识库按研究结果维度输出数据可视化静态页',
+    libraries: [{ key: 'paper', label: '学术论文' }],
+    retrieval: {
+      documents: [
+        {
+          path: 'C:\\tmp\\paper-1.pdf',
+          name: 'paper-1.pdf',
+          title: 'Clinical Study 1',
+          ext: '.pdf',
+          summary: 'A randomized paper with outcome signals.',
+          excerpt: '',
+          category: 'paper',
+          bizCategory: 'paper',
+          parseStatus: 'success',
+          extractedChars: 220,
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          topicTags: ['试验', '结果'],
+          structuredProfile: {
+            methodology: 'randomized placebo controlled',
+            resultSignals: ['改善主要指标'],
+            metricSignals: ['primary endpoint'],
+            publicationSignals: ['peer reviewed'],
+          },
+        } as any,
+      ],
+      evidenceMatches: [],
+      meta: { candidateCount: 1, rerankedCount: 1 },
+    } as any,
+    templateTaskHint: 'paper-static-page',
+  });
+
+  assert.match(block, /Primary grouping dimension: result/);
+  assert.match(block, /核心发现/);
+  assert.match(block, /结果指标/);
 });

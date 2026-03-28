@@ -11,6 +11,7 @@ export function buildKnowledgeAnswerPrompt() {
 }
 
 export function buildKnowledgeOutputPrompt(
+  skillInstruction: string,
   templateInstruction: string,
   reportInstruction: string,
 ) {
@@ -18,9 +19,32 @@ export function buildKnowledgeOutputPrompt(
     'You are the AI smart service assistant for knowledge-backed report generation.',
     'The user has explicitly requested an output generated from the selected knowledge libraries.',
     'Use the supplied knowledge evidence as the primary source of truth.',
+    'Treat yourself as the final generator. The local system only narrows files, evidence, and template constraints.',
+    'Prefer stronger evidence selection and template-fit organization over local workflow control.',
+    skillInstruction,
     'Follow the shared template envelope closely and keep free-form invention to a minimum.',
     'If evidence is incomplete, fill gaps conservatively and keep uncertainty explicit in the content.',
     templateInstruction,
+    reportInstruction,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function buildKnowledgeConceptPagePrompt(
+  skillInstruction: string,
+  reportInstruction: string,
+) {
+  return [
+    'You are the AI smart service assistant for knowledge-backed visual report generation.',
+    'The user wants a data-visualized static page generated from the selected knowledge libraries.',
+    'Use the supplied knowledge evidence as the primary source of truth.',
+    'First decide the most suitable concept page structure from the user intent and the evidence, then fill it with matched library content.',
+    'Do not force a shared template skeleton unless the user explicitly specified a custom template by full name.',
+    'Prefer a clear concept board with strong sections, cards, charts, and evidence-backed summaries.',
+    'Treat the local system as a supply layer that narrows files and evidence, not as the page designer.',
+    skillInstruction,
+    'If evidence is incomplete, keep the page conservative and make uncertainty explicit.',
     reportInstruction,
   ]
     .filter(Boolean)

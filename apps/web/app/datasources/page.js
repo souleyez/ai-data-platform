@@ -207,6 +207,47 @@ function rememberDatasourceFeedback(title, content, meta = '') {
   });
 }
 
+function legacyCopyText(value) {
+  if (typeof document === 'undefined') return false;
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  }
+
+  document.body.removeChild(textarea);
+  return copied;
+}
+
+async function copyText(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through to legacy copy
+    }
+  }
+
+  return legacyCopyText(text);
+}
+
 function StatCard({ label, value, subtle }) {
   return (
     <div className="stat-card">
@@ -334,7 +375,10 @@ export default function DatasourcesPage() {
     if (!publicPath) return;
     const url = `${window.location.origin}${publicPath}`;
     try {
-      await navigator.clipboard.writeText(url);
+      const copied = await copyText(url);
+      if (!copied) {
+        throw new Error('copy_failed');
+      }
       setMessage(`已复制外部上传链接：${item.name}`);
       rememberDatasourceFeedback('外部上传链接已复制', `${item.name} 的外部上传链接已复制，可直接发给外部用户提交资料。`, item.name);
     } catch {

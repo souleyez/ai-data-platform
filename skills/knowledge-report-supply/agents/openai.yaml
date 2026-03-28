@@ -1,0 +1,4 @@
+interface:
+  display_name: "Knowledge Report Supply"
+  short_description: "Template-aware supply for library-grounded report generation"
+  default_prompt: "Use $knowledge-report-supply to assemble evidence and template hints for a library-grounded answer or report."

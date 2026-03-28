@@ -1,4 +1,4 @@
-﻿import { promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -330,7 +330,12 @@ function scoreDecodedText(text: string) {
   const cjkCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
   const asciiWordCount = (text.match(/[A-Za-z0-9]/g) || []).length;
   const whitespaceCount = (text.match(/\s/g) || []).length;
-  const mojibakeCount = (text.match(/[锟�鈥滐綇鍚堝悓鏂囨。绠€鍘]/g) || []).length;
+  const mojibakeChars = [0x951F, 0x9225, 0x935A, 0x93C2, 0x7EE0]
+    .map((codePoint) => String.fromCodePoint(codePoint));
+  const mojibakeCount = mojibakeChars.reduce(
+    (count, char) => count + ((text.match(new RegExp(char, 'g')) || []).length),
+    0,
+  );
 
   return (cjkCount * 3)
     + asciiWordCount

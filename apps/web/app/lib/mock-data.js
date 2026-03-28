@@ -1,4 +1,4 @@
-﻿import { PROJECT_WORKBENCH_CATEGORIES } from './project-taxonomy';
+import { PROJECT_WORKBENCH_CATEGORIES } from './project-taxonomy';
 
 export const sourceItems = [
   { name: '合同文档库', status: 'success' },

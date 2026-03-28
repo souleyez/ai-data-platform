@@ -30,6 +30,53 @@ function hasAny(text: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function looksLikeRecurringDiscoveryPrompt(text: string) {
+  const hasRecurringSignal = hasAny(text, [
+    /每周/,
+    /每天/,
+    /每日/,
+    /定期/,
+    /定时/,
+    /持续/,
+    /周期/,
+    /监控/,
+    /跟踪/,
+    /同步/,
+    /weekly/,
+    /daily/,
+  ]);
+  const hasCollectionSignal = hasAny(text, [
+    /抓取/,
+    /采集/,
+    /拉取/,
+    /发现/,
+    /扫描/,
+    /订阅/,
+    /跟进/,
+    /monitor/,
+    /collect/,
+    /crawl/,
+  ]);
+  const hasDiscoveryScope = hasAny(text, [
+    /中国政府采购网/,
+    /公共资源交易/,
+    /采购网/,
+    /招标/,
+    /投标/,
+    /公告/,
+    /公示/,
+    /论文/,
+    /期刊/,
+    /文献/,
+    /学术/,
+    /arxiv/,
+    /pubmed/,
+    /doaj/,
+    /openalex/,
+  ]);
+  return hasDiscoveryScope && (hasRecurringSignal || hasCollectionSignal);
+}
+
 function detectKind(prompt: string): DatasourceKind {
   const text = normalizeText(prompt);
   if (hasAny(text, [/mysql/, /postgres/, /postgresql/, /sqlserver/, /oracle/, /clickhouse/, /sqlite/, /数据库/])) {
@@ -41,7 +88,10 @@ function detectKind(prompt: string): DatasourceKind {
   if (hasAny(text, [/登录/, /账号/, /密码/, /cookie/, /会话/, /后台网站/, /需要登录/])) {
     return 'web_login';
   }
-  if (hasAny(text, [/持续采集/, /定期采集/, /发现链接/, /公开网站/, /公告网站/, /站点列表/, /招标网站/, /论文网站/])) {
+  if (
+    hasAny(text, [/持续采集/, /定期采集/, /发现链接/, /公开网站/, /公告网站/, /站点列表/, /招标网站/, /论文网站/]) ||
+    looksLikeRecurringDiscoveryPrompt(text)
+  ) {
     return 'web_discovery';
   }
   return 'web_public';

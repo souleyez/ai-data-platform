@@ -7,7 +7,11 @@ import {
   type ChatOutput,
 } from './knowledge-output.js';
 import { detectOutputKind } from './knowledge-plan.js';
-import { buildKnowledgeAnswerPrompt, buildKnowledgeOutputPrompt } from './knowledge-prompts.js';
+import {
+  buildKnowledgeAnswerPrompt,
+  buildKnowledgeConceptPagePrompt,
+  buildKnowledgeOutputPrompt,
+} from './knowledge-prompts.js';
 import {
   adaptSelectedTemplatesForRequest,
   buildKnowledgeTemplateInstruction,
@@ -16,13 +20,16 @@ import {
   inferTemplateTaskHint,
   resolveRequestedSharedTemplate,
   selectKnowledgeTemplates,
+  shouldUseConceptPageMode,
 } from './knowledge-template.js';
 import { runOpenClawChat } from './openclaw-adapter.js';
 import {
+  buildConceptPageSupplyBlock,
   prepareKnowledgeRetrieval,
   prepareKnowledgeScope,
   prepareKnowledgeSupply,
 } from './knowledge-supply.js';
+import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type KnowledgeExecutionInput = {
   prompt: string;
@@ -65,6 +72,8 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const requestText = String(input.confirmedRequest || input.prompt).trim();
   const requestedKind = detectOutputKind(requestText) || 'page';
   const requestedTemplate = await resolveRequestedSharedTemplate(requestText, requestedKind);
+  const requestedTemplateKey = requestedTemplate?.templateKey || input.preferredTemplateKey || '';
+  const conceptPageMode = shouldUseConceptPageMode(requestedKind, requestedTemplateKey);
 
   if (requestedTemplate?.clarificationMessage && !requestedTemplate.templateKey) {
     return {
@@ -89,12 +98,12 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     await selectKnowledgeTemplates(
       scopeState.libraries,
       requestedKind,
-      requestedTemplate?.templateKey || input.preferredTemplateKey,
+      requestedTemplateKey,
     ),
     requestText,
   );
   const templateTaskHint = inferTemplateTaskHint(selectedTemplates, requestedKind);
-  const templateSearchHints = buildTemplateSearchHints(selectedTemplates);
+  const templateSearchHints = conceptPageMode ? [] : buildTemplateSearchHints(selectedTemplates);
   const supply = await prepareKnowledgeRetrieval({
     requestText,
     timeRange: input.timeRange,
@@ -115,7 +124,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       content,
       intent: 'report',
       mode: 'openclaw',
-      reportTemplate: selectedTemplates[0]
+      reportTemplate: !conceptPageMode && selectedTemplates[0]
         ? {
             key: selectedTemplates[0].template.key,
             label: selectedTemplates[0].template.label,
@@ -125,12 +134,28 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     };
   }
 
-  const templateInstruction = await buildKnowledgeTemplateInstruction(
-    resolvedLibraries,
-    requestedKind,
-    requestedTemplate?.templateKey || input.preferredTemplateKey,
-  );
-  const templateContext = buildTemplateContextBlock(selectedTemplates);
+  const templateInstruction = conceptPageMode
+    ? ''
+    : await buildKnowledgeTemplateInstruction(
+      resolvedLibraries,
+      requestedKind,
+      requestedTemplateKey,
+    );
+  const skillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
+    'references/supply-contract.md',
+  ]);
+  const templateContext = conceptPageMode ? '' : buildTemplateContextBlock(selectedTemplates);
+  const activeEnvelope = conceptPageMode ? null : (selectedTemplates[0]?.envelope || null);
+  const conceptPageContext = conceptPageMode
+    ? buildConceptPageSupplyBlock({
+      requestText,
+      libraries: resolvedLibraries,
+      retrieval: supply.effectiveRetrieval,
+      timeRange: input.timeRange,
+      contentFocus: input.contentFocus,
+      templateTaskHint,
+    })
+    : '';
 
   let output: ChatOutput;
   try {
@@ -139,30 +164,37 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       sessionUser: input.sessionUser,
       chatHistory: supply.knowledgeChatHistory,
       contextBlocks: [
+        conceptPageContext,
         templateContext,
         buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
           timeRange: input.timeRange,
           contentFocus: input.contentFocus,
         }),
       ].filter(Boolean),
-      systemPrompt: buildKnowledgeOutputPrompt(
-        templateInstruction,
-        buildReportInstruction(requestedKind),
-      ),
+      systemPrompt: conceptPageMode
+        ? buildKnowledgeConceptPagePrompt(
+          skillInstruction,
+          buildReportInstruction(requestedKind),
+        )
+        : buildKnowledgeOutputPrompt(
+          skillInstruction,
+          templateInstruction,
+          buildReportInstruction(requestedKind),
+        ),
     });
 
     output = normalizeReportOutput(
       requestedKind,
       requestText,
       cloud.content,
-      selectedTemplates[0]?.envelope || null,
+      activeEnvelope,
     );
   } catch {
     output = buildKnowledgeFallbackOutput(
       requestedKind,
       requestText,
       supply.effectiveRetrieval.documents,
-      selectedTemplates[0]?.envelope || null,
+      activeEnvelope,
     );
   }
 
@@ -172,7 +204,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     content: output.content,
     intent: 'report',
     mode: 'openclaw',
-    reportTemplate: selectedTemplates[0]
+    reportTemplate: !conceptPageMode && selectedTemplates[0]
       ? {
           key: selectedTemplates[0].template.key,
           label: selectedTemplates[0].template.label,

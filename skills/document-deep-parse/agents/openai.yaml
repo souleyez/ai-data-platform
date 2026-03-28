@@ -1,0 +1,4 @@
+interface:
+  display_name: "Document Deep Parse"
+  short_description: "Deep structured parsing for knowledge-base documents"
+  default_prompt: "Use $document-deep-parse to extract structured evidence and slots from an ingested enterprise document."

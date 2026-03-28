@@ -58,6 +58,36 @@ Worker:
   - 一个本地模板问题，例如“幼猫的乳品建议”
   - 一个云端普通问题，例如“请给我一个偶像品牌命名建议”
 
+## UTF-8 Safe Smoke
+
+为了避免 PowerShell、SSH inline script 或终端字体把正常的 UTF-8 中文显示成“看起来像乱码”的文本，线上中文问法的回归不要只靠终端肉眼判断。优先使用仓库内的 UTF-8 safe smoke：
+
+```powershell
+corepack pnpm smoke:remote:utf8 -- --host 120.24.251.24
+```
+
+这条脚本会：
+
+- 先检查 `/api/health` 和 `/api/model-config`
+- 再用 UTF-8 JSON 请求实际回归 `/api/chat`
+- 覆盖普通问答、按库报表输出、技能维度表格、最近上传文档细节、否决按库意向、数据源中文规划
+- 将响应按 Unicode escape 形式写入 `tmp/smoke-remote/`
+
+这样判断命中链路时，依据的是接口字段和落盘结果，而不是终端里显示出来的中文是否正常。
+
+### 什么时候说明终端乱码不算文件坏
+
+如果满足下面两点，优先判断为“终端显示问题”，不是“源码文件已损坏”：
+
+1. `corepack pnpm check:text-integrity` 通过
+2. Python 读取文件并输出 `unicode_escape` 时内容正常
+
+不要把 PowerShell 控制台里直接显示的中文再复制回源码，这会把显示层问题重新写成真实脏数据。
+
+### BOM 也属于编码风险
+
+`check:text-integrity` 现在也会检查 UTF-8 BOM。核心源码文件不应该带 BOM；如果守卫报 `UTF8_BOM`，应先清除 BOM 再继续部署或回归。
+
 ## 本地桥接说明
 
 `tools/openclaw-local-gateway.mjs` 仅用于开发机兼容：

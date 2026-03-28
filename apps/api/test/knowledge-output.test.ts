@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeReportOutput } from '../src/lib/knowledge-output.js';
+import {
+  buildKnowledgeFallbackOutput,
+  normalizeReportOutput,
+} from '../src/lib/knowledge-output.js';
+import type { ParsedDocument } from '../src/lib/document-parser.js';
 
 test('normalizeReportOutput should accept root-level columns and rows', () => {
   const output = normalizeReportOutput(
@@ -108,4 +112,47 @@ test('normalizeReportOutput should prefer envelope title for template-aligned pa
   );
 
   assert.equal(output.title, '简历人才维度静态页');
+});
+
+test('buildKnowledgeFallbackOutput should produce resume company table when cloud output is unavailable', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: 'resume-1.pdf',
+      ext: '.pdf',
+      title: '张三简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '简历摘要',
+      excerpt: '简历摘要',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '张三',
+        latestCompany: '甲公司',
+        companies: ['甲公司'],
+        skills: ['Java', 'ERP'],
+        itProjectHighlights: ['负责甲公司 ERP 升级项目，担任实施负责人，时间 2023-2024'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'table',
+    '基于人才简历知识库中全部时间范围的简历，按公司维度整理涉及公司的 IT 项目信息，输出表格。',
+    documents,
+    {
+      title: '简历 IT 项目公司维度表',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按公司维度输出简历 IT 项目经历',
+      tableColumns: ['公司', '候选人', 'IT项目', '项目角色/职责', '技术栈/系统关键词', '时间线', '证据来源'],
+    },
+  );
+
+  assert.equal(output.type, 'table');
+  assert.equal(output.table?.columns?.[0], '公司');
+  assert.equal(output.table?.rows?.[0]?.[0], '甲公司');
+  assert.equal(output.table?.rows?.[0]?.[1], '张三');
 });

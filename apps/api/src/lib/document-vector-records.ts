@@ -59,6 +59,8 @@ function buildTemplateTaskTags(item: ParsedDocument) {
   if (item.schemaType === 'paper') {
     tags.add('paper-evidence');
     tags.add('paper-summary');
+    tags.add('paper-static-page');
+    tags.add('paper-table');
   }
   if (item.schemaType === 'contract') {
     tags.add('contract-risk');
@@ -76,6 +78,10 @@ function buildTemplateTaskTags(item: ParsedDocument) {
   if (/(bids?|tender|标书|招标|投标)/.test(groupText)) {
     tags.add('bids-table');
     tags.add('bids-static-page');
+  }
+  if (/(iot|物联网|设备|网关|解决方案)/.test(groupText) || String(item.bizCategory || '') === 'iot') {
+    tags.add('iot-static-page');
+    tags.add('iot-table');
   }
 
   return [...tags];
@@ -136,10 +142,13 @@ function buildFieldAliases(): Record<string, string[]> {
     subjectType: ['population', 'subject', 'cohort', 'sample type'],
     metricSignals: ['metric', 'result metric', 'business metric', 'indicator'],
     publicationSignals: ['journal', 'publication', 'publisher', 'peer reviewed'],
+    resultSignals: ['result', 'finding', 'research result', 'conclusion signal'],
     interfaceType: ['api type', 'interface', 'endpoint type'],
     deploymentMode: ['deploy mode', 'deployment', 'runtime mode'],
     integrationSignals: ['integration', 'integration points', 'connector'],
     moduleSignals: ['module', 'component', 'service'],
+    valueSignals: ['value', 'benefit', 'roi', 'business value'],
+    benefitSignals: ['benefit', 'business benefit', 'outcome', 'gain'],
     ingredientSignals: ['ingredients', 'ingredient', 'actives'],
     strainSignals: ['strain', 'probiotic strain', 'bacteria'],
     targetScenario: ['scenario', 'use case', 'target scenario'],

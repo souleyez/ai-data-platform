@@ -24,6 +24,20 @@ export type ChatOutput =
 
 type JsonRecord = Record<string, unknown>;
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill';
+type KnowledgePageOutput = {
+  type: 'page';
+  title: string;
+  content: string;
+  format: 'html';
+  page: NonNullable<Exclude<ChatOutput, { type: 'answer' }>['page']>;
+};
+
+const RESUME_COMPANY_COLUMNS = ['公司', '候选人', 'IT项目', '项目角色/职责', '技术栈/系统关键词', '时间线', '证据来源'];
+const RESUME_PROJECT_COLUMNS = ['项目主题', '公司', '候选人', '角色/职责', '技术关键词', '时间线', '证据来源'];
+const RESUME_TALENT_COLUMNS = ['候选人', '第一学历', '最近公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'];
+const RESUME_SKILL_COLUMNS = ['技能类别', '候选人', '技能详情', '最近公司', '关联项目', '证据来源'];
+const DEFAULT_PAGE_SECTIONS = ['摘要', '重点分析', '行动建议', 'AI综合分析'];
+const UNKNOWN_COMPANY = '未明确公司';
 
 function normalizeText(value: string) {
   return String(value || '')
@@ -244,44 +258,96 @@ function alignSectionsToEnvelope(
   });
 }
 
+function toStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => sanitizeText(item)).filter(Boolean);
+}
+
+function getResumeProfile(item: ParsedDocument) {
+  return (item.structuredProfile || {}) as Record<string, unknown>;
+}
+
+function hasCompanySignal(text: string) {
+  return containsAny(text, ['company', 'employer', 'organization', '公司', '雇主']);
+}
+
+function hasProjectSignal(text: string) {
+  return containsAny(text, [
+    'project',
+    'projects',
+    'system',
+    'systems',
+    'platform',
+    'platforms',
+    'api',
+    'implementation',
+    'delivery',
+    'architecture',
+    '项目',
+    '系统',
+    '平台',
+    '接口',
+    '实施',
+    '交付',
+    '架构',
+    'it',
+  ]);
+}
+
+function hasSkillSignal(text: string) {
+  return containsAny(text, [
+    'skill',
+    'skills',
+    'ability',
+    'abilities',
+    'tech stack',
+    'technology',
+    '技术栈',
+    '技能',
+    '能力',
+    '核心能力',
+    '关键技能',
+  ]);
+}
+
+function hasTalentSignal(text: string) {
+  return containsAny(text, [
+    'talent',
+    'candidate',
+    'candidates',
+    'people',
+    'person',
+    '人才',
+    '候选人',
+    '人员',
+    '画像',
+    '学历',
+    '工作经历',
+  ]);
+}
+
 function detectResumeRequestView(requestText: string): ResumeRequestView {
   const text = normalizeText(requestText);
 
   if (containsAny(text, ['人才维度', '候选人维度', '人才画像', '候选人画像', '按人才', '按候选人'])) {
     return 'talent';
   }
-  if (containsAny(text, ['skill', 'skills', 'ability', 'abilities', '技术栈', '技能', '能力', '核心能力'])) {
-    return 'skill';
-  }
-  if (
-    containsAny(text, ['company', 'employer', 'organization', '公司', '雇主'])
-    && containsAny(text, ['project', 'system', 'platform', 'api', '项目', '系统', '平台', '接口', 'it'])
-  ) {
-    return 'company';
-  }
-  if (containsAny(text, ['project', 'system', 'platform', 'api', '项目', '系统', '平台', '接口'])) {
-    return 'project';
-  }
-  if (containsAny(text, ['talent', 'candidate', '人才', '候选人', '学历', '工作经历'])) {
-    return 'talent';
-  }
+  if (hasSkillSignal(text)) return 'skill';
+  if (hasCompanySignal(text) && hasProjectSignal(text)) return 'company';
+  if (hasProjectSignal(text)) return 'project';
+  if (hasTalentSignal(text)) return 'talent';
   return 'generic';
-}
-
-function toStringArray(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => sanitizeText(item)).filter(Boolean);
 }
 
 function extractProjectRole(text: string) {
   const source = sanitizeText(text);
-  const match = source.match(/(负责[^，。；]{2,20}|担任[^，。；]{2,20}|主导[^，。；]{2,20}|参与[^，。；]{2,20}|牵头[^，。；]{2,20})/);
+  const match = source.match(/(负责[^，。；]{2,24}|担任[^，。；]{2,24}|主导[^，。；]{2,24}|参与[^，。；]{2,24}|牵头[^，。；]{2,24})/);
   return match?.[1] || '';
 }
 
 function extractProjectTimeline(text: string) {
   const source = sanitizeText(text);
-  const match = source.match(/((?:20\d{2}|19\d{2})[./-]?\d{0,2}(?:\s*[~-]\s*(?:20\d{2}|至今|现在)\d{0,5})?)/);
+  const match = source.match(/((?:20\d{2}|19\d{2})[./-]?\d{0,2}(?:\s*[~-]\s*(?:(?:20\d{2})[./-]?\d{0,2}|至今|现在))?)/);
   return match?.[1] || '';
 }
 
@@ -294,10 +360,6 @@ function extractTechKeywords(text: string) {
   ];
   const matches = keywords.filter((keyword) => source.includes(keyword.toLowerCase()));
   return [...new Set(matches)].slice(0, 6).join(' / ');
-}
-
-function getResumeProfile(item: ParsedDocument) {
-  return (item.structuredProfile || {}) as Record<string, unknown>;
 }
 
 function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
@@ -313,7 +375,7 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
     const projectHighlights = toStringArray(profile.itProjectHighlights).length
       ? toStringArray(profile.itProjectHighlights)
       : toStringArray(profile.projectHighlights);
-    const effectiveCompanies = companies.length ? companies.slice(0, 4) : ['未明确公司'];
+    const effectiveCompanies = companies.length ? companies.slice(0, 4) : [UNKNOWN_COMPANY];
     const effectiveProjects = projectHighlights.length
       ? projectHighlights.slice(0, 6)
       : toStringArray(profile.highlights)
@@ -349,12 +411,14 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
   }
 
   const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = row.join('|');
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 36);
+  return rows
+    .filter((row) => {
+      const key = row.join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 36);
 }
 
 function buildResumeProjectRows(documents: ParsedDocument[]) {
@@ -363,7 +427,7 @@ function buildResumeProjectRows(documents: ParsedDocument[]) {
     if (item.schemaType !== 'resume') continue;
     const profile = getResumeProfile(item);
     const candidate = sanitizeText(profile.candidateName || item.title || item.name) || item.name;
-    const company = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || '未明确公司';
+    const company = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || UNKNOWN_COMPANY;
     const projects = toStringArray(profile.itProjectHighlights).length
       ? toStringArray(profile.itProjectHighlights)
       : toStringArray(profile.projectHighlights);
@@ -408,7 +472,7 @@ function buildResumeSkillRows(documents: ParsedDocument[]) {
     if (item.schemaType !== 'resume') continue;
     const profile = getResumeProfile(item);
     const candidate = sanitizeText(profile.candidateName || item.title || item.name) || item.name;
-    const latestCompany = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || '未明确公司';
+    const latestCompany = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || UNKNOWN_COMPANY;
     const projects = toStringArray(profile.itProjectHighlights).length
       ? toStringArray(profile.itProjectHighlights)
       : toStringArray(profile.projectHighlights);
@@ -426,7 +490,14 @@ function buildResumeSkillRows(documents: ParsedDocument[]) {
   return rows.slice(0, 40);
 }
 
-function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): ChatOutput {
+function defaultResumePageSections(view: ResumeRequestView) {
+  if (view === 'company') return ['公司概览', '重点项目分布', '候选人覆盖', '技术关键词', '风险与机会', 'AI综合分析'];
+  if (view === 'project') return ['项目概览', '公司分布', '候选人参与', '技术关键词', '交付信号', 'AI综合分析'];
+  if (view === 'skill') return ['技能概览', '候选人分布', '公司覆盖', '关联项目', '人才机会', 'AI综合分析'];
+  return ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'];
+}
+
+function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
   const companyRows = view === 'company' ? buildResumeCompanyProjectRows(documents) : [];
   const projectRows = view === 'project' ? buildResumeProjectRows(documents) : [];
   const talentRows = view === 'talent' || view === 'generic' ? buildResumeTalentRows(documents) : [];
@@ -440,55 +511,87 @@ function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocumen
         ? skillRows
         : talentRows;
 
-  const companyCount = new Set(effectiveRows.map((row) => row[0] || row[1]).filter(Boolean)).size;
-  const candidateCount = new Set(effectiveRows.map((row) => row[1] || row[0]).filter(Boolean)).size;
-  const cardLabel = view === 'skill' ? '技能条目' : view === 'project' ? '项目条目' : view === 'company' ? '公司条目' : '候选人条目';
-  const summary = effectiveRows.length
-    ? `当前基于库内 ${documents.length} 份简历整理出 ${effectiveRows.length} 条${cardLabel}，可直接用于招聘筛选与人才盘点。`
-    : '当前知识库中暂无足够简历信息用于生成页面。';
+  const primaryIndex = view === 'company' ? 0 : view === 'project' ? 0 : view === 'skill' ? 0 : 0;
+  const companyCount = new Set(
+    effectiveRows
+      .map((row) => view === 'company' ? row[0] : view === 'project' ? row[1] : row[2] || row[0])
+      .filter(Boolean),
+  ).size;
+  const candidateCount = new Set(
+    effectiveRows
+      .map((row) => view === 'company' ? row[1] : view === 'project' ? row[2] : view === 'skill' ? row[1] : row[0])
+      .filter(Boolean),
+  ).size;
 
-  const sections = alignSectionsToEnvelope(
-    [],
-    envelope?.pageSections || ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'],
-    summary,
-  ).map((section, index) => ({
+  const cardLabel =
+    view === 'skill'
+      ? '技能条目'
+      : view === 'project'
+        ? '项目条目'
+        : view === 'company'
+          ? '公司条目'
+          : '候选人条目';
+  const summary = effectiveRows.length
+    ? `当前基于库内 ${documents.length} 份简历整理出 ${effectiveRows.length} 条${cardLabel}，可直接用于招聘筛选、人才盘点和项目经验对比。`
+    : '当前知识库中暂无足够的简历结构化结果可用于生成页面。';
+  const sectionTitles = envelope?.pageSections?.length ? envelope.pageSections : defaultResumePageSections(view);
+  const sections = alignSectionsToEnvelope([], sectionTitles, summary).map((section, index) => ({
     ...section,
-    body: section.body || (
-      index === 0
-        ? summary
-        : effectiveRows
-            .slice(index - 1, index + 2)
-            .map((row) => row.filter(Boolean).slice(0, 4).join(' | '))
-            .filter(Boolean)
-            .join('\n')
-    ),
+    body: section.body
+      || (
+        index === 0
+          ? summary
+          : effectiveRows
+              .slice(index - 1, index + 2)
+              .map((row) => row.filter(Boolean).slice(0, 4).join(' | '))
+              .filter(Boolean)
+              .join('\n')
+      ),
     bullets: section.bullets?.length
       ? section.bullets
       : effectiveRows
           .slice(index, index + 3)
-          .map((row) => row.filter(Boolean)[0])
+          .map((row) => row.filter(Boolean)[primaryIndex])
           .filter(Boolean) as string[],
   }));
 
+  const chartTitle =
+    view === 'skill'
+      ? '技能覆盖分布'
+      : view === 'project'
+        ? '项目覆盖分布'
+        : view === 'company'
+          ? '公司覆盖分布'
+          : '候选人覆盖分布';
+
   return {
     type: 'page',
-    title: envelope?.title || '简历静态页',
+    title: envelope?.title
+      || (
+        view === 'company'
+          ? '简历公司维度 IT 项目静态页'
+          : view === 'project'
+            ? '简历项目维度静态页'
+            : view === 'skill'
+              ? '简历技能维度静态页'
+              : '简历人才维度静态页'
+      ),
     content: summary,
     format: 'html',
     page: {
       summary,
       cards: [
         { label: '简历数量', value: String(documents.length), note: '参与本次页面生成的简历文档数' },
-        { label: cardLabel, value: String(effectiveRows.length), note: '当前页面提取出的主要条目数' },
-        { label: '公司覆盖', value: String(companyCount), note: '关联到的公司或组织数' },
-        { label: '候选人覆盖', value: String(candidateCount), note: '涉及的候选人数' },
+        { label: cardLabel, value: String(effectiveRows.length), note: '当前页面抽取出的主要条目数' },
+        { label: '公司覆盖', value: String(companyCount), note: '涉及的公司或组织数量' },
+        { label: '候选人覆盖', value: String(candidateCount), note: '涉及的候选人数量' },
       ],
       sections,
       charts: [
         {
-          title: view === 'skill' ? '技能覆盖分布' : view === 'project' ? '项目覆盖分布' : '候选人覆盖分布',
+          title: chartTitle,
           items: effectiveRows.slice(0, 8).map((row) => ({
-            label: row[0] || row[1] || '未命名',
+            label: row[primaryIndex] || '未命名',
             value: 1,
           })),
         },
@@ -497,12 +600,27 @@ function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocumen
   };
 }
 
+function wrapPageOutputAsKind(kind: 'page' | 'pdf' | 'ppt', page: KnowledgePageOutput): ChatOutput {
+  if (kind === 'page') return page;
+  return {
+    type: kind,
+    title: page.title,
+    content: page.content,
+    format: kind,
+    page: page.page,
+  };
+}
+
 function buildFallbackTableOutput(title: string, content: string, envelope?: ReportTemplateEnvelope | null): ChatOutput {
   const fallbackColumns = envelope?.tableColumns?.length ? envelope.tableColumns : ['结论', '说明', '证据来源'];
   const fallbackRow =
     fallbackColumns.length === 1
       ? [content]
-      : [content || '当前未能稳定提取更多结构化条目。', '可继续补充更明确的筛选条件或模板名称。', '知识库当前证据'];
+      : [
+          content || '当前未能稳定提取更多结构化条目。',
+          '可继续补充更明确的筛选条件或模板全名。',
+          '知识库当前证据',
+        ];
 
   return {
     type: 'table',
@@ -522,15 +640,9 @@ function buildFallbackPageOutput(
   title: string,
   content: string,
   envelope?: ReportTemplateEnvelope | null,
-): {
-  type: 'page';
-  title: string;
-  content: string;
-  format: 'html';
-  page: NonNullable<Exclude<ChatOutput, { type: 'answer' }>['page']>;
-} {
+): KnowledgePageOutput {
   const summary = content || '当前未能稳定提取更多可展示的知识库内容。';
-  const sections = (envelope?.pageSections || ['摘要', '重点分析', '行动建议', 'AI综合分析']).map((sectionTitle, index) => ({
+  const sections = (envelope?.pageSections || DEFAULT_PAGE_SECTIONS).map((sectionTitle, index) => ({
     title: sectionTitle,
     body: index === 0 ? summary : '',
     bullets: [],
@@ -561,14 +673,7 @@ function buildGenericFallbackOutput(
 
   if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
     const page = buildFallbackPageOutput(title, content, envelope);
-    if (kind === 'page') return page;
-    return {
-      type: kind,
-      title: page.title,
-      content: page.content,
-      format: kind,
-      page: page.page,
-    };
+    return wrapPageOutputAsKind(kind, page);
   }
 
   return buildFallbackTableOutput(title, content, envelope);
@@ -618,23 +723,24 @@ export function buildKnowledgeFallbackOutput(
   const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
 
   if (resumeDocuments.length) {
-    if (kind === 'page') {
-      return buildResumePageOutput(view, resumeDocuments, envelope);
+    if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
+      const page = buildResumePageOutput(view, resumeDocuments, envelope);
+      return wrapPageOutputAsKind(kind, page);
     }
 
     if (kind === 'table') {
-      if (view === 'company' && envelope?.tableColumns?.includes('公司')) {
+      if (view === 'company') {
         const rows = buildResumeCompanyProjectRows(resumeDocuments);
         if (rows.length) {
           return {
             type: 'table',
-            title: envelope.title || '简历 IT 项目公司维度表',
+            title: envelope?.title || '简历 IT 项目公司维度表',
             content: `已基于库内简历整理出按公司维度的 IT 项目信息，共 ${rows.length} 条。`,
             format: 'csv',
             table: {
-              title: envelope.title || '简历 IT 项目公司维度表',
+              title: envelope?.title || '简历 IT 项目公司维度表',
               subtitle: '基于知识库结构化简历信息自动整理',
-              columns: envelope.tableColumns,
+              columns: envelope?.tableColumns || RESUME_COMPANY_COLUMNS,
               rows,
             },
           };
@@ -652,7 +758,7 @@ export function buildKnowledgeFallbackOutput(
             table: {
               title: envelope?.title || '简历项目维度表',
               subtitle: '基于知识库结构化简历信息自动整理',
-              columns: envelope?.tableColumns || ['IT项目/系统', '公司', '候选人', '项目角色/职责', '技术栈/系统关键词', '时间线', '证据来源'],
+              columns: envelope?.tableColumns || RESUME_PROJECT_COLUMNS,
               rows,
             },
           };
@@ -670,7 +776,7 @@ export function buildKnowledgeFallbackOutput(
             table: {
               title: envelope?.title || '简历技能维度表',
               subtitle: '基于知识库结构化简历信息自动整理',
-              columns: envelope?.tableColumns || ['技能类别', '候选人', '技能详情', '最近公司', '关联项目', '证据来源'],
+              columns: envelope?.tableColumns || RESUME_SKILL_COLUMNS,
               rows,
             },
           };
@@ -688,7 +794,7 @@ export function buildKnowledgeFallbackOutput(
             table: {
               title: envelope?.title || '简历人才维度表',
               subtitle: '基于知识库结构化简历信息自动整理',
-              columns: envelope?.tableColumns || ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'],
+              columns: envelope?.tableColumns || RESUME_TALENT_COLUMNS,
               rows,
             },
           };
@@ -714,12 +820,7 @@ export function normalizeReportOutput(
 
   if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
     const pageSource = pickNestedObject(payload, [['page']]) || pickNestedObject(root, [['page']]) || payload;
-    const summary = pickString(
-      pageSource.summary,
-      payload.summary,
-      root.summary,
-      content,
-    );
+    const summary = pickString(pageSource.summary, payload.summary, root.summary, content);
     const cards = normalizeCards(pageSource.cards || payload.cards || root.cards);
     const rawSections = normalizeSections(pageSource.sections || payload.sections || root.sections);
     const alignedSections = envelope?.pageSections?.length
@@ -773,7 +874,7 @@ export function normalizeReportOutput(
     || root.records;
 
   const { columns: objectColumns, rows } = sanitizeRows(tableRowsInput, preferredColumns);
-  const finalColumns = normalizeColumnNames((envelope?.tableColumns?.length ? envelope.tableColumns : objectColumns));
+  const finalColumns = normalizeColumnNames(envelope?.tableColumns?.length ? envelope.tableColumns : objectColumns);
   const finalRows = alignRowsToColumns(rows, finalColumns);
   const tableTitle = pickString(
     isObject(tableSource) ? tableSource.title : '',

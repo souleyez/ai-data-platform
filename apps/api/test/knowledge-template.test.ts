@@ -56,11 +56,8 @@ function makeSelectedTemplate(overrides?: {
   };
 }
 
-test('inferTemplateTaskHint should identify resume, bids and order template tasks', () => {
-  assert.equal(
-    inferTemplateTaskHint([makeSelectedTemplate()], 'table'),
-    'resume-comparison',
-  );
+test('inferTemplateTaskHint should identify resume, bids, order, paper and iot tasks', () => {
+  assert.equal(inferTemplateTaskHint([makeSelectedTemplate()], 'table'), 'resume-comparison');
 
   assert.equal(
     inferTemplateTaskHint([
@@ -68,7 +65,7 @@ test('inferTemplateTaskHint should identify resume, bids and order template task
         group: {
           key: 'bids',
           label: '标书知识库',
-          description: '标书知识库',
+          description: '标书资料库',
           triggerKeywords: ['标书', '招标', '投标'],
         },
         template: { key: 'bids-table-template', label: '标书应答表格' },
@@ -84,12 +81,42 @@ test('inferTemplateTaskHint should identify resume, bids and order template task
           key: 'order',
           label: '订单分析',
           description: '订单经营知识库',
-          triggerKeywords: ['订单', '销售', '库存'],
+          triggerKeywords: ['订单', '销量', '库存'],
         },
         template: { key: 'order-static-template', label: '订单经营静态页', type: 'static-page' },
       }),
     ], 'page'),
     'order-static-page',
+  );
+
+  assert.equal(
+    inferTemplateTaskHint([
+      makeSelectedTemplate({
+        group: {
+          key: 'paper',
+          label: '学术论文',
+          description: '学术论文知识库',
+          triggerKeywords: ['论文', '研究', '期刊'],
+        },
+        template: { key: 'paper-page-template', label: '论文综述静态页', type: 'static-page' },
+      }),
+    ], 'page'),
+    'paper-static-page',
+  );
+
+  assert.equal(
+    inferTemplateTaskHint([
+      makeSelectedTemplate({
+        group: {
+          key: 'iot解决方案',
+          label: 'IOT解决方案',
+          description: '物联网解决方案知识库',
+          triggerKeywords: ['iot', '物联网', '设备', '网关'],
+        },
+        template: { key: 'iot-page-template', label: 'IOT 解决方案静态页', type: 'static-page' },
+      }),
+    ], 'page'),
+    'iot-static-page',
   );
 });
 
@@ -111,52 +138,98 @@ test('adaptSelectedTemplatesForRequest should switch resume company table envelo
   ]);
 });
 
-test('adaptSelectedTemplatesForRequest should switch resume skill page envelope when request is skill dashboard', () => {
+test('adaptSelectedTemplatesForRequest should switch bid page envelope by risk view', () => {
   const adapted = adaptSelectedTemplatesForRequest(
     [
       makeSelectedTemplate({
+        group: {
+          key: 'bids',
+          label: '标书知识库',
+          description: '标书资料库',
+          triggerKeywords: ['标书', '招标', '投标'],
+        },
         template: {
-          key: 'resume-page-template',
+          key: 'bid-page-template',
+          label: '标书摘要静态页',
           type: 'static-page',
-          label: '数据可视化静态页',
+          description: '标书共享模板',
         },
       }),
     ],
-    '请基于人才简历库按技能维度生成数据可视化静态页。',
+    '请基于标书知识库按风险维度输出静态页，重点看资格风险、材料缺口和时间风险。',
   );
 
-  assert.equal(adapted[0]?.envelope.title, '简历技能维度静态页');
+  assert.equal(adapted[0]?.envelope.title, '标书风险维度静态页');
   assert.deepEqual(adapted[0]?.envelope.pageSections, [
-    '技能概览',
-    '技能分布',
-    '候选人覆盖',
-    '公司关联',
-    '项目关联',
+    '风险概览',
+    '资格风险',
+    '材料缺口',
+    '时间风险',
+    '应答建议',
     'AI综合分析',
   ]);
 });
 
-test('adaptSelectedTemplatesForRequest should keep talent view when request explicitly says talent dimension', () => {
+test('adaptSelectedTemplatesForRequest should switch order page envelope by platform view', () => {
   const adapted = adaptSelectedTemplatesForRequest(
     [
       makeSelectedTemplate({
+        group: {
+          key: 'order',
+          label: '订单分析',
+          description: '订单经营知识库',
+          triggerKeywords: ['订单', '销量', '库存'],
+        },
         template: {
-          key: 'resume-page-template',
+          key: 'order-page-template',
+          label: '订单经营静态页',
           type: 'static-page',
-          label: '数据可视化静态页',
+          description: '订单共享模板',
         },
       }),
     ],
-    '请基于简历知识库按人才维度整理学历、最近公司、核心能力和项目经历，生成数据可视化静态页。',
+    '请基于订单分析库按平台维度输出静态页，重点看天猫、京东、抖音的销量趋势和库存。',
   );
 
-  assert.equal(adapted[0]?.envelope.title, '简历人才维度静态页');
+  assert.equal(adapted[0]?.envelope.title, '订单平台维度静态页');
   assert.deepEqual(adapted[0]?.envelope.pageSections, [
-    '人才概览',
-    '学历与背景',
-    '公司经历',
-    '项目经历',
-    '核心能力',
+    '经营摘要',
+    '平台对比',
+    '品类覆盖',
+    '销量趋势',
+    '库存与备货建议',
+    'AI综合分析',
+  ]);
+});
+
+test('adaptSelectedTemplatesForRequest should switch iot page envelope by module view', () => {
+  const adapted = adaptSelectedTemplatesForRequest(
+    [
+      makeSelectedTemplate({
+        group: {
+          key: 'iot解决方案',
+          label: 'IOT解决方案',
+          description: '物联网解决方案知识库',
+          triggerKeywords: ['iot', '物联网', '设备', '网关'],
+        },
+        template: {
+          key: 'iot-page-template',
+          label: 'IOT 解决方案静态页',
+          type: 'static-page',
+          description: 'IOT 共享模板',
+        },
+      }),
+    ],
+    '请基于IOT解决方案知识库按模块维度输出静态页，重点梳理设备、网关、平台和接口集成。',
+  );
+
+  assert.equal(adapted[0]?.envelope.title, 'IOT 模块维度静态页');
+  assert.deepEqual(adapted[0]?.envelope.pageSections, [
+    '模块概览',
+    '设备与网关',
+    '平台能力',
+    '接口集成',
+    '交付关系',
     'AI综合分析',
   ]);
 });

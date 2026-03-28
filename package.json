@@ -10,15 +10,23 @@
     "dev:web": "corepack pnpm --filter web dev",
     "dev:worker": "corepack pnpm --filter worker dev",
     "openclaw:install": "powershell -ExecutionPolicy Bypass -File tools/install-openclaw-latest.ps1",
+    "openclaw:workspace:init": "powershell -ExecutionPolicy Bypass -File tools/init-openclaw-workspace.ps1",
+    "openclaw:skills:list": "corepack pnpm exec clawhub list --workdir .",
+    "openclaw:skills:update": "corepack pnpm exec clawhub update --all --workdir .",
     "local:start": "powershell -ExecutionPolicy Bypass -File tools/start-local.ps1",
     "local:stop": "powershell -ExecutionPolicy Bypass -File tools/stop-local.ps1",
     "local:status": "powershell -ExecutionPolicy Bypass -File tools/status-local.ps1",
     "smoke:local": "node tools/smoke-local.mjs",
     "smoke:local:cloud": "node tools/smoke-local.mjs --with-cloud",
+    "smoke:remote:utf8": "node tools/smoke-remote.mjs",
     "seed:default-samples": "node tools/seed-default-samples.mjs",
     "deploy:remote": "powershell -ExecutionPolicy Bypass -File tools/deploy-remote.ps1",
+    "check:text-integrity": "node tools/check-text-integrity.mjs",
     "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
     "test": "corepack pnpm --filter api test",
-    "lint": "corepack pnpm build"
+    "lint": "corepack pnpm check:text-integrity && corepack pnpm build"
+  },
+  "devDependencies": {
+    "clawhub": "^0.9.0"
   }
 }

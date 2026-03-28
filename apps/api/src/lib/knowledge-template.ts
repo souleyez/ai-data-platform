@@ -5,6 +5,7 @@ import {
   type ReportTemplateEnvelope,
   type SharedReportTemplate,
 } from './report-center.js';
+import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 
 export type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
 export type KnowledgeTemplateTaskHint =
@@ -14,8 +15,13 @@ export type KnowledgeTemplateTaskHint =
   | 'formula-static-page'
   | 'bids-table'
   | 'bids-static-page'
+  | 'paper-table'
+  | 'paper-static-page'
   | 'order-static-page'
-  | 'contract-risk';
+  | 'contract-risk'
+  | 'technical-summary'
+  | 'iot-table'
+  | 'iot-static-page';
 
 export type SelectedKnowledgeTemplate = {
   group: ReportGroup;
@@ -29,12 +35,17 @@ export type RequestedSharedTemplate = {
 };
 
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill';
+type BidRequestView = 'generic' | 'section' | 'response' | 'risk';
+type OrderRequestView = 'generic' | 'platform' | 'category' | 'stock';
+type IotRequestView = 'generic' | 'scenario' | 'module' | 'value';
 
 const RESUME_KEYWORDS = ['resume', 'cv', '简历', '候选人', '人才'];
 const BID_KEYWORDS = ['bids', 'bid', 'tender', 'rfp', 'proposal', '标书', '招标', '投标'];
 const ORDER_KEYWORDS = ['order', 'orders', '订单', '销量', '销售', '库存', '备货', '电商'];
 const FORMULA_KEYWORDS = ['formula', '配方', '奶粉', '菌株', '益生菌'];
+const PAPER_KEYWORDS = ['paper', 'papers', 'study', 'studies', 'journal', 'research', '论文', '学术论文', '研究', '期刊'];
 const CONTRACT_KEYWORDS = ['contract', 'contracts', '合同', '条款', '法务'];
+const IOT_KEYWORDS = ['iot', 'internet of things', '物联网', '边缘', '传感', '设备', '网关', '平台', '解决方案'];
 
 function normalizeText(...parts: Array<string | undefined | null>) {
   return parts
@@ -92,8 +103,16 @@ function isFormulaGroup(group: ReportGroup) {
   return hasAnyKeyword(buildGroupText(group), FORMULA_KEYWORDS);
 }
 
+function isPaperGroup(group: ReportGroup) {
+  return hasAnyKeyword(buildGroupText(group), PAPER_KEYWORDS);
+}
+
 function isContractGroup(group: ReportGroup) {
   return hasAnyKeyword(buildGroupText(group), CONTRACT_KEYWORDS);
+}
+
+function isIotGroup(group: ReportGroup) {
+  return hasAnyKeyword(buildGroupText(group), IOT_KEYWORDS);
 }
 
 function looksLikeResumeTemplate(template: SharedReportTemplate) {
@@ -112,8 +131,16 @@ function looksLikeFormulaTemplate(template: SharedReportTemplate) {
   return hasAnyKeyword(buildTemplateText(template), FORMULA_KEYWORDS);
 }
 
+function looksLikePaperTemplate(template: SharedReportTemplate) {
+  return hasAnyKeyword(buildTemplateText(template), PAPER_KEYWORDS);
+}
+
 function looksLikeContractTemplate(template: SharedReportTemplate) {
   return hasAnyKeyword(buildTemplateText(template), CONTRACT_KEYWORDS);
+}
+
+function looksLikeIotTemplate(template: SharedReportTemplate) {
+  return hasAnyKeyword(buildTemplateText(template), IOT_KEYWORDS);
 }
 
 function scoreTemplateForGroup(template: SharedReportTemplate, group: ReportGroup, kind: KnowledgeOutputKind) {
@@ -127,7 +154,9 @@ function scoreTemplateForGroup(template: SharedReportTemplate, group: ReportGrou
   if (isBidGroup(group) && looksLikeBidTemplate(template)) score += 120;
   if (isOrderGroup(group) && looksLikeOrderTemplate(template)) score += 120;
   if (isFormulaGroup(group) && looksLikeFormulaTemplate(template)) score += 120;
+  if (isPaperGroup(group) && looksLikePaperTemplate(template)) score += 120;
   if (isContractGroup(group) && looksLikeContractTemplate(template)) score += 120;
+  if (isIotGroup(group) && looksLikeIotTemplate(template)) score += 120;
 
   return score;
 }
@@ -146,7 +175,7 @@ function buildTemplateEnvelopeInstruction(group: ReportGroup, template: SharedRe
 }
 
 function mentionsCustomTemplateIntent(text: string) {
-  return /(自定义模板|我的模板|上传模板|参考模板|按模板|使用模板|按照模板)/.test(text);
+  return /(自定义模板|我的模板|上传模板|参考模板|按模板|使用模板)/i.test(text);
 }
 
 function matchesTemplateName(requestText: string, template: SharedReportTemplate) {
@@ -188,7 +217,7 @@ function hasProjectSignal(text: string) {
     '实施',
     '交付',
     '架构',
-    'it项目',
+    'it',
   ]);
 }
 
@@ -224,16 +253,73 @@ function hasTalentSignal(text: string) {
   ]);
 }
 
+function hasBidSectionSignal(text: string) {
+  return hasAnyKeyword(text, ['section', 'sections', 'chapter', '章节', '资格条件', '时间节点']);
+}
+
+function hasBidResponseSignal(text: string) {
+  return hasAnyKeyword(text, ['response', 'materials', 'material', 'qualification', '应答', '材料', '资质', '方案']);
+}
+
+function hasBidRiskSignal(text: string) {
+  return hasAnyKeyword(text, ['risk', 'risks', 'deadline', 'compliance', '风险', '截止', '合规']);
+}
+
+function hasOrderPlatformSignal(text: string) {
+  return hasAnyKeyword(text, ['platform', 'tmall', 'jd', 'douyin', 'amazon', 'shopify', '平台', '天猫', '京东', '抖音']);
+}
+
+function hasOrderCategorySignal(text: string) {
+  return hasAnyKeyword(text, ['category', 'categories', 'sku', '品类', '类目', '商品']);
+}
+
+function hasOrderStockSignal(text: string) {
+  return hasAnyKeyword(text, ['inventory', 'stock', 'forecast', 'replenishment', 'restock', '库存', '预测', '备货', '异常波动']);
+}
+
+function hasIotScenarioSignal(text: string) {
+  return hasAnyKeyword(text, ['scenario', 'use case', 'customer', 'industry', '场景', '客户', '行业']);
+}
+
+function hasIotModuleSignal(text: string) {
+  return hasAnyKeyword(text, ['module', 'modules', 'device', 'gateway', 'platform', 'api', '模块', '设备', '网关', '平台', '接口']);
+}
+
+function hasIotValueSignal(text: string) {
+  return hasAnyKeyword(text, ['value', 'roi', 'benefit', 'benefits', 'delivery', 'stability', '价值', '收益', '成效', '交付', '稳定性']);
+}
+
 function detectResumeRequestView(requestText: string): ResumeRequestView {
   const text = normalizeText(requestText);
-
-  if (hasAnyKeyword(text, ['人才维度', '候选人维度', '人才画像', '候选人画像', '按人才', '按候选人'])) {
-    return 'talent';
-  }
+  if (hasAnyKeyword(text, ['人才维度', '候选人维度', '人才画像', '候选人画像', '按人才', '按候选人'])) return 'talent';
   if (hasSkillSignal(text)) return 'skill';
   if (hasCompanySignal(text) && hasProjectSignal(text)) return 'company';
   if (hasProjectSignal(text)) return 'project';
   if (hasTalentSignal(text)) return 'talent';
+  return 'generic';
+}
+
+function detectBidRequestView(requestText: string): BidRequestView {
+  const text = normalizeText(requestText);
+  if (hasBidRiskSignal(text)) return 'risk';
+  if (hasBidResponseSignal(text)) return 'response';
+  if (hasBidSectionSignal(text)) return 'section';
+  return 'generic';
+}
+
+function detectOrderRequestView(requestText: string): OrderRequestView {
+  const text = normalizeText(requestText);
+  if (hasOrderPlatformSignal(text)) return 'platform';
+  if (hasOrderCategorySignal(text)) return 'category';
+  if (hasOrderStockSignal(text)) return 'stock';
+  return 'generic';
+}
+
+function detectIotRequestView(requestText: string): IotRequestView {
+  const text = normalizeText(requestText);
+  if (hasIotValueSignal(text)) return 'value';
+  if (hasIotModuleSignal(text)) return 'module';
+  if (hasIotScenarioSignal(text)) return 'scenario';
   return 'generic';
 }
 
@@ -242,6 +328,8 @@ function adaptResumeEnvelope(
   kind: KnowledgeOutputKind,
   view: ResumeRequestView,
 ): ReportTemplateEnvelope {
+  if (view === 'generic') return envelope;
+
   if (kind === 'page') {
     if (view === 'company') {
       return {
@@ -250,7 +338,7 @@ function adaptResumeEnvelope(
         fixedStructure: [
           '按公司维度汇总库内简历里涉及的 IT 项目、系统、平台和接口经历。',
           '同一家公司下尽量聚合多位候选人的共同项目主题与技术信号。',
-          '页面结构应稳定，适合业务方直接浏览和转发。',
+          '页面结构要稳定，适合业务方直接浏览和转发。',
         ],
         variableZones: ['公司概览', '重点项目分布', '候选人覆盖', '技术关键词', '风险与机会', 'AI综合分析'],
         outputHint: '按公司维度整理简历中的 IT 项目经历，突出公司、项目、候选人覆盖和技术关键词。',
@@ -308,7 +396,7 @@ function adaptResumeEnvelope(
       title: '简历 IT 项目公司维度表',
       fixedStructure: [
         '按公司维度汇总简历中涉及的 IT 项目、系统、平台和接口经历。',
-        '同一家公司可聚合多位候选人的相关项目经历。',
+        '同一家公司可以聚合多位候选人的相关项目经历。',
         '优先保留项目名称、项目职责、技术关键词、时间线和证据来源。',
       ],
       variableZones: ['公司名称', '候选人姓名', 'IT 项目或系统名称', '项目角色与职责', '技术栈或系统关键词', '时间线', '证据来源'],
@@ -323,7 +411,7 @@ function adaptResumeEnvelope(
       title: '简历项目维度表',
       fixedStructure: [
         '按项目维度整理简历里的项目或系统经历。',
-        '同一项目尽量聚合涉及公司、候选人和技术关键词。',
+        '同一项目下尽量聚合涉及公司、候选人和技术关键词。',
         '优先保留项目名称、公司、候选人、职责、技术关键词和时间线。',
       ],
       variableZones: ['项目名称', '涉及公司', '候选人', '项目角色与职责', '技术关键词', '时间线', '证据来源'],
@@ -347,22 +435,306 @@ function adaptResumeEnvelope(
     };
   }
 
-  if (view === 'talent') {
+  return {
+    ...envelope,
+    title: '简历人才维度表',
+    fixedStructure: [
+      '按人才维度整理候选人，优先体现学历、最近公司、核心能力、年龄、工作年限和项目亮点。',
+      '每一行只对应一位候选人。',
+      '字段缺失可以留空，不要自行补造。',
+    ],
+    variableZones: ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'],
+    outputHint: '按人才维度整理简历信息，突出学历背景、最近公司、核心能力和项目亮点。',
+    tableColumns: ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'],
+  };
+}
+
+function adaptBidEnvelope(
+  envelope: ReportTemplateEnvelope,
+  kind: KnowledgeOutputKind,
+  view: BidRequestView,
+): ReportTemplateEnvelope {
+  if (view === 'generic') return envelope;
+
+  if (kind === 'page') {
+    if (view === 'risk') {
+      return {
+        ...envelope,
+        title: '标书风险维度静态页',
+        fixedStructure: [
+          '按风险维度整理标书资料，突出资格风险、时间风险、材料缺口和合规事项。',
+          '页面适合内部预审和复核，不要漂移到泛泛摘要。',
+          '结论要与库内证据对应。',
+        ],
+        variableZones: ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
+        outputHint: '按风险维度整理标书资料，突出资格风险、材料缺口、关键时间节点和应答建议。',
+        pageSections: ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
+      };
+    }
+
+    if (view === 'response') {
+      return {
+        ...envelope,
+        title: '标书应答维度静态页',
+        fixedStructure: [
+          '按应答维度整理招投标资料，突出章节要求、应答重点、补充材料和交付建议。',
+          '优先围绕实际应答动作组织内容。',
+          '适合项目组内部分工和对标。',
+        ],
+        variableZones: ['项目概况', '应答重点', '需补充材料', '资格条件', '交付建议', 'AI综合分析'],
+        outputHint: '按应答维度整理标书资料，突出应答重点、补充材料、资格条件和交付建议。',
+        pageSections: ['项目概况', '应答重点', '需补充材料', '资格条件', '交付建议', 'AI综合分析'],
+      };
+    }
+
     return {
       ...envelope,
-      title: '简历人才维度表',
+      title: '标书章节维度静态页',
       fixedStructure: [
-        '按人才维度整理候选人，优先体现学历、最近公司、核心能力、年龄、工作年限和项目亮点。',
-        '每一行只对应一位候选人。',
-        '字段缺失可以留空，不要自行补造。'
+        '按章节维度整理标书资料，突出章节要求、资格条件、时间节点和关键注意事项。',
+        '同一章节下尽量聚合应答重点与风险提醒。',
+        '适合快速浏览整体结构。',
       ],
-      variableZones: ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'],
-      outputHint: '按人才维度整理简历信息，突出学历背景、最近公司、核心能力和项目亮点。',
-      tableColumns: ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '项目亮点', '证据来源'],
+      variableZones: ['章节概览', '资格条件', '时间节点', '应答重点', '风险提醒', 'AI综合分析'],
+      outputHint: '按章节维度整理标书资料，突出章节要求、资格条件、时间节点和风险提醒。',
+      pageSections: ['章节概览', '资格条件', '时间节点', '应答重点', '风险提醒', 'AI综合分析'],
     };
   }
 
-  return envelope;
+  if (view === 'risk') {
+    return {
+      ...envelope,
+      title: '标书风险维度表',
+      fixedStructure: [
+        '按风险维度整理标书资料。',
+        '优先覆盖资格风险、材料缺口、时间风险和对应建议。',
+        '每一行都应带证据来源。',
+      ],
+      variableZones: ['风险类别', '章节/事项', '风险说明', '需补充材料', '应对建议', '证据来源'],
+      outputHint: '按风险维度整理标书资料，突出资格风险、材料缺口、时间风险和应对建议。',
+      tableColumns: ['风险类别', '章节/事项', '风险说明', '需补充材料', '应对建议', '证据来源'],
+    };
+  }
+
+  if (view === 'response') {
+    return {
+      ...envelope,
+      title: '标书应答维度表',
+      fixedStructure: [
+        '按应答维度整理标书资料。',
+        '优先体现章节、应答重点、需补充材料、负责人动作和证据来源。',
+        '适合项目推进与分工。',
+      ],
+      variableZones: ['章节', '应答重点', '需补充材料', '资格条件', '交付建议', '证据来源'],
+      outputHint: '按应答维度整理标书资料，突出章节、应答重点、需补充材料和交付建议。',
+      tableColumns: ['章节', '应答重点', '需补充材料', '资格条件', '交付建议', '证据来源'],
+    };
+  }
+
+  return {
+    ...envelope,
+    title: '标书章节维度表',
+    fixedStructure: [
+      '按章节维度整理标书资料。',
+      '优先体现章节要求、资格条件、时间节点、风险提醒和证据来源。',
+      '适合整体梳理和预审。',
+    ],
+    variableZones: ['章节', '资格条件', '关键时间节点', '应答重点', '风险提示', '证据来源'],
+    outputHint: '按章节维度整理标书资料，突出章节要求、资格条件、时间节点和风险提示。',
+    tableColumns: ['章节', '资格条件', '关键时间节点', '应答重点', '风险提示', '证据来源'],
+  };
+}
+
+function adaptOrderEnvelope(
+  envelope: ReportTemplateEnvelope,
+  kind: KnowledgeOutputKind,
+  view: OrderRequestView,
+): ReportTemplateEnvelope {
+  if (view === 'generic') return envelope;
+
+  if (kind === 'page') {
+    if (view === 'platform') {
+      return {
+        ...envelope,
+        title: '订单平台维度静态页',
+        fixedStructure: [
+          '按平台维度整理订单与经营资料。',
+          '优先体现平台对比、销量趋势、库存和备货动作。',
+          '页面适合运营和业务复盘。',
+        ],
+        variableZones: ['经营摘要', '平台对比', '品类覆盖', '销量趋势', '库存与备货建议', 'AI综合分析'],
+        outputHint: '按平台维度整理订单与经营资料，突出平台对比、销量趋势和库存备货。',
+        pageSections: ['经营摘要', '平台对比', '品类覆盖', '销量趋势', '库存与备货建议', 'AI综合分析'],
+      };
+    }
+
+    if (view === 'category') {
+      return {
+        ...envelope,
+        title: '订单品类维度静态页',
+        fixedStructure: [
+          '按品类维度整理订单与经营资料。',
+          '优先体现品类分布、平台覆盖、销量趋势和库存风险。',
+          '页面适合经营分析与补货决策。',
+        ],
+        variableZones: ['经营摘要', '品类对比', '平台覆盖', '销量趋势', '库存风险', 'AI综合分析'],
+        outputHint: '按品类维度整理订单与经营资料，突出品类分布、平台覆盖和库存风险。',
+        pageSections: ['经营摘要', '品类对比', '平台覆盖', '销量趋势', '库存风险', 'AI综合分析'],
+      };
+    }
+
+    return {
+      ...envelope,
+      title: '订单库存与预测静态页',
+      fixedStructure: [
+        '按库存与预测维度整理订单资料。',
+        '优先体现库存指数、预测销量、备货推荐和异常波动。',
+        '页面适合补货和运营预警。',
+      ],
+      variableZones: ['经营摘要', '库存指数', '预测销量', '备货推荐', '异常波动说明', 'AI综合分析'],
+      outputHint: '按库存与预测维度整理订单资料，突出库存指数、预测销量、备货推荐和异常波动。',
+      pageSections: ['经营摘要', '库存指数', '预测销量', '备货推荐', '异常波动说明', 'AI综合分析'],
+    };
+  }
+
+  if (view === 'platform') {
+    return {
+      ...envelope,
+      title: '订单平台维度表',
+      fixedStructure: [
+        '按平台维度整理订单与经营资料。',
+        '优先体现平台、核心指标、同比环比、库存指数和备货建议。',
+        '适合快速对比不同平台表现。',
+      ],
+      variableZones: ['平台', '核心指标', '同比/环比', '预测销量', '库存指数', '备货推荐', '证据来源'],
+      outputHint: '按平台维度整理订单资料，突出平台、核心指标、同比环比和备货建议。',
+      tableColumns: ['平台', '核心指标', '同比/环比', '预测销量', '库存指数', '备货推荐', '证据来源'],
+    };
+  }
+
+  if (view === 'category') {
+    return {
+      ...envelope,
+      title: '订单品类维度表',
+      fixedStructure: [
+        '按品类维度整理订单与经营资料。',
+        '优先体现品类、平台覆盖、销量、库存风险和备货建议。',
+        '适合品类经营分析。',
+      ],
+      variableZones: ['品类', '平台覆盖', '销量表现', '库存风险', '备货建议', '证据来源'],
+      outputHint: '按品类维度整理订单资料，突出品类、平台覆盖、销量表现和库存风险。',
+      tableColumns: ['品类', '平台覆盖', '销量表现', '库存风险', '备货建议', '证据来源'],
+    };
+  }
+
+  return {
+    ...envelope,
+    title: '订单库存与预测表',
+    fixedStructure: [
+      '按库存与预测维度整理订单与经营资料。',
+      '优先体现SKU或品类、预测销量、库存指数、备货建议和异常波动。',
+      '适合补货和风控决策。',
+    ],
+    variableZones: ['对象', '预测销量', '库存指数', '备货推荐', '异常波动', '证据来源'],
+    outputHint: '按库存与预测维度整理订单资料，突出预测销量、库存指数、备货推荐和异常波动。',
+    tableColumns: ['对象', '预测销量', '库存指数', '备货推荐', '异常波动', '证据来源'],
+  };
+}
+
+function adaptIotEnvelope(
+  envelope: ReportTemplateEnvelope,
+  kind: KnowledgeOutputKind,
+  view: IotRequestView,
+): ReportTemplateEnvelope {
+  if (view === 'generic') return envelope;
+
+  if (kind === 'page') {
+    if (view === 'scenario') {
+      return {
+        ...envelope,
+        title: 'IOT 场景维度静态页',
+        fixedStructure: [
+          '按场景维度整理 IOT 解决方案资料。',
+          '优先体现行业/客户场景、核心痛点、解决方案和交付信号。',
+          '适合方案汇报和客户沟通。',
+        ],
+        variableZones: ['场景概览', '行业分布', '核心痛点', '解决方案摘要', '交付信号', 'AI综合分析'],
+        outputHint: '按场景维度整理 IOT 资料，突出行业/客户场景、核心痛点、解决方案和交付信号。',
+        pageSections: ['场景概览', '行业分布', '核心痛点', '解决方案摘要', '交付信号', 'AI综合分析'],
+      };
+    }
+
+    if (view === 'module') {
+      return {
+        ...envelope,
+        title: 'IOT 模块维度静态页',
+        fixedStructure: [
+          '按模块维度整理 IOT 解决方案资料。',
+          '优先体现设备、网关、平台、接口和集成关系。',
+          '适合技术方案梳理和内部评审。',
+        ],
+        variableZones: ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
+        outputHint: '按模块维度整理 IOT 资料，突出设备、网关、平台、接口和集成关系。',
+        pageSections: ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
+      };
+    }
+
+    return {
+      ...envelope,
+      title: 'IOT 价值维度静态页',
+      fixedStructure: [
+        '按价值维度整理 IOT 解决方案资料。',
+        '优先体现业务价值、交付结果、稳定性、ROI 和落地建议。',
+        '适合对外汇报和复盘。',
+      ],
+      variableZones: ['价值概览', '业务收益', '交付结果', '稳定性信号', '下一步建议', 'AI综合分析'],
+      outputHint: '按价值维度整理 IOT 资料，突出业务收益、交付结果、稳定性和下一步建议。',
+      pageSections: ['价值概览', '业务收益', '交付结果', '稳定性信号', '下一步建议', 'AI综合分析'],
+    };
+  }
+
+  if (view === 'scenario') {
+    return {
+      ...envelope,
+      title: 'IOT 场景维度表',
+      fixedStructure: [
+        '按场景维度整理 IOT 方案资料。',
+        '优先体现行业/客户场景、核心痛点、解决方案、交付信号和证据来源。',
+        '适合方案梳理。',
+      ],
+      variableZones: ['场景', '行业/客户', '核心痛点', '解决方案', '交付信号', '证据来源'],
+      outputHint: '按场景维度整理 IOT 资料，突出行业/客户场景、核心痛点、解决方案和交付信号。',
+      tableColumns: ['场景', '行业/客户', '核心痛点', '解决方案', '交付信号', '证据来源'],
+    };
+  }
+
+  if (view === 'module') {
+    return {
+      ...envelope,
+      title: 'IOT 模块维度表',
+      fixedStructure: [
+        '按模块维度整理 IOT 方案资料。',
+        '优先体现模块、设备/网关、平台能力、接口集成和证据来源。',
+        '适合技术评审。',
+      ],
+      variableZones: ['模块', '设备/网关', '平台能力', '接口集成', '交付关系', '证据来源'],
+      outputHint: '按模块维度整理 IOT 资料，突出模块、设备/网关、平台能力和接口集成。',
+      tableColumns: ['模块', '设备/网关', '平台能力', '接口集成', '交付关系', '证据来源'],
+    };
+  }
+
+  return {
+    ...envelope,
+    title: 'IOT 价值维度表',
+    fixedStructure: [
+      '按价值维度整理 IOT 方案资料。',
+      '优先体现业务价值、交付结果、稳定性、ROI 和建议。',
+      '适合对外汇报和内部复盘。',
+    ],
+    variableZones: ['价值主题', '业务收益', '交付结果', '稳定性信号', '下一步建议', '证据来源'],
+    outputHint: '按价值维度整理 IOT 资料，突出业务收益、交付结果、稳定性和下一步建议。',
+    tableColumns: ['价值主题', '业务收益', '交付结果', '稳定性信号', '下一步建议', '证据来源'],
+  };
 }
 
 export function selectSharedTemplateForGroup(
@@ -394,10 +766,10 @@ export async function selectKnowledgeTemplates(
   if (!libraries.length) return [];
 
   const state = await loadReportCenterState();
-  const libraryMap = new Map(libraries.map((item) => [item.key, item]));
+  const librarySet = new Set(libraries.flatMap((item) => [item.key, item.label]).filter(Boolean));
 
   return state.groups
-    .filter((group) => libraryMap.has(group.key))
+    .filter((group) => librarySet.has(group.key) || librarySet.has(group.label))
     .map((group) => {
       const template = selectSharedTemplateForGroup(state.templates, group, kind, preferredTemplateKey);
       if (!template) return null;
@@ -424,6 +796,13 @@ export async function buildKnowledgeTemplateInstruction(
     '',
     ...selectedTemplates.map(({ group, template }) => buildTemplateEnvelopeInstruction(group, template)),
   ].join('\n\n');
+}
+
+export function shouldUseConceptPageMode(
+  kind: KnowledgeOutputKind,
+  preferredTemplateKey?: string,
+) {
+  return kind === 'page' && !String(preferredTemplateKey || '').trim();
 }
 
 export function buildTemplateContextBlock(selectedTemplates: SelectedKnowledgeTemplate[]) {
@@ -525,11 +904,6 @@ export function adaptSelectedTemplatesForRequest(
 
   const normalizedRequest = String(requestText || '').trim();
   return selectedTemplates.map((entry) => {
-    if (!isResumeGroup(entry.group)) return entry;
-
-    const view = detectResumeRequestView(normalizedRequest);
-    if (view === 'generic') return entry;
-
     const kind = entry.template.type === 'static-page'
       ? 'page'
       : entry.template.type === 'ppt'
@@ -540,7 +914,7 @@ export function adaptSelectedTemplatesForRequest(
 
     return {
       ...entry,
-      envelope: adaptResumeEnvelope(entry.envelope, kind, view),
+      envelope: adaptTemplateEnvelopeForRequest(entry.group, entry.envelope, kind, normalizedRequest),
     };
   });
 }
@@ -556,6 +930,8 @@ export function inferTemplateTaskHint(
   if (isBidGroup(primary.group)) return kind === 'page' ? 'bids-static-page' : 'bids-table';
   if (isOrderGroup(primary.group)) return 'order-static-page';
   if (isFormulaGroup(primary.group)) return kind === 'page' ? 'formula-static-page' : 'formula-table';
+  if (isPaperGroup(primary.group)) return kind === 'page' ? 'paper-static-page' : 'paper-table';
   if (isContractGroup(primary.group)) return 'contract-risk';
+  if (isIotGroup(primary.group)) return kind === 'page' ? 'iot-static-page' : 'iot-table';
   return 'general';
 }
