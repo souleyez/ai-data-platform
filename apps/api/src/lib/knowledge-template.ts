@@ -227,6 +227,9 @@ function hasTalentSignal(text: string) {
 function detectResumeRequestView(requestText: string): ResumeRequestView {
   const text = normalizeText(requestText);
 
+  if (hasAnyKeyword(text, ['人才维度', '候选人维度', '人才画像', '候选人画像', '按人才', '按候选人'])) {
+    return 'talent';
+  }
   if (hasSkillSignal(text)) return 'skill';
   if (hasCompanySignal(text) && hasProjectSignal(text)) return 'company';
   if (hasProjectSignal(text)) return 'project';

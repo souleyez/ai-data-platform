@@ -88,3 +88,24 @@ test('normalizeReportOutput should align page sections to envelope sections', ()
   assert.equal(output.page?.sections?.[0]?.body, '公司维度概览。');
   assert.equal(output.page?.sections?.[3]?.body, '技术关键词内容。');
 });
+
+test('normalizeReportOutput should prefer envelope title for template-aligned pages', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '按人才维度生成静态页',
+    JSON.stringify({
+      title: '一个泛化标题',
+      summary: '摘要',
+      sections: [{ title: '人才概览', body: '内容' }],
+    }),
+    {
+      title: '简历人才维度静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按人才维度整理简历信息',
+      pageSections: ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.title, '简历人才维度静态页');
+});

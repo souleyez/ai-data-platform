@@ -247,6 +247,9 @@ function alignSectionsToEnvelope(
 function detectResumeRequestView(requestText: string): ResumeRequestView {
   const text = normalizeText(requestText);
 
+  if (containsAny(text, ['人才维度', '候选人维度', '人才画像', '候选人画像', '按人才', '按候选人'])) {
+    return 'talent';
+  }
   if (containsAny(text, ['skill', 'skills', 'ability', 'abilities', '技术栈', '技能', '能力', '核心能力'])) {
     return 'skill';
   }
@@ -706,7 +709,7 @@ export function normalizeReportOutput(
   const parsed = tryParseJsonPayload(rawContent);
   const root = isObject(parsed) ? parsed : {};
   const payload = pickNestedObject(root, [['output'], ['report'], ['result'], ['data']]) || root;
-  const title = pickString(payload.title, root.title, buildDefaultTitle(kind));
+  const title = pickString(envelope?.title, payload.title, root.title, buildDefaultTitle(kind));
   const content = pickString(payload.content, root.content, rawContent);
 
   if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {

@@ -136,6 +136,31 @@ test('adaptSelectedTemplatesForRequest should switch resume skill page envelope 
   ]);
 });
 
+test('adaptSelectedTemplatesForRequest should keep talent view when request explicitly says talent dimension', () => {
+  const adapted = adaptSelectedTemplatesForRequest(
+    [
+      makeSelectedTemplate({
+        template: {
+          key: 'resume-page-template',
+          type: 'static-page',
+          label: '数据可视化静态页',
+        },
+      }),
+    ],
+    '请基于简历知识库按人才维度整理学历、最近公司、核心能力和项目经历，生成数据可视化静态页。',
+  );
+
+  assert.equal(adapted[0]?.envelope.title, '简历人才维度静态页');
+  assert.deepEqual(adapted[0]?.envelope.pageSections, [
+    '人才概览',
+    '学历与背景',
+    '公司经历',
+    '项目经历',
+    '核心能力',
+    'AI综合分析',
+  ]);
+});
+
 test('buildTemplateSearchHints and context block should include envelope structure and references', () => {
   const selected = makeSelectedTemplate({
     template: {
