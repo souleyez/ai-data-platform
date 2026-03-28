@@ -102,7 +102,7 @@ export default function AuditPage() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <h2>AI 知识库</h2>
+            <h2>AI审计</h2>
             <p>把“清理原文件”和“彻底删除”拆开管理，长期低引用资料优先只删原件、保留结构化结果。</p>
           </div>
         </header>

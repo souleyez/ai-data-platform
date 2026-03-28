@@ -130,6 +130,16 @@ export async function getDatasourceCredential(id: string) {
   return record ? toPublicRecord(record) : null;
 }
 
+export async function getDatasourceCredentialRecord(id: string) {
+  const items = await readAll();
+  return items.find((item) => item.id === id) || null;
+}
+
+export async function getDatasourceCredentialSecret(id: string) {
+  const record = await getDatasourceCredentialRecord(id);
+  return record?.secret || null;
+}
+
 export async function upsertDatasourceCredential(input: Partial<DatasourceCredentialRecord>) {
   const record = normalizeRecord(input);
   if (!record.id) throw new Error('credential id is required');

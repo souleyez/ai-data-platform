@@ -144,7 +144,7 @@ export default function Sidebar({
       <div className="brand">
         <div className="brand-logo">AI</div>
         <div>
-          <h1>AI文档数据助理</h1>
+          <h1>智能助手</h1>
           <p>个人知识库，采编写一站式解决</p>
         </div>
       </div>

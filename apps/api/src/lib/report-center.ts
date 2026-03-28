@@ -4,6 +4,8 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MultipartFile } from '@fastify/multipart';
 import { loadDocumentLibraries } from './document-libraries.js';
+import type { ParsedDocument } from './document-parser.js';
+import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
@@ -59,6 +61,22 @@ export type ReportTemplateEnvelope = {
   pageSections?: string[];
 };
 
+export type ReportDynamicSource = {
+  enabled: boolean;
+  request: string;
+  outputType: 'table' | 'page' | 'ppt' | 'pdf';
+  templateKey?: string;
+  templateLabel?: string;
+  timeRange?: string;
+  contentFocus?: string;
+  libraries: Array<{ key?: string; label?: string }>;
+  updatedAt?: string;
+  lastRenderedAt?: string;
+  sourceFingerprint?: string;
+  sourceDocumentCount?: number;
+  sourceUpdatedAt?: string;
+};
+
 export type ReportOutputRecord = {
   id: string;
   groupKey: string;
@@ -87,6 +105,7 @@ export type ReportOutputRecord = {
   } | null;
   libraries?: Array<{ key?: string; label?: string }>;
   downloadUrl?: string;
+  dynamicSource?: ReportDynamicSource | null;
 };
 
 function summarizeTableForAnalysis(table?: ReportOutputRecord['table']) {
@@ -271,6 +290,242 @@ function attachLocalReportAnalysis(record: ReportOutputRecord) {
       rows,
     },
   };
+}
+
+function normalizeDynamicSource(
+  dynamicSource: Partial<ReportDynamicSource> | null | undefined,
+  fallback: {
+    request?: string;
+    kind?: ReportOutputRecord['kind'];
+    templateKey?: string;
+    templateLabel?: string;
+    libraries?: ReportOutputRecord['libraries'];
+  },
+): ReportDynamicSource | null {
+  const enabled = Boolean(dynamicSource?.enabled) || fallback.kind === 'page';
+  const libraries = Array.isArray(dynamicSource?.libraries) && dynamicSource?.libraries.length
+    ? dynamicSource.libraries
+    : Array.isArray(fallback.libraries)
+      ? fallback.libraries
+      : [];
+
+  if (!enabled || !libraries.length) return null;
+
+  return {
+    enabled: true,
+    request: String(dynamicSource?.request || fallback.request || '').trim(),
+    outputType: (dynamicSource?.outputType || fallback.kind || 'page') as 'table' | 'page' | 'ppt' | 'pdf',
+    templateKey: String(dynamicSource?.templateKey || fallback.templateKey || '').trim(),
+    templateLabel: String(dynamicSource?.templateLabel || fallback.templateLabel || '').trim(),
+    timeRange: String(dynamicSource?.timeRange || '').trim(),
+    contentFocus: String(dynamicSource?.contentFocus || '').trim(),
+    libraries: libraries
+      .map((item) => ({
+        key: String(item?.key || '').trim(),
+        label: String(item?.label || '').trim(),
+      }))
+      .filter((item) => item.key || item.label),
+    updatedAt: String(dynamicSource?.updatedAt || new Date().toISOString()).trim(),
+    lastRenderedAt: String(dynamicSource?.lastRenderedAt || '').trim(),
+    sourceFingerprint: String(dynamicSource?.sourceFingerprint || '').trim(),
+    sourceDocumentCount: Number(dynamicSource?.sourceDocumentCount || 0),
+    sourceUpdatedAt: String(dynamicSource?.sourceUpdatedAt || '').trim(),
+  };
+}
+
+function buildDocumentTimestamp(item: {
+  detailParsedAt?: string;
+  cloudStructuredAt?: string;
+  retainedAt?: string;
+  categoryConfirmedAt?: string;
+}) {
+  const timestamps = [item.detailParsedAt, item.cloudStructuredAt, item.retainedAt, item.categoryConfirmedAt]
+    .map((value) => {
+      const date = value ? new Date(value) : null;
+      return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+    })
+    .filter(Boolean);
+  return timestamps.length ? Math.max(...timestamps) : 0;
+}
+
+function matchesDynamicLibraries(
+  item: { groups?: string[]; confirmedGroups?: string[]; suggestedGroups?: string[] },
+  libraries: Array<{ key?: string; label?: string }>,
+) {
+  const names = new Set(
+    libraries
+      .flatMap((entry) => [entry.key, entry.label])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  );
+  if (!names.size) return false;
+
+  const documentGroups = [
+    ...(Array.isArray(item.groups) ? item.groups : []),
+    ...(Array.isArray(item.confirmedGroups) ? item.confirmedGroups : []),
+    ...(Array.isArray(item.suggestedGroups) ? item.suggestedGroups : []),
+  ];
+
+  return documentGroups.some((group) => names.has(String(group || '').trim()));
+}
+
+function matchesTimeRange(
+  item: { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; categoryConfirmedAt?: string },
+  timeRange?: string,
+) {
+  const text = String(timeRange || '').trim();
+  if (!text || /(全部|所有|不限|all)/i.test(text)) return true;
+
+  const timestamp = buildDocumentTimestamp(item);
+  if (!timestamp) return true;
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  if (/(今天|今日|today)/i.test(text)) return now - timestamp <= dayMs;
+  if (/(本周|这周|近一周|最近一周|week)/i.test(text)) return now - timestamp <= dayMs * 7;
+  if (/(本月|这个月|近一个月|最近一个月|month)/i.test(text)) return now - timestamp <= dayMs * 31;
+  if (/(最近|最新|recent)/i.test(text)) return now - timestamp <= dayMs * 14;
+  return true;
+}
+
+function countTopValues(values: string[]) {
+  const counter = new Map<string, number>();
+  for (const value of values) {
+    const key = String(value || '').trim();
+    if (!key) continue;
+    counter.set(key, (counter.get(key) || 0) + 1);
+  }
+  return [...counter.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
+}
+
+function summarizeDocuments(documents: Array<{ title?: string; name?: string; summary?: string }>, limit = 3) {
+  return documents
+    .slice(0, limit)
+    .map((item) => {
+      const title = String(item.title || item.name || '').trim() || '未命名文档';
+      const summary = String(item.summary || '').trim();
+      return summary ? `${title}：${summary}` : title;
+    })
+    .join('；');
+}
+
+function buildDynamicSectionBody(
+  title: string,
+  source: ReportDynamicSource,
+  documents: Array<Record<string, unknown>>,
+  topTopics: Array<[string, number]>,
+  topSchemas: Array<[string, number]>,
+) {
+  const normalizedTitle = String(title || '').trim();
+  const latestSummary = summarizeDocuments(documents as Array<{ title?: string; name?: string; summary?: string }>, 3);
+  const topicSummary = topTopics.length ? topTopics.map(([name, count]) => `${name}(${count})`).join('、') : '暂无稳定主题';
+  const schemaSummary = topSchemas.length ? topSchemas.map(([name, count]) => `${name}(${count})`).join('、') : '暂无稳定类型';
+
+  if (/摘要|概况|总览/.test(normalizedTitle)) {
+    return `本次页面基于 ${documents.length} 份库内资料动态生成。当前请求重点为“${source.request || '当前知识库内容'}”，最近资料概览为：${latestSummary || '暂无可用资料摘要'}。`;
+  }
+  if (/指标|对比|趋势|图表/.test(normalizedTitle)) {
+    return `当前知识库的主要文档类型为 ${schemaSummary}，高频主题包括 ${topicSummary}。页面中的图表和指标会随着库内资料变化自动更新。`;
+  }
+  if (/风险|异常/.test(normalizedTitle)) {
+    return `当前更值得关注的是 ${topicSummary}。建议优先复核最近新增资料中的变化点、证据一致性和异常波动说明。`;
+  }
+  if (/建议|行动|备货/.test(normalizedTitle)) {
+    return `建议继续围绕“${source.contentFocus || source.request || '当前目标'}”筛选重点材料，并优先处理 ${topicSummary || schemaSummary}。`;
+  }
+  return latestSummary || `当前可用资料主要围绕 ${topicSummary || schemaSummary} 展开。`;
+}
+
+function buildDynamicPageRecord(
+  record: ReportOutputRecord,
+  template: SharedReportTemplate,
+  documents: Array<Record<string, unknown>>,
+) {
+  const source = normalizeDynamicSource(record.dynamicSource, {
+    request: record.title || record.summary || '',
+    kind: record.kind,
+    templateKey: record.templateKey,
+    templateLabel: record.templateLabel,
+    libraries: record.libraries,
+  });
+  if (!source) return record;
+
+  const scopedDocuments = documents
+    .filter((item) => matchesDynamicLibraries(item as { groups?: string[]; confirmedGroups?: string[]; suggestedGroups?: string[] }, source.libraries))
+    .filter((item) => matchesTimeRange(item as { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; categoryConfirmedAt?: string }, source.timeRange));
+
+  const query = [source.contentFocus, source.request].filter(Boolean).join(' ').trim();
+  const rankedDocuments = query
+    ? matchDocumentsByPrompt(scopedDocuments as ParsedDocument[], query, Math.min(scopedDocuments.length, 30))
+    : scopedDocuments;
+  const latestDocuments = [...rankedDocuments].sort((left, right) => buildDocumentTimestamp(right as never) - buildDocumentTimestamp(left as never));
+
+  const topSchemas = countTopValues(latestDocuments.map((item) => String(item.schemaType || item.category || 'generic')));
+  const topTopics = countTopValues(latestDocuments.flatMap((item) => Array.isArray(item.topicTags) ? item.topicTags : []));
+  const detailedCount = latestDocuments.filter((item) => item.parseStage === 'detailed').length;
+  const latestTimestamp = latestDocuments.length ? buildDocumentTimestamp(latestDocuments[0] as never) : 0;
+  const latestUpdatedAt = latestTimestamp ? new Date(latestTimestamp).toISOString() : '';
+  const sourceFingerprint = latestDocuments
+    .slice(0, 24)
+    .map((item) => `${String(item.path || item.name || '')}:${String(item.detailParsedAt || item.cloudStructuredAt || item.summary || '').slice(0, 48)}`)
+    .join('|');
+
+  if (sourceFingerprint && source.sourceFingerprint === sourceFingerprint) {
+    return record;
+  }
+
+  const envelope = buildSharedTemplateEnvelope(template);
+  const summary = latestDocuments.length
+    ? `当前已基于 ${latestDocuments.length} 份库内资料生成动态页面，其中 ${detailedCount} 份已完成进阶解析。主要主题包括 ${topTopics.map(([name]) => name).slice(0, 4).join('、') || '暂无明确主题'}。`
+    : '当前知识库中暂无符合条件的资料，页面保持空状态。';
+  const sections = (envelope.pageSections || ['摘要', '重点分析', '行动建议', 'AI综合分析']).map((title) => ({
+    title,
+    body: title === 'AI综合分析'
+      ? `该页面会随着知识库内容变化自动刷新，当前最值得优先关注的是 ${topTopics.map(([name]) => name).slice(0, 2).join('、') || '资料质量与更新频率'}。`
+      : buildDynamicSectionBody(title, source, latestDocuments, topTopics, topSchemas),
+    bullets: title === 'AI综合分析'
+      ? []
+      : latestDocuments
+          .slice(0, 3)
+          .map((item) => String(item.title || item.name || '').trim())
+          .filter(Boolean),
+  }));
+
+  return attachLocalReportAnalysis({
+    ...record,
+    content: summary,
+    summary: `${record.templateLabel} 已按当前知识库内容动态刷新。`,
+    page: {
+      summary,
+      cards: [
+        { label: '资料数量', value: String(latestDocuments.length), note: '当前参与页面生成的库内文档数' },
+        { label: '进阶解析', value: String(detailedCount), note: '已完成详细解析的文档数' },
+        { label: '主要类型', value: topSchemas[0]?.[0] || '未识别', note: topSchemas.map(([name, count]) => `${name} ${count}`).join('、') },
+        { label: '最近更新', value: latestUpdatedAt ? latestUpdatedAt.slice(0, 10) : '-', note: source.timeRange || '默认全量范围' },
+      ],
+      sections,
+      charts: [
+        {
+          title: '文档类型分布',
+          items: topSchemas.map(([label, value]) => ({ label, value })),
+        },
+        {
+          title: '主题热点分布',
+          items: topTopics.map(([label, value]) => ({ label, value })),
+        },
+      ].filter((chart) => chart.items.length),
+    },
+    dynamicSource: {
+      ...source,
+      outputType: 'page',
+      templateKey: source.templateKey || template.key,
+      templateLabel: source.templateLabel || template.label,
+      lastRenderedAt: new Date().toISOString(),
+      sourceFingerprint,
+      sourceDocumentCount: latestDocuments.length,
+      sourceUpdatedAt: latestUpdatedAt,
+    },
+  });
 }
 
 function resolveTemplateTypeFromKind(kind?: 'table' | 'page' | 'ppt' | 'pdf'): ReportTemplateType | null {
@@ -935,11 +1190,41 @@ export async function loadReportCenterState() {
   const templates = mergeSharedTemplates(Array.isArray(state.templates) ? state.templates : []);
   const rawOutputs = Array.isArray(state.outputs) ? state.outputs : [];
   const { outputs, changed } = reconcileOutputRecords(rawOutputs, groups);
-  if (changed) {
-    await saveGroupsAndOutputs(groups, outputs, templates);
+  let nextOutputs = outputs;
+  let refreshedChanged = false;
+  if (nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled)) {
+    const documentState = await loadParsedDocuments(400, false);
+    nextOutputs = nextOutputs.map((item) => {
+      if (!(item.kind === 'page' && item.dynamicSource?.enabled)) return item;
+      const template =
+        templates.find((entry) => entry.key === (item.dynamicSource?.templateKey || item.templateKey))
+        || templates.find((entry) => entry.key === item.templateKey)
+        || templates.find((entry) => entry.type === 'static-page' && entry.isDefault)
+        || templates.find((entry) => entry.type === 'static-page');
+      if (!template) return item;
+      const refreshed = buildDynamicPageRecord(item, template, documentState.items as Array<Record<string, unknown>>);
+      if (JSON.stringify({
+        content: refreshed.content,
+        summary: refreshed.summary,
+        page: refreshed.page,
+        dynamicSource: refreshed.dynamicSource,
+      }) !== JSON.stringify({
+        content: item.content,
+        summary: item.summary,
+        page: item.page,
+        dynamicSource: item.dynamicSource,
+      })) {
+        refreshedChanged = true;
+      }
+      return refreshed;
+    });
   }
 
-  return { groups, outputs, templates };
+  if (changed || refreshedChanged) {
+    await saveGroupsAndOutputs(groups, nextOutputs, templates);
+  }
+
+  return { groups, outputs: nextOutputs, templates };
 }
 
 export async function createReportOutput(input: {
@@ -954,12 +1239,13 @@ export async function createReportOutput(input: {
   page?: ReportOutputRecord['page'];
   libraries?: ReportOutputRecord['libraries'];
   downloadUrl?: string;
+  dynamicSource?: Partial<ReportDynamicSource> | null;
 }) {
   const state = await loadReportCenterState();
   const group = state.groups.find((item) => item.key === input.groupKey);
   if (!group) throw new Error('report group not found');
 
-  const preferredTemplateType = resolveTemplateTypeFromKind(input.kind) || 'table';
+  const preferredTemplateType = resolveTemplateTypeFromKind(input.kind) || 'static-page';
   const template =
     (input.templateKey ? state.templates.find((item) => item.key === input.templateKey) : null)
     || state.templates.find((item) => item.type === preferredTemplateType && item.isDefault)
@@ -1010,6 +1296,23 @@ export async function createReportOutput(input: {
     page: input.page || null,
     libraries: Array.isArray(input.libraries) ? input.libraries : [],
     downloadUrl: input.downloadUrl || '',
+    dynamicSource: normalizeDynamicSource(input.dynamicSource, {
+      request: input.title || group.label,
+      kind:
+        input.kind
+        || (template.type === 'table'
+          ? 'table'
+          : template.type === 'static-page'
+            ? 'page'
+            : template.type === 'document'
+              ? 'pdf'
+              : 'ppt'),
+      templateKey: template.key,
+      templateLabel: template.label,
+      libraries: Array.isArray(input.libraries) && input.libraries.length
+        ? input.libraries
+        : [{ key: group.key, label: group.label }],
+    }),
   };
 
   const record = await attachReportAnalysis(baseRecord);

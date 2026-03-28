@@ -34,14 +34,14 @@ export function useHomePageController() {
   const [messages, setMessages] = useState(() => loadStoredChatMessages(initialMessages));
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
-  const [reportCollapsed, setReportCollapsed] = useState(false);
+  const [reportCollapsed, setReportCollapsed] = useState(true);
   const [reportItems, setReportItems] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState('');
+  const hasAutoSelectedReportRef = useRef(false);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
-  const [conversationState, setConversationState] = useState(null);
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
@@ -95,12 +95,22 @@ export function useHomePageController() {
 
   useEffect(() => {
     if (!reportItems.length) {
+      hasAutoSelectedReportRef.current = false;
       setSelectedReportId('');
       return;
     }
 
-    if (!reportItems.some((item) => item.id === selectedReportId)) {
+    if (selectedReportId) {
+      if (!reportItems.some((item) => item.id === selectedReportId)) {
+        setSelectedReportId(reportItems[0].id);
+      }
+      hasAutoSelectedReportRef.current = true;
+      return;
+    }
+
+    if (!hasAutoSelectedReportRef.current) {
       setSelectedReportId(reportItems[0].id);
+      hasAutoSelectedReportRef.current = true;
     }
   }, [reportItems, selectedReportId]);
 
@@ -108,8 +118,7 @@ export function useHomePageController() {
     setMessages(initialMessages);
     clearStoredChatMessages();
     setInput('');
-    setReportCollapsed(false);
-    setConversationState(null);
+    setReportCollapsed(true);
   }
 
   async function deleteReport(reportId) {
@@ -159,7 +168,6 @@ export function useHomePageController() {
     loadDocumentSnapshot,
     loadReports,
     setGroupSaving,
-    setConversationState,
     setInput,
     setIsLoading,
     setMessages,
@@ -171,7 +179,6 @@ export function useHomePageController() {
   };
 
   return {
-    conversationState,
     documentLibraries,
     documentTotal,
     groupSaving,
@@ -195,7 +202,6 @@ export function useHomePageController() {
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
       inputState: { isLoading, uploadLoading },
-      conversationState,
       messages,
     }),
     runDocumentUpload: (files) => runDocumentUpload(files, {

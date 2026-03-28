@@ -79,6 +79,16 @@ export async function registerReportRoutes(app: FastifyInstance) {
       } | null;
       libraries?: Array<{ key?: string; label?: string }>;
       downloadUrl?: string;
+      dynamicSource?: {
+        enabled?: boolean;
+        request?: string;
+        outputType?: 'table' | 'page' | 'ppt' | 'pdf';
+        templateKey?: string;
+        templateLabel?: string;
+        timeRange?: string;
+        contentFocus?: string;
+        libraries?: Array<{ key?: string; label?: string }>;
+      } | null;
     };
 
     const groupKey = String(body.groupKey || '').trim();
@@ -98,6 +108,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       page: body.page,
       libraries: Array.isArray(body.libraries) ? body.libraries : [],
       downloadUrl: body.downloadUrl,
+      dynamicSource: body.dynamicSource || null,
     });
 
     return {
@@ -137,7 +148,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     return {
       status: 'updated',
       item: result.group,
-      message: `已将 ${result.group.label} 的默认输出模板切换为 ${result.template.label}。`,
+      message: `已将 ${result.group.label} 的默认模板切换为 ${result.template.label}。`,
     };
   });
 
@@ -171,7 +182,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
 
     const item = await createSharedReportTemplate({
       label: String(body.label || '').trim(),
-      type: (body.type || 'table') as 'table' | 'static-page' | 'ppt' | 'document',
+      type: (body.type || 'static-page') as 'table' | 'static-page' | 'ppt' | 'document',
       description: body.description,
       isDefault: Boolean(body.isDefault),
     });

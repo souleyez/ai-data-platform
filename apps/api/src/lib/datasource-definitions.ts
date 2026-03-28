@@ -10,6 +10,12 @@ export type DatasourceAuthMode = 'none' | 'credential' | 'manual_session' | 'dat
 export type DatasourceTargetMode = 'primary' | 'secondary';
 export type DatasourceRunStatus = 'running' | 'success' | 'partial' | 'failed';
 
+export type DatasourceRunSummaryItem = {
+  id: string;
+  label: string;
+  summary: string;
+};
+
 export type DatasourceTargetLibrary = {
   key: string;
   label: string;
@@ -60,6 +66,7 @@ export type DatasourceRun = {
   ingestedCount: number;
   documentIds: string[];
   libraryKeys: string[];
+  resultSummaries?: DatasourceRunSummaryItem[];
   summary?: string;
   errorMessage?: string;
 };
@@ -164,6 +171,15 @@ function normalizeRun(item: Partial<DatasourceRun>): DatasourceRun {
     ingestedCount: Number(item.ingestedCount || 0),
     documentIds: Array.isArray(item.documentIds) ? item.documentIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
     libraryKeys: Array.isArray(item.libraryKeys) ? item.libraryKeys.map((value) => String(value || '').trim()).filter(Boolean) : [],
+    resultSummaries: Array.isArray(item.resultSummaries)
+      ? item.resultSummaries
+          .map((entry) => ({
+            id: String(entry?.id || '').trim(),
+            label: String(entry?.label || '').trim(),
+            summary: String(entry?.summary || '').trim(),
+          }))
+          .filter((entry) => entry.id && entry.label)
+      : [],
     summary: item.summary || '',
     errorMessage: item.errorMessage || '',
   };
@@ -265,5 +281,22 @@ export async function appendDatasourceRun(input: Partial<DatasourceRun>) {
     items.unshift(run);
   }
   await writeRuns(items.slice(0, 500));
+
+  const definitions = await readDefinitions();
+  const definitionIndex = definitions.findIndex((item) => item.id === run.datasourceId);
+  if (definitionIndex >= 0) {
+    const definition = definitions[definitionIndex];
+    const lastRunAt = run.finishedAt || run.startedAt;
+    definitions[definitionIndex] = {
+      ...definition,
+      lastRunAt,
+      lastStatus: run.status,
+      lastSummary: run.summary || run.errorMessage || definition.lastSummary || '',
+      updatedAt: new Date().toISOString(),
+      nextRunAt: computeNextRunAt(definition.schedule.kind, definition.status),
+    };
+    await writeDefinitions(definitions);
+  }
+
   return run;
 }

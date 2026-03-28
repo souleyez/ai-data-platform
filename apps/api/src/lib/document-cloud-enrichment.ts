@@ -7,7 +7,6 @@ import type {
   StructuredEntity,
 } from './document-parser.js';
 import { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
-import { isOpenClawGatewayConfigured } from './openclaw-adapter.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
 
 type CloudEvidenceBlock = {
@@ -266,8 +265,6 @@ export async function enhanceParsedDocumentsWithCloud(items: ParsedDocument[]) {
     !CLOUD_ENRICH_ENABLED
     || CLOUD_ENRICH_MAX_PER_BATCH <= 0
     || providerMode === 'disabled'
-    || providerMode === 'openclaw-skill'
-    || !isOpenClawGatewayConfigured()
   ) {
     return items;
   }

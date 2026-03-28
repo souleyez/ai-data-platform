@@ -33,14 +33,15 @@ function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
   });
 }
 
-async function persistGeneratedReport(normalized, message, context) {
+async function persistGeneratedReport(normalized, message, context, requestPrompt = '') {
   const { setReportItems, setSelectedReportId, loadReports } = context;
-  const generatedReport = createGeneratedReport({ response: normalized, message });
+  const generatedReport = createGeneratedReport({ response: normalized, message, requestPrompt });
   if (!generatedReport) return;
 
   try {
     const saved = await saveChatGeneratedReport({
       groupKey: generatedReport.groupKey || normalized.libraries?.[0]?.key || '',
+      templateKey: generatedReport.templateKey || normalized.reportTemplate?.key || '',
       title: generatedReport.title,
       kind: generatedReport.kind,
       format: generatedReport.format,
@@ -49,6 +50,7 @@ async function persistGeneratedReport(normalized, message, context) {
       page: generatedReport.page,
       libraries: generatedReport.libraries,
       downloadUrl: generatedReport.downloadUrl,
+      dynamicSource: generatedReport.dynamicSource || null,
     });
     if (saved?.item) {
       await loadReports?.();
@@ -117,7 +119,7 @@ export async function runDocumentUpload(files, context) {
 }
 
 export async function submitQuestion(value, context) {
-  const { inputState, messages, setConversationState, setInput, setIsLoading, setMessages } = context;
+  const { inputState, messages, setInput, setIsLoading, setMessages } = context;
 
   const text = String(value || '').trim();
   if (!text || inputState.isLoading || inputState.uploadLoading) return;
@@ -129,15 +131,12 @@ export async function submitQuestion(value, context) {
   try {
     const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
       mode: 'general',
-      conversationState: context.conversationState || null,
     });
     const normalized = normalizeChatResponse(data, null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
-    setConversationState?.(normalized.conversationState || null);
-    await persistGeneratedReport(normalized, message, context);
+    await persistGeneratedReport(normalized, message, context, text);
   } catch (error) {
-    setConversationState?.(null);
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',

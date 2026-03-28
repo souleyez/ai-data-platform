@@ -122,7 +122,7 @@ export async function buildDatasourceDefinitionFromWebCaptureTask(task: WebCaptu
   };
 }
 
-export function buildDatasourceRunFromWebCaptureTask(task: WebCaptureTask): DatasourceRun | null {
+export function buildDatasourceRunFromWebCaptureTask(task: WebCaptureTask, targetLibraries: DatasourceTargetLibrary[] = []): DatasourceRun | null {
   if (!task.lastRunAt || !task.lastStatus) return null;
   return {
     id: buildRunId(task),
@@ -134,13 +134,14 @@ export function buildDatasourceRunFromWebCaptureTask(task: WebCaptureTask): Data
     capturedCount: task.lastCollectedCount || task.lastCollectedItems?.length || 0,
     ingestedCount: task.documentPath ? 1 : 0,
     documentIds: task.documentPath ? [task.documentPath] : [],
-    libraryKeys: [],
+    libraryKeys: targetLibraries.map((item) => item.key),
     summary: task.lastSummary || '',
     errorMessage: task.lastStatus === 'error' ? task.lastSummary || 'capture failed' : '',
   };
 }
 
 export type WebCaptureDatasourceOverrides = {
+  id?: string;
   name?: string;
   targetLibraries?: DatasourceTargetLibrary[];
   notes?: string;
@@ -150,6 +151,7 @@ export async function syncWebCaptureTaskToDatasource(task: WebCaptureTask, overr
   const definition = await buildDatasourceDefinitionFromWebCaptureTask(task);
   const nextDefinition: DatasourceDefinition = {
     ...definition,
+    id: overrides.id?.trim() || definition.id,
     name: overrides.name?.trim() || definition.name,
     notes: overrides.notes?.trim() || definition.notes,
     targetLibraries: overrides.targetLibraries?.length ? overrides.targetLibraries : definition.targetLibraries,
@@ -158,6 +160,7 @@ export async function syncWebCaptureTaskToDatasource(task: WebCaptureTask, overr
 
   const run = buildDatasourceRunFromWebCaptureTask(task);
   if (run) {
+    run.libraryKeys = nextDefinition.targetLibraries.map((item) => item.key);
     await appendDatasourceRun(run);
   }
 
@@ -166,6 +169,6 @@ export async function syncWebCaptureTaskToDatasource(task: WebCaptureTask, overr
 
 export async function buildDatasourceSummaryFromWebCaptureTask(task: WebCaptureTask): Promise<DatasourceProviderSummary> {
   const definition = await buildDatasourceDefinitionFromWebCaptureTask(task);
-  const run = buildDatasourceRunFromWebCaptureTask(task);
+  const run = buildDatasourceRunFromWebCaptureTask(task, definition.targetLibraries);
   return webDatasourceProvider.summarize(definition, run ? [run] : []);
 }

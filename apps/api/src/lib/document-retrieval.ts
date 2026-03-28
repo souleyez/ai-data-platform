@@ -136,6 +136,15 @@ function detectTemplateTask(prompt: string): TemplateTask {
   return 'general';
 }
 
+function isResumeCompanyProjectPrompt(prompt: string) {
+  const text = normalizePrompt(prompt);
+  return (
+    containsAny(text, ['resume', 'cv', 'candidate', 'talent', '简历', '候选人', '人才'])
+    && containsAny(text, ['company', 'employer', '公司', '组织', '维度'])
+    && containsAny(text, ['project', '项目', 'it', 'system', 'platform', 'api', '架构', '开发', '实施', '技术'])
+  );
+}
+
 function detectRetrievalIntent(prompt: string): RetrievalIntent {
   const text = normalizePrompt(prompt);
   const signalScore = {
@@ -422,6 +431,12 @@ function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: Tem
 
   const profileText = JSON.stringify(profile);
   if (templateTask === 'resume-comparison' && /(education|latestcompany|skills|yearsofexperience|candidatename)/i.test(profileText)) score += 12;
+  if (templateTask === 'resume-comparison' && isResumeCompanyProjectPrompt(prompt)) {
+    if (/(companies|latestcompany)/i.test(profileText)) score += 14;
+    if (/(projecthighlights)/i.test(profileText)) score += 16;
+    if (/(itprojecthighlights)/i.test(profileText)) score += 20;
+    if (/(skills)/i.test(profileText)) score += 6;
+  }
   if ((templateTask === 'formula-table' || templateTask === 'formula-static-page') && /(ingredientsignals|strainsignals|targetscenario|intendedaudience|productform)/i.test(profileText)) score += 10;
   if (templateTask === 'order-static-page') {
     if (/(platformsignals|categorysignals|metricsignals|replenishmentsignals|salescyclesignals|forecastsignals|anomalysignals|operatingsignals|keymetrics|platforms)/i.test(profileText)) score += 14;
@@ -443,6 +458,7 @@ function scoreEvidenceTemplateFit(entry: DocumentEvidenceMatch, prompt: string, 
 
   if (templateTask === 'resume-comparison') {
     score += item.schemaType === 'resume' ? 10 : -20;
+    if (isResumeCompanyProjectPrompt(prompt) && containsAny(chunkText, ['company', 'project', 'system', 'platform', 'api', 'implementation', 'development', 'architecture', '技术', '项目', '系统', '平台', '接口', '开发', '实施', '架构'])) score += 14;
     if (containsAny(chunkText, ['education', 'company', 'skill', 'experience', '学历', '公司', '能力'])) score += 8;
   } else if (templateTask === 'paper-summary') {
     score += isPurePaperCandidate(item) ? 10 : -12;

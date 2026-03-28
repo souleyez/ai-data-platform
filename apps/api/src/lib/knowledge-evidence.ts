@@ -14,6 +14,29 @@ function toText(value: unknown) {
   return String(value || '').trim();
 }
 
+function formatStructuredProfile(profile: ParsedDocument['structuredProfile']) {
+  if (!profile || typeof profile !== 'object') return '';
+
+  return Object.entries(profile)
+    .flatMap(([key, value]) => {
+      if (Array.isArray(value)) {
+        const compact = value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 5);
+        return compact.length ? [`${key}: ${compact.join('、')}`] : [];
+      }
+      if (value && typeof value === 'object') {
+        const compact = Object.entries(value as Record<string, unknown>)
+          .map(([entryKey, entryValue]) => `${entryKey}:${String(entryValue || '').trim()}`)
+          .filter((entry) => !entry.endsWith(':'))
+          .slice(0, 4);
+        return compact.length ? [`${key}: ${compact.join('；')}`] : [];
+      }
+      const text = String(value || '').trim();
+      return text ? [`${key}: ${text}`] : [];
+    })
+    .slice(0, 8)
+    .join('\n');
+}
+
 function extractPathTimestamp(filePath: string) {
   const match = String(filePath || '').match(/(?:^|[\\/])(\d{13})(?:[-_.]|$)/);
   if (!match) return 0;
@@ -31,6 +54,15 @@ function extractDocumentTimestamp(item: ParsedDocument) {
   ].filter((value) => Number.isFinite(value) && value > 0);
 
   return candidates.length ? Math.max(...candidates) : 0;
+}
+
+function sortDocumentsForKnowledgeContext(items: ParsedDocument[]) {
+  return [...items].sort((left, right) => {
+    const leftDetailed = left.parseStage === 'detailed' || left.detailParseStatus === 'succeeded' ? 1 : 0;
+    const rightDetailed = right.parseStage === 'detailed' || right.detailParseStatus === 'succeeded' ? 1 : 0;
+    if (rightDetailed !== leftDetailed) return rightDetailed - leftDetailed;
+    return extractDocumentTimestamp(right) - extractDocumentTimestamp(left);
+  });
 }
 
 function getWeekStart(now: Date) {
@@ -54,6 +86,7 @@ function getQuarterStart(now: Date) {
 function normalizeTimeRangeLabel(timeRange?: string) {
   const text = toText(timeRange).toLowerCase();
   if (!text) return '';
+  if (/\u5168\u90e8\u65f6\u95f4|\u5168\u65f6\u95f4|\u6240\u6709\u65f6\u95f4|\u5168\u91cf|\u5168\u90e8|\u5168\u5e93|all time|full range/.test(text)) return 'all-time';
   if (/\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|recent upload|latest upload/.test(text)) return 'recent-upload';
   if (/\u4eca\u5929|today/.test(text)) return 'today';
   if (/\u6628\u5929|\u6628\u65e5|yesterday/.test(text)) return 'yesterday';
@@ -111,6 +144,7 @@ function resolveTimeWindow(label: string, now = new Date()) {
 export function filterDocumentsByTimeRange(items: ParsedDocument[], timeRange?: string) {
   const label = normalizeTimeRangeLabel(timeRange);
   if (!label || !items.length) return items;
+  if (label === 'all-time') return items;
 
   const window = resolveTimeWindow(label);
   if (!window) return items;
@@ -195,8 +229,32 @@ export function buildKnowledgeContext(
   retrieval: RetrievalResult | { documents: any[]; evidenceMatches: any[] },
   scope?: KnowledgeScope,
 ) {
-  const documents = retrieval.documents.slice(0, 6);
+  const documents = sortDocumentsForKnowledgeContext(retrieval.documents).slice(0, 6);
   const evidence = retrieval.evidenceMatches.slice(0, 8);
+  const documentBlocks = documents.map((item: ParsedDocument, index: number) => {
+    const evidenceChunks = (item.evidenceChunks || [])
+      .slice(0, 2)
+      .map((chunk) => String(chunk?.text || '').trim())
+      .filter(Boolean);
+    const claims = (item.claims || [])
+      .slice(0, 2)
+      .map((claim) => [claim.subject, claim.predicate, claim.object].filter(Boolean).join(' '))
+      .filter(Boolean);
+    const profile = formatStructuredProfile(item.structuredProfile);
+
+    return [
+      `文档 ${index + 1}: ${item.title || item.name}`,
+      `类型：${item.schemaType || item.category || 'generic'}`,
+      `摘要：${item.summary || item.excerpt || '无摘要'}`,
+      profile ? `结构化重点：\n${profile}` : '',
+      claims.length ? `关键结论：\n${claims.map((text, claimIndex) => `${claimIndex + 1}. ${text}`).join('\n')}` : '',
+      evidenceChunks.length
+        ? `关键证据：\n${evidenceChunks.map((text, evidenceIndex) => `${evidenceIndex + 1}. ${text}`).join('\n')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  });
 
   return [
     `用户需求：${requestText}`,
@@ -204,16 +262,14 @@ export function buildKnowledgeContext(
     scope?.timeRange ? `时间范围：${scope.timeRange}` : '',
     scope?.contentFocus ? `内容范围：${scope.contentFocus}` : '',
     '',
-    '文档摘要：',
-    ...documents.map(
-      (item: any, index: number) =>
-        `${index + 1}. ${item.title || item.name}\n摘要：${item.summary || item.excerpt || '无摘要'}\n主题：${
-          (item.topicTags || []).join('、') || '未识别'
-        }`,
-    ),
+    '优先参考的详细解析文档：',
+    ...documentBlocks,
     '',
     '高相关证据：',
-    ...evidence.map((item: any, index: number) => `${index + 1}. ${item.item.title || item.item.name}\n证据：${item.chunkText}`),
+    ...evidence.map(
+      (item: any, index: number) =>
+        `${index + 1}. ${item.item.title || item.item.name}\n证据：${String(item.chunkText || '').trim()}`,
+    ),
   ].filter(Boolean).join('\n\n');
 }
 

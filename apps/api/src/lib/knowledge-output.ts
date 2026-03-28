@@ -1,3 +1,4 @@
+import type { ParsedDocument } from './document-parser.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
 
 export type ChatOutput =
@@ -94,6 +95,118 @@ function buildFallbackTableOutput(title: string, content: string): ChatOutput {
       rows: [[content, '如需更细字段，可以继续补充要求']],
     },
   };
+}
+
+function toStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function extractProjectRole(text: string) {
+  const source = String(text || '').trim();
+  const match = source.match(/(负责[^，。；]{2,20}|担任[^，。；]{2,20}|主导[^，。；]{2,20}|参与[^，。；]{2,20}|牵头[^，。；]{2,20})/);
+  return match?.[1] || '';
+}
+
+function extractProjectTimeline(text: string) {
+  const source = String(text || '').trim();
+  const match = source.match(/((?:20\d{2}|19\d{2})[./-]?\d{0,2}(?:\s*[~-]\s*(?:20\d{2}|至今|现在)\d{0,5})?)/);
+  return match?.[1] || '';
+}
+
+function extractTechKeywords(text: string) {
+  const source = String(text || '').toLowerCase();
+  const keywords = [
+    'sap', 'erp', 'crm', 'mes', 'wms', 'bi', 'api', 'java', 'python', 'go', 'c#', 'sql',
+    'mysql', 'oracle', 'postgresql', 'redis', 'kafka', 'docker', 'kubernetes', 'aws',
+    'azure', '阿里云', '腾讯云', '系统', '平台', '接口', '数据中台', '供应链', '实施', '开发', '架构',
+  ];
+  const matches = keywords.filter((keyword) => source.includes(keyword.toLowerCase()));
+  return [...new Set(matches)].slice(0, 6).join(' / ');
+}
+
+function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
+  const rows: Array<Array<string>> = [];
+
+  for (const item of documents) {
+    if (item.schemaType !== 'resume') continue;
+    const profile = (item.structuredProfile || {}) as Record<string, unknown>;
+    const candidate = String(profile.candidateName || item.title || item.name || '').trim() || item.name;
+    const companies = toStringArray(profile.companies).length
+      ? toStringArray(profile.companies)
+      : [String(profile.latestCompany || '').trim()].filter(Boolean);
+    const projectHighlights = toStringArray(profile.itProjectHighlights).length
+      ? toStringArray(profile.itProjectHighlights)
+      : toStringArray(profile.projectHighlights);
+
+    const effectiveCompanies = companies.length ? companies.slice(0, 4) : ['未明确公司'];
+    const effectiveProjects = projectHighlights.length
+      ? projectHighlights.slice(0, 6)
+      : toStringArray(profile.highlights).filter((entry) => /(项目|系统|平台|接口|开发|实施|技术)/i.test(entry)).slice(0, 4);
+
+    if (!effectiveProjects.length) {
+      rows.push([
+        effectiveCompanies[0],
+        candidate,
+        '未提取到明确 IT 项目',
+        '',
+        toStringArray(profile.skills).slice(0, 6).join(' / '),
+        '',
+        item.name,
+      ]);
+      continue;
+    }
+
+    for (const company of effectiveCompanies) {
+      for (const project of effectiveProjects) {
+        rows.push([
+          company,
+          candidate,
+          project,
+          extractProjectRole(project),
+          extractTechKeywords(project) || toStringArray(profile.skills).slice(0, 6).join(' / '),
+          extractProjectTimeline(project),
+          item.name,
+        ]);
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = row.join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 24);
+}
+
+export function buildKnowledgeFallbackOutput(
+  kind: 'table' | 'page' | 'pdf' | 'ppt',
+  requestText: string,
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+): ChatOutput {
+  if (kind === 'table' && envelope?.tableColumns?.includes('公司') && envelope.tableColumns.includes('IT项目')) {
+    const rows = buildResumeCompanyProjectRows(documents);
+    if (rows.length) {
+      const content = `已基于库内简历整理出按公司维度的 IT 项目信息，共 ${rows.length} 条。`;
+      return {
+        type: 'table',
+        title: '简历 IT 项目公司维度表',
+        content,
+        format: 'csv',
+        table: {
+          title: '简历 IT 项目公司维度表',
+          subtitle: '基于库内简历的结构化信息自动整理',
+          columns: envelope.tableColumns,
+          rows,
+        },
+      };
+    }
+  }
+
+  return normalizeReportOutput(kind, requestText, '', envelope);
 }
 
 export function normalizeReportOutput(

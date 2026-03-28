@@ -137,8 +137,11 @@ function sanitizeResumeFields(fields: ParsedDocument['resumeFields']) {
     expectedCity: normalize(fields.expectedCity),
     expectedSalary: normalize(fields.expectedSalary),
     latestCompany: normalize(fields.latestCompany),
+    companies: normalizeList(fields.companies),
     skills: normalizeList(fields.skills),
     highlights: normalizeList(fields.highlights),
+    projectHighlights: normalizeList(fields.projectHighlights),
+    itProjectHighlights: normalizeList(fields.itProjectHighlights),
   };
   return Object.values(sanitized).some((value) => Array.isArray(value) ? value.length : Boolean(value)) ? sanitized : undefined;
 }

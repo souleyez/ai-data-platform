@@ -22,7 +22,14 @@ import {
   runDatasourceDefinition,
 } from '../lib/datasource-execution.js';
 import { planDatasourceFromPrompt } from '../lib/datasource-planning.js';
-import { buildDatasourceMeta, listDatasourceProviderSummaries } from '../lib/datasource-service.js';
+import {
+  buildDatasourceDocumentSummaryMap,
+  buildDatasourceLibraryLabelMap,
+  buildDatasourceMeta,
+  buildDatasourceRunReadModels,
+  enrichDatasourceProviderSummary,
+  listDatasourceProviderSummaries,
+} from '../lib/datasource-service.js';
 import { listDatasourcePresets } from '../lib/datasource-presets.js';
 import { sourceItems } from '../lib/mock-data.js';
 import { listWebCaptureTasks } from '../lib/web-capture.js';
@@ -40,29 +47,17 @@ function toDatasourceItem(item: any) {
   };
 }
 
-function toDocumentLabels(documentIds: string[]) {
-  return (documentIds || []).map((value) => path.basename(String(value || ''))).filter(Boolean);
-}
-
 async function buildDocumentSummaryMap() {
   const snapshot = await loadParsedDocuments(5000, false);
-  return new Map(
-    snapshot.items.map((item) => [
-      item.path,
-      {
-        id: item.path,
-        label: item.title || item.name || path.basename(item.path),
-        summary: item.summary || item.excerpt || '',
-      },
-    ]),
+  return buildDatasourceDocumentSummaryMap(
+    snapshot.items.map((item) => ({
+      path: item.path,
+      title: item.title,
+      name: item.name,
+      summary: item.summary,
+      excerpt: item.excerpt,
+    })),
   );
-}
-
-function toDocumentSummaries(documentIds: string[], summaryMap: Map<string, { id: string; label: string; summary: string }>) {
-  return (documentIds || [])
-    .map((value) => summaryMap.get(String(value || '').trim()))
-    .filter(Boolean)
-    .slice(0, 8);
 }
 
 function buildLegacyDynamicItems(webTasks: Awaited<ReturnType<typeof listWebCaptureTasks>>) {
@@ -289,13 +284,14 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/datasources/managed', async () => {
-    const [items, meta] = await Promise.all([
+    const [items, meta, documentSummaryMap] = await Promise.all([
       listDatasourceProviderSummaries(),
       buildDatasourceMeta(),
+      buildDocumentSummaryMap(),
     ]);
     return {
       total: items.length,
-      items,
+      items: items.map((item) => enrichDatasourceProviderSummary(item, documentSummaryMap)),
       meta,
     };
   });
@@ -310,22 +306,21 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
 
   app.get('/datasources/runs', async (request) => {
     const query = (request.query || {}) as { datasourceId?: string };
-    const [items, definitions, documentSummaryMap] = await Promise.all([
+    const [items, definitions, documentSummaryMap, documentLibraries] = await Promise.all([
       listDatasourceRuns(String(query.datasourceId || '').trim() || undefined),
       listDatasourceDefinitions(),
       buildDocumentSummaryMap(),
+      loadDocumentLibraries(),
     ]);
-    const definitionMap = new Map(definitions.map((item) => [item.id, item]));
+    const libraryLabelMap = buildDatasourceLibraryLabelMap(documentLibraries);
     return {
       total: items.length,
-      items: items.map((item) => ({
-        ...item,
-        datasourceName: definitionMap.get(item.datasourceId)?.name || item.datasourceId,
-        libraryLabels: (definitionMap.get(item.datasourceId)?.targetLibraries || [])
-          .map((entry) => entry.label),
-        documentLabels: toDocumentLabels(item.documentIds),
-        documentSummaries: toDocumentSummaries(item.documentIds, documentSummaryMap),
-      })),
+      items: buildDatasourceRunReadModels({
+        runs: items,
+        definitions,
+        libraryLabelMap,
+        documentSummaryMap,
+      }),
     };
   });
 
@@ -480,18 +475,7 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       activeItems,
       captureTasks,
       managedDatasources: providerSummaries.map((item) => ({
-        ...item,
-        runtime: item.runtime
-          ? {
-              ...item.runtime,
-              documentLabels: item.runtime.documentLabels?.length
-                ? item.runtime.documentLabels
-                : toDocumentLabels(item.runtime.documentIds || []),
-              documentSummaries: item.runtime.documentSummaries?.length
-                ? item.runtime.documentSummaries
-                : toDocumentSummaries(item.runtime.documentIds || [], documentSummaryMap),
-            }
-          : item.runtime,
+        ...enrichDatasourceProviderSummary(item, documentSummaryMap),
       })),
       providerMeta,
       presetCatalog,

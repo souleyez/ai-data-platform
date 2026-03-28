@@ -432,7 +432,13 @@ async function loadVectorRecords() {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as DocumentVectorRecord);
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as DocumentVectorRecord];
+      } catch {
+        return [];
+      }
+    });
 }
 
 function scoreIntentFitForRecord(record: DocumentVectorRecord, intent?: string) {

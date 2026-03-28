@@ -11,6 +11,29 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function sanitizeFilename(value, fallback = 'report') {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/\.+$/g, '');
+  return normalized || fallback;
+}
+
+function chunkArray(items, size) {
+  if (!Array.isArray(items) || size <= 0) return [];
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function normalizeNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function createGeneratedReportId() {
   return `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -18,11 +41,11 @@ export function createGeneratedReportId() {
 function normalizeChartItems(items) {
   return Array.isArray(items)
     ? items
-      .map((item) => ({
-        label: item?.label || '',
-        value: Number(item?.value || 0),
-      }))
-      .filter((item) => item.label)
+        .map((item) => ({
+          label: item?.label || '',
+          value: normalizeNumber(item?.value),
+        }))
+        .filter((item) => item.label)
     : [];
 }
 
@@ -32,34 +55,57 @@ function normalizePage(page) {
     summary: page?.summary || '',
     cards: Array.isArray(page?.cards)
       ? page.cards
-        .map((card) => ({
-          label: card?.label || '',
-          value: card?.value || '',
-          note: card?.note || '',
-        }))
-        .filter((card) => card.label || card.value)
+          .map((card) => ({
+            label: card?.label || '',
+            value: card?.value || '',
+            note: card?.note || '',
+          }))
+          .filter((card) => card.label || card.value)
       : [],
     sections: Array.isArray(page?.sections)
       ? page.sections
-        .map((section) => ({
-          title: section?.title || '',
-          body: section?.body || '',
-          bullets: Array.isArray(section?.bullets) ? section.bullets.filter(Boolean) : [],
-        }))
-        .filter((section) => section.title || section.body || section.bullets.length)
+          .map((section) => ({
+            title: section?.title || '',
+            body: section?.body || '',
+            bullets: Array.isArray(section?.bullets) ? section.bullets.filter(Boolean) : [],
+          }))
+          .filter((section) => section.title || section.body || section.bullets.length)
       : [],
     charts: Array.isArray(page?.charts)
       ? page.charts
-        .map((chart) => ({
-          title: chart?.title || '',
-          items: normalizeChartItems(chart?.items),
-        }))
-        .filter((chart) => chart.title || chart.items.length)
+          .map((chart) => ({
+            title: chart?.title || '',
+            items: normalizeChartItems(chart?.items),
+          }))
+          .filter((chart) => chart.title || chart.items.length)
       : [],
   };
 }
 
-export function createGeneratedReport({ response, message }) {
+function normalizeLibraries(libraries) {
+  return Array.isArray(libraries) ? libraries.filter((item) => item?.key || item?.label) : [];
+}
+
+function normalizeDynamicSource(dynamicSource) {
+  if (!dynamicSource || !dynamicSource.enabled) return null;
+  return {
+    enabled: true,
+    request: String(dynamicSource.request || '').trim(),
+    outputType: String(dynamicSource.outputType || '').trim() || 'page',
+    templateKey: String(dynamicSource.templateKey || '').trim(),
+    templateLabel: String(dynamicSource.templateLabel || '').trim(),
+    timeRange: String(dynamicSource.timeRange || '').trim(),
+    contentFocus: String(dynamicSource.contentFocus || '').trim(),
+    libraries: normalizeLibraries(dynamicSource.libraries),
+    updatedAt: String(dynamicSource.updatedAt || '').trim(),
+    lastRenderedAt: String(dynamicSource.lastRenderedAt || '').trim(),
+    sourceFingerprint: String(dynamicSource.sourceFingerprint || '').trim(),
+    sourceDocumentCount: normalizeNumber(dynamicSource.sourceDocumentCount),
+    sourceUpdatedAt: String(dynamicSource.sourceUpdatedAt || '').trim(),
+  };
+}
+
+export function createGeneratedReport({ response, message, requestPrompt = '' }) {
   const createdAt = new Date().toISOString();
   const output = response?.output || message?.output || null;
   const outputType = output?.type || (message?.table ? 'table' : 'answer');
@@ -70,13 +116,33 @@ export function createGeneratedReport({ response, message }) {
     output?.title ||
     message?.table?.title ||
     message?.title ||
-    (outputType === 'table' ? '生成表格报表' : '生成静态分析页');
+    (outputType === 'table' ? '生成表格报表' : '生成数据可视化静态页');
+  const libraries = normalizeLibraries(response?.libraries);
+  const reportTemplate = response?.reportTemplate || null;
+  const dynamicSource =
+    outputType === 'page' && libraries.length
+      ? {
+          enabled: true,
+          request: String(requestPrompt || title || '').trim(),
+          outputType,
+          templateKey: String(reportTemplate?.key || '').trim(),
+          templateLabel: String(reportTemplate?.label || '').trim(),
+          libraries,
+          updatedAt: createdAt,
+          lastRenderedAt: '',
+          sourceFingerprint: '',
+          sourceDocumentCount: 0,
+          sourceUpdatedAt: '',
+          timeRange: '',
+          contentFocus: '',
+        }
+      : null;
 
   return {
     id: createGeneratedReportId(),
     title,
     kind: outputType,
-    format: output?.format || (outputType === 'table' ? 'csv' : 'html'),
+    format: output?.format || (outputType === 'table' ? 'csv' : outputType === 'page' ? 'html' : 'txt'),
     source: 'chat',
     createdAt,
     content: output?.content || message?.content || '',
@@ -84,10 +150,13 @@ export function createGeneratedReport({ response, message }) {
     page: normalizePage(output?.page),
     intent: response?.intent || 'report',
     mode: response?.mode || 'fallback',
-    libraries: Array.isArray(response?.libraries) ? response.libraries : [],
+    libraries,
     downloadUrl: output?.downloadUrl || '',
     groupKey: response?.libraries?.[0]?.key || '',
-    templateKey: '',
+    groupLabel: response?.libraries?.[0]?.label || '',
+    templateKey: reportTemplate?.key || '',
+    templateLabel: reportTemplate?.label || '',
+    dynamicSource,
   };
 }
 
@@ -105,12 +174,13 @@ export function normalizeGeneratedReportRecord(item) {
     page: normalizePage(item?.page),
     intent: item?.intent || 'report',
     mode: item?.mode || 'openclaw',
-    libraries: Array.isArray(item?.libraries) ? item.libraries : [],
+    libraries: normalizeLibraries(item?.libraries),
     downloadUrl: item?.downloadUrl || '',
     groupKey: item?.groupKey || '',
     groupLabel: item?.groupLabel || '',
     templateKey: item?.templateKey || '',
     templateLabel: item?.templateLabel || '',
+    dynamicSource: normalizeDynamicSource(item?.dynamicSource),
   };
 }
 
@@ -127,6 +197,7 @@ export function buildGeneratedReportPersistPayload(item) {
     page: item.page,
     libraries: item.libraries || [],
     downloadUrl: item.downloadUrl || '',
+    dynamicSource: item.dynamicSource || null,
   };
 }
 
@@ -168,14 +239,6 @@ export async function copyGeneratedReportLink(item) {
   return link;
 }
 
-export function getGeneratedReportActionLabel(item) {
-  if (!item) return '查看';
-  if (item.kind === 'table') return '下载表格';
-  if (item.format === 'ppt' || item.format === 'pdf') return '下载文件';
-  if (item.kind === 'page') return '复制静态页链接';
-  return '查看';
-}
-
 function buildCsv(table) {
   const rows = [table?.columns || [], ...(table?.rows || [])];
   return rows
@@ -191,6 +254,82 @@ function buildCsv(table) {
         .join(','),
     )
     .join('\n');
+}
+
+function buildRowsFromPage(item) {
+  const rows = [];
+  const page = item?.page || {};
+
+  for (const card of page.cards || []) {
+    rows.push(['指标卡片', card.label || '', card.value || '', card.note || '']);
+  }
+
+  for (const section of page.sections || []) {
+    rows.push(['页面分节', section.title || '', section.body || '', (section.bullets || []).join('；')]);
+  }
+
+  for (const chart of page.charts || []) {
+    for (const entry of chart.items || []) {
+      rows.push(['图表数据', chart.title || '', entry.label || '', entry.value ?? '']);
+    }
+  }
+
+  if (!rows.length && item?.content) {
+    rows.push(['正文', item.title || '', item.content, '']);
+  }
+
+  return rows;
+}
+
+function buildTableCsvFromReport(item) {
+  if (item?.table?.columns?.length && Array.isArray(item?.table?.rows)) {
+    return buildCsv(item.table);
+  }
+  const rows = buildRowsFromPage(item);
+  return buildCsv({
+    columns: ['类型', '标题', '内容', '补充信息'],
+    rows,
+  });
+}
+
+function buildPlainText(item) {
+  const parts = [
+    item?.title ? `标题：${item.title}` : '',
+    item?.createdAt ? `生成时间：${item.createdAt}` : '',
+    item?.templateLabel ? `模板：${item.templateLabel}` : '',
+    Array.isArray(item?.libraries) && item.libraries.length
+      ? `知识库：${item.libraries.map((entry) => entry.label || entry.key).filter(Boolean).join('、')}`
+      : '',
+    item?.summary ? `摘要：${item.summary}` : '',
+    item?.content ? `正文：\n${item.content}` : '',
+  ].filter(Boolean);
+
+  if (item?.table?.columns?.length) {
+    parts.push(`表头：${item.table.columns.join(' | ')}`);
+    for (const row of item.table.rows || []) {
+      parts.push((row || []).map((cell) => String(cell ?? '')).join(' | '));
+    }
+  }
+
+  if (item?.page?.summary) {
+    parts.push(`页面摘要：${item.page.summary}`);
+  }
+
+  for (const section of item?.page?.sections || []) {
+    parts.push(`${section.title || '分节'}：${section.body || ''}`);
+    for (const bullet of section.bullets || []) {
+      parts.push(`- ${bullet}`);
+    }
+  }
+
+  for (const chart of item?.page?.charts || []) {
+    parts.push(`图表：${chart.title || '未命名图表'}`);
+    for (const entry of chart.items || []) {
+      parts.push(`- ${entry.label}: ${entry.value}`);
+    }
+  }
+
+  return parts.join('\n\n').trim();
 }
 
 function buildPageHtml(item) {
@@ -222,13 +361,13 @@ function buildPageHtml(item) {
 
   const charts = (item?.page?.charts || [])
     .map((chart) => {
-      const maxValue = Math.max(...chart.items.map((entry) => Number(entry.value || 0)), 1);
+      const maxValue = Math.max(...chart.items.map((entry) => normalizeNumber(entry.value)), 1);
       const rows = chart.items
         .map(
           (entry) => `
             <div class="bar-row">
               <span class="bar-label">${escapeHtml(entry.label)}</span>
-              <span class="bar-track"><span class="bar-fill" style="width:${Math.max(8, (Number(entry.value || 0) / maxValue) * 100)}%"></span></span>
+              <span class="bar-track"><span class="bar-fill" style="width:${Math.max(8, (normalizeNumber(entry.value) / maxValue) * 100)}%"></span></span>
               <span class="bar-value">${escapeHtml(entry.value)}</span>
             </div>`,
         )
@@ -246,7 +385,7 @@ function buildPageHtml(item) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(item?.title || '静态分析页')}</title>
+  <title>${escapeHtml(item?.title || '数据可视化静态页')}</title>
   <style>
     body { font-family: "Microsoft YaHei", sans-serif; margin: 32px; color: #16202f; line-height: 1.7; background: #f8fafc; }
     h1, h2 { margin: 0 0 12px; }
@@ -267,7 +406,7 @@ function buildPageHtml(item) {
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(item?.title || '静态分析页')}</h1>
+  <h1>${escapeHtml(item?.title || '数据可视化静态页')}</h1>
   <div class="meta">生成时间：${escapeHtml(item?.createdAt || '')}</div>
   ${item?.content ? `<section class="section"><p>${escapeHtml(item.content)}</p></section>` : ''}
   ${cards ? `<div class="cards">${cards}</div>` : ''}
@@ -277,35 +416,82 @@ function buildPageHtml(item) {
 </html>`;
 }
 
-export function downloadGeneratedReport(item) {
-  if (typeof window === 'undefined' || !item) return;
+async function downloadPptx(item) {
+  const response = await fetch('/api/reports/export/pptx', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ item }),
+  });
 
-  if (item.downloadUrl) {
-    window.open(item.downloadUrl, '_blank', 'noopener,noreferrer');
-    return;
+  if (!response.ok) {
+    throw new Error(`PPT export failed: ${response.status}`);
   }
 
-  let extension = item.format || 'txt';
-  let mimeType = 'text/plain;charset=utf-8';
-  let content = item.content || '';
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename=\"?([^\";]+)\"?/i);
+  const rawName = decodeURIComponent(match?.[1] || match?.[2] || '');
+  const safeName = sanitizeFilename(rawName || item?.title, 'report');
+  const filename = safeName.toLowerCase().endsWith('.pptx') ? safeName : `${safeName}.pptx`;
 
-  if (item.kind === 'table' && item.table) {
-    extension = 'csv';
-    mimeType = 'text/csv;charset=utf-8';
-    content = buildCsv(item.table);
-  } else if (item.kind === 'page') {
-    extension = 'html';
-    mimeType = 'text/html;charset=utf-8';
-    content = buildPageHtml(item);
-  }
+  downloadBlob(filename, blob, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+}
 
+function downloadBlob(filename, content, mimeType) {
+  if (typeof window === 'undefined') return;
   const blob = new Blob([content], { type: mimeType });
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${item.title || 'generated-report'}.${extension}`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+}
+
+export function getGeneratedReportShareActions(item) {
+  if (!item) return [];
+  return [
+    { key: 'link', label: '复制链接' },
+    { key: 'table', label: '按表格下载' },
+    { key: 'ppt', label: '按PPT下载' },
+    { key: 'text', label: '按纯文字下载' },
+  ];
+}
+
+export async function downloadGeneratedReportAs(item, mode = 'table') {
+  if (!item || typeof window === 'undefined') return;
+
+  if (mode === 'link') {
+    await copyGeneratedReportLink(item);
+    return;
+  }
+
+  if (mode === 'table') {
+    downloadBlob(`${sanitizeFilename(item.title, 'report')}.csv`, buildTableCsvFromReport(item), 'text/csv;charset=utf-8');
+    return;
+  }
+
+  if (mode === 'ppt') {
+    await downloadPptx(item);
+    return;
+  }
+
+  if (mode === 'text') {
+    downloadBlob(`${sanitizeFilename(item.title, 'report')}.txt`, buildPlainText(item), 'text/plain;charset=utf-8');
+    return;
+  }
+
+  if (mode === 'page') {
+    downloadBlob(`${sanitizeFilename(item.title, 'report')}.html`, buildPageHtml(item), 'text/html;charset=utf-8');
+  }
+}
+
+export function downloadGeneratedReport(item) {
+  if (!item) return;
+  const fallbackMode = item.kind === 'page' ? 'page' : item.kind === 'table' ? 'table' : 'text';
+  void downloadGeneratedReportAs(item, fallbackMode);
 }

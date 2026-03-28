@@ -60,13 +60,13 @@ export default function HomePageClient({ initialModelState }) {
       <main className="main-panel">
         <header className="topbar">
           <div className="topbar-title-row">
-            <h2>AI智能服务</h2>
+            <h2>智能助手</h2>
             <span className="topbar-inline-note">{buildTopSummary(documentTotal, documentLibraries)}</span>
           </div>
         </header>
 
         <section className="homepage-grid">
-          <section className={`workspace-grid ${reportCollapsed ? 'workspace-grid-expanded' : ''}`}>
+          <section className={`workspace-grid ${reportCollapsed ? 'workspace-grid-compact' : 'workspace-grid-expanded'}`}>
             <ChatPanel
               messages={messages}
               input={input}

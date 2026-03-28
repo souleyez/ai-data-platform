@@ -10,6 +10,17 @@ function toDocumentLabels(documentIds: string[]) {
   return (documentIds || []).map((value) => String(value || '').split(/[\\/]/).at(-1) || '').filter(Boolean);
 }
 
+function toResultSummaries(run: DatasourceRun | null) {
+  return (run?.resultSummaries || [])
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      summary: item.summary,
+    }))
+    .filter((item) => item.id && item.label)
+    .slice(0, 8);
+}
+
 function buildCapabilities(definition: DatasourceDefinition) {
   const capabilities = ['erp-sync', 'ingest', 'schedule'] as const;
   if (definition.authMode === 'credential' || definition.authMode === 'manual_session' || definition.authMode === 'api_token') {
@@ -36,9 +47,14 @@ export const erpDatasourceProvider: DatasourceProvider = {
       targetLibraries: definition.targetLibraries,
       capabilities: [...buildCapabilities(definition)],
       executionHints: [
-        `认证方式：${plan.authKind}`,
-        `业务模块：${plan.modules.join('、')}`,
-        `连接提示：${plan.endpointHints.join('、')}`,
+        `Auth: ${plan.authKind}`,
+        `Target: ${plan.endpointTarget}`,
+        `Modules: ${plan.modules.join(', ')}`,
+        `Transport: ${plan.preferredTransport}`,
+        `Bootstrap mode: ${plan.bootstrapMode}`,
+        `Readiness: ${plan.executionReadiness}`,
+        `Bootstrap requests: ${plan.bootstrapRequests.length}`,
+        `Readonly guards: ${plan.readonlyGuards.length}`,
       ],
       notes: definition.notes || '',
       runtime: latestRun
@@ -53,8 +69,13 @@ export const erpDatasourceProvider: DatasourceProvider = {
             discoveredCount: latestRun.discoveredCount,
             capturedCount: latestRun.capturedCount,
             ingestedCount: latestRun.ingestedCount,
+            libraryKeys: latestRun.libraryKeys,
             documentIds: latestRun.documentIds,
-            documentLabels: toDocumentLabels(latestRun.documentIds),
+            documentLabels: latestRun.resultSummaries?.length
+              ? latestRun.resultSummaries.map((item) => item.label).filter(Boolean)
+              : toDocumentLabels(latestRun.documentIds),
+            resultSummaries: toResultSummaries(latestRun),
+            documentSummaries: toResultSummaries(latestRun),
           }
         : {
             datasourceId: definition.id,
@@ -67,8 +88,11 @@ export const erpDatasourceProvider: DatasourceProvider = {
             discoveredCount: 0,
             capturedCount: 0,
             ingestedCount: 0,
+            libraryKeys: definition.targetLibraries.map((item) => item.key),
             documentIds: [],
             documentLabels: [],
+            resultSummaries: [],
+            documentSummaries: [],
           },
     };
     return summary;

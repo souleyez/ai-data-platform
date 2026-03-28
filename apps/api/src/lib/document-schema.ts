@@ -94,6 +94,21 @@ export function buildStructuredProfile(input: {
   }
 
   if (input.schemaType === 'resume') {
+    const highlights = input.resumeFields?.highlights || [];
+    const existingProjects = input.resumeFields?.projectHighlights || [];
+    const existingItProjects = input.resumeFields?.itProjectHighlights || [];
+    const fallbackProjects = existingProjects.length
+      ? existingProjects
+      : highlights.filter((entry) => /(项目|project|系统|platform|api|实施|开发|架构|技术)/i.test(String(entry || ''))).slice(0, 8);
+    const fallbackItProjects = existingItProjects.length
+      ? existingItProjects
+      : fallbackProjects.filter((entry) => /(it|系统|platform|api|接口|开发|实施|架构|技术)/i.test(String(entry || ''))).slice(0, 8);
+    const companies = input.resumeFields?.companies?.length
+      ? input.resumeFields.companies
+      : input.resumeFields?.latestCompany
+        ? [input.resumeFields.latestCompany]
+        : [];
+
     return {
       ...base,
       candidateName: input.resumeFields?.candidateName || '',
@@ -102,8 +117,12 @@ export function buildStructuredProfile(input: {
       yearsOfExperience: input.resumeFields?.yearsOfExperience || '',
       education: input.resumeFields?.education || '',
       major: input.resumeFields?.major || '',
+      latestCompany: input.resumeFields?.latestCompany || '',
+      companies,
       skills: input.resumeFields?.skills || [],
-      highlights: input.resumeFields?.highlights || [],
+      highlights,
+      projectHighlights: fallbackProjects,
+      itProjectHighlights: fallbackItProjects,
     };
   }
 

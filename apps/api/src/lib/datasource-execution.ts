@@ -5,7 +5,6 @@ import {
   type DatasourceDefinition,
   type DatasourceRun,
 } from './datasource-definitions.js';
-import { computeNextRunAt } from './datasource-schedule.js';
 import {
   buildDatasourceRunFromWebCaptureTask,
   syncWebCaptureTaskToDatasource,
@@ -17,8 +16,10 @@ import {
   updateWebCaptureTaskStatus,
   upsertWebCaptureTask,
 } from './web-capture.js';
-import { buildDatabaseExecutionPlan } from './datasource-database-connector.js';
-import { buildErpExecutionPlan } from './datasource-erp-connector.js';
+import { buildDatabaseExecutionPlan, buildDatabaseRunSummaryItems } from './datasource-database-connector.js';
+import { getDatasourceCredentialSecret } from './datasource-credentials.js';
+import { buildErpExecutionPlan, buildErpRunSummaryItems } from './datasource-erp-connector.js';
+import { computeNextRunAt } from './datasource-schedule.js';
 
 function buildSyntheticRun(
   definition: DatasourceDefinition,
@@ -41,20 +42,6 @@ function buildSyntheticRun(
     summary,
     errorMessage,
   } satisfies Partial<DatasourceRun>;
-}
-
-async function persistDefinitionRunState(
-  definition: DatasourceDefinition,
-  status: DatasourceRun['status'],
-  summary: string,
-) {
-  return upsertDatasourceDefinition({
-    ...definition,
-    lastRunAt: new Date().toISOString(),
-    lastStatus: status,
-    lastSummary: summary,
-    nextRunAt: computeNextRunAt(definition.schedule.kind, definition.status),
-  });
 }
 
 function getDefinitionUrl(definition: DatasourceDefinition) {
@@ -128,6 +115,9 @@ export async function pauseDatasourceDefinition(id: string) {
 export async function runDatasourceDefinition(id: string) {
   const definition = await getDatasourceDefinition(id);
   if (!definition) throw new Error('datasource definition not found');
+  if (definition.status === 'paused') {
+    throw new Error('paused datasource definition cannot be run until activated');
+  }
 
   if (definition.kind === 'upload_public') {
     const summary = `外部资料上传入口已就绪，可通过固定链接向 ${(definition.targetLibraries || []).map((item) => item.label).join('、') || '目标知识库'} 提交材料。`;
@@ -135,31 +125,42 @@ export async function runDatasourceDefinition(id: string) {
       ...buildSyntheticRun(definition, 'partial', summary),
       summary,
     });
-    const nextDefinition = await persistDefinitionRunState(definition, 'partial', summary);
+    const nextDefinition = await getDatasourceDefinition(definition.id);
     return { definition: nextDefinition, task: null, run };
   }
 
   if (definition.kind === 'database') {
-    const plan = buildDatabaseExecutionPlan(definition);
+    const credentialSecret = definition.credentialRef?.id
+      ? await getDatasourceCredentialSecret(definition.credentialRef.id)
+      : null;
+    const plan = buildDatabaseExecutionPlan(definition, {
+      connectionString: credentialSecret?.connectionString || '',
+    });
+    const resultSummaries = buildDatabaseRunSummaryItems(plan);
+    const status = plan.validationWarnings.length ? 'partial' : 'success';
     const run = await appendDatasourceRun({
-      ...buildSyntheticRun(definition, 'partial', plan.summary),
+      ...buildSyntheticRun(definition, status, plan.summary),
       discoveredCount: plan.queryTargets.length,
       capturedCount: plan.queryTargets.length,
+      resultSummaries,
       summary: plan.summary,
     });
-    const nextDefinition = await persistDefinitionRunState(definition, 'partial', plan.summary);
+    const nextDefinition = await getDatasourceDefinition(definition.id);
     return { definition: nextDefinition, task: null, run };
   }
 
   if (definition.kind === 'erp') {
     const plan = buildErpExecutionPlan(definition);
+    const resultSummaries = buildErpRunSummaryItems(plan);
+    const status = plan.validationWarnings.length ? 'partial' : 'success';
     const run = await appendDatasourceRun({
-      ...buildSyntheticRun(definition, 'partial', plan.summary),
+      ...buildSyntheticRun(definition, status, plan.summary),
       discoveredCount: plan.modules.length,
       capturedCount: plan.modules.length,
+      resultSummaries,
       summary: plan.summary,
     });
-    const nextDefinition = await persistDefinitionRunState(definition, 'partial', plan.summary);
+    const nextDefinition = await getDatasourceDefinition(definition.id);
     return { definition: nextDefinition, task: null, run };
   }
 
@@ -178,6 +179,7 @@ export async function runDatasourceDefinition(id: string) {
   });
 
   const syncedDefinition = await syncWebCaptureTaskToDatasource(task, {
+    id: definition.id,
     name: definition.name,
     targetLibraries: definition.targetLibraries,
     notes: definition.notes,

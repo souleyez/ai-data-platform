@@ -14,7 +14,7 @@ export type KnowledgePlan = {
 function normalizeText(value: string) {
   return String(value || '')
     .toLowerCase()
-    .replace(/[，。、“”"'‘’：:；;、!?（）()【】\[\]\-_/\\|]+/g, ' ')
+    .replace(/[，。、“”"'‘’：:；;！!（）()\[\]\-_/\\|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -24,7 +24,7 @@ export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt'
   if (!normalized) return null;
   if (/(静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|page)\b/.test(normalized)) return 'page';
   if (/\bppt\b|演示稿|汇报稿|汇报提纲/.test(normalized)) return 'ppt';
-  if (/\bpdf\b|文档版|正式文档/.test(normalized)) return 'pdf';
+  if (/\bpdf\b|文档版|正式文档|word|docx/.test(normalized)) return 'pdf';
   if (/(报表|表格|对比表|清单|报告)/.test(normalized)) return 'table';
   return null;
 }
@@ -102,9 +102,9 @@ export function buildKnowledgePlanPrompt(
     '请把最近 3 到 5 轮对话整理成一条“按知识库输出”的执行需求。',
     '要求：',
     '1. 只返回 JSON，不要解释，不要 Markdown。',
-    '2. JSON schema 为 {"request":"...", "outputType":"table|page|pdf|ppt"}。',
+    '2. JSON schema 为 {"request":"...", "outputType":"page|table|pdf|ppt"}。',
     '3. request 必须是一句完整中文，明确主题、输出形式和重点。',
-    '4. 如果不能稳定判断输出形式，outputType 默认为 table。',
+    '4. 如果无法稳定判断输出形式，outputType 默认使用 page。',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -116,8 +116,8 @@ export function shouldFallbackToLocalPlan(planText: string) {
   const questionMarks = (text.match(/\?/g) || []).length;
   const hasTooManyQuestionMarks = questionMarks >= 4 || (text.length > 0 && questionMarks / text.length >= 0.2);
   return (
-    hasTooManyQuestionMarks ||
-    /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|无法从当前输入|请提供具体|明确说明要整理的主题|无法提取有效需求|无法提取有效业务需求|输入内容无法提取|无效数据)/.test(text)
+    hasTooManyQuestionMarks
+    || /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|请提供具体|无法提取有效需求|输入内容无法提取|无效数据)/.test(text)
   );
 }
 
@@ -129,19 +129,19 @@ export function buildLocalKnowledgePlan(
     .filter((item) => item.role === 'user')
     .map((item) => item.content)
     .slice(-3)
-    .join('；');
+    .join('，');
 
   const source = [recentUserContent, prompt]
     .filter(Boolean)
-    .join('；')
+    .join('，')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const outputKind = detectOutputKind(source) || 'table';
+  const outputKind = detectOutputKind(source) || 'page';
   const outputLabel = outputKind === 'page'
-    ? '静态页'
+    ? '数据可视化静态页'
     : outputKind === 'pdf'
-      ? 'PDF'
+      ? '文档'
       : outputKind === 'ppt'
         ? 'PPT'
         : '表格报表';
@@ -157,11 +157,11 @@ export function buildLocalKnowledgePlan(
 }
 
 export function buildKnowledgePlanMessage() {
-  return '我已经根据最近几轮对话整理出一条按知识库输出的需求。请先确认或修改，再执行输出。';
+  return '我已经根据最近几轮对话整理出一条按知识库输出的需求，请继续直接调整或确认。';
 }
 
 export function buildNoPlanMessage() {
-  return '这次还没有整理出稳定的知识库输出需求。请补充一句更明确的目标，然后重新点击“按知识库输出”。';
+  return '这次还没有整理出稳定的知识库输出需求。请补充更明确的目标后再继续。';
 }
 
 export function extractPlanningResult(
@@ -180,9 +180,9 @@ export function extractPlanningResult(
     const parsed = JSON.parse(jsonText);
     const request = String(parsed?.request || '').trim() || fallbackPrompt;
     const detected = String(parsed?.outputType || '').trim().toLowerCase();
-    const outputType = detected === 'page' || detected === 'pdf' || detected === 'ppt' ? detected : 'table';
+    const outputType = ['page', 'table', 'pdf', 'ppt'].includes(detected) ? detected : 'page';
     return { request, outputType };
   } catch {
-    return { request: fallbackPrompt, outputType: 'table' };
+    return { request: fallbackPrompt, outputType: 'page' };
   }
 }

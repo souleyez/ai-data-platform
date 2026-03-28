@@ -51,6 +51,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     intent: data?.intent || 'general',
     needsKnowledge: Boolean(data?.needsKnowledge),
     libraries: Array.isArray(data?.libraries) ? data.libraries : [],
+    reportTemplate: data?.reportTemplate || null,
     output,
     guard: data?.guard || null,
     conversationState: data?.conversationState || null,

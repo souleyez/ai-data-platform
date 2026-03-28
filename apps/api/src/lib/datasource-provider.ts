@@ -2,6 +2,7 @@ import type {
   DatasourceDefinition,
   DatasourceKind,
   DatasourceRun,
+  DatasourceRunSummaryItem,
   DatasourceScheduleKind,
   DatasourceStatus,
   DatasourceTargetLibrary,
@@ -28,6 +29,8 @@ export type DatasourceProviderRuntime = {
   discoveredCount?: number;
   capturedCount?: number;
   ingestedCount?: number;
+  libraryKeys?: string[];
+  libraryLabels?: string[];
   documentIds?: string[];
   documentLabels?: string[];
   documentSummaries?: Array<{
@@ -35,6 +38,7 @@ export type DatasourceProviderRuntime = {
     label: string;
     summary: string;
   }>;
+  resultSummaries?: DatasourceRunSummaryItem[];
 };
 
 export type DatasourceProviderSummary = {
