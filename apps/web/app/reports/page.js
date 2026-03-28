@@ -12,6 +12,12 @@ import {
   formatGeneratedReportTime,
   normalizeGeneratedReportRecord,
 } from '../lib/generated-reports';
+import {
+  buildDefaultTemplateLabel,
+  buildUploadedTemplateItems,
+  formatTemplateUploadSourceTypeLabel,
+  inferTemplateUploadSourceType,
+} from '../lib/report-template-uploads.mjs';
 import { normalizeDatasourceResponse, normalizeReportsResponse } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
@@ -35,123 +41,6 @@ function formatFileSize(size) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function indexToLetters(index) {
-  let value = index;
-  let result = '';
-  do {
-    result = String.fromCharCode(97 + (value % 26)) + result;
-    value = Math.floor(value / 26) - 1;
-  } while (value >= 0);
-  return result;
-}
-
-function buildDefaultTemplateLabel(templates = []) {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(-2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const prefix = `${yy}${mm}${dd}`;
-
-  const usedLabels = new Set(
-    (templates || [])
-      .map((template) => String(template?.label || '').trim().toLowerCase())
-      .filter(Boolean),
-  );
-
-  let index = 0;
-  while (usedLabels.has(`${prefix}${indexToLetters(index)}`)) {
-    index += 1;
-  }
-  return `${prefix}${indexToLetters(index)}`;
-}
-
-function isUserUploadedTemplate(template) {
-  const origin = String(template?.origin || '').trim().toLowerCase();
-  if (origin) return origin === 'user';
-  return !String(template?.key || '').startsWith('shared-');
-}
-
-function inferSourceTypeFromFile(file) {
-  const fileName = String(file?.name || '').toLowerCase();
-  if (/\.(doc|docx|rtf|odt)$/.test(fileName)) return 'word';
-  if (/\.(ppt|pptx|pptm|key)$/.test(fileName)) return 'ppt';
-  if (/\.(xls|xlsx|csv|tsv|ods)$/.test(fileName)) return 'spreadsheet';
-  if (file?.type?.startsWith('image/') || /\.(png|jpg|jpeg|gif|bmp|webp|svg)$/.test(fileName)) return 'image';
-  return 'other';
-}
-
-function inferSourceTypeFromReference(reference = {}) {
-  const sourceType = String(reference?.sourceType || '').trim();
-  if (sourceType) return sourceType;
-
-  if (reference?.url) return 'web-link';
-
-  const fileName = String(reference?.originalName || reference?.fileName || '').toLowerCase();
-  if (/\.(doc|docx|rtf|odt)$/.test(fileName)) return 'word';
-  if (/\.(ppt|pptx|pptm|key)$/.test(fileName)) return 'ppt';
-  if (/\.(xls|xlsx|csv|tsv|ods)$/.test(fileName)) return 'spreadsheet';
-  if (/\.(png|jpg|jpeg|gif|bmp|webp|svg)$/.test(fileName)) return 'image';
-  return 'other';
-}
-
-function formatSourceTypeLabel(sourceType) {
-  if (sourceType === 'word') return 'WORD';
-  if (sourceType === 'ppt') return 'PPT';
-  if (sourceType === 'spreadsheet') return '表格';
-  if (sourceType === 'image') return '图片';
-  if (sourceType === 'web-link') return '网页链接';
-  return '其他';
-}
-
-function buildUploadedTemplateItems(templates = []) {
-  return templates
-    .filter(isUserUploadedTemplate)
-    .flatMap((template) => {
-      const references = Array.isArray(template.referenceImages) ? template.referenceImages : [];
-      if (!references.length) {
-        return [{
-          id: `placeholder:${template.key}`,
-          templateKey: template.key,
-          templateLabel: template.label,
-          description: template.description || '',
-          createdAt: template.createdAt || '',
-          uploadedAt: template.createdAt || '',
-          sourceType: 'other',
-          sourceLabel: '待补充',
-          uploadName: '仅创建模板记录，尚未附文件或链接',
-          relativePath: '',
-          url: '',
-          mimeType: '',
-          size: 0,
-        }];
-      }
-
-      return references.map((reference, index) => {
-        const sourceType = inferSourceTypeFromReference(reference);
-        return {
-          id: reference?.id || `${template.key}:${index}`,
-          templateKey: template.key,
-          templateLabel: template.label,
-          description: template.description || '',
-          createdAt: template.createdAt || '',
-          uploadedAt: reference?.uploadedAt || template.createdAt || '',
-          sourceType,
-          sourceLabel: formatSourceTypeLabel(sourceType),
-          uploadName: reference?.url || reference?.originalName || reference?.fileName || template.label,
-          relativePath: reference?.relativePath || '',
-          url: reference?.url || '',
-          mimeType: reference?.mimeType || '',
-          size: Number(reference?.size || 0),
-        };
-      });
-    })
-    .sort((a, b) => {
-      const left = new Date(b.uploadedAt || b.createdAt || 0).getTime();
-      const right = new Date(a.uploadedAt || a.createdAt || 0).getTime();
-      return left - right;
-    });
-}
-
 function UploadedTemplateItem({ item }) {
   return (
     <article className="capture-result-item report-upload-item">
@@ -162,7 +51,7 @@ function UploadedTemplateItem({ item }) {
             上传时间：{formatDateTime(item.uploadedAt || item.createdAt)}
           </div>
         </div>
-        <span className="report-upload-tag">{item.sourceLabel}</span>
+        <span className="report-upload-tag">{formatTemplateUploadSourceTypeLabel(item.sourceType)}</span>
       </div>
 
       {item.description ? <div className="capture-task-note">{item.description}</div> : null}
@@ -184,7 +73,7 @@ function UploadedTemplateItem({ item }) {
         </div>
         <div className="report-upload-cell">
           <span>来源类型</span>
-          <strong>{item.sourceLabel}</strong>
+          <strong>{formatTemplateUploadSourceTypeLabel(item.sourceType)}</strong>
         </div>
         <div className="report-upload-cell">
           <span>文件大小</span>
@@ -341,7 +230,9 @@ function ReportsPageContent() {
       setSubmittingKey('upload-template');
       setMessage('');
 
-      const sourceType = hasFile ? inferSourceTypeFromFile(templateFile) : 'web-link';
+      const sourceType = hasFile
+        ? inferTemplateUploadSourceType({ fileName: templateFile?.name, mimeType: templateFile?.type })
+        : 'web-link';
       const response = await fetch(buildApiUrl('/api/reports/template'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
