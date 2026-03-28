@@ -15,6 +15,7 @@ import {
 import {
   buildDefaultTemplateLabel,
   buildUploadedTemplateItems,
+  findDuplicateTemplateUpload,
   formatTemplateUploadSourceTypeLabel,
   inferTemplateUploadSourceType,
 } from '../lib/report-template-uploads.mjs';
@@ -41,7 +42,11 @@ function formatFileSize(size) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function UploadedTemplateItem({ item }) {
+function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteReference, buildDownloadUrl }) {
+  const isPlaceholder = String(item.id || '').startsWith('placeholder:');
+  const deletingTemplate = submittingKey === `delete-template:${item.templateKey}`;
+  const deletingReference = submittingKey === `delete-reference:${item.id}`;
+
   return (
     <article className="capture-result-item report-upload-item">
       <div className="report-upload-header">
@@ -87,6 +92,38 @@ function UploadedTemplateItem({ item }) {
           <span>存储路径</span>
           <strong>{item.relativePath || '-'}</strong>
         </div>
+      </div>
+
+      <div className="report-template-actions">
+        {item.url ? (
+          <a className="ghost-btn report-upload-action" href={item.url} target="_blank" rel="noreferrer">
+            打开链接
+          </a>
+        ) : !isPlaceholder ? (
+          <a className="ghost-btn report-upload-action" href={buildDownloadUrl(item)}>
+            下载原文件
+          </a>
+        ) : null}
+
+        {!isPlaceholder ? (
+          <button
+            className="ghost-btn"
+            type="button"
+            disabled={deletingReference || deletingTemplate}
+            onClick={() => onDeleteReference(item)}
+          >
+            {deletingReference ? '删除中...' : '删除当前条目'}
+          </button>
+        ) : null}
+
+        <button
+          className="ghost-btn"
+          type="button"
+          disabled={deletingTemplate || deletingReference}
+          onClick={() => onDeleteTemplate(item)}
+        >
+          {deletingTemplate ? '删除中...' : '删除整个模板'}
+        </button>
       </div>
     </article>
   );
@@ -206,12 +243,64 @@ function ReportsPageContent() {
     }
   }, [generatedId, outputRecords, selectedReportId]);
 
+  function buildTemplateReferenceDownloadUrl(item) {
+    return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
+  }
+
+  async function deleteTemplate(item) {
+    if (!window.confirm(`确认删除模板“${item.templateLabel}”吗？这会移除它的所有上传记录。`)) {
+      return;
+    }
+
+    try {
+      setSubmittingKey(`delete-template:${item.templateKey}`);
+      setMessage('');
+      const response = await fetch(buildApiUrl(`/api/reports/template/${encodeURIComponent(item.templateKey)}`), {
+        method: 'DELETE',
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || 'delete template failed');
+      await loadReports();
+      setMessage(json?.message || '模板已删除。');
+    } catch (deleteError) {
+      setMessage(deleteError instanceof Error ? deleteError.message : '删除模板失败。');
+    } finally {
+      setSubmittingKey('');
+    }
+  }
+
+  async function deleteTemplateReference(item) {
+    if (!window.confirm(`确认删除“${item.uploadName}”吗？`)) {
+      return;
+    }
+
+    try {
+      setSubmittingKey(`delete-reference:${item.id}`);
+      setMessage('');
+      const response = await fetch(
+        `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}`)}?templateKey=${encodeURIComponent(item.templateKey)}`,
+        {
+          method: 'DELETE',
+        },
+      );
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || 'delete template reference failed');
+      await loadReports();
+      setMessage(json?.message || '上传记录已删除。');
+    } catch (deleteError) {
+      setMessage(deleteError instanceof Error ? deleteError.message : '删除上传记录失败。');
+    } finally {
+      setSubmittingKey('');
+    }
+  }
+
   async function uploadTemplate() {
     const label = String(templateDraft.label || '').trim();
     const description = String(templateDraft.description || '').trim();
     const link = String(templateDraft.link || '').trim();
     const hasFile = Boolean(templateFile);
     const hasLink = Boolean(link);
+    let createdTemplate = null;
 
     if (!label) {
       setMessage('模板名称不能为空。');
@@ -233,6 +322,14 @@ function ReportsPageContent() {
       const sourceType = hasFile
         ? inferTemplateUploadSourceType({ fileName: templateFile?.name, mimeType: templateFile?.type })
         : 'web-link';
+      const duplicate = findDuplicateTemplateUpload(data?.templates || [], {
+        fileName: hasFile ? templateFile?.name : '',
+        url: hasLink ? link : '',
+      });
+      if (duplicate) {
+        throw new Error(`相同内容已存在于模板“${duplicate.templateLabel}”中，请不要重复上传。`);
+      }
+
       const response = await fetch(buildApiUrl('/api/reports/template'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,7 +342,7 @@ function ReportsPageContent() {
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'create template failed');
 
-      const createdTemplate = json?.item || null;
+      createdTemplate = json?.item || null;
       if (!createdTemplate?.key) throw new Error('template create failed');
 
       if (hasFile) {
@@ -286,6 +383,16 @@ function ReportsPageContent() {
       }
       setMessage('模板已上传并加入列表。');
     } catch (uploadError) {
+      const shouldCleanup = typeof createdTemplate?.key === 'string' && createdTemplate.key;
+      if (shouldCleanup) {
+        try {
+          await fetch(buildApiUrl(`/api/reports/template/${encodeURIComponent(createdTemplate.key)}`), {
+            method: 'DELETE',
+          });
+        } catch {
+          // keep original upload error
+        }
+      }
       setMessage(uploadError instanceof Error ? uploadError.message : '上传模板失败。');
     } finally {
       setSubmittingKey('');
@@ -414,7 +521,14 @@ function ReportsPageContent() {
               ) : (
                 <div className="capture-result-list reports-scroll-panel report-upload-list">
                   {uploadedTemplateItems.map((item) => (
-                    <UploadedTemplateItem key={item.id} item={item} />
+                    <UploadedTemplateItem
+                      key={item.id}
+                      item={item}
+                      submittingKey={submittingKey}
+                      onDeleteTemplate={deleteTemplate}
+                      onDeleteReference={deleteTemplateReference}
+                      buildDownloadUrl={buildTemplateReferenceDownloadUrl}
+                    />
                   ))}
                 </div>
               )}

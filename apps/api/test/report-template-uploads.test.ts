@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDefaultTemplateLabel,
   buildUploadedTemplateItems,
+  findDuplicateTemplateUpload,
   formatTemplateUploadSourceTypeLabel,
   inferTemplateUploadSourceType,
   isUserUploadedTemplate,
@@ -103,4 +104,42 @@ test('buildUploadedTemplateItems should emit a placeholder row when user templat
   assert.equal(items.length, 1);
   assert.equal(items[0].id, 'placeholder:template-user-empty');
   assert.equal(items[0].uploadName, '仅创建模板记录，尚未附文件或链接');
+});
+
+test('findDuplicateTemplateUpload should detect duplicate file names and links', () => {
+  const templates = [
+    {
+      key: 'template-user-link',
+      origin: 'user',
+      label: '官网样式参考',
+      referenceImages: [
+        {
+          id: 'tmplref-link',
+          url: 'https://example.com/report-template',
+          originalName: '官网样式',
+        },
+      ],
+    },
+    {
+      key: 'template-user-file',
+      origin: 'user',
+      label: '周报样式',
+      referenceImages: [
+        {
+          id: 'tmplref-file',
+          originalName: '周报模板.docx',
+        },
+      ],
+    },
+  ];
+
+  assert.equal(
+    findDuplicateTemplateUpload(templates, { fileName: '周报模板.docx' })?.templateKey,
+    'template-user-file',
+  );
+  assert.equal(
+    findDuplicateTemplateUpload(templates, { url: 'https://example.com/report-template' })?.templateKey,
+    'template-user-link',
+  );
+  assert.equal(findDuplicateTemplateUpload(templates, { fileName: '全新模板.docx' }), null);
 });

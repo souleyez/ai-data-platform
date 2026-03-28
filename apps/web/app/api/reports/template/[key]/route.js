@@ -8,3 +8,10 @@ export async function PATCH(request, { params }) {
     body,
   });
 }
+
+export async function DELETE(_request, { params }) {
+  const key = encodeURIComponent(params?.key || '');
+  return proxyJson(`/api/reports/template/${key}`, {
+    method: 'DELETE',
+  });
+}

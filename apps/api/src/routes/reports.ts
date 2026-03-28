@@ -1,10 +1,14 @@
+import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import {
   addSharedTemplateReferenceLink,
   createSharedReportTemplate,
   createReportOutput,
   deleteReportOutput,
+  deleteSharedReportTemplate,
+  deleteSharedTemplateReference,
   loadReportCenterState,
+  readSharedTemplateReferenceFile,
   reviseReportOutput,
   updateSharedReportTemplate,
   updateReportGroupTemplate,
@@ -212,6 +216,18 @@ export async function registerReportRoutes(app: FastifyInstance) {
     };
   });
 
+  app.delete('/reports/template/:key', async (request, reply) => {
+    const key = String((request.params as { key?: string })?.key || '').trim();
+    if (!key) return reply.code(400).send({ error: 'key is required' });
+
+    const item = await deleteSharedReportTemplate(key);
+    return {
+      status: 'deleted',
+      item,
+      message: `宸插垹闄ゆā鏉?${item.label}`,
+    };
+  });
+
   app.post('/reports/template-reference', async (request, reply) => {
     const file = await request.file();
     const templateKey = String((request.query as { templateKey?: string })?.templateKey || '').trim();
@@ -246,6 +262,34 @@ export async function registerReportRoutes(app: FastifyInstance) {
       item,
       message: `宸蹭笂浼犳ā鏉跨綉椤甸摼鎺?${item.url || item.originalName}`,
     };
+  });
+
+  app.delete('/reports/template-reference/:id', async (request, reply) => {
+    const id = String((request.params as { id?: string })?.id || '').trim();
+    const templateKey = String((request.query as { templateKey?: string })?.templateKey || '').trim();
+    if (!id) return reply.code(400).send({ error: 'id is required' });
+    if (!templateKey) return reply.code(400).send({ error: 'templateKey is required' });
+
+    const item = await deleteSharedTemplateReference(templateKey, id);
+    return {
+      status: 'deleted',
+      item,
+      message: `宸插垹闄ゅ弬鑰冨唴瀹?${item.originalName || item.url || item.id}`,
+    };
+  });
+
+  app.get('/reports/template-reference/:id/download', async (request, reply) => {
+    const id = String((request.params as { id?: string })?.id || '').trim();
+    const templateKey = String((request.query as { templateKey?: string })?.templateKey || '').trim();
+    if (!id) return reply.code(400).send({ error: 'id is required' });
+    if (!templateKey) return reply.code(400).send({ error: 'templateKey is required' });
+
+    const { reference, absolutePath } = await readSharedTemplateReferenceFile(templateKey, id);
+    const downloadName = encodeURIComponent(reference.originalName || reference.fileName || 'template-reference');
+    reply.header('Content-Type', reference.mimeType || 'application/octet-stream');
+    reply.header('Content-Disposition', `attachment; filename*=UTF-8''${downloadName}`);
+    reply.header('Cache-Control', 'no-store');
+    return reply.send(createReadStream(absolutePath));
   });
 
   app.post('/reports/output/:id/revise', async (request, reply) => {

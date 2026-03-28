@@ -343,6 +343,12 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .report-upload-link:hover {
   text-decoration: underline;
 }
+.report-upload-action {
+  text-decoration: none;
+}
+.report-upload-action:hover {
+  text-decoration: none;
+}
 .generated-report-detail {
   display: grid;
   gap: 12px;

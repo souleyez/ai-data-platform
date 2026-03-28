@@ -212,6 +212,81 @@ function normalizeReportReferenceImage(reference: Partial<ReportReferenceImage> 
   };
 }
 
+function normalizePath(filePath: string) {
+  return path.resolve(String(filePath || ''));
+}
+
+function startsWithPath(filePath: string, rootPath: string) {
+  const normalizedFile = normalizePath(filePath).toLowerCase();
+  const normalizedRoot = normalizePath(rootPath).toLowerCase();
+  return normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}${path.sep}`.toLowerCase());
+}
+
+function normalizeReferenceName(value: string) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function isUserSharedReportTemplate(template: Pick<SharedReportTemplate, 'key' | 'origin'> | null | undefined) {
+  const origin = String(template?.origin || '').trim().toLowerCase();
+  if (origin) return origin === 'user';
+  return !String(template?.key || '').startsWith('shared-');
+}
+
+export function findDuplicateSharedTemplateReference(
+  templates: SharedReportTemplate[],
+  input: {
+    fileName?: string;
+    url?: string;
+  },
+) {
+  const normalizedFileName = normalizeReferenceName(input.fileName || '');
+  const normalizedUrl = String(input.url || '').trim() ? normalizeReferenceUrl(String(input.url || '').trim()) : '';
+  if (!normalizedFileName && !normalizedUrl) return null;
+
+  for (const template of templates || []) {
+    if (!isUserSharedReportTemplate(template)) continue;
+    for (const reference of template.referenceImages || []) {
+      const referenceName = normalizeReferenceName(reference.originalName || reference.fileName || '');
+      const referenceUrl = String(reference.url || '').trim();
+      const duplicated =
+        (normalizedFileName && referenceName === normalizedFileName)
+        || (normalizedUrl && referenceUrl === normalizedUrl);
+
+      if (duplicated) {
+        return {
+          templateKey: template.key,
+          templateLabel: template.label,
+          referenceId: reference.id,
+          uploadName: reference.url || reference.originalName || reference.fileName || template.label,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveReferenceFilePath(reference: ReportReferenceImage) {
+  const relativePath = String(reference.relativePath || '').trim();
+  if (!relativePath || reference.kind === 'link' || reference.url) return '';
+
+  const resolved = normalizePath(path.resolve(STORAGE_ROOT, relativePath));
+  return startsWithPath(resolved, REPORT_REFERENCE_DIR) ? resolved : '';
+}
+
+async function deleteStoredReferenceFile(reference: ReportReferenceImage) {
+  const filePath = resolveReferenceFilePath(reference);
+  if (!filePath) return false;
+
+  try {
+    await fs.unlink(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 function summarizeTableForAnalysis(table?: ReportOutputRecord['table']) {
   const columns = Array.isArray(table?.columns) ? table.columns : [];
   const rows = Array.isArray(table?.rows) ? table.rows : [];
@@ -1829,9 +1904,15 @@ export async function uploadSharedTemplateReference(templateKey: string, file: M
   const state = await loadReportCenterState();
   const template = state.templates.find((item) => item.key === templateKey);
   if (!template) throw new Error('shared report template not found');
+  if (!isUserSharedReportTemplate(template)) throw new Error('system template cannot accept uploaded references');
+
+  const safeName = sanitizeFileName(file.filename || 'template-reference');
+  const duplicate = findDuplicateSharedTemplateReference(state.templates, { fileName: safeName });
+  if (duplicate) {
+    throw new Error(`template reference already exists in ${duplicate.templateLabel}`);
+  }
 
   await ensureDirs();
-  const safeName = sanitizeFileName(file.filename || 'template-reference');
   const id = buildId('tmplref');
   const ext = path.extname(safeName) || '.dat';
   const outputName = `${id}${ext}`;
@@ -1868,8 +1949,13 @@ export async function addSharedTemplateReferenceLink(templateKey: string, input:
   const state = await loadReportCenterState();
   const template = state.templates.find((item) => item.key === templateKey);
   if (!template) throw new Error('shared report template not found');
+  if (!isUserSharedReportTemplate(template)) throw new Error('system template cannot accept uploaded references');
 
   const normalizedUrl = normalizeReferenceUrl(input.url);
+  const duplicate = findDuplicateSharedTemplateReference(state.templates, { url: normalizedUrl });
+  if (duplicate) {
+    throw new Error(`template reference already exists in ${duplicate.templateLabel}`);
+  }
   const uploaded = normalizeReportReferenceImage({
     id: buildId('tmplref'),
     fileName: '',
@@ -1889,6 +1975,77 @@ export async function addSharedTemplateReferenceLink(templateKey: string, input:
   ));
   await saveGroupsAndOutputs(state.groups, state.outputs, nextTemplates);
   return uploaded;
+}
+
+export async function deleteSharedReportTemplate(templateKey: string) {
+  const state = await loadReportCenterState();
+  const template = state.templates.find((item) => item.key === templateKey);
+  if (!template) throw new Error('shared report template not found');
+  if (!isUserSharedReportTemplate(template)) throw new Error('system template cannot be deleted');
+
+  for (const reference of template.referenceImages || []) {
+    await deleteStoredReferenceFile(reference);
+  }
+
+  const nextTemplates = state.templates
+    .filter((item) => item.key !== templateKey)
+    .map((item) => ({ ...item }));
+
+  if (template.isDefault) {
+    const sameType = nextTemplates.filter((item) => item.type === template.type);
+    if (sameType.length && !sameType.some((item) => item.isDefault)) {
+      sameType[0].isDefault = true;
+    }
+  }
+
+  await saveGroupsAndOutputs(state.groups, state.outputs, nextTemplates);
+  return template;
+}
+
+export async function deleteSharedTemplateReference(templateKey: string, referenceId: string) {
+  const state = await loadReportCenterState();
+  const template = state.templates.find((item) => item.key === templateKey);
+  if (!template) throw new Error('shared report template not found');
+  if (!isUserSharedReportTemplate(template)) throw new Error('system template references cannot be deleted');
+
+  const reference = (template.referenceImages || []).find((item) => item.id === referenceId);
+  if (!reference) throw new Error('template reference not found');
+
+  await deleteStoredReferenceFile(reference);
+
+  const nextTemplates = state.templates.map((item) => (
+    item.key === templateKey
+      ? { ...item, referenceImages: (item.referenceImages || []).filter((entry) => entry.id !== referenceId) }
+      : item
+  ));
+
+  await saveGroupsAndOutputs(state.groups, state.outputs, nextTemplates);
+  return reference;
+}
+
+export async function readSharedTemplateReferenceFile(templateKey: string, referenceId: string) {
+  const state = await loadReportCenterState();
+  const template = state.templates.find((item) => item.key === templateKey);
+  if (!template) throw new Error('shared report template not found');
+
+  const reference = (template.referenceImages || []).find((item) => item.id === referenceId);
+  if (!reference) throw new Error('template reference not found');
+  if (reference.kind === 'link' || reference.url) throw new Error('template reference is not a file');
+
+  const absolutePath = resolveReferenceFilePath(reference);
+  if (!absolutePath) throw new Error('template reference file path is invalid');
+
+  try {
+    await fs.access(absolutePath);
+  } catch {
+    throw new Error('template reference file not found');
+  }
+
+  return {
+    template,
+    reference,
+    absolutePath,
+  };
 }
 
 export async function reviseReportOutput(outputId: string, instruction: string) {

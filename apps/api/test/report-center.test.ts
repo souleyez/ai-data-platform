@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSharedTemplateEnvelope,
+  findDuplicateSharedTemplateReference,
   inferReportReferenceSourceType,
   inferReportTemplateTypeFromSource,
+  isUserSharedReportTemplate,
   resolveReportGroup,
   type ReportGroup,
   type SharedReportTemplate,
@@ -166,4 +168,57 @@ test('inferReportTemplateTypeFromSource should map uploads to internal template 
     inferReportTemplateTypeFromSource({ url: 'https://example.com/report-template' }),
     'static-page',
   );
+});
+
+test('isUserSharedReportTemplate should only allow user templates', () => {
+  assert.equal(isUserSharedReportTemplate(makeTemplate({ key: 'shared-static-page-default', origin: 'system' })), false);
+  assert.equal(isUserSharedReportTemplate(makeTemplate({ key: 'template-user-1', origin: 'user' })), true);
+});
+
+test('findDuplicateSharedTemplateReference should detect duplicate file names and links across user templates', () => {
+  const templates = [
+    makeTemplate({
+      key: 'shared-static-page-default',
+      origin: 'system',
+      referenceImages: [
+        { id: 'system-ref', originalName: '系统模板.docx', uploadedAt: '2026-03-28T08:00:00.000Z', relativePath: '' },
+      ],
+    }),
+    makeTemplate({
+      key: 'template-user-link',
+      origin: 'user',
+      referenceImages: [
+        {
+          id: 'tmplref-link',
+          originalName: '官网样式',
+          uploadedAt: '2026-03-28T08:00:00.000Z',
+          relativePath: '',
+          kind: 'link',
+          url: 'https://example.com/report-template',
+        },
+      ],
+    }),
+    makeTemplate({
+      key: 'template-user-file',
+      origin: 'user',
+      referenceImages: [
+        {
+          id: 'tmplref-file',
+          originalName: '周报模板.docx',
+          uploadedAt: '2026-03-28T08:00:00.000Z',
+          relativePath: 'storage/files/report-references/tmplref-file.docx',
+        },
+      ],
+    }),
+  ];
+
+  assert.equal(
+    findDuplicateSharedTemplateReference(templates, { fileName: '周报模板.docx' })?.templateKey,
+    'template-user-file',
+  );
+  assert.equal(
+    findDuplicateSharedTemplateReference(templates, { url: 'https://example.com/report-template' })?.templateKey,
+    'template-user-link',
+  );
+  assert.equal(findDuplicateSharedTemplateReference(templates, { fileName: '全新模板.docx' }), null);
 });

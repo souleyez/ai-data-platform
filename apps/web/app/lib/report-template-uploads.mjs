@@ -58,6 +58,35 @@ export function formatTemplateUploadSourceTypeLabel(sourceType) {
   return '其他';
 }
 
+function normalizeDuplicateName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeDuplicateUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  try {
+    return new URL(text).toString();
+  } catch {
+    return text;
+  }
+}
+
+export function findDuplicateTemplateUpload(templates = [], input = {}) {
+  const normalizedFileName = normalizeDuplicateName(input?.fileName || '');
+  const normalizedUrl = normalizeDuplicateUrl(input?.url || '');
+  if (!normalizedFileName && !normalizedUrl) return null;
+
+  const items = buildUploadedTemplateItems(templates).filter((item) => !String(item.id || '').startsWith('placeholder:'));
+  return items.find((item) => {
+    if (normalizedUrl) {
+      return normalizeDuplicateUrl(item.url || '') === normalizedUrl;
+    }
+    return !item.url && normalizeDuplicateName(item.uploadName || '') === normalizedFileName;
+  }) || null;
+}
+
 export function buildUploadedTemplateItems(templates = []) {
   return templates
     .filter(isUserUploadedTemplate)
