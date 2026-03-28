@@ -14,14 +14,14 @@ import {
 test('parseKnowledgeConversationState should accept valid persisted slot state', () => {
   const state = parseKnowledgeConversationState({
     kind: 'knowledge_output',
-    libraries: [{ key: 'resume', label: '人才简历库' }],
+    libraries: [{ key: 'resume', label: '人才简历知识库' }],
     timeRange: '全部时间',
     contentFocus: '公司维度 IT 项目信息',
     outputType: 'table',
     missingSlot: 'output',
   });
 
-  assert.equal(state?.libraries[0]?.label, '人才简历库');
+  assert.equal(state?.libraries[0]?.label, '人才简历知识库');
   assert.equal(state?.timeRange, '全部时间');
 });
 
@@ -29,7 +29,7 @@ test('mergeKnowledgeConversationState should fill all slots for explicit request
   const merged = mergeKnowledgeConversationState(
     '基于全部时间的人才简历库，按公司维度整理 IT 项目信息，输出表格',
     null,
-    [{ key: 'resume', label: '人才简历库' }],
+    [{ key: 'resume', label: '人才简历知识库' }],
   );
 
   assert.equal(merged.complete, true);
@@ -60,7 +60,7 @@ test('extractExplicitKnowledgeFocus should infer company-based IT project focus'
 test('buildMissingKnowledgeSlotMessage should guide only the missing slot', () => {
   const timeState: KnowledgeConversationState = {
     kind: 'knowledge_output',
-    libraries: [{ key: 'resume', label: '人才简历库' }],
+    libraries: [{ key: 'resume', label: '人才简历知识库' }],
     timeRange: '',
     contentFocus: '公司维度 IT 项目信息',
     outputType: 'table',
@@ -73,7 +73,7 @@ test('buildMissingKnowledgeSlotMessage should guide only the missing slot', () =
 test('buildKnowledgeRequest should produce a compact supply request', () => {
   const state: KnowledgeConversationState = {
     kind: 'knowledge_output',
-    libraries: [{ key: 'resume', label: '人才简历库' }],
+    libraries: [{ key: 'resume', label: '人才简历知识库' }],
     timeRange: '全部时间',
     contentFocus: '公司维度 IT 项目信息',
     outputType: 'table',
@@ -81,7 +81,7 @@ test('buildKnowledgeRequest should produce a compact supply request', () => {
   };
 
   const request = buildKnowledgeRequest(state);
-  assert.match(request, /人才简历库/);
+  assert.match(request, /人才简历知识库/);
   assert.match(request, /全部时间/);
   assert.match(request, /公司维度 IT 项目信息/);
   assert.match(request, /表格/);

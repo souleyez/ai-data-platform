@@ -21,8 +21,8 @@ test('knowledge rejection phrases should force general chat mode', () => {
 
 test('knowledge output intent should activate when output request and scope are both clear', () => {
   const matched = looksLikeKnowledgeOutputIntent({
-    prompt: '基于人才简历库输出一份按公司维度整理的 IT 项目表格',
-    libraries: [{ key: 'resume', label: '人才简历库' }],
+    prompt: '请基于人才简历知识库中全部时间范围的简历，按公司维度整理涉及公司的IT项目信息，生成数据可视化静态页报表。',
+    libraries: [{ key: 'resume', label: '人才简历知识库' }],
     hasDocumentDetailFollowup: false,
   });
 
@@ -32,7 +32,7 @@ test('knowledge output intent should activate when output request and scope are 
 test('knowledge answer intent should stay in answer mode for detail questions', () => {
   const matched = looksLikeKnowledgeAnswerIntent({
     prompt: '刚上传的简历里第一学历和最近公司分别是什么？',
-    libraries: [{ key: 'resume', label: '人才简历库' }],
+    libraries: [{ key: 'resume', label: '人才简历知识库' }],
     hasDocumentDetailFollowup: false,
   });
 

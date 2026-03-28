@@ -9,6 +9,27 @@ export type KnowledgeConversationState = {
   missingSlot: 'time' | 'content' | 'output';
 };
 
+const TIME_RANGE_RULES: Array<{ pattern: RegExp; value: string }> = [
+  { pattern: /\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|recent upload|latest upload/i, value: '最近上传' },
+  { pattern: /\u4eca\u5929|\u4eca\u65e5|today/i, value: '今天' },
+  { pattern: /\u6628\u5929|\u6628\u65e5|yesterday/i, value: '昨天' },
+  { pattern: /\u672c\u5468|\u8fd9\u5468|\u8fd9\u4e00\u5468|this week/i, value: '本周' },
+  { pattern: /\u4e0a\u5468|\u4e0a\u4e00\u5468|last week/i, value: '上周' },
+  { pattern: /\u672c\u6708|\u8fd9\u4e2a\u6708|this month/i, value: '本月' },
+  { pattern: /\u4e0a\u4e2a\u6708|\u4e0a\u6708|last month/i, value: '上个月' },
+  { pattern: /\u6700\u8fd1\u4e00\u5468|\u8fd1\u4e00\u5468|recent week/i, value: '最近一周' },
+  { pattern: /\u6700\u8fd1\u4e00\u4e2a\u6708|\u8fd1\u4e00\u4e2a\u6708|recent month|last month/i, value: '最近一个月' },
+  { pattern: /\u6700\u8fd1\u4e09\u4e2a\u6708|\u8fd1\u4e09\u4e2a\u6708|recent 3 months|last 3 months/i, value: '最近三个月' },
+  { pattern: /\u6700\u8fd1\u534a\u5e74|\u8fd1\u534a\u5e74|recent 6 months|last 6 months/i, value: '最近半年' },
+  { pattern: /\u6700\u8fd1\u4e00\u5e74|\u8fd1\u4e00\u5e74|recent year|last year/i, value: '最近一年' },
+  { pattern: /\u672c\u5b63\u5ea6|\u8fd9\u4e2a\u5b63\u5ea6|this quarter/i, value: '本季度' },
+  { pattern: /\u5168\u90e8\u65f6\u95f4|\u5168\u65f6\u95f4|\u6240\u6709\u65f6\u95f4|\u5168\u91cf|\u5168\u90e8|all time|all-time|full range/i, value: '全部时间' },
+];
+
+function normalizeText(text: string) {
+  return String(text || '').trim();
+}
+
 export function parseKnowledgeConversationState(value: unknown): KnowledgeConversationState | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
@@ -49,100 +70,50 @@ function mapOutputTypeLabel(outputType: KnowledgeConversationState['outputType']
 function extractOutputType(text: string): KnowledgeConversationState['outputType'] {
   const detected = detectOutputKind(text || '');
   if (detected) return detected;
-  return /(文档|正文文档|正式文档|word|docx?)/i.test(String(text || '').trim()) ? 'pdf' : '';
+  return /\u6587\u6863|\u6b63\u6587\u6587\u6863|\u6b63\u5f0f\u6587\u6863|word|docx?/i.test(String(text || '').trim()) ? 'pdf' : '';
 }
 
 function extractLooseTimeRange(text: string) {
-  const source = String(text || '').trim();
-  const patterns = [
-    /最近上传/,
-    /刚上传/,
-    /今天|今日/,
-    /昨日|昨天/,
-    /本周|这周|这一周/,
-    /上周|上一周/,
-    /本月|这个月/,
-    /上个月|上月/,
-    /最近一周|近一周/,
-    /最近一个月|近一个月/,
-    /最近三个月|近三个月/,
-    /最近半年|近半年/,
-    /最近一年|近一年/,
-    /本季度|这个季度/,
-    /全部时间|全时间|所有时间|全量|全部/,
-    /all time|all-time|full range/i,
-  ];
-  for (const pattern of patterns) {
-    const match = source.match(pattern);
-    if (match?.[0]) return match[0];
+  const source = normalizeText(text);
+  for (const rule of TIME_RANGE_RULES) {
+    if (rule.pattern.test(source)) return rule.value;
   }
   return '';
 }
 
 export function extractNormalizedTimeRange(text: string) {
-  const source = String(text || '').trim();
-  if (!source) return '';
+  return extractLooseTimeRange(text);
+}
 
-  const explicitPatterns = [
-    /最近上传|刚上传/i,
-    /今天|今日/i,
-    /昨日|昨天/i,
-    /本周|这周|这一周/i,
-    /上周|上一周/i,
-    /本月|这个月/i,
-    /上个月|上月/i,
-    /最近一周|近一周/i,
-    /最近一个月|近一个月/i,
-    /最近三个月|近三个月/i,
-    /最近半年|近半年/i,
-    /最近一年|近一年/i,
-    /本季度|这个季度/i,
-    /全部时间|全时间|所有时间|全量|全部/i,
-    /all time|all-time|full range/i,
-  ];
-
-  for (const pattern of explicitPatterns) {
-    const match = source.match(pattern);
-    if (match?.[0]) return match[0];
-  }
-
-  return extractLooseTimeRange(source);
+function stripControlWords(text: string) {
+  return String(text || '')
+    .replace(/\u8bf7|\u8bf7\u4f60|\u5e2e\u6211|\u9ebb\u70e6|\u60f3\u8981|\u9700\u8981|\u5e0c\u671b|\u5e2e\u5fd9|\u57fa\u4e8e|\u6839\u636e|\u6309\u7167|\u56f4\u7ed5|\u805a\u7126|\u9488\u5bf9|\u4f18\u5148/gi, ' ')
+    .replace(/\u77e5\u8bc6\u5e93|\u6587\u6863\u5e93|\u8d44\u6599\u5e93|\u5e93\u5185|\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|\u8fd9\u4efd\u6587\u6863|\u8fd9\u4e2a\u6587\u4ef6|\u8fd9\u4e9b\u6750\u6599|\u8fd9\u6279\u6750\u6599|\u8fd9\u6279\u6587\u6863/gi, ' ')
+    .replace(/\u8f93\u51fa|\u751f\u6210|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u6574\u7406|\u6c47\u603b|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa/gi, ' ')
+    .replace(/\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u6570\u636e\u53ef\u89c6\u5316\u9759\u6001\u9875|ppt|pdf|\u6587\u6863/gi, ' ')
+    .replace(/\u4eca\u5929|\u4eca\u65e5|\u6628\u5929|\u6628\u65e5|\u672c\u5468|\u8fd9\u5468|\u8fd9\u4e00\u5468|\u4e0a\u5468|\u4e0a\u4e00\u5468|\u672c\u6708|\u8fd9\u4e2a\u6708|\u4e0a\u4e2a\u6708|\u4e0a\u6708|\u6700\u8fd1\u4e00\u5468|\u8fd1\u4e00\u5468|\u6700\u8fd1\u4e00\u4e2a\u6708|\u8fd1\u4e00\u4e2a\u6708|\u6700\u8fd1\u4e09\u4e2a\u6708|\u8fd1\u4e09\u4e2a\u6708|\u6700\u8fd1\u534a\u5e74|\u8fd1\u534a\u5e74|\u6700\u8fd1\u4e00\u5e74|\u8fd1\u4e00\u5e74|\u672c\u5b63\u5ea6|\u5168\u90e8\u65f6\u95f4|\u5168\u65f6\u95f4|\u6240\u6709\u65f6\u95f4|\u5168\u91cf|\u5168\u90e8|all time|all-time|full range/gi, ' ')
+    .replace(/[，。；;,.!?！？()（）【】[\]<>《》“”"'‘’]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractLooseContentFocus(text: string) {
-  return String(text || '')
-    .replace(/请|请你|帮我|麻烦|想要|需要|希望|帮忙|基于|根据|按照|围绕|聚焦|针对|优先/gi, ' ')
-    .replace(/知识库|文档库|资料库|库内|最近上传|刚上传|这份文档|这个文件|这些材料|这批材料|这批文档/g, ' ')
-    .replace(/输出|生成|整理|汇总|做成|做一份|做个|导出|形成|产出/g, ' ')
-    .replace(/报表|表格|对比表|静态页|数据可视化静态页|PPT|PDF|文档/g, ' ')
-    .replace(/今天|昨日|昨天|本周|上周|本月|上个月|最近上传|最近一周|最近一个月|最近三个月|近一周|近一个月|近三个月|最近半年|近半年|最近一年|近一年|本季度|全部时间|全时间|所有时间|全量|全部/gi, ' ')
-    .replace(/[，。；;,.!?！？]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return stripControlWords(text);
 }
 
 export function extractNormalizedContentFocus(text: string) {
-  const source = String(text || '').trim();
+  const source = normalizeText(text);
   if (!source) return '';
 
-  const cleaned = source
-    .replace(/请|请你|帮我|麻烦|想要|需要|希望|帮忙|基于|根据|按照|围绕|聚焦|针对|优先/gi, ' ')
-    .replace(/知识库|库内|文档库|资料库|最近上传|刚上传|这份文档|这个文件|这些材料|这批材料|这批文档/gi, ' ')
-    .replace(/输出|生成|做成|做一份|做个|整理成|导出|形成|产出/gi, ' ')
-    .replace(/报表|表格|对比表|静态页|数据可视化静态页|ppt|pdf|文档/gi, ' ')
-    .replace(/今天|今日|昨天|昨日|本周|这周|这一周|上周|上一周|本月|这个月|上个月|上月|最近一周|近一周|最近一个月|近一个月|最近三个月|近三个月|最近半年|近半年|最近一年|近一年|本季度|这个季度|全部时间|全时间|所有时间|全量|全部|all time|all-time|full range/gi, ' ')
-    .replace(/[，。；;：:.!?！？()（）【】\[\]<>《》"'“”‘’]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
+  const cleaned = stripControlWords(source);
   if (cleaned) return cleaned;
 
   const fallbackParts = [
     ...source.matchAll(/按(.{2,24}?)维度/g),
-    ...source.matchAll(/提取(.{2,40}?)(?:，|。|并|并且|并按|按|输出|$)/g),
-    ...source.matchAll(/整理(.{2,40}?)(?:，|。|并|并且|并按|按|输出|$)/g),
-    ...source.matchAll(/汇总(.{2,40}?)(?:，|。|并|并且|并按|按|输出|$)/g),
-    ...source.matchAll(/分析(.{2,40}?)(?:，|。|并|并且|并按|按|输出|$)/g),
+    ...source.matchAll(/提取(.{2,40}?)(?:，|。|并且|并按|按.*输出|$)/g),
+    ...source.matchAll(/整理(.{2,40}?)(?:，|。|并且|并按|按.*输出|$)/g),
+    ...source.matchAll(/汇总(.{2,40}?)(?:，|。|并且|并按|按.*输出|$)/g),
+    ...source.matchAll(/分析(.{2,40}?)(?:，|。|并且|并按|按.*输出|$)/g),
   ]
     .map((match) => String(match[1] || '').trim())
     .filter(Boolean);
@@ -151,7 +122,7 @@ export function extractNormalizedContentFocus(text: string) {
 }
 
 export function extractExplicitKnowledgeFocus(text: string) {
-  const source = String(text || '').trim();
+  const source = normalizeText(text);
   if (!source) return '';
 
   if (/公司/.test(source) && /(项目|IT|系统|平台|接口|技术|开发|实施)/i.test(source)) {
@@ -176,7 +147,7 @@ export function extractExplicitKnowledgeFocus(text: string) {
 }
 
 function isLikelySlotOnlyReply(text: string) {
-  const source = String(text || '').trim();
+  const source = normalizeText(text);
   if (!source) return false;
   if (Boolean(extractNormalizedTimeRange(source))) return true;
   if (Boolean(extractOutputType(source))) return true;
@@ -202,12 +173,12 @@ function getMissingSlot(state: Omit<KnowledgeConversationState, 'kind' | 'missin
 
 export function buildMissingKnowledgeSlotMessage(state: KnowledgeConversationState) {
   if (state.missingSlot === 'time') {
-    return '要按库内内容输出，还缺时间范围。请补充例如最近上传、本周、最近一个月这类时间范围。';
+    return '要按库内内容处理，还缺时间范围。请补充例如最近上传、本周、最近一个月、全部时间这类时间约束。';
   }
   if (state.missingSlot === 'content') {
-    return '要按库内内容输出，还缺内容范围。请说明要基于哪个知识库或哪批文档，以及重点看什么内容。';
+    return '要按库内内容处理，还缺内容范围。请说明要基于哪个知识库或哪批文档，以及重点看什么内容。';
   }
-  return '要按库内内容输出，还缺输出形式。请说明要表格、数据可视化静态页、PPT 还是文档。';
+  return '要按库内内容处理，还缺输出形式。请说明要表格、数据可视化静态页、PPT 还是文档。';
 }
 
 export function buildKnowledgeRequest(state: KnowledgeConversationState) {
@@ -216,7 +187,7 @@ export function buildKnowledgeRequest(state: KnowledgeConversationState) {
     : '相关知识库';
   const timeText = state.timeRange || '最近上传';
   const focusText = state.contentFocus || '相关内容';
-  return `请基于 ${libraryLabel} 中 ${timeText} 范围内的材料，围绕 ${focusText}，输出一份 ${mapOutputTypeLabel(state.outputType)}。`;
+  return `请基于 ${libraryLabel} 中 ${timeText} 范围内的材料，围绕 ${focusText}，输出一份${mapOutputTypeLabel(state.outputType)}。`;
 }
 
 export function mergeKnowledgeConversationState(

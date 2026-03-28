@@ -76,8 +76,8 @@ test('filterDocumentsByContentFocus should prefer company and project focused re
 
 test('buildKnowledgeRetrievalQuery should retain time, content and library hints', () => {
   const query = buildKnowledgeRetrievalQuery(
-    '基于人才简历库输出公司维度 IT 项目表格',
-    [{ key: 'resume', label: '人才简历库' }],
+    '基于人才简历知识库输出公司维度 IT 项目表格',
+    [{ key: 'resume', label: '人才简历知识库' }],
     {
       timeRange: '全部时间',
       contentFocus: '公司维度 IT 项目',
@@ -86,6 +86,6 @@ test('buildKnowledgeRetrievalQuery should retain time, content and library hints
 
   assert.match(query, /公司维度 IT 项目/);
   assert.match(query, /全部时间/);
-  assert.match(query, /人才简历库/);
+  assert.match(query, /人才简历知识库/);
   assert.doesNotMatch(query, /输出/);
 });

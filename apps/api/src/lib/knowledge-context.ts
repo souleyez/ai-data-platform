@@ -6,34 +6,34 @@ import { buildPromptForScoring, collectLibraryMatches } from './knowledge-plan.j
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
 const DOCUMENT_DETAIL_PATTERNS = [
-  /刚上传/,
-  /最近上传/,
-  /上传的文档/,
-  /上传的文件/,
-  /这份文档/,
-  /这个文档/,
-  /这个文件/,
-  /这份材料/,
-  /该文档/,
-  /该文件/,
-  /文档里/,
-  /材料里/,
-  /文件里/,
-  /详细看/,
-  /仔细看/,
-  /详细阅读/,
-  /认真读/,
-  /看看.*文档/,
-  /查看.*文档/,
-  /根据.*文档/,
-  /按.*文档/,
+  /\u521a\u4e0a\u4f20/,
+  /\u6700\u8fd1\u4e0a\u4f20/,
+  /\u4e0a\u4f20\u7684\u6587\u6863/,
+  /\u4e0a\u4f20\u7684\u6587\u4ef6/,
+  /\u8fd9\u4efd\u6587\u6863/,
+  /\u8fd9\u4e2a\u6587\u6863/,
+  /\u8fd9\u4e2a\u6587\u4ef6/,
+  /\u8fd9\u4efd\u6750\u6599/,
+  /\u8be5\u6587\u6863/,
+  /\u8be5\u6587\u4ef6/,
+  /\u6587\u6863\u91cc/,
+  /\u6750\u6599\u91cc/,
+  /\u6587\u4ef6\u91cc/,
+  /\u8be6\u7ec6\u770b/,
+  /\u4ed4\u7ec6\u770b/,
+  /\u8be6\u7ec6\u9605\u8bfb/,
+  /\u8ba4\u771f\u8bfb/,
+  /\u770b\u770b.*\u6587\u6863/,
+  /\u67e5\u770b.*\u6587\u6863/,
+  /\u6839\u636e.*\u6587\u6863/,
+  /\u6309.*\u6587\u6863/,
 ];
 
 const DETAIL_QUESTION_PATTERNS =
-  /(细节|详细|具体|条款|参数|内容|依据|原文|证据|章节|接口|字段|学历|公司|日期|金额|结论)/;
+  /\u7ec6\u8282|\u8be6\u7ec6|\u5177\u4f53|\u6761\u6b3e|\u53c2\u6570|\u5185\u5bb9|\u4f9d\u636e|\u539f\u6587|\u8bc1\u636e|\u7ae0\u8282|\u63a5\u53e3|\u5b57\u6bb5|\u5b66\u5386|\u516c\u53f8|\u65e5\u671f|\u91d1\u989d|\u7ed3\u8bba/;
 
 const RECENT_UPLOAD_LIBRARY_PATTERNS =
-  /(最近上传|刚上传|这份文档|这个文件|这些材料|这批文档|这批材料)/;
+  /\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|\u8fd9\u4efd\u6587\u6863|\u8fd9\u4e2a\u6587\u4ef6|\u8fd9\u4e9b\u6750\u6599|\u8fd9\u6279\u6587\u6863|\u8fd9\u6279\u6750\u6599/;
 
 function isUploadedDocument(item: ParsedDocument) {
   const target = `${item.path || ''} ${item.name || ''}`.toLowerCase();
@@ -144,7 +144,7 @@ function buildRecentUploadedContextBlocks(documents: ParsedDocument[]) {
   return [
     [
       '系统最近完成详细解析的上传文档如下。',
-      '普通问答可优先参考这些材料的详细摘要、结构化重点和证据。',
+      '普通问答可以优先参考这些材料的详细摘要、结构化重点和证据。',
       ...documents.slice(0, 2).map((item, index) => buildCompactDocumentBlock(item, index)),
     ].join('\n\n'),
   ];
@@ -167,7 +167,8 @@ export function looksLikeDocumentDetailFollowup(prompt: string, chatHistory: Cha
 
   const keywords = extractDocumentFollowupKeywords(text);
   const historyJoined = chatHistory.map((item) => item.content).join('\n');
-  const hasRecentIngestContext = /(上传完成|涉及材料|入库|摘要|文档类型|知识库|解析)/.test(historyJoined);
+  const hasRecentIngestContext =
+    /\u4e0a\u4f20\u5b8c\u6210|\u6d89\u53ca\u6750\u6599|\u5165\u5e93|\u6458\u8981|\u6587\u6863\u7c7b\u578b|\u77e5\u8bc6\u5e93|\u89e3\u6790/.test(historyJoined);
   return DETAIL_QUESTION_PATTERNS.test(text) && hasRecentIngestContext && keywords.length > 0;
 }
 

@@ -103,9 +103,7 @@ export function buildKnowledgeChatHistory(chatHistory: ChatHistoryItem[], reques
     .filter((item) => item.content)
     .filter((item) => !looksLikeOperationalFeedback(item.content));
 
-  if (!cleaned.length) {
-    return [];
-  }
+  if (!cleaned.length) return [];
 
   const requestTerms = new Set(tokenizeKnowledgeText(requestText));
   const selectedIndexes = new Set(cleaned.map((_, index) => index).slice(-4));

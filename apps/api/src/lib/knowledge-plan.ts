@@ -14,7 +14,7 @@ export type KnowledgePlan = {
 function normalizeText(value: string) {
   return String(value || '')
     .toLowerCase()
-    .replace(/[，。、“”"'‘’：:；;！!（）()\[\]\-_/\\|]+/g, ' ')
+    .replace(/[，。、“”"'‘’；;!?！？（）()\[\]\-_/\\|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -22,10 +22,10 @@ function normalizeText(value: string) {
 export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt' | null {
   const normalized = normalizeText(text);
   if (!normalized) return null;
-  if (/(静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|page)\b/.test(normalized)) return 'page';
-  if (/\bppt\b|演示稿|汇报稿|汇报提纲/.test(normalized)) return 'ppt';
-  if (/\bpdf\b|文档版|正式文档|word|docx/.test(normalized)) return 'pdf';
-  if (/(报表|表格|对比表|清单|报告)/.test(normalized)) return 'table';
+  if (/\u9759\u6001\u9875|\u53ef\u89c6\u5316\u9875\u9762|\u6570\u636e\u53ef\u89c6\u5316|\u56fe\u8868\u9875\u9762|dashboard|landing page|\bpage\b/.test(normalized)) return 'page';
+  if (/\bppt\b|\u6f14\u793a\u7a3f|\u6c47\u62a5\u7a3f|\u6c47\u62a5\u63d0\u7eb2/.test(normalized)) return 'ppt';
+  if (/\bpdf\b|\u6587\u6863\u7248|\u6b63\u5f0f\u6587\u6863|word|docx/.test(normalized)) return 'pdf';
+  if (/\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u6e05\u5355|\u62a5\u544a/.test(normalized)) return 'table';
   return null;
 }
 
@@ -117,7 +117,7 @@ export function shouldFallbackToLocalPlan(planText: string) {
   const hasTooManyQuestionMarks = questionMarks >= 4 || (text.length > 0 && questionMarks / text.length >= 0.2);
   return (
     hasTooManyQuestionMarks
-    || /(乱码|看不清|无法识别|未能识别|无法判断|重新发送|请提供具体|无法提取有效需求|输入内容无法提取|无效数据)/.test(text)
+    || /乱码|看不清|无法识别|未能识别|无法判断|重新发送|请提供具体|无法提取有效需求|输入内容无法提取|无效数据/.test(text)
   );
 }
 
@@ -129,11 +129,11 @@ export function buildLocalKnowledgePlan(
     .filter((item) => item.role === 'user')
     .map((item) => item.content)
     .slice(-3)
-    .join('，');
+    .join('；');
 
   const source = [recentUserContent, prompt]
     .filter(Boolean)
-    .join('，')
+    .join('；')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -157,11 +157,11 @@ export function buildLocalKnowledgePlan(
 }
 
 export function buildKnowledgePlanMessage() {
-  return '我已经根据最近几轮对话整理出一条按知识库输出的需求，请继续直接调整或确认。';
+  return '我已经根据最近几轮对话整理出一条按知识库处理的需求，你可以直接继续补充或确认。';
 }
 
 export function buildNoPlanMessage() {
-  return '这次还没有整理出稳定的知识库输出需求。请补充更明确的目标后再继续。';
+  return '这次还没有整理出稳定的知识库处理需求。请补充更明确的目标后再继续。';
 }
 
 export function extractPlanningResult(

@@ -61,9 +61,9 @@ function buildFallbackResponse(
     intent: requestMode === 'general' ? ('general' as const) : ('report' as const),
     content,
     output: { type: 'answer', content },
-    libraries: [] as Array<{ key: string; label: string }>,
-    knowledgePlan: null as KnowledgePlan | null,
-    conversationState: null as KnowledgeConversationState | null,
+    libraries: [],
+    knowledgePlan: null,
+    conversationState: null,
     fallbackReason: gatewayConfigured ? '' : 'cloud-gateway-not-configured',
   };
 }
