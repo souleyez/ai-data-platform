@@ -156,3 +156,74 @@ test('buildKnowledgeFallbackOutput should produce resume company table when clou
   assert.equal(output.table?.rows?.[0]?.[0], '甲公司');
   assert.equal(output.table?.rows?.[0]?.[1], '张三');
 });
+
+test('normalizeReportOutput should convert supply-echo json into readable concept page output', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '请基于 bids 知识库按风险维度生成静态页',
+    JSON.stringify({
+      scope: {
+        libraries: [{ key: 'bids', label: '标书资料库' }],
+        outputKind: 'static-page',
+      },
+      documents: [
+        {
+          title: '投标须知',
+          summary: '说明资格要求、材料准备和截止时间。',
+          whySelected: '命中风险维度供料',
+        },
+      ],
+      evidence: [
+        {
+          title: '资格要求',
+          text: '需要营业执照、业绩案例和资质证书。',
+        },
+      ],
+      templateGuidance: {
+        preferredSections: ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
+        groupingHints: ['按风险维度分组', '按紧急程度排序'],
+        outputHint: '生成可转发的数据可视化静态页',
+      },
+      gaps: ['缺少时间节点和截止日期信息'],
+    }),
+    null,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.doesNotMatch(output.page?.summary || '', /^```json/i);
+  assert.match(output.page?.summary || '', /缺少时间节点和截止日期信息/);
+  assert.equal(output.content, output.page?.summary);
+  assert.deepEqual(
+    output.page?.sections?.map((item) => item.title),
+    ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
+  );
+  assert.ok((output.page?.cards?.length || 0) >= 1);
+  assert.match(output.page?.sections?.[1]?.body || '', /缺少时间节点和截止日期信息/);
+});
+
+test('normalizeReportOutput should convert request-echo pages into readable fallback page output', () => {
+  const requestText = '请基于 IOT解决方案 知识库中全部时间范围的资料，按模块维度生成数据可视化静态页报表。';
+  const output = normalizeReportOutput(
+    'page',
+    requestText,
+    requestText,
+    {
+      title: 'IOT 解决方案模块维度静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按模块维度生成静态页',
+      pageSections: ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.notEqual(output.page?.summary, requestText);
+  assert.match(output.page?.summary || '', /未稳定产出结构化页面内容/);
+  assert.ok((output.page?.cards?.length || 0) >= 2);
+  assert.deepEqual(
+    output.page?.sections?.map((item) => item.title),
+    ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
+  );
+  assert.match(output.page?.sections?.[0]?.body || '', /未稳定产出结构化页面内容/);
+  assert.match(output.page?.sections?.[1]?.body || '', /原始请求：请基于 IOT解决方案/);
+});
