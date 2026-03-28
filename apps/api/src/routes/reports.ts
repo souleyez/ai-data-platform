@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  addSharedTemplateReferenceLink,
   createSharedReportTemplate,
   createReportOutput,
   deleteReportOutput,
@@ -176,13 +177,15 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const body = (request.body || {}) as {
       label?: string;
       type?: 'table' | 'static-page' | 'ppt' | 'document';
+      sourceType?: 'word' | 'ppt' | 'spreadsheet' | 'image' | 'web-link' | 'other';
       description?: string;
       isDefault?: boolean;
     };
 
     const item = await createSharedReportTemplate({
       label: String(body.label || '').trim(),
-      type: (body.type || 'static-page') as 'table' | 'static-page' | 'ppt' | 'document',
+      type: body.type,
+      sourceType: body.sourceType,
       description: body.description,
       isDefault: Boolean(body.isDefault),
     });
@@ -220,6 +223,28 @@ export async function registerReportRoutes(app: FastifyInstance) {
       status: 'uploaded',
       item,
       message: `已上传模板参考文件 ${item.originalName}`,
+    };
+  });
+
+  app.post('/reports/template-reference-link', async (request, reply) => {
+    const body = (request.body || {}) as {
+      templateKey?: string;
+      url?: string;
+      label?: string;
+    };
+    const templateKey = String(body.templateKey || '').trim();
+    const url = String(body.url || '').trim();
+    if (!templateKey) return reply.code(400).send({ error: 'templateKey is required' });
+    if (!url) return reply.code(400).send({ error: 'url is required' });
+
+    const item = await addSharedTemplateReferenceLink(templateKey, {
+      url,
+      label: body.label,
+    });
+    return {
+      status: 'uploaded',
+      item,
+      message: `宸蹭笂浼犳ā鏉跨綉椤甸摼鎺?${item.url || item.originalName}`,
     };
   });
 

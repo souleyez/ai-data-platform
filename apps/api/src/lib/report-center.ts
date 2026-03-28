@@ -17,12 +17,19 @@ const REPORT_STATE_FILE = path.join(REPORT_CONFIG_DIR, 'report-center.json');
 
 export type ReportTemplateType = 'table' | 'static-page' | 'ppt' | 'document';
 
+export type ReportReferenceSourceType = 'word' | 'ppt' | 'spreadsheet' | 'image' | 'web-link' | 'other';
+
 export type ReportReferenceImage = {
   id: string;
   fileName: string;
   originalName: string;
   uploadedAt: string;
   relativePath: string;
+  kind?: 'file' | 'link';
+  sourceType?: ReportReferenceSourceType;
+  mimeType?: string;
+  size?: number;
+  url?: string;
 };
 
 export type ReportGroupTemplate = {
@@ -50,6 +57,8 @@ export type SharedReportTemplate = {
   description: string;
   supported: boolean;
   isDefault?: boolean;
+  origin?: 'system' | 'user';
+  createdAt?: string;
   referenceImages: ReportReferenceImage[];
 };
 
@@ -109,6 +118,99 @@ export type ReportOutputRecord = {
   downloadUrl?: string;
   dynamicSource?: ReportDynamicSource | null;
 };
+
+function getExtensionFromPathLike(value: string) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  const pathname = normalized.split('?')[0].split('#')[0];
+  return path.extname(pathname);
+}
+
+function normalizeReferenceUrl(rawUrl: string) {
+  const value = String(rawUrl || '').trim();
+  if (!value) throw new Error('reference url is required');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('reference url is invalid');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('reference url must use http or https');
+  }
+
+  return parsed.toString();
+}
+
+export function inferReportReferenceSourceType(input: {
+  fileName?: string;
+  mimeType?: string;
+  url?: string;
+}): ReportReferenceSourceType {
+  const normalizedMimeType = String(input.mimeType || '').trim().toLowerCase();
+  const normalizedUrl = String(input.url || '').trim();
+  const extension = getExtensionFromPathLike(input.fileName || normalizedUrl);
+
+  if (normalizedUrl && !extension) {
+    return 'web-link';
+  }
+
+  if (['.doc', '.docx', '.rtf', '.odt'].includes(extension)) return 'word';
+  if (['.ppt', '.pptx', '.pptm', '.key'].includes(extension)) return 'ppt';
+  if (['.xls', '.xlsx', '.csv', '.tsv', '.ods'].includes(extension)) return 'spreadsheet';
+  if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'].includes(extension)) return 'image';
+
+  if (normalizedMimeType.includes('word') || normalizedMimeType.includes('officedocument.wordprocessingml')) return 'word';
+  if (normalizedMimeType.includes('presentation') || normalizedMimeType.includes('powerpoint')) return 'ppt';
+  if (normalizedMimeType.includes('spreadsheet') || normalizedMimeType.includes('excel') || normalizedMimeType.includes('csv')) return 'spreadsheet';
+  if (normalizedMimeType.startsWith('image/')) return 'image';
+
+  return normalizedUrl ? 'web-link' : 'other';
+}
+
+export function inferReportTemplateTypeFromSource(input: {
+  fileName?: string;
+  mimeType?: string;
+  url?: string;
+  sourceType?: ReportReferenceSourceType;
+}): ReportTemplateType {
+  const sourceType = input.sourceType || inferReportReferenceSourceType(input);
+  if (sourceType === 'ppt') return 'ppt';
+  if (sourceType === 'spreadsheet') return 'table';
+  if (sourceType === 'word') return 'document';
+  if (sourceType === 'image' || sourceType === 'web-link') return 'static-page';
+  return 'document';
+}
+
+function normalizeReportReferenceImage(reference: Partial<ReportReferenceImage> | null | undefined): ReportReferenceImage | null {
+  if (!reference) return null;
+
+  const url = String(reference.url || '').trim();
+  const kind = url ? 'link' : (reference.kind === 'link' ? 'link' : 'file');
+  const normalizedUrl = kind === 'link' && url ? normalizeReferenceUrl(url) : '';
+  const sourceType =
+    reference.sourceType
+    || inferReportReferenceSourceType({
+      fileName: reference.originalName || reference.fileName,
+      mimeType: reference.mimeType,
+      url: normalizedUrl,
+    });
+
+  return {
+    id: String(reference.id || buildId('ref')),
+    fileName: String(reference.fileName || '').trim(),
+    originalName: String(reference.originalName || reference.fileName || normalizedUrl || '未命名上传内容').trim(),
+    uploadedAt: String(reference.uploadedAt || '').trim() || new Date().toISOString(),
+    relativePath: String(reference.relativePath || '').trim(),
+    kind,
+    sourceType,
+    mimeType: String(reference.mimeType || '').trim(),
+    size: Number(reference.size || 0) || 0,
+    url: normalizedUrl,
+  };
+}
 
 function summarizeTableForAnalysis(table?: ReportOutputRecord['table']) {
   const columns = Array.isArray(table?.columns) ? table.columns : [];
@@ -861,6 +963,7 @@ function buildDefaultSharedTemplates(): SharedReportTemplate[] {
       description: '默认用于生成可转发的数据可视化静态页，强调摘要、核心指标、图表和行动建议。',
       supported: true,
       isDefault: true,
+      origin: 'system',
       referenceImages: [],
     },
     {
@@ -870,6 +973,7 @@ function buildDefaultSharedTemplates(): SharedReportTemplate[] {
       description: '默认用于生成汇报型PPT提纲，强调标题页、关键结论、分章节要点和行动建议。',
       supported: true,
       isDefault: true,
+      origin: 'system',
       referenceImages: [],
     },
     {
@@ -879,6 +983,7 @@ function buildDefaultSharedTemplates(): SharedReportTemplate[] {
       description: '默认用于生成结构稳定的表格报表，强调结论、说明、证据来源等固定列。',
       supported: true,
       isDefault: true,
+      origin: 'system',
       referenceImages: [],
     },
     {
@@ -888,6 +993,7 @@ function buildDefaultSharedTemplates(): SharedReportTemplate[] {
       description: '默认用于生成正文型文档输出，强调标题、摘要、分节和结论建议。',
       supported: true,
       isDefault: true,
+      origin: 'system',
       referenceImages: [],
     },
   ];
@@ -907,7 +1013,14 @@ function mergeSharedTemplates(storedTemplates: SharedReportTemplate[] | undefine
     merged.set(template.key, {
       ...(fallback || {}),
       ...template,
-      referenceImages: Array.isArray(template.referenceImages) ? template.referenceImages : (fallback?.referenceImages || []),
+      origin:
+        template.origin
+        || fallback?.origin
+        || (String(template.key || '').startsWith('shared-') ? 'system' : 'user'),
+      createdAt: String(template.createdAt || fallback?.createdAt || '').trim(),
+      referenceImages: (Array.isArray(template.referenceImages) ? template.referenceImages : (fallback?.referenceImages || []))
+        .map((item) => normalizeReportReferenceImage(item))
+        .filter(Boolean) as ReportReferenceImage[],
     });
   }
 
@@ -1439,7 +1552,9 @@ export async function loadReportCenterState() {
       triggerKeywords: Array.isArray(stored.triggerKeywords) && stored.triggerKeywords.length ? stored.triggerKeywords : base.triggerKeywords,
       defaultTemplateKey: resolvedDefaultTemplateKey,
       templates: storedTemplates,
-      referenceImages: Array.isArray(stored.referenceImages) ? stored.referenceImages : [],
+      referenceImages: (Array.isArray(stored.referenceImages) ? stored.referenceImages : [])
+        .map((item) => normalizeReportReferenceImage(item))
+        .filter(Boolean) as ReportReferenceImage[],
     };
   });
 
@@ -1623,13 +1738,19 @@ export async function uploadReportReferenceImage(groupKey: string, file: Multipa
   const fullPath = path.join(REPORT_REFERENCE_DIR, outputName);
   await pipeline(file.file, createWriteStream(fullPath));
 
-  const image: ReportReferenceImage = {
+  const stats = await fs.stat(fullPath);
+  const image = normalizeReportReferenceImage({
     id,
     fileName: outputName,
     originalName: safeName,
     uploadedAt: new Date().toISOString(),
     relativePath: path.relative(STORAGE_ROOT, fullPath).replace(/\\/g, '/'),
-  };
+    kind: 'file',
+    sourceType: inferReportReferenceSourceType({ fileName: safeName, mimeType: file.mimetype }),
+    mimeType: String(file.mimetype || '').trim(),
+    size: stats.size,
+  });
+  if (!image) throw new Error('reference image is invalid');
 
   group.referenceImages = [image, ...group.referenceImages].slice(0, 12);
   await saveGroupsAndOutputs(state.groups, state.outputs, state.templates);
@@ -1643,13 +1764,14 @@ export function findReportGroupForPrompt(groups: ReportGroup[], prompt: string) 
 
 export async function createSharedReportTemplate(input: {
   label: string;
-  type: ReportTemplateType;
+  type?: ReportTemplateType;
+  sourceType?: ReportReferenceSourceType;
   description?: string;
   isDefault?: boolean;
 }) {
   const state = await loadReportCenterState();
   const label = String(input.label || '').trim();
-  const type = input.type;
+  const type = input.type || inferReportTemplateTypeFromSource({ sourceType: input.sourceType });
   if (!label) throw new Error('template label is required');
   if (!['table', 'static-page', 'ppt', 'document'].includes(type)) {
     throw new Error('template type is invalid');
@@ -1662,6 +1784,8 @@ export async function createSharedReportTemplate(input: {
     description: String(input.description || '').trim() || `${label} 模板`,
     supported: true,
     isDefault: Boolean(input.isDefault),
+    origin: 'user',
+    createdAt: new Date().toISOString(),
     referenceImages: [],
   };
 
@@ -1714,13 +1838,49 @@ export async function uploadSharedTemplateReference(templateKey: string, file: M
   const fullPath = path.join(REPORT_REFERENCE_DIR, outputName);
   await pipeline(file.file, createWriteStream(fullPath));
 
-  const uploaded: ReportReferenceImage = {
+  const stats = await fs.stat(fullPath);
+  const uploaded = normalizeReportReferenceImage({
     id,
     fileName: outputName,
     originalName: safeName,
     uploadedAt: new Date().toISOString(),
     relativePath: path.relative(STORAGE_ROOT, fullPath).replace(/\\/g, '/'),
-  };
+    kind: 'file',
+    sourceType: inferReportReferenceSourceType({ fileName: safeName, mimeType: file.mimetype }),
+    mimeType: String(file.mimetype || '').trim(),
+    size: stats.size,
+  });
+  if (!uploaded) throw new Error('shared template reference is invalid');
+
+  const nextTemplates = state.templates.map((item) => (
+    item.key === templateKey
+      ? { ...item, referenceImages: [uploaded, ...item.referenceImages].slice(0, 16) }
+      : item
+  ));
+  await saveGroupsAndOutputs(state.groups, state.outputs, nextTemplates);
+  return uploaded;
+}
+
+export async function addSharedTemplateReferenceLink(templateKey: string, input: {
+  url: string;
+  label?: string;
+}) {
+  const state = await loadReportCenterState();
+  const template = state.templates.find((item) => item.key === templateKey);
+  if (!template) throw new Error('shared report template not found');
+
+  const normalizedUrl = normalizeReferenceUrl(input.url);
+  const uploaded = normalizeReportReferenceImage({
+    id: buildId('tmplref'),
+    fileName: '',
+    originalName: String(input.label || normalizedUrl).trim(),
+    uploadedAt: new Date().toISOString(),
+    relativePath: '',
+    kind: 'link',
+    sourceType: inferReportReferenceSourceType({ url: normalizedUrl }),
+    url: normalizedUrl,
+  });
+  if (!uploaded) throw new Error('shared template reference is invalid');
 
   const nextTemplates = state.templates.map((item) => (
     item.key === templateKey

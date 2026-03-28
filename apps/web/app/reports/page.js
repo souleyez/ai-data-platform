@@ -27,11 +27,12 @@ function formatDateTime(value) {
   }).format(date);
 }
 
-function formatTemplateKind(type) {
-  if (type === 'static-page') return '数据可视化静态页';
-  if (type === 'ppt') return 'PPT';
-  if (type === 'document') return '文档';
-  return '表格';
+function formatFileSize(size) {
+  const value = Number(size || 0);
+  if (!value) return '-';
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function indexToLetters(index) {
@@ -64,53 +65,141 @@ function buildDefaultTemplateLabel(templates = []) {
   return `${prefix}${indexToLetters(index)}`;
 }
 
-function TemplateCard({ template, submittingKey, onSetDefault }) {
-  const referenceFiles = Array.isArray(template.referenceImages) ? template.referenceImages : [];
+function isUserUploadedTemplate(template) {
+  const origin = String(template?.origin || '').trim().toLowerCase();
+  if (origin) return origin === 'user';
+  return !String(template?.key || '').startsWith('shared-');
+}
 
+function inferSourceTypeFromFile(file) {
+  const fileName = String(file?.name || '').toLowerCase();
+  if (/\.(doc|docx|rtf|odt)$/.test(fileName)) return 'word';
+  if (/\.(ppt|pptx|pptm|key)$/.test(fileName)) return 'ppt';
+  if (/\.(xls|xlsx|csv|tsv|ods)$/.test(fileName)) return 'spreadsheet';
+  if (file?.type?.startsWith('image/') || /\.(png|jpg|jpeg|gif|bmp|webp|svg)$/.test(fileName)) return 'image';
+  return 'other';
+}
+
+function inferSourceTypeFromReference(reference = {}) {
+  const sourceType = String(reference?.sourceType || '').trim();
+  if (sourceType) return sourceType;
+
+  if (reference?.url) return 'web-link';
+
+  const fileName = String(reference?.originalName || reference?.fileName || '').toLowerCase();
+  if (/\.(doc|docx|rtf|odt)$/.test(fileName)) return 'word';
+  if (/\.(ppt|pptx|pptm|key)$/.test(fileName)) return 'ppt';
+  if (/\.(xls|xlsx|csv|tsv|ods)$/.test(fileName)) return 'spreadsheet';
+  if (/\.(png|jpg|jpeg|gif|bmp|webp|svg)$/.test(fileName)) return 'image';
+  return 'other';
+}
+
+function formatSourceTypeLabel(sourceType) {
+  if (sourceType === 'word') return 'WORD';
+  if (sourceType === 'ppt') return 'PPT';
+  if (sourceType === 'spreadsheet') return '表格';
+  if (sourceType === 'image') return '图片';
+  if (sourceType === 'web-link') return '网页链接';
+  return '其他';
+}
+
+function buildUploadedTemplateItems(templates = []) {
+  return templates
+    .filter(isUserUploadedTemplate)
+    .flatMap((template) => {
+      const references = Array.isArray(template.referenceImages) ? template.referenceImages : [];
+      if (!references.length) {
+        return [{
+          id: `placeholder:${template.key}`,
+          templateKey: template.key,
+          templateLabel: template.label,
+          description: template.description || '',
+          createdAt: template.createdAt || '',
+          uploadedAt: template.createdAt || '',
+          sourceType: 'other',
+          sourceLabel: '待补充',
+          uploadName: '仅创建模板记录，尚未附文件或链接',
+          relativePath: '',
+          url: '',
+          mimeType: '',
+          size: 0,
+        }];
+      }
+
+      return references.map((reference, index) => {
+        const sourceType = inferSourceTypeFromReference(reference);
+        return {
+          id: reference?.id || `${template.key}:${index}`,
+          templateKey: template.key,
+          templateLabel: template.label,
+          description: template.description || '',
+          createdAt: template.createdAt || '',
+          uploadedAt: reference?.uploadedAt || template.createdAt || '',
+          sourceType,
+          sourceLabel: formatSourceTypeLabel(sourceType),
+          uploadName: reference?.url || reference?.originalName || reference?.fileName || template.label,
+          relativePath: reference?.relativePath || '',
+          url: reference?.url || '',
+          mimeType: reference?.mimeType || '',
+          size: Number(reference?.size || 0),
+        };
+      });
+    })
+    .sort((a, b) => {
+      const left = new Date(b.uploadedAt || b.createdAt || 0).getTime();
+      const right = new Date(a.uploadedAt || a.createdAt || 0).getTime();
+      return left - right;
+    });
+}
+
+function UploadedTemplateItem({ item }) {
   return (
-    <details className="capture-result-item" open={Boolean(template.isDefault)}>
-      <summary className="report-template-summary">
-        <span>
-          <strong>{template.label}</strong>
-          <span className="report-template-kind">{formatTemplateKind(template.type)}</span>
-        </span>
-        <span className="report-template-meta">
-          {template.isDefault ? '当前默认模板' : `参考文件 ${referenceFiles.length} 份`}
-        </span>
-      </summary>
-
-      <div className="report-template-body">
-        <div className="capture-task-note">{template.description || '暂未填写模板说明。'}</div>
-
-        <div className="report-template-actions">
-          <button
-            className="ghost-btn"
-            type="button"
-            disabled={submittingKey === `default:${template.key}` || template.isDefault}
-            onClick={() => onSetDefault(template.key)}
-          >
-            {template.isDefault ? '当前默认' : '设为默认'}
-          </button>
-        </div>
-
-        <div className="capture-task-note">
-          如需按自定义模板输出，请在提问时精确指定模板全名：<code>{template.label}</code>
-        </div>
-
-        {referenceFiles.length ? (
-          <div className="capture-result-list">
-            {referenceFiles.map((file) => (
-              <div key={file.id} className="capture-result-item">
-                <strong>{file.originalName}</strong>
-                <div className="capture-task-meta">上传时间：{formatDateTime(file.uploadedAt)}</div>
-              </div>
-            ))}
+    <article className="capture-result-item report-upload-item">
+      <div className="report-upload-header">
+        <div>
+          <strong>{item.templateLabel}</strong>
+          <div className="report-upload-meta">
+            上传时间：{formatDateTime(item.uploadedAt || item.createdAt)}
           </div>
-        ) : (
-          <div className="capture-task-note">当前还没有参考文件。</div>
-        )}
+        </div>
+        <span className="report-upload-tag">{item.sourceLabel}</span>
       </div>
-    </details>
+
+      {item.description ? <div className="capture-task-note">{item.description}</div> : null}
+
+      <div className="report-upload-grid">
+        <div className="report-upload-cell">
+          <span>上传内容</span>
+          {item.url ? (
+            <a className="report-upload-link" href={item.url} target="_blank" rel="noreferrer">
+              {item.uploadName}
+            </a>
+          ) : (
+            <strong>{item.uploadName}</strong>
+          )}
+        </div>
+        <div className="report-upload-cell">
+          <span>模板名</span>
+          <strong>{item.templateLabel}</strong>
+        </div>
+        <div className="report-upload-cell">
+          <span>来源类型</span>
+          <strong>{item.sourceLabel}</strong>
+        </div>
+        <div className="report-upload-cell">
+          <span>文件大小</span>
+          <strong>{formatFileSize(item.size)}</strong>
+        </div>
+        <div className="report-upload-cell">
+          <span>MIME</span>
+          <strong>{item.mimeType || '-'}</strong>
+        </div>
+        <div className="report-upload-cell">
+          <span>存储路径</span>
+          <strong>{item.relativePath || '-'}</strong>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -136,6 +225,8 @@ function SingleReportActions({ item }) {
 function ReportsPageContent() {
   const searchParams = useSearchParams();
   const generatedId = searchParams.get('generated') || '';
+  const fileInputRef = useRef(null);
+  const hasAutoSelectedReportRef = useRef(false);
   const [data, setData] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
@@ -143,11 +234,10 @@ function ReportsPageContent() {
   const [submittingKey, setSubmittingKey] = useState('');
   const [generatedReport, setGeneratedReport] = useState(null);
   const [selectedReportId, setSelectedReportId] = useState('');
-  const hasAutoSelectedReportRef = useRef(false);
   const [templateDraft, setTemplateDraft] = useState({
     label: '',
-    type: 'static-page',
     description: '',
+    link: '',
   });
   const [templateFile, setTemplateFile] = useState(null);
 
@@ -191,6 +281,11 @@ function ReportsPageContent() {
     [data],
   );
 
+  const uploadedTemplateItems = useMemo(
+    () => buildUploadedTemplateItems(data?.templates || []),
+    [data],
+  );
+
   useEffect(() => {
     if (!generatedId) {
       setGeneratedReport(null);
@@ -222,26 +317,47 @@ function ReportsPageContent() {
     }
   }, [generatedId, outputRecords, selectedReportId]);
 
-  async function createTemplate() {
+  async function uploadTemplate() {
     const label = String(templateDraft.label || '').trim();
+    const description = String(templateDraft.description || '').trim();
+    const link = String(templateDraft.link || '').trim();
+    const hasFile = Boolean(templateFile);
+    const hasLink = Boolean(link);
+
     if (!label) {
       setMessage('模板名称不能为空。');
       return;
     }
+    if (hasFile && hasLink) {
+      setMessage('文件和网页链接二选一即可。');
+      return;
+    }
+    if (!hasFile && !hasLink) {
+      setMessage('请上传文件或填写网页链接。');
+      return;
+    }
 
     try {
-      setSubmittingKey('create-template');
+      setSubmittingKey('upload-template');
       setMessage('');
+
+      const sourceType = hasFile ? inferSourceTypeFromFile(templateFile) : 'web-link';
       const response = await fetch(buildApiUrl('/api/reports/template'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(templateDraft),
+        body: JSON.stringify({
+          label,
+          description,
+          sourceType,
+        }),
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'create template failed');
 
       const createdTemplate = json?.item || null;
-      if (templateFile && createdTemplate?.key) {
+      if (!createdTemplate?.key) throw new Error('template create failed');
+
+      if (hasFile) {
         const formData = new FormData();
         formData.append('file', templateFile);
         const uploadResponse = await fetch(
@@ -253,38 +369,33 @@ function ReportsPageContent() {
         );
         const uploadJson = await uploadResponse.json();
         if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template reference failed');
+      } else {
+        const uploadResponse = await fetch(buildApiUrl('/api/reports/template-reference-link'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            templateKey: createdTemplate.key,
+            url: link,
+            label,
+          }),
+        });
+        const uploadJson = await uploadResponse.json();
+        if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template link failed');
       }
 
       await loadReports();
       setTemplateDraft({
         label: buildDefaultTemplateLabel((data?.templates || []).concat(createdTemplate ? [createdTemplate] : [])),
-        type: 'static-page',
         description: '',
+        link: '',
       });
       setTemplateFile(null);
-      setMessage(templateFile ? '已新增模板并上传参考文件。' : json?.message || '已新增模板。');
-    } catch (createError) {
-      setMessage(createError instanceof Error ? createError.message : '新增模板失败。');
-    } finally {
-      setSubmittingKey('');
-    }
-  }
-
-  async function setTemplateDefault(templateKey) {
-    try {
-      setSubmittingKey(`default:${templateKey}`);
-      setMessage('');
-      const response = await fetch(buildApiUrl(`/api/reports/template/${encodeURIComponent(templateKey)}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isDefault: true }),
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json?.error || 'update template failed');
-      setMessage(json?.message || '已更新默认模板。');
-      await loadReports();
-    } catch (updateError) {
-      setMessage(updateError instanceof Error ? updateError.message : '更新默认模板失败。');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      setMessage('模板已上传并加入列表。');
+    } catch (uploadError) {
+      setMessage(uploadError instanceof Error ? uploadError.message : '上传模板失败。');
     } finally {
       setSubmittingKey('');
     }
@@ -331,7 +442,7 @@ function ReportsPageContent() {
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>左侧管理共享输出模板，右侧统一查看已出报表。自然语言调整报表统一放在首页右侧当前报表区。</p>
+            <p>这里只保留两个模块：用户上传的模板、已生成的报表。模板上传不再手动分类，系统会按文件或链接自动识别。</p>
           </div>
         </header>
 
@@ -343,21 +454,17 @@ function ReportsPageContent() {
             <section className="card documents-card reports-templates-panel">
               <div className="panel-header">
                 <div>
-                  <h3>输出模板</h3>
-                  <p>模板对所有知识库共享。默认输出形式是数据可视化静态页，也支持维护多份 PPT、表格和文档模板。</p>
+                  <h3>用户上传的模板</h3>
+                  <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考，不再手动分类。</p>
                 </div>
               </div>
 
               <section className="capture-task-card">
                 <div className="capture-task-heading">
                   <div>
-                    <h4>模板上传窗口</h4>
-                    <p>新增模板时请先命名。默认命名会按当天日期自动生成，如 `260328a`。</p>
+                    <h4>上传模板</h4>
+                    <p>保留模板名和说明即可，文件与网页链接二选一。</p>
                   </div>
-                </div>
-
-                <div className="capture-task-note">
-                  如果要按自定义模板输出，必须在提问时精确指定模板全名。
                 </div>
 
                 <div className="filter-row report-template-create-row">
@@ -367,61 +474,64 @@ function ReportsPageContent() {
                     value={templateDraft.label}
                     onChange={(event) => setTemplateDraft((prev) => ({ ...prev, label: event.target.value }))}
                   />
-                  <select
+                  <input
                     className="filter-input"
-                    value={templateDraft.type}
-                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, type: event.target.value }))}
-                  >
-                    <option value="static-page">数据可视化静态页</option>
-                    <option value="ppt">PPT</option>
-                    <option value="table">表格</option>
-                    <option value="document">文档</option>
-                  </select>
+                    placeholder="模板说明（可选）"
+                    value={templateDraft.description}
+                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
+                  />
                 </div>
 
                 <div className="filter-row report-template-create-row">
                   <input
+                    ref={fileInputRef}
                     className="filter-input"
-                    placeholder="模板说明"
-                    value={templateDraft.description}
-                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
+                    type="file"
+                    accept="image/*,.doc,.docx,.rtf,.odt,.ppt,.pptx,.pptm,.xls,.xlsx,.csv,.tsv,.ods"
+                    onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
                   />
                   <input
                     className="filter-input"
-                    type="file"
-                    accept="image/*,.pdf,.ppt,.pptx,.xlsx,.xls,.doc,.docx"
-                    onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
+                    placeholder="或填写网页链接，如 https://example.com/template"
+                    value={templateDraft.link}
+                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, link: event.target.value }))}
                   />
                   <button
                     className="primary-btn"
                     type="button"
-                    onClick={() => void createTemplate()}
-                    disabled={submittingKey === 'create-template'}
+                    onClick={() => void uploadTemplate()}
+                    disabled={submittingKey === 'upload-template'}
                   >
-                    {submittingKey === 'create-template' ? '上传中...' : '上传模板'}
+                    {submittingKey === 'upload-template' ? '上传中...' : '上传模板'}
                   </button>
                 </div>
 
                 <div className="capture-task-meta">
-                  {templateFile ? `已选择参考文件：${templateFile.name}` : '可选上传参考文件，用于帮助系统贴合你的模板结构。'}
+                  {templateFile
+                    ? `已选择文件：${templateFile.name}`
+                    : templateDraft.link
+                      ? `已填写链接：${templateDraft.link}`
+                      : '支持上传 Word、PPT、表格、图片，或直接填网页链接。'}
                 </div>
               </section>
 
-              <div className="capture-result-list reports-scroll-panel">
-                {(data.templates || []).map((template) => (
-                  <TemplateCard
-                    key={template.key}
-                    template={template}
-                    submittingKey={submittingKey}
-                    onSetDefault={setTemplateDefault}
-                  />
-                ))}
-              </div>
+              {!uploadedTemplateItems.length ? (
+                <section className="report-empty-card">
+                  <h4>还没有上传模板</h4>
+                  <p>上传完成后，这里会列出所有模板文件和网页链接的详细信息。</p>
+                </section>
+              ) : (
+                <div className="capture-result-list reports-scroll-panel report-upload-list">
+                  {uploadedTemplateItems.map((item) => (
+                    <UploadedTemplateItem key={item.id} item={item} />
+                  ))}
+                </div>
+              )}
             </section>
 
             <ReportResultsPanel
-              title="已出报表"
-              description="统一查看所有已出报表，并使用链接、表格、PPT 或纯文字方式继续分享。"
+              title="已生成的报表"
+              description="统一查看所有已生成报表，并继续分享、下载或查看详情。"
               items={outputRecords}
               selectedReportId={selectedReportId}
               onSelectReport={setSelectedReportId}

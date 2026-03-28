@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSharedTemplateEnvelope,
+  inferReportReferenceSourceType,
+  inferReportTemplateTypeFromSource,
   resolveReportGroup,
   type ReportGroup,
   type SharedReportTemplate,
@@ -15,6 +17,7 @@ function makeTemplate(overrides: Partial<SharedReportTemplate>): SharedReportTem
     description: '默认用于生成结构稳定的表格报表。',
     supported: true,
     isDefault: true,
+    origin: 'system',
     referenceImages: [],
     ...overrides,
   };
@@ -60,7 +63,7 @@ test('buildSharedTemplateEnvelope should return bid sections for bid static page
       key: 'bid-static-template',
       label: '标书摘要静态页',
       type: 'static-page',
-      description: '用于招投标项目的摘要静态页模板',
+      description: '用于招投标项目摘要静态页模板',
     }),
   );
 
@@ -120,7 +123,7 @@ test('buildSharedTemplateEnvelope should return iot sections for iot static page
       key: 'iot-static-template',
       label: 'IOT解决方案静态页',
       type: 'static-page',
-      description: '适用于物联网方案讲解和平台模块梳理的静态页模板',
+      description: '适用于物联网方案讲解和平模块梳理的静态页模板',
     }),
   );
 
@@ -142,4 +145,25 @@ test('resolveReportGroup should match by key or label', () => {
 
   assert.equal(resolveReportGroup(groups, '简历')?.key, '简历');
   assert.equal(resolveReportGroup(groups, '人才简历')?.label, '人才简历');
+});
+
+test('inferReportReferenceSourceType should detect office files and links', () => {
+  assert.equal(inferReportReferenceSourceType({ fileName: '报价模板.docx' }), 'word');
+  assert.equal(inferReportReferenceSourceType({ fileName: '汇报提纲.pptx' }), 'ppt');
+  assert.equal(inferReportReferenceSourceType({ fileName: '经营分析.xlsx' }), 'spreadsheet');
+  assert.equal(inferReportReferenceSourceType({ fileName: '样式参考.png' }), 'image');
+  assert.equal(
+    inferReportReferenceSourceType({ url: 'https://example.com/report-template' }),
+    'web-link',
+  );
+});
+
+test('inferReportTemplateTypeFromSource should map uploads to internal template types', () => {
+  assert.equal(inferReportTemplateTypeFromSource({ fileName: '报价模板.docx' }), 'document');
+  assert.equal(inferReportTemplateTypeFromSource({ fileName: '汇报提纲.pptx' }), 'ppt');
+  assert.equal(inferReportTemplateTypeFromSource({ fileName: '经营分析.xlsx' }), 'table');
+  assert.equal(
+    inferReportTemplateTypeFromSource({ url: 'https://example.com/report-template' }),
+    'static-page',
+  );
 });
