@@ -155,3 +155,129 @@ test('buildConceptPageSupplyBlock should provide paper result sections when pape
   assert.match(block, /核心发现/);
   assert.match(block, /结果指标/);
 });
+
+test('buildConceptPageSupplyBlock should provide bid risk sections and grouping hints for bid concept pages', () => {
+  const block = buildConceptPageSupplyBlock({
+    requestText: '请基于 bids 知识库按风险维度输出静态页，重点看资格风险、材料缺口和时间风险。',
+    libraries: [{ key: 'bids', label: 'bids' }],
+    retrieval: {
+      documents: [
+        {
+          path: 'C:\\tmp\\bid-1.md',
+          name: 'bid-1.md',
+          title: 'Hospital Tender 1',
+          ext: '.md',
+          summary: 'Medical device tender with qualification, materials, and deadline risks.',
+          excerpt: '',
+          category: 'general',
+          bizCategory: 'general',
+          parseStatus: 'success',
+          extractedChars: 260,
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          topicTags: ['医疗设备', '投标'],
+          structuredProfile: {
+            riskSignals: ['资格预审', '截止时间'],
+            qualificationSignals: ['资质证书', '业绩案例'],
+            sectionSignals: ['技术应答', '商务条款'],
+          },
+        } as any,
+      ],
+      evidenceMatches: [],
+      meta: { candidateCount: 1, rerankedCount: 1 },
+    } as any,
+    templateTaskHint: 'bids-static-page',
+  });
+
+  assert.match(block, /Primary grouping dimension: risk/);
+  assert.match(block, /Recommended sections:/);
+  assert.match(block, /资格风险/);
+  assert.match(block, /材料缺口/);
+  assert.match(block, /Recommended cards:/);
+  assert.match(block, /Grouping hints:/);
+  assert.match(block, /资格预审/);
+});
+
+test('buildConceptPageSupplyBlock should use scenario grouping hints for iot concept pages', () => {
+  const block = buildConceptPageSupplyBlock({
+    requestText: '请基于 IOT解决方案 知识库按场景维度输出静态页，重点梳理行业场景、客户痛点和部署方式。',
+    libraries: [{ key: 'iot解决方案', label: 'IOT解决方案' }],
+    retrieval: {
+      documents: [
+        {
+          path: 'C:\\tmp\\iot-1.md',
+          name: 'iot-1.md',
+          title: 'Smart Warehouse Solution',
+          ext: '.md',
+          summary: 'A smart warehouse IOT solution with edge and cloud deployment.',
+          excerpt: '',
+          category: 'technical',
+          bizCategory: 'iot',
+          parseStatus: 'success',
+          extractedChars: 280,
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          topicTags: ['智慧仓储', '仓配'],
+          structuredProfile: {
+            targetScenario: ['智慧仓储', '区域仓配'],
+            deploymentMode: '边缘 + 云',
+            customerSignals: ['仓配中心'],
+          },
+        } as any,
+      ],
+      evidenceMatches: [],
+      meta: { candidateCount: 1, rerankedCount: 1 },
+    } as any,
+    templateTaskHint: 'iot-static-page',
+  });
+
+  assert.match(block, /Primary grouping dimension: scenario/);
+  assert.match(block, /Recommended sections:/);
+  assert.match(block, /场景概览/);
+  assert.match(block, /Recommended cards:/);
+  assert.match(block, /Grouping hints:/);
+  assert.match(block, /智慧仓储/);
+  assert.match(block, /边缘 \+ 云/);
+});
+
+test('buildConceptPageSupplyBlock should provide module sections for iot module pages', () => {
+  const block = buildConceptPageSupplyBlock({
+    requestText: '请基于 IOT解决方案 知识库按模块维度输出静态页，重点梳理设备、网关、平台和接口集成。',
+    libraries: [{ key: 'iot解决方案', label: 'IOT解决方案' }],
+    retrieval: {
+      documents: [
+        {
+          path: 'C:\\tmp\\iot-2.md',
+          name: 'iot-2.md',
+          title: 'IOT Reference Architecture',
+          ext: '.md',
+          summary: 'Reference architecture covering gateway, rules engine, and API integration.',
+          excerpt: '',
+          category: 'technical',
+          bizCategory: 'iot',
+          parseStatus: 'success',
+          extractedChars: 320,
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          topicTags: ['设备接入', '接口集成'],
+          structuredProfile: {
+            moduleSignals: ['设备接入', '规则引擎'],
+            interfaceType: 'MQTT / REST',
+            integrationSignals: ['WMS', 'ERP'],
+            valueSignals: ['库存可视化'],
+          },
+        } as any,
+      ],
+      evidenceMatches: [],
+      meta: { candidateCount: 1, rerankedCount: 1 },
+    } as any,
+    templateTaskHint: 'iot-static-page',
+  });
+
+  assert.match(block, /Primary grouping dimension: module/);
+  assert.match(block, /模块概览/);
+  assert.match(block, /接口集成/);
+  assert.match(block, /Grouping hints:/);
+  assert.match(block, /设备接入/);
+  assert.match(block, /MQTT \/ REST/);
+});

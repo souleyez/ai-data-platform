@@ -248,6 +248,14 @@ function buildSyntheticTemplateFieldRecords(
     { field: 'supplementaryMaterials', enabled: tasks.includes('bids-table') || tasks.includes('bids-static-page') },
     { field: 'riskNote', enabled: tasks.includes('bids-table') || tasks.includes('bids-static-page') },
     { field: 'evidenceSource', enabled: tasks.includes('bids-table') || tasks.includes('bids-static-page') },
+    { field: 'targetScenario', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'moduleSignals', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'interfaceType', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'integrationSignals', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'deploymentMode', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'valueSignals', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'benefitSignals', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
+    { field: 'metricSignals', enabled: tasks.includes('iot-static-page') || tasks.includes('iot-table') },
   ];
 
   return syntheticFields

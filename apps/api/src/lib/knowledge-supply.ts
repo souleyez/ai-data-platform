@@ -169,6 +169,12 @@ function buildConceptGroupingHints(
     if (dimension === 'conclusion') {
       return collectStructuredValues(profile, ['resultSignals', 'publicationSignals', 'subjectType']);
     }
+    if (dimension === 'scenario') {
+      return [
+        ...collectStructuredValues(profile, ['targetScenario', 'industrySignals', 'customerSignals', 'deploymentMode']),
+        ...(item.topicTags || []),
+      ];
+    }
     if (dimension === 'module') {
       return collectStructuredValues(profile, ['moduleSignals', 'interfaceType', 'integrationSignals']);
     }

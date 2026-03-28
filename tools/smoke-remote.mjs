@@ -140,14 +140,23 @@ function readLibraries(payload) {
   return [];
 }
 
+function matchesLibraryAliases(item, aliases) {
+  const normalizedAliases = aliases.map((entry) => String(entry || '').trim().toLowerCase()).filter(Boolean);
+  const key = String(item?.key || '').trim().toLowerCase();
+  const label = String(item?.label || '').trim().toLowerCase();
+  return normalizedAliases.includes(key) || normalizedAliases.includes(label);
+}
+
 function readLibraryCount(libraries, aliases) {
-  const normalizedAliases = aliases.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
-  const library = libraries.find((item) => {
-    const key = String(item?.key || '').trim().toLowerCase();
-    const label = String(item?.label || '').trim().toLowerCase();
-    return normalizedAliases.includes(key) || normalizedAliases.includes(label);
-  });
+  const library = libraries.find((item) => matchesLibraryAliases(item, aliases));
   return Number(library?.documentCount || 0);
+}
+
+function assertMatchedLibrary(payload, aliases, context) {
+  assertCondition(
+    Array.isArray(payload?.libraries) && payload.libraries.some((item) => matchesLibraryAliases(item, aliases)),
+    `${context} did not route to expected library`,
+  );
 }
 
 async function main() {
@@ -234,28 +243,40 @@ async function main() {
   }
 
   const bidsCount = readLibraryCount(libraries, ['bids', '标书']);
+  const bidsPage = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: bidsPagePrompt }, 'bids page chat');
+  assertCondition(bidsPage?.intent === 'report', `expected report intent for bids page, got ${bidsPage?.intent || 'unknown'}`);
+  assertMatchedLibrary(bidsPage, ['bids', '标书'], 'bids page');
+  assertCondition(bidsPage?.reportTemplate == null, 'expected bids page to stay in concept-page mode without shared template');
   if (bidsCount > 0) {
-    const bidsPage = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: bidsPagePrompt }, 'bids page chat');
-    assertCondition(bidsPage?.intent === 'report', `expected report intent for bids page, got ${bidsPage?.intent || 'unknown'}`);
     assertCondition(bidsPage?.output?.type === 'page', `expected page output for bids page, got ${bidsPage?.output?.type || 'unknown'}`);
-    assertCondition(Array.isArray(bidsPage?.libraries) && bidsPage.libraries.length > 0, 'bids page returned no matched libraries');
-    await writeArtifact(options.outputDir, `${timestamp}-bids-page-chat.json`, bidsPage);
-    log('bids-page', `output=${bidsPage.output.type} libraries=${bidsPage.libraries.map((item) => item.label || item.key).join(', ')}`);
   } else {
-    log('bids-page', 'skipped (bids library has no documents)');
+    assertCondition(bidsPage?.output?.type === 'answer', `expected answer fallback for empty bids library, got ${bidsPage?.output?.type || 'unknown'}`);
   }
+  await writeArtifact(options.outputDir, `${timestamp}-bids-page-chat.json`, bidsPage);
+  log(
+    'bids-page',
+    bidsCount > 0
+      ? `output=${bidsPage.output.type} libraries=${bidsPage.libraries.map((item) => item.label || item.key).join(', ')}`
+      : `fallback=${bidsPage?.output?.type || 'unknown'} libraries=${bidsPage.libraries.map((item) => item.label || item.key).join(', ')}`,
+  );
 
   const iotCount = readLibraryCount(libraries, ['iot解决方案', 'iot']);
+  const iotPage = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: iotPagePrompt }, 'iot page chat');
+  assertCondition(iotPage?.intent === 'report', `expected report intent for iot page, got ${iotPage?.intent || 'unknown'}`);
+  assertMatchedLibrary(iotPage, ['iot解决方案', 'iot'], 'iot page');
+  assertCondition(iotPage?.reportTemplate == null, 'expected iot page to stay in concept-page mode without shared template');
   if (iotCount > 0) {
-    const iotPage = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: iotPagePrompt }, 'iot page chat');
-    assertCondition(iotPage?.intent === 'report', `expected report intent for iot page, got ${iotPage?.intent || 'unknown'}`);
     assertCondition(iotPage?.output?.type === 'page', `expected page output for iot page, got ${iotPage?.output?.type || 'unknown'}`);
-    assertCondition(Array.isArray(iotPage?.libraries) && iotPage.libraries.length > 0, 'iot page returned no matched libraries');
-    await writeArtifact(options.outputDir, `${timestamp}-iot-page-chat.json`, iotPage);
-    log('iot-page', `output=${iotPage.output.type} libraries=${iotPage.libraries.map((item) => item.label || item.key).join(', ')}`);
   } else {
-    log('iot-page', 'skipped (IOT library has no documents)');
+    assertCondition(iotPage?.output?.type === 'answer', `expected answer fallback for empty iot library, got ${iotPage?.output?.type || 'unknown'}`);
   }
+  await writeArtifact(options.outputDir, `${timestamp}-iot-page-chat.json`, iotPage);
+  log(
+    'iot-page',
+    iotCount > 0
+      ? `output=${iotPage.output.type} libraries=${iotPage.libraries.map((item) => item.label || item.key).join(', ')}`
+      : `fallback=${iotPage?.output?.type || 'unknown'} libraries=${iotPage.libraries.map((item) => item.label || item.key).join(', ')}`,
+  );
 
   const detail = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: detailPrompt }, 'recent document detail chat');
   assertCondition(detail?.intent === 'general', `expected general intent for detail prompt, got ${detail?.intent || 'unknown'}`);
@@ -274,7 +295,8 @@ async function main() {
   assertCondition(datasourcePlan?.status === 'planned', `expected planned status, got ${datasourcePlan?.status || 'unknown'}`);
   assertCondition(datasourcePlan?.draft?.kind === 'web_discovery', `expected web_discovery kind, got ${datasourcePlan?.draft?.kind || 'unknown'}`);
   assertCondition(
-    Array.isArray(datasourcePlan?.draft?.targetLibraries) && datasourcePlan.draft.targetLibraries.some((item) => item.key === 'bids' || item.label === 'bids'),
+    Array.isArray(datasourcePlan?.draft?.targetLibraries)
+      && datasourcePlan.draft.targetLibraries.some((item) => item.key === 'bids' || item.label === 'bids'),
     'datasource plan did not route to bids library',
   );
   await writeArtifact(options.outputDir, `${timestamp}-datasource-plan.json`, datasourcePlan);
