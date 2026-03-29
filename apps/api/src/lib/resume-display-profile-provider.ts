@@ -17,6 +17,22 @@ export type ResumeDisplayProfileResolution = {
   profiles: ResumeDisplayProfile[];
 };
 
+const WEAK_RESUME_PROJECT_PATTERNS = [
+  /^(?:[a-z][、.．:：]\s*)/i,
+  /^(?:负责|参与|协助|维护|跟进|制定|完成|优化|推进|主导|带领|管理|测试|支持|实施|编写|设计|开发|搭建|上线)/u,
+  /(?:客户关系|项目进度|回款情况|结算情况|销售方案|项目立项|代码质量管控|开发进度把控|技术工作统筹|培训技术员|核心功能)/u,
+  /^(?:完整的销售方案|系统搭建与上线|优化了平台)$/u,
+];
+
+const GENERIC_RESUME_PROJECT_LABELS = new Set([
+  '平台',
+  '系统',
+  '项目',
+  '方案',
+  '销售方案',
+  '系统搭建与上线',
+]);
+
 function buildProfileKey(profile: Pick<ResumeDisplayProfile, 'sourcePath' | 'sourceName'>) {
   return `${sanitizeText(profile.sourcePath, 320)}::${sanitizeText(profile.sourceName, 160)}`;
 }
@@ -76,6 +92,47 @@ function buildDocumentContext(item: ParsedDocument) {
   };
 }
 
+function sanitizeSeedProject(value: unknown) {
+  const raw = sanitizeText(value, 120)
+    .replace(/^[•·\-*]+/, '')
+    .trim();
+  if (!raw) return '';
+
+  const explicitMatch = raw.match(/([\u4e00-\u9fffA-Za-z0-9()（）\-]{2,24}(?:项目|系统|平台|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI))/iu);
+  const candidate = sanitizeText(explicitMatch?.[1] || raw, 48);
+  if (!candidate) return '';
+  if (candidate.length > 32) return '';
+  if (/[;；,，。]/u.test(candidate)) return '';
+  if (GENERIC_RESUME_PROJECT_LABELS.has(candidate)) return '';
+  if (WEAK_RESUME_PROJECT_PATTERNS.some((pattern) => pattern.test(candidate))) return '';
+  if (/^(?:智慧|安防|园区|支付|视频|电商|风控|数据|物流|医院|物业|SaaS|IoT|IOT|AIGC|AI)/iu.test(candidate)) return candidate;
+  if (/(?:项目|系统|平台|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI)$/iu.test(candidate)) return candidate;
+  return '';
+}
+
+function buildSeedSummary(input: {
+  currentRole?: string;
+  yearsOfExperience?: string;
+  education?: string;
+  displayCompany?: string;
+  displaySkills?: string[];
+  displayProjects?: string[];
+}) {
+  const parts = [
+    sanitizeText(input.currentRole, 40),
+    sanitizeText(input.yearsOfExperience, 20),
+    sanitizeText(input.education, 20),
+    sanitizeText(input.displayCompany, 80),
+  ].filter(Boolean);
+  const skills = (input.displaySkills || []).slice(0, 3).join(' / ');
+  const primaryProject = sanitizeText(input.displayProjects?.[0], 40);
+  return sanitizeText([
+    parts.join(' | '),
+    skills ? `技能 ${skills}` : '',
+    primaryProject ? `代表项目 ${primaryProject}` : '',
+  ].filter(Boolean).join(' | '), 180);
+}
+
 function buildSeedProfileFromDocument(item: ParsedDocument) {
   const profile = (item.resumeFields || item.structuredProfile || {}) as ResumeFields;
   const canonical = canonicalizeResumeFields(profile, {
@@ -91,14 +148,19 @@ function buildSeedProfileFromDocument(item: ParsedDocument) {
   const displayProjects = sanitizeStringArray(
     canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : canonical?.projectHighlights,
     80,
-  ).slice(0, 4);
+  )
+    .map((entry) => sanitizeSeedProject(entry))
+    .filter(Boolean)
+    .slice(0, 3);
   const displaySkills = sanitizeStringArray(canonical?.skills, 40).slice(0, 6);
-  const displaySummary = sanitizeText(
-    canonical?.highlights?.[0]
-      || [canonical?.currentRole, canonical?.yearsOfExperience, canonical?.education, displayCompany].filter(Boolean).join(' | ')
-      || item.summary,
-    240,
-  );
+  const displaySummary = buildSeedSummary({
+    currentRole: canonical?.currentRole,
+    yearsOfExperience: canonical?.yearsOfExperience,
+    education: canonical?.education,
+    displayCompany,
+    displaySkills,
+    displayProjects,
+  });
 
   if (!displayName && !displayCompany && !displayProjects.length && !displaySkills.length && !displaySummary) {
     return null;

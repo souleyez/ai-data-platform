@@ -90,6 +90,37 @@ test('buildResumeDisplaySeedProfiles should derive stable local seed profiles fr
   assert.ok(profiles[0]?.displaySkills.includes('SQL'));
 });
 
+test('buildResumeDisplaySeedProfiles should suppress weak project phrases and noisy summaries', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-b.docx',
+      name: 'resume-b.docx',
+      ext: '.docx',
+      title: 'Xie Zeqiang Resume',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: 'a、负责建筑智能化项目立项，制定完整的销售方案，完成项目的投标、签约；',
+      excerpt: 'a、负责建筑智能化项目立项，制定完整的销售方案，完成项目的投标、签约；',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '谢泽强',
+        currentRole: '解决方案经理',
+        latestCompany: '深圳达实智能股份有限公司',
+        yearsOfExperience: '16年',
+        projectHighlights: ['完整的销售方案', '优化了平台', '智慧园区管理平台'],
+        skills: ['Java', '数据分析'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.deepEqual(profiles[0]?.displayProjects, ['智慧园区管理平台']);
+  assert.doesNotMatch(profiles[0]?.displaySummary || '', /负责建筑智能化项目立项|完整的销售方案/);
+  assert.match(profiles[0]?.displaySummary || '', /解决方案经理|深圳达实智能股份有限公司|Java/);
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;
