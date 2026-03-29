@@ -209,6 +209,35 @@ test('buildResumeDisplaySeedProfiles should prefer full names over honorific-onl
   assert.equal(profiles[0]?.displayCompany, '广州正善诚合互联网科技有限公司');
 });
 
+test('buildResumeDisplaySeedProfiles should recover concise project labels from summary context when highlights are empty', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-f.docx',
+      name: 'resume-f.docx',
+      ext: '.docx',
+      title: '\u9648\u68ee\u806a\u7b80\u5386',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '\u9648\u68ee\u806a\u5728\u5e7f\u5dde\u5353\u52e4\u4fe1\u606f\u6280\u672f\u6709\u9650\u516c\u53f8\u4e3b\u8981\u8d1f\u8d23\u5bf9\u516c\u53f8\u667a\u6167\u56ed\u533a\u7ba1\u7406\u5e73\u53f0\u4e0e\u652f\u4ed8\u4e2d\u53f0\u5efa\u8bbe\u3002',
+      excerpt: '\u4e3b\u5bfc\u667a\u6167\u56ed\u533a\u7ba1\u7406\u5e73\u53f0\u7684\u4e1a\u52a1\u6a21\u5757\u4e0e\u6570\u636e\u5e73\u53f0\u5efa\u8bbe\u3002',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '\u9648\u68ee\u806a',
+        latestCompany: '\u5e7f\u5dde\u5353\u52e4\u4fe1\u606f\u6280\u672f\u6709\u9650\u516c\u53f8',
+        yearsOfExperience: '9 years',
+        projectHighlights: [],
+        skills: ['Java', 'SQL'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.match(JSON.stringify(profiles[0]?.displayProjects || []), /\u667a\u6167\u56ed\u533a\u7ba1\u7406\u5e73\u53f0/);
+  assert.match(JSON.stringify(profiles[0]?.displayProjects || []), /\u652f\u4ed8\u4e2d\u53f0/);
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;

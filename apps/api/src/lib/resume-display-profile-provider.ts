@@ -34,6 +34,9 @@ const GENERIC_RESUME_PROJECT_LABELS = new Set([
   '系统搭建与上线',
 ]);
 
+const RESUME_PROJECT_CONTEXT_PATTERN = /([\u4e00-\u9fffA-Za-z0-9()\-]{2,36}(?:\u5e73\u53f0|\u7cfb\u7edf|\u9879\u76ee|\u5e94\u7528|\u65b9\u6848|\u4e2d\u53f0|APP|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC))/giu;
+const RESUME_PROJECT_LEAD_PATTERN = /^(?:(?:\u5bf9(?:\u516c\u53f8|\u4f01\u4e1a)?|\u516c\u53f8|\u4f01\u4e1a|\u56f4\u7ed5|\u9762\u5411|\u9488\u5bf9)\s*)?(?:(?:\u4e3b\u8981)?\u8d1f\u8d23|\u53c2\u4e0e|\u4e3b\u5bfc|\u642d\u5efa|\u5efa\u8bbe|\u5f00\u53d1|\u8bbe\u8ba1|\u7ef4\u62a4|\u4f18\u5316|\u63a8\u8fdb|\u652f\u6301|\u4ea4\u4ed8|\u843d\u5730|\u5b9e\u65bd)\s*/u;
+
 function buildProfileKey(profile: Pick<ResumeDisplayProfile, 'sourcePath' | 'sourceName'>) {
   return `${sanitizeText(profile.sourcePath, 320)}::${sanitizeText(profile.sourceName, 160)}`;
 }
@@ -135,22 +138,82 @@ function buildDocumentContext(item: ParsedDocument) {
   };
 }
 
-function sanitizeSeedProject(value: unknown) {
-  const raw = sanitizeText(value, 120)
-    .replace(/^[•·\-*]+/, '')
+function sanitizeProjectLead(value: unknown) {
+  let text = sanitizeText(value, 120);
+  if (!text) return '';
+
+  text = text
+    .replace(/^.*?(?=(?:\u5bf9(?:\u516c\u53f8|\u4f01\u4e1a)?|\u516c\u53f8|\u4f01\u4e1a|(?:\u4e3b\u8981)?\u8d1f\u8d23|\u53c2\u4e0e|\u4e3b\u5bfc|\u642d\u5efa|\u5efa\u8bbe|\u5f00\u53d1|\u8bbe\u8ba1|\u7ef4\u62a4|\u4f18\u5316|\u63a8\u8fdb|\u652f\u6301|\u4ea4\u4ed8|\u843d\u5730|\u5b9e\u65bd))/u, '')
+    .replace(/(?:\u7684[\u4e00-\u9fffA-Za-z0-9()\-]{1,24})+$/u, '')
+    .replace(/(?:\u5efa\u8bbe|\u5f00\u53d1|\u8bbe\u8ba1|\u7ef4\u62a4|\u4f18\u5316|\u63a8\u8fdb|\u652f\u6301|\u4ea4\u4ed8|\u843d\u5730|\u5b9e\u65bd)$/u, '')
+    .replace(/^(?:\u5bf9(?:\u516c\u53f8|\u4f01\u4e1a)?|\u516c\u53f8|\u4f01\u4e1a)\s*/u, '')
     .trim();
+
+  let previous = '';
+  while (text && text !== previous) {
+    previous = text;
+    text = text.replace(RESUME_PROJECT_LEAD_PATTERN, '').trim();
+  }
+
+  return text;
+}
+
+function sanitizeSeedProject(value: unknown) {
+  const raw = sanitizeProjectLead(sanitizeText(value, 120)
+    .replace(/^[•·\-*]+/, '')
+    .trim());
   if (!raw) return '';
 
   const explicitMatch = raw.match(/([\u4e00-\u9fffA-Za-z0-9()（）\-]{2,24}(?:项目|系统|平台|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI))/iu);
-  const candidate = sanitizeText(explicitMatch?.[1] || raw, 48);
+  const candidate = sanitizeProjectLead(sanitizeText(explicitMatch?.[1] || raw, 48));
   if (!candidate) return '';
   if (candidate.length > 32) return '';
+  if (/[\u4e0e\u53ca\u548c\u3001/]/u.test(candidate)) return '';
+  if (/\u9879\u76ee$/u.test(candidate) && !/(?:[A-Za-z0-9]|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI|\u5e73\u53f0|\u7cfb\u7edf|\u4e2d\u53f0)/u.test(candidate)) return '';
+  if (/^[\u4e00-\u9fff]{1}(?:\u5e73\u53f0|\u7cfb\u7edf|\u9879\u76ee|\u65b9\u6848|\u4e2d\u53f0)$/u.test(candidate)) return '';
   if (/[;；,，。]/u.test(candidate)) return '';
   if (GENERIC_RESUME_PROJECT_LABELS.has(candidate)) return '';
   if (WEAK_RESUME_PROJECT_PATTERNS.some((pattern) => pattern.test(candidate))) return '';
   if (/^(?:智慧|安防|园区|支付|视频|电商|风控|数据|物流|医院|物业|SaaS|IoT|IOT|AIGC|AI)/iu.test(candidate)) return candidate;
   if (/(?:项目|系统|平台|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI)$/iu.test(candidate)) return candidate;
   return '';
+}
+
+function collectResumeDisplayProjects(projectValues: unknown[], contextValues: unknown[], limit = 4) {
+  const projects: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (value: unknown) => {
+    const candidate = sanitizeSeedProject(value);
+    if (!candidate) return;
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    projects.push(candidate);
+  };
+
+  for (const value of projectValues) {
+    if (projects.length >= limit) break;
+    push(value);
+  }
+
+  for (const value of contextValues) {
+    if (projects.length >= limit) break;
+    const text = sanitizeText(value, 2000);
+    if (!text) continue;
+    for (const match of text.matchAll(new RegExp(RESUME_PROJECT_CONTEXT_PATTERN))) {
+      push(match[1]);
+      const fragments = String(match[1] || '').split(/[\u4e0e\u53ca\u548c\u3001/]/u);
+      for (const fragment of fragments) {
+        push(fragment);
+        if (projects.length >= limit) break;
+      }
+      if (projects.length >= limit) break;
+    }
+  }
+
+  if (projects.length) return projects.slice(0, limit);
+  return sanitizeStringArray(projectValues, 80).filter(Boolean).slice(0, limit);
 }
 
 function buildSeedSummary(input: {
@@ -203,13 +266,16 @@ function buildSeedProfileFromDocument(item: ParsedDocument) {
     item.fullText,
     item.title,
   ], 120);
-  const displayProjects = sanitizeStringArray(
-    canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : canonical?.projectHighlights,
-    80,
-  )
-    .map((entry) => sanitizeSeedProject(entry))
-    .filter(Boolean)
-    .slice(0, 3);
+  const displayProjects = collectResumeDisplayProjects(
+    canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : (canonical?.projectHighlights || []),
+    [
+      item.summary,
+      item.excerpt,
+      item.fullText,
+      item.title,
+    ],
+    3,
+  );
   const displaySkills = sanitizeStringArray(canonical?.skills, 40).slice(0, 6);
   const displaySummary = buildSeedSummary({
     currentRole: canonical?.currentRole,
@@ -259,7 +325,16 @@ function normalizeProfile(raw: unknown) {
   const sourcePath = sanitizeText(raw.sourcePath, 320);
   const sourceName = sanitizeText(raw.sourceName, 160);
   if (!sourcePath && !sourceName) return null;
-  const displayProjects = sanitizeStringArray(raw.displayProjects, 80).slice(0, 4);
+  const displayProjects = collectResumeDisplayProjects(
+    sanitizeStringArray(raw.displayProjects, 80),
+    [
+      raw.displaySummary,
+      raw.summary,
+      raw.title,
+      sourceName,
+    ],
+    4,
+  );
   const displaySkills = sanitizeStringArray(raw.displaySkills, 40).slice(0, 6);
   const displaySummary = sanitizeText(raw.displaySummary, 240);
   const displayCompany = selectResumeDisplayCompany([
@@ -293,7 +368,9 @@ function normalizeProfile(raw: unknown) {
       ...(canonical?.companies || []),
       displayCompany,
     ], 120),
-    displayProjects: displayProjects.length ? displayProjects : sanitizeStringArray(canonical?.projectHighlights, 80).slice(0, 4),
+    displayProjects: displayProjects.length
+      ? displayProjects
+      : collectResumeDisplayProjects(canonical?.projectHighlights || [], [displaySummary, raw.summary, raw.title], 4),
     displaySkills: displaySkills.length ? displaySkills : sanitizeStringArray(canonical?.skills, 40).slice(0, 6),
     displaySummary,
   } satisfies ResumeDisplayProfile;
@@ -354,7 +431,14 @@ function mergeResumeDisplayProfiles(primary: ResumeDisplayProfile[], fallback: R
       sourceName: profile.sourceName || previous?.sourceName || '',
       displayName: profile.displayName || previous?.displayName || '',
       displayCompany: profile.displayCompany || previous?.displayCompany || '',
-      displayProjects: profile.displayProjects?.length ? profile.displayProjects : (previous?.displayProjects || []),
+      displayProjects: collectResumeDisplayProjects(
+        [
+          ...(profile.displayProjects || []),
+          ...(previous?.displayProjects || []),
+        ],
+        [],
+        4,
+      ),
       displaySkills: profile.displaySkills?.length ? profile.displaySkills : (previous?.displaySkills || []),
       displaySummary: profile.displaySummary || previous?.displaySummary || '',
     });
