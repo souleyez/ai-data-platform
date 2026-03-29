@@ -1,6 +1,7 @@
 import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
+import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
 import { mergeResumeFields } from './resume-canonicalizer.js';
 
 export type ChatOutput =
@@ -584,6 +585,17 @@ function getCanonicalResumeFields(item: ParsedDocument) {
   );
 }
 
+function buildResumeDisplayProfileMap(displayProfiles: ResumeDisplayProfile[] = []) {
+  const profileMap = new Map<string, ResumeDisplayProfile>();
+  for (const profile of displayProfiles) {
+    const pathKey = normalizeText(profile.sourcePath);
+    const nameKey = normalizeText(profile.sourceName);
+    if (pathKey) profileMap.set(pathKey, profile);
+    if (nameKey) profileMap.set(nameKey, profile);
+  }
+  return profileMap;
+}
+
 function normalizeUniqueStrings(values: unknown[], limit = 8) {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -714,15 +726,18 @@ function getResumeDisplayName(entry: ResumePageEntry) {
   return sanitizeResumeCandidateName(entry.candidateName);
 }
 
-function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] {
+function buildResumePageEntries(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []): ResumePageEntry[] {
+  const displayProfileMap = buildResumeDisplayProfileMap(displayProfiles);
   return documents
     .filter((item) => item.schemaType === 'resume')
     .map((item) => {
       const profile = getResumeProfile(item) as ResumeFields;
       const resumeFields = item.resumeFields || {};
       const canonicalFields = getCanonicalResumeFields(item);
-      const candidateName = sanitizeResumeCandidateName(canonicalFields?.candidateName);
+      const displayProfile = displayProfileMap.get(normalizeText(item.path)) || displayProfileMap.get(normalizeText(item.name));
+      const candidateName = sanitizeResumeCandidateName(displayProfile?.displayName || canonicalFields?.candidateName);
       const companies = normalizeUniqueStrings([
+        sanitizeResumeCompany(displayProfile?.displayCompany),
         ...(canonicalFields?.companies || []).map((entry) => sanitizeResumeCompany(entry)),
         sanitizeResumeCompany(canonicalFields?.latestCompany),
         ...toStringArray(resumeFields.companies).map((entry) => sanitizeResumeCompany(entry)),
@@ -733,9 +748,27 @@ function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] 
         extractResumeCompanyFromText(item.title),
       ], 4);
       const latestCompany = companies[0] || '';
-      const projectHighlights = normalizeUniqueStrings(canonicalFields?.projectHighlights || [], 6);
-      const itProjectHighlights = normalizeUniqueStrings(canonicalFields?.itProjectHighlights || [], 6);
-      const skills = normalizeUniqueStrings(canonicalFields?.skills || [], 8);
+      const projectHighlights = normalizeUniqueStrings(
+        displayProfile?.displayProjects?.length
+          ? displayProfile.displayProjects
+          : (canonicalFields?.projectHighlights || []),
+        6,
+      );
+      const itProjectHighlights = normalizeUniqueStrings(
+        displayProfile?.displayProjects?.length
+          ? displayProfile.displayProjects
+          : [
+              ...(canonicalFields?.itProjectHighlights || []),
+              ...(canonicalFields?.projectHighlights || []),
+            ],
+        6,
+      );
+      const skills = normalizeUniqueStrings(
+        displayProfile?.displaySkills?.length
+          ? displayProfile.displaySkills
+          : (canonicalFields?.skills || []),
+        8,
+      );
       const education = sanitizeText(canonicalFields?.education);
       const yearsOfExperience = sanitizeText(canonicalFields?.yearsOfExperience);
 
@@ -747,12 +780,17 @@ function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] 
         skills,
         projectHighlights,
         itProjectHighlights,
-        highlights: normalizeUniqueStrings(canonicalFields?.highlights || [], 8),
+        highlights: normalizeUniqueStrings(
+          displayProfile?.displaySummary
+            ? [displayProfile.displaySummary]
+            : (canonicalFields?.highlights || []),
+          8,
+        ),
         expectedCity: sanitizeText(canonicalFields?.expectedCity),
         expectedSalary: sanitizeText(canonicalFields?.expectedSalary),
         sourceName: item.name,
         sourceTitle: item.title,
-        summary: sanitizeText(item.summary),
+        summary: sanitizeText(displayProfile?.displaySummary || item.summary),
       };
     })
     .filter((entry) => (
@@ -1001,10 +1039,10 @@ function extractTechKeywords(text: string) {
   return [...new Set(matches)].slice(0, 6).join(' / ');
 }
 
-function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
+function buildResumeCompanyProjectRows(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []) {
   const rows: Array<Array<string>> = [];
 
-  for (const entry of buildResumePageEntries(documents)) {
+  for (const entry of buildResumePageEntries(documents, displayProfiles)) {
     const candidate = getResumeDisplayName(entry);
     const effectiveCompanies = entry.latestCompany ? [entry.latestCompany] : [UNKNOWN_COMPANY];
     const effectiveProjects = entry.itProjectHighlights.length
@@ -1050,9 +1088,9 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
     .slice(0, 36);
 }
 
-function buildResumeProjectRows(documents: ParsedDocument[]) {
+function buildResumeProjectRows(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []) {
   const rows: Array<Array<string>> = [];
-  for (const entry of buildResumePageEntries(documents)) {
+  for (const entry of buildResumePageEntries(documents, displayProfiles)) {
     const candidate = getResumeDisplayName(entry);
     const company = entry.latestCompany || UNKNOWN_COMPANY;
     const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
@@ -1071,8 +1109,8 @@ function buildResumeProjectRows(documents: ParsedDocument[]) {
   return rows.slice(0, 36);
 }
 
-function buildResumeTalentRows(documents: ParsedDocument[]) {
-  return buildResumePageEntries(documents)
+function buildResumeTalentRows(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []) {
+  return buildResumePageEntries(documents, displayProfiles)
     .map((entry) => [
       getResumeDisplayName(entry),
       entry.education,
@@ -1087,9 +1125,9 @@ function buildResumeTalentRows(documents: ParsedDocument[]) {
     .slice(0, 36);
 }
 
-function buildResumeSkillRows(documents: ParsedDocument[]) {
+function buildResumeSkillRows(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []) {
   const rows: Array<Array<string>> = [];
-  for (const entry of buildResumePageEntries(documents)) {
+  for (const entry of buildResumePageEntries(documents, displayProfiles)) {
     const candidate = getResumeDisplayName(entry);
     const latestCompany = entry.latestCompany || UNKNOWN_COMPANY;
     const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
@@ -1114,11 +1152,16 @@ function legacyDefaultResumePageSections(view: ResumeRequestView) {
   return ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'];
 }
 
-function legacyBuildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
-  const companyRows = view === 'company' ? buildResumeCompanyProjectRows(documents) : [];
-  const projectRows = view === 'project' ? buildResumeProjectRows(documents) : [];
-  const talentRows = view === 'talent' || view === 'generic' ? buildResumeTalentRows(documents) : [];
-  const skillRows = view === 'skill' ? buildResumeSkillRows(documents) : [];
+function legacyBuildResumePageOutput(
+  view: ResumeRequestView,
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+  displayProfiles: ResumeDisplayProfile[] = [],
+): KnowledgePageOutput {
+  const companyRows = view === 'company' ? buildResumeCompanyProjectRows(documents, displayProfiles) : [];
+  const projectRows = view === 'project' ? buildResumeProjectRows(documents, displayProfiles) : [];
+  const talentRows = view === 'talent' || view === 'generic' ? buildResumeTalentRows(documents, displayProfiles) : [];
+  const skillRows = view === 'skill' ? buildResumeSkillRows(documents, displayProfiles) : [];
 
   const effectiveRows = companyRows.length
     ? companyRows
@@ -1397,8 +1440,13 @@ function buildResumePageCharts(view: ResumeRequestView, stats: ResumePageStats) 
   ];
 }
 
-function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
-  const stats = buildResumePageStats(buildResumePageEntries(documents));
+function buildResumePageOutput(
+  view: ResumeRequestView,
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+  displayProfiles: ResumeDisplayProfile[] = [],
+): KnowledgePageOutput {
+  const stats = buildResumePageStats(buildResumePageEntries(documents, displayProfiles));
   const summary = buildResumePageSummary(view, documents.length, stats);
   const shouldUseEnvelopeSections = Boolean(envelope?.pageSections?.length) && hasExpectedResumeTitle(view, envelope?.title || '');
   const sectionTitles = shouldUseEnvelopeSections ? (envelope?.pageSections || []) : defaultResumePageSections(view);
@@ -1593,19 +1641,20 @@ export function buildKnowledgeFallbackOutput(
   requestText: string,
   documents: ParsedDocument[],
   envelope?: ReportTemplateEnvelope | null,
+  displayProfiles: ResumeDisplayProfile[] = [],
 ): ChatOutput {
   const view = resolveResumeRequestView(requestText);
   const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
 
   if (resumeDocuments.length) {
     if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
-      const page = buildResumePageOutput(view, resumeDocuments, envelope);
+      const page = buildResumePageOutput(view, resumeDocuments, envelope, displayProfiles);
       return wrapPageOutputAsKind(kind, page);
     }
 
     if (kind === 'table') {
       if (view === 'company') {
-        const rows = buildResumeCompanyProjectRows(resumeDocuments);
+        const rows = buildResumeCompanyProjectRows(resumeDocuments, displayProfiles);
         if (rows.length) {
           return {
             type: 'table',
@@ -1623,7 +1672,7 @@ export function buildKnowledgeFallbackOutput(
       }
 
       if (view === 'project') {
-        const rows = buildResumeProjectRows(resumeDocuments);
+        const rows = buildResumeProjectRows(resumeDocuments, displayProfiles);
         if (rows.length) {
           return {
             type: 'table',
@@ -1641,7 +1690,7 @@ export function buildKnowledgeFallbackOutput(
       }
 
       if (view === 'skill') {
-        const rows = buildResumeSkillRows(resumeDocuments);
+        const rows = buildResumeSkillRows(resumeDocuments, displayProfiles);
         if (rows.length) {
           return {
             type: 'table',
@@ -1659,7 +1708,7 @@ export function buildKnowledgeFallbackOutput(
       }
 
       if (view === 'talent' || view === 'generic') {
-        const rows = buildResumeTalentRows(resumeDocuments);
+        const rows = buildResumeTalentRows(resumeDocuments, displayProfiles);
         if (rows.length) {
           return {
             type: 'table',
@@ -1687,6 +1736,7 @@ export function normalizeReportOutput(
   rawContent: string,
   envelope?: ReportTemplateEnvelope | null,
   documents: ParsedDocument[] = [],
+  displayProfiles: ResumeDisplayProfile[] = [],
 ): ChatOutput {
   const parsed = tryParseJsonPayload(rawContent);
   const root = isObject(parsed) ? parsed : {};
@@ -1744,7 +1794,7 @@ export function normalizeReportOutput(
     if (resumeDocuments.length && normalizedOutput.page) {
       const view = resolveResumeRequestView(requestText);
       if (shouldUseResumePageFallback(view, normalizedOutput.title, normalizedOutput.page)) {
-        return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope);
+        return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope, displayProfiles);
       }
     }
 

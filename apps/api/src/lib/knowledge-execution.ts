@@ -33,6 +33,10 @@ import {
   buildReportPlan,
   buildReportPlanContextBlock,
 } from './report-planner.js';
+import {
+  buildResumeDisplayProfileContextBlock,
+  runResumeDisplayProfileResolver,
+} from './resume-display-profile-provider.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type KnowledgeExecutionInput = {
@@ -169,6 +173,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     .join('\n\n');
   const templateContext = conceptPageMode ? '' : buildTemplateContextBlock(selectedTemplates);
   const activeEnvelope = reportPlan?.envelope || (conceptPageMode ? null : (selectedTemplates[0]?.envelope || null));
+  const resumeDisplayProfileResolution = requestedKind === 'page'
+    ? await runResumeDisplayProfileResolver({
+      requestText,
+      documents: supply.effectiveRetrieval.documents,
+      sessionUser: input.sessionUser,
+    })
+    : null;
+  const resumeDisplayProfileContext = buildResumeDisplayProfileContextBlock(resumeDisplayProfileResolution);
   const conceptPageContext = conceptPageMode
     ? buildConceptPageSupplyBlock({
       requestText,
@@ -189,6 +201,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       contextBlocks: [
         conceptPageContext,
         reportPlanContext,
+        resumeDisplayProfileContext,
         templateContext,
         buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
           timeRange: input.timeRange,
@@ -213,6 +226,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       cloud.content,
       activeEnvelope,
       supply.effectiveRetrieval.documents,
+      resumeDisplayProfileResolution?.profiles || [],
     );
   } catch {
     output = buildKnowledgeFallbackOutput(
@@ -220,6 +234,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       requestText,
       supply.effectiveRetrieval.documents,
       activeEnvelope,
+      resumeDisplayProfileResolution?.profiles || [],
     );
   }
 
