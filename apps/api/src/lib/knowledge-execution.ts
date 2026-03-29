@@ -38,7 +38,7 @@ import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
 } from './resume-display-profile-provider.js';
-import { runResumePageComposer } from './resume-page-composer.js';
+import { runResumePageComposerDetailed } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type KnowledgeExecutionInput = {
@@ -80,9 +80,12 @@ export type ResumePageDebugTrace = {
   initialOutput: ChatOutput | null;
   initialNeedsFallback: boolean;
   composerAttempted: boolean;
+  composerAttemptModes: string[];
+  composerSelectedAttempt: string;
   composerModelContent: string;
   composerOutput: ChatOutput | null;
   composerNeedsFallback: boolean | null;
+  composerErrorMessage: string;
   errorStage: string;
   errorMessage: string;
   finalStage: 'initial-output' | 'composer-output' | 'fallback-output' | 'catch-fallback-output';
@@ -254,9 +257,12 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       initialOutput: null,
       initialNeedsFallback: false,
       composerAttempted: false,
+      composerAttemptModes: [],
+      composerSelectedAttempt: '',
       composerModelContent: '',
       composerOutput: null,
       composerNeedsFallback: null,
+      composerErrorMessage: '',
       errorStage: '',
       errorMessage: '',
       finalStage: 'initial-output',
@@ -279,11 +285,8 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
     if (canComposeResumePage) {
-      if (resumePageDebugTrace) {
-        resumePageDebugTrace.composerAttempted = true;
-      }
       executionStage = 'composer-model';
-      const composedContent = await runResumePageComposer({
+      const composerResult = await runResumePageComposerDetailed({
         requestText,
         reportPlan,
         envelope: activeEnvelope,
@@ -291,9 +294,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         displayProfiles: resumeDisplayProfileResolution?.profiles || [],
         sessionUser: input.sessionUser,
       });
+      const composedContent = composerResult.content;
 
       if (resumePageDebugTrace) {
+        resumePageDebugTrace.composerAttempted = composerResult.attemptedModes.length > 0;
+        resumePageDebugTrace.composerAttemptModes = composerResult.attemptedModes;
+        resumePageDebugTrace.composerSelectedAttempt = composerResult.attemptMode;
         resumePageDebugTrace.composerModelContent = composedContent || '';
+        resumePageDebugTrace.composerErrorMessage = composerResult.error;
       }
 
       if (composedContent) {
@@ -321,6 +329,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           output = composedOutput;
           if (resumePageDebugTrace) resumePageDebugTrace.finalStage = 'composer-output';
         }
+      } else if (resumePageDebugTrace && composerResult.error) {
+        resumePageDebugTrace.errorStage = 'composer-model';
+        resumePageDebugTrace.errorMessage = composerResult.error;
       }
 
       if (!output) {

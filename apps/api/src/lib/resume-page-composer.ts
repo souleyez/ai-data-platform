@@ -5,6 +5,15 @@ import type { ReportTemplateEnvelope } from './report-center.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
+type ComposerPromptMode = 'rich' | 'compact';
+
+export type ResumePageComposerExecution = {
+  content: string | null;
+  error: string;
+  attemptMode: ComposerPromptMode | '';
+  attemptedModes: ComposerPromptMode[];
+};
+
 function sanitizeText(value: unknown, maxLength = 240) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -17,39 +26,42 @@ function buildComposerContext(input: {
   envelope?: ReportTemplateEnvelope | null;
   documents: ParsedDocument[];
   displayProfiles: ResumeDisplayProfile[];
-}) {
+}, mode: ComposerPromptMode) {
+  const isCompact = mode === 'compact';
   return {
     requestText: sanitizeText(input.requestText, 240),
     envelope: input.envelope ? {
       title: sanitizeText(input.envelope.title, 120),
-      outputHint: sanitizeText(input.envelope.outputHint, 240),
+      outputHint: sanitizeText(input.envelope.outputHint, isCompact ? 120 : 240),
       pageSections: input.envelope.pageSections || [],
     } : null,
     plan: input.reportPlan ? {
-      objective: sanitizeText(input.reportPlan.objective, 240),
-      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, 4),
-      cards: (input.reportPlan.cards || []).slice(0, 4).map((item) => ({
+      objective: sanitizeText(input.reportPlan.objective, isCompact ? 160 : 240),
+      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, isCompact ? 3 : 4),
+      cards: (input.reportPlan.cards || []).slice(0, isCompact ? 3 : 4).map((item) => ({
         label: sanitizeText(item.label, 80),
       })),
-      charts: (input.reportPlan.charts || []).slice(0, 2).map((item) => ({
+      charts: (input.reportPlan.charts || []).slice(0, isCompact ? 1 : 2).map((item) => ({
         title: sanitizeText(item.title, 80),
       })),
-      sections: (input.reportPlan.sections || []).map((item) => ({
+      sections: (input.reportPlan.sections || []).slice(0, isCompact ? 4 : 8).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, 160),
-        evidenceFocus: sanitizeText(item.evidenceFocus, 120),
+        purpose: sanitizeText(item.purpose, isCompact ? 100 : 160),
+        evidenceFocus: sanitizeText(item.evidenceFocus, isCompact ? 80 : 120),
       })),
     } : null,
-    profiles: input.displayProfiles.slice(0, 6).map((profile) => ({
-      sourcePath: sanitizeText(profile.sourcePath, 320),
-      sourceName: sanitizeText(profile.sourceName, 160),
+    profiles: input.displayProfiles.slice(0, isCompact ? 4 : 6).map((profile) => ({
+      sourcePath: isCompact ? '' : sanitizeText(profile.sourcePath, 320),
+      sourceName: isCompact ? '' : sanitizeText(profile.sourceName, 160),
       displayName: sanitizeText(profile.displayName, 80),
       displayCompany: sanitizeText(profile.displayCompany, 160),
-      displayProjects: (profile.displayProjects || []).slice(0, 2),
-      displaySkills: (profile.displaySkills || []).slice(0, 4),
-      displaySummary: sanitizeText(profile.displaySummary, 120),
+      displayProjects: (profile.displayProjects || []).slice(0, isCompact ? 1 : 2),
+      displaySkills: (profile.displaySkills || []).slice(0, isCompact ? 3 : 4),
+      displaySummary: sanitizeText(profile.displaySummary, isCompact ? 80 : 120),
     })),
-    supportingDocuments: input.documents
+    supportingDocuments: isCompact
+      ? []
+      : input.documents
       .filter((item) => item.schemaType === 'resume')
       .slice(0, 4)
       .map((item) => ({
@@ -77,6 +89,83 @@ async function buildSystemPrompt() {
     .join('\n\n');
 }
 
+function buildComposerPrompt(input: {
+  requestText: string;
+  reportPlan?: ReportPlan | null;
+  envelope?: ReportTemplateEnvelope | null;
+  documents: ParsedDocument[];
+  displayProfiles: ResumeDisplayProfile[];
+  sessionUser?: string;
+}, mode: ComposerPromptMode) {
+  const modeInstruction = mode === 'compact'
+    ? 'Retry in compact mode. Use only the clearest profiles, keep the page concise, and prefer stable cards/charts over exhaustive detail.'
+    : 'Compose one final resume page from the following curated display profiles and plan context.';
+  return [
+    `Request: ${sanitizeText(input.requestText, 240)}`,
+    modeInstruction,
+    JSON.stringify(buildComposerContext(input, mode), null, 2),
+  ].join('\n\n');
+}
+
+export async function runResumePageComposerDetailed(input: {
+  requestText: string;
+  reportPlan?: ReportPlan | null;
+  envelope?: ReportTemplateEnvelope | null;
+  documents: ParsedDocument[];
+  displayProfiles: ResumeDisplayProfile[];
+  sessionUser?: string;
+}): Promise<ResumePageComposerExecution> {
+  if (!isOpenClawGatewayConfigured()) {
+    return {
+      content: null,
+      error: 'Cloud gateway is not configured',
+      attemptMode: '',
+      attemptedModes: [],
+    };
+  }
+  if (!input.displayProfiles.length) {
+    return {
+      content: null,
+      error: 'No resume display profiles available for composer',
+      attemptMode: '',
+      attemptedModes: [],
+    };
+  }
+
+  const systemPrompt = await buildSystemPrompt();
+  const attemptedModes: ComposerPromptMode[] = [];
+  let lastError = '';
+
+  for (const mode of ['rich', 'compact'] as const) {
+    attemptedModes.push(mode);
+    try {
+      const result = await runOpenClawChat({
+        prompt: buildComposerPrompt(input, mode),
+        systemPrompt,
+        sessionUser: input.sessionUser,
+      });
+      if (sanitizeText(result.content, 120)) {
+        return {
+          content: result.content,
+          error: '',
+          attemptMode: mode,
+          attemptedModes,
+        };
+      }
+      lastError = `Composer returned empty content in ${mode} mode`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error || '');
+    }
+  }
+
+  return {
+    content: null,
+    error: lastError || 'Composer returned empty content',
+    attemptMode: '',
+    attemptedModes,
+  };
+}
+
 export async function runResumePageComposer(input: {
   requestText: string;
   reportPlan?: ReportPlan | null;
@@ -85,23 +174,6 @@ export async function runResumePageComposer(input: {
   displayProfiles: ResumeDisplayProfile[];
   sessionUser?: string;
 }) {
-  if (!isOpenClawGatewayConfigured() || !input.displayProfiles.length) return null;
-
-  const systemPrompt = await buildSystemPrompt();
-  const prompt = [
-    `Request: ${sanitizeText(input.requestText, 240)}`,
-    'Compose one final resume page from the following curated display profiles and plan context.',
-    JSON.stringify(buildComposerContext(input), null, 2),
-  ].join('\n\n');
-
-  try {
-    const result = await runOpenClawChat({
-      prompt,
-      systemPrompt,
-      sessionUser: input.sessionUser,
-    });
-    return result.content;
-  } catch {
-    return null;
-  }
+  const result = await runResumePageComposerDetailed(input);
+  return result.content;
 }
