@@ -337,6 +337,74 @@ async function verifyGeneratedReport(outputId) {
   }
 
   log('reports', 'Generated report is visible in report center');
+  return record;
+}
+
+async function reviseGeneratedReport(outputId, previousSummary) {
+  const instruction = `Highlight risk actions for local smoke ${smokeId}`;
+  const payload = await fetchJson(`${baseWeb}/api/reports/output/${encodeURIComponent(outputId)}/revise`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instruction }),
+  }, 'revise generated report output');
+
+  if (payload?.status !== 'revised') {
+    throw new Error(`generated report revise status mismatch: ${payload?.status}`);
+  }
+
+  const revised = payload?.item || null;
+  if (revised?.id !== outputId) {
+    throw new Error('generated report revise returned an unexpected report id');
+  }
+
+  if (!String(revised?.summary || '').trim()) {
+    throw new Error('generated report revise returned an empty summary');
+  }
+
+  if (String(revised?.summary || '').trim() === String(previousSummary || '').trim()) {
+    throw new Error('generated report revise did not change the summary');
+  }
+
+  const persisted = await poll(async () => {
+    const state = await loadReportState('generated report revise persistence');
+    const record = findReportOutput(state, outputId);
+    return record?.summary === revised.summary ? record : null;
+  }, { label: 'generated report revise persistence' });
+
+  log('reports', 'Generated report can be revised through the web proxy');
+  return persisted;
+}
+
+async function exportGeneratedReportPptx(item) {
+  const response = await fetch(`${baseWeb}/api/reports/export/pptx`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item }),
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`export generated report pptx failed with ${response.status}`);
+  }
+
+  const contentType = String(response.headers.get('content-type') || '');
+  if (!contentType.includes('application/vnd.openxmlformats-officedocument.presentationml.presentation')) {
+    throw new Error(`unexpected pptx export content-type: ${contentType || 'missing'}`);
+  }
+
+  const disposition = String(response.headers.get('content-disposition') || '');
+  if (!/\.pptx/i.test(disposition)) {
+    throw new Error('pptx export did not return a .pptx filename');
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length < 512) {
+    throw new Error(`pptx export body is unexpectedly small: ${buffer.length}`);
+  }
+  if (buffer[0] !== 0x50 || buffer[1] !== 0x4b) {
+    throw new Error('pptx export body does not look like a zip container');
+  }
+
+  log('reports', 'Generated report can be exported as PPT through the web route');
 }
 
 async function deleteGeneratedReport(outputId) {
@@ -415,7 +483,9 @@ async function runReportCenterChecks() {
   );
 
   createdReportOutputId = await createGeneratedReport(createdFileTemplateKey);
-  await verifyGeneratedReport(createdReportOutputId);
+  const initialReport = await verifyGeneratedReport(createdReportOutputId);
+  const revisedReport = await reviseGeneratedReport(createdReportOutputId, initialReport?.summary || '');
+  await exportGeneratedReportPptx(revisedReport);
   await deleteGeneratedReport(createdReportOutputId);
   createdReportOutputId = '';
 
