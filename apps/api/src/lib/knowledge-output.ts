@@ -24,7 +24,7 @@ export type ChatOutput =
     };
 
 type JsonRecord = Record<string, unknown>;
-type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill';
+type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill' | 'client';
 type ResumePageEntry = {
   candidateName: string;
   education: string;
@@ -39,6 +39,22 @@ type ResumePageEntry = {
   sourceName: string;
   sourceTitle: string;
   summary: string;
+};
+type ResumePageStats = {
+  entries: ResumePageEntry[];
+  candidateCount: number;
+  companyCount: number;
+  projectCount: number;
+  skillCount: number;
+  companies: Array<{ label: string; value: number }>;
+  projects: Array<{ label: string; value: number }>;
+  skills: Array<{ label: string; value: number }>;
+  educations: Array<{ label: string; value: number }>;
+  candidateLines: string[];
+  companyLines: string[];
+  projectLines: string[];
+  skillLines: string[];
+  salaryLines: string[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -684,6 +700,111 @@ function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] 
     .filter((entry) => entry.candidateName || entry.latestCompany || entry.skills.length || entry.projectHighlights.length);
 }
 
+function buildRankedLabelCounts(values: string[], limit = 8) {
+  const counts = new Map<string, { label: string; value: number }>();
+  for (const value of values) {
+    const label = sanitizeText(value);
+    if (!label) continue;
+    const normalized = normalizeText(label);
+    if (!normalized) continue;
+    const next = counts.get(normalized);
+    if (next) {
+      next.value += 1;
+      continue;
+    }
+    counts.set(normalized, { label, value: 1 });
+  }
+
+  return [...counts.values()]
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, 'zh-CN'))
+    .slice(0, limit);
+}
+
+function joinRankedLabels(items: Array<{ label: string; value: number }>, limit = 4) {
+  return items
+    .slice(0, limit)
+    .map((item) => `${item.label}${item.value > 1 ? `(${item.value})` : ''}`)
+    .join('、');
+}
+
+function buildResumeCandidateLine(entry: ResumePageEntry) {
+  const parts = [
+    entry.candidateName || entry.sourceTitle || entry.sourceName,
+    entry.latestCompany ? `最近公司 ${entry.latestCompany}` : '',
+    entry.yearsOfExperience || '',
+    entry.education ? `学历 ${entry.education}` : '',
+    entry.skills.length ? `技能 ${entry.skills.slice(0, 3).join(' / ')}` : '',
+  ].filter(Boolean);
+  return parts.join('，');
+}
+
+function buildResumeCompanyLine(item: { label: string; value: number }, stats: ResumePageStats) {
+  const relatedCandidates = stats.entries
+    .filter((entry) => entry.latestCompany === item.label)
+    .map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName)
+    .filter(Boolean)
+    .slice(0, 3);
+  const candidateText = relatedCandidates.length ? `；代表候选人 ${relatedCandidates.join('、')}` : '';
+  return `${item.label}：覆盖 ${item.value} 份简历${candidateText}`;
+}
+
+function buildResumeProjectLine(item: { label: string; value: number }, stats: ResumePageStats) {
+  const owner = stats.entries.find((entry) => (
+    entry.itProjectHighlights.includes(item.label) || entry.projectHighlights.includes(item.label)
+  ));
+  const ownerText = owner?.candidateName || owner?.sourceTitle || owner?.sourceName || '';
+  const companyText = owner?.latestCompany ? `，关联公司 ${owner.latestCompany}` : '';
+  return `${item.label}${ownerText ? `：代表候选人 ${ownerText}` : ''}${companyText}`;
+}
+
+function buildResumeSkillLine(item: { label: string; value: number }, stats: ResumePageStats) {
+  const candidates = stats.entries
+    .filter((entry) => entry.skills.includes(item.label))
+    .map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName)
+    .filter(Boolean)
+    .slice(0, 3);
+  return `${item.label}：覆盖 ${item.value} 位候选人${candidates.length ? `；代表候选人 ${candidates.join('、')}` : ''}`;
+}
+
+function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
+  const companies = buildRankedLabelCounts(entries.map((entry) => entry.latestCompany).filter(Boolean), 8);
+  const projects = buildRankedLabelCounts(
+    entries.flatMap((entry) => (entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights)).filter(Boolean),
+    10,
+  );
+  const skills = buildRankedLabelCounts(entries.flatMap((entry) => entry.skills).filter(Boolean), 10);
+  const educations = buildRankedLabelCounts(entries.map((entry) => entry.education).filter(Boolean), 6);
+  const salaryLines = normalizeUniqueStrings(
+    entries
+      .map((entry) => entry.expectedSalary)
+      .filter(Boolean),
+    6,
+  );
+
+  const stats: ResumePageStats = {
+    entries,
+    candidateCount: new Set(entries.map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName).filter(Boolean)).size,
+    companyCount: companies.length,
+    projectCount: projects.length,
+    skillCount: skills.length,
+    companies,
+    projects,
+    skills,
+    educations,
+    candidateLines: [],
+    companyLines: [],
+    projectLines: [],
+    skillLines: [],
+    salaryLines,
+  };
+
+  stats.candidateLines = entries.slice(0, 6).map(buildResumeCandidateLine);
+  stats.companyLines = companies.map((item) => buildResumeCompanyLine(item, stats)).slice(0, 6);
+  stats.projectLines = projects.map((item) => buildResumeProjectLine(item, stats)).slice(0, 6);
+  stats.skillLines = skills.map((item) => buildResumeSkillLine(item, stats)).slice(0, 6);
+  return stats;
+}
+
 function hasCompanySignal(text: string) {
   return containsAny(text, ['company', 'employer', 'organization', '公司', '雇主']);
 }
@@ -743,6 +864,36 @@ function hasTalentSignal(text: string) {
   ]);
 }
 
+function legacyHasClientSignal(text: string) {
+  return containsAny(text, [
+    'client',
+    'customer',
+    'presentation',
+    'pitch',
+    'report',
+    '瀹㈡埛',
+    '姹囨姤',
+    '灞曠ず',
+    '鎺ㄨ崘',
+    '鍖归厤寤鸿',
+  ]);
+}
+
+function hasClientSignal(text: string) {
+  return containsAny(text, [
+    'client',
+    'customer',
+    'presentation',
+    'pitch',
+    'report',
+    '\u5ba2\u6237',
+    '\u6c47\u62a5',
+    '\u5c55\u793a',
+    '\u63a8\u8350',
+    '\u5339\u914d\u5efa\u8bae',
+  ]);
+}
+
 function detectResumeRequestView(requestText: string): ResumeRequestView {
   const text = normalizeText(requestText);
 
@@ -754,6 +905,12 @@ function detectResumeRequestView(requestText: string): ResumeRequestView {
   if (hasProjectSignal(text)) return 'project';
   if (hasTalentSignal(text)) return 'talent';
   return 'generic';
+}
+
+function resolveResumeRequestView(requestText: string): ResumeRequestView {
+  const text = normalizeText(requestText);
+  if (hasClientSignal(text)) return 'client';
+  return detectResumeRequestView(requestText);
 }
 
 function extractProjectRole(text: string) {
@@ -885,14 +1042,14 @@ function buildResumeSkillRows(documents: ParsedDocument[]) {
   return rows.slice(0, 40);
 }
 
-function defaultResumePageSections(view: ResumeRequestView) {
+function legacyDefaultResumePageSections(view: ResumeRequestView) {
   if (view === 'company') return ['公司概览', '重点项目分布', '候选人覆盖', '技术关键词', '风险与机会', 'AI综合分析'];
   if (view === 'project') return ['项目概览', '公司分布', '候选人参与', '技术关键词', '交付信号', 'AI综合分析'];
   if (view === 'skill') return ['技能概览', '候选人分布', '公司覆盖', '关联项目', '人才机会', 'AI综合分析'];
   return ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'];
 }
 
-function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
+function legacyBuildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
   const companyRows = view === 'company' ? buildResumeCompanyProjectRows(documents) : [];
   const projectRows = view === 'project' ? buildResumeProjectRows(documents) : [];
   const talentRows = view === 'talent' || view === 'generic' ? buildResumeTalentRows(documents) : [];
@@ -993,6 +1150,263 @@ function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocumen
       ],
     },
   };
+}
+
+function defaultResumePageSections(view: ResumeRequestView) {
+  if (view === 'client') return ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析'];
+  if (view === 'company') return ['公司概览', '重点项目分布', '候选人覆盖', '技术关键词', '风险与机会', 'AI综合分析'];
+  if (view === 'project') return ['项目概览', '公司分布', '候选人参与', '技术关键词', '交付信号', 'AI综合分析'];
+  if (view === 'skill') return ['技能概览', '候选人分布', '公司覆盖', '关联项目', '人才机会', 'AI综合分析'];
+  return ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'];
+}
+
+function buildResumePageTitle(view: ResumeRequestView, envelope?: ReportTemplateEnvelope | null) {
+  if (envelope?.title) return envelope.title;
+  if (view === 'client') return '简历客户汇报静态页';
+  if (view === 'company') return '简历公司维度 IT 项目静态页';
+  if (view === 'project') return '简历项目维度静态页';
+  if (view === 'skill') return '简历技能维度静态页';
+  return '简历人才维度静态页';
+}
+
+function buildResumePageSummary(view: ResumeRequestView, documentCount: number, stats: ResumePageStats) {
+  const shared = `当前基于库内 ${documentCount} 份简历，整理出 ${stats.candidateCount} 位候选人、${stats.companyCount} 家关联公司和 ${stats.projectCount} 条项目线索。`;
+  if (view === 'client') return `${shared} 当前页面采用客户汇报视角，重点展示代表候选人、核心技能和匹配建议。`;
+  if (view === 'company') return `${shared} 当前页面按公司维度组织，适合快速查看目标公司的项目经验覆盖和人才结构。`;
+  if (view === 'project') return `${shared} 当前页面按项目维度组织，适合对比代表项目、参与候选人和技术方向。`;
+  if (view === 'skill') {
+    return `当前基于库内 ${documentCount} 份简历，汇总出 ${stats.skillCount} 类核心技能、${stats.candidateCount} 位候选人和 ${stats.projectCount} 条关联项目线索，适合用于技能盘点和招聘筛选。`;
+  }
+  return `${shared} 当前页面按人才维度组织，适合快速查看候选人背景、项目经历和核心能力。`;
+}
+
+function buildResumePageCards(view: ResumeRequestView, documentCount: number, stats: ResumePageStats) {
+  if (view === 'client') {
+    return [
+      { label: '简历数量', value: String(documentCount), note: '参与本次客户页生成的简历数量' },
+      { label: '候选人覆盖', value: String(stats.candidateCount), note: '已识别出的候选人数量' },
+      { label: '公司覆盖', value: String(stats.companyCount), note: '关联公司或组织数量' },
+      { label: '项目线索', value: String(stats.projectCount), note: '可展示的代表项目线索' },
+    ];
+  }
+  if (view === 'company') {
+    return [
+      { label: '候选人覆盖', value: String(stats.candidateCount), note: '具备公司或项目线索的候选人数量' },
+      { label: '公司覆盖', value: String(stats.companyCount), note: '当前页面涉及的重点公司数量' },
+      { label: '项目线索', value: String(stats.projectCount), note: '从简历中归纳出的代表项目线索' },
+      { label: '技能热点', value: joinRankedLabels(stats.skills, 3) || '待补充', note: '高频技能方向' },
+    ];
+  }
+  if (view === 'project') {
+    return [
+      { label: '项目线索', value: String(stats.projectCount), note: '去重后的项目线索数量' },
+      { label: '候选人覆盖', value: String(stats.candidateCount), note: '参与项目的候选人数量' },
+      { label: '公司覆盖', value: String(stats.companyCount), note: '相关公司或组织数量' },
+      { label: '技能热点', value: joinRankedLabels(stats.skills, 3) || '待补充', note: '高频技术方向' },
+    ];
+  }
+  if (view === 'skill') {
+    return [
+      { label: '技能覆盖', value: String(stats.skillCount), note: '去重后的核心技能数量' },
+      { label: '候选人覆盖', value: String(stats.candidateCount), note: '具备技能画像的候选人数量' },
+      { label: '公司覆盖', value: String(stats.companyCount), note: '技能来源关联到的公司数量' },
+      { label: '关联项目', value: String(stats.projectCount), note: '技能对应的代表项目线索' },
+    ];
+  }
+  return [
+    { label: '简历数量', value: String(documentCount), note: '参与本次页面生成的简历数量' },
+    { label: '候选人覆盖', value: String(stats.candidateCount), note: '已识别出的候选人数量' },
+    { label: '公司覆盖', value: String(stats.companyCount), note: '关联公司或组织数量' },
+    { label: '技能覆盖', value: String(stats.skillCount), note: '去重后的核心技能数量' },
+  ];
+}
+
+function buildResumeSectionBlueprints(view: ResumeRequestView, summary: string, stats: ResumePageStats) {
+  const compensationText = stats.salaryLines.length ? `；期望薪资线索包括 ${stats.salaryLines.slice(0, 3).join('、')}` : '';
+  if (view === 'client') {
+    return [
+      { body: summary, bullets: [joinRankedLabels(stats.skills, 4), joinRankedLabels(stats.companies, 4), `代表项目 ${joinRankedLabels(stats.projects, 3)}`].filter(Boolean) },
+      { body: `代表候选人主要集中在 ${joinRankedLabels(stats.companies, 4)} 等背景公司，可直接用于客户展示与初筛沟通。`, bullets: stats.candidateLines.slice(0, 5) },
+      { body: `代表项目主要覆盖 ${joinRankedLabels(stats.projects, 5)} 等方向，体现了平台搭建、交付实施和业务落地能力。`, bullets: stats.projectLines.slice(0, 5) },
+      { body: `核心技能以 ${joinRankedLabels(stats.skills, 6)} 为主，兼顾项目实施、产品规划和业务协同。`, bullets: stats.skillLines.slice(0, 5) },
+      { body: `建议优先根据岗位目标从公司背景、项目场景和技能组合三条线并行筛选${compensationText}。`, bullets: [
+        '优先选择项目经历与客户业务场景接近的候选人',
+        '对管理岗重点关注公司背景、团队带领与交付经历',
+        '对技术岗重点关注高频技能组合与代表项目',
+      ] },
+      { body: '当前页以知识库证据为主、AI归纳为辅，适合作为客户沟通和内部筛选的第一版展示页。', bullets: [
+        '优先核验代表项目与最近公司是否与目标岗位高度相关',
+        '当证据不足时，以保守描述替代自由补完',
+      ] },
+    ];
+  }
+  if (view === 'company') {
+    return [
+      { body: summary, bullets: stats.companyLines.slice(0, 5) },
+      { body: `重点项目主要覆盖 ${joinRankedLabels(stats.projects, 5)} 等方向，适合按公司维度查看候选人的项目沉淀。`, bullets: stats.projectLines.slice(0, 5) },
+      { body: `当前候选人来源公司较为集中，代表背景包括 ${joinRankedLabels(stats.companies, 5)}。`, bullets: stats.candidateLines.slice(0, 5) },
+      { body: `技术关键词主要集中在 ${joinRankedLabels(stats.skills, 6)}，说明候选人更偏平台型、交付型和解决方案型能力。`, bullets: stats.skillLines.slice(0, 5) },
+      { body: '从公司维度看，页面适合快速评估候选人的行业贴近度与项目经验密度。', bullets: [
+        '优先识别是否存在目标行业的连续经历',
+        '当项目描述较短时，以项目主题而非业绩数字作为判断依据',
+        '重点关注最近公司和代表项目的组合',
+      ] },
+      { body: '当前输出以知识库可见的公司、项目与技能线索为依据，避免扩写无法验证的业绩数字。', bullets: [
+        '适合作为公司维度的人才盘点初稿',
+        '如需更细颗粒度判断，可继续下钻到项目维度页面',
+      ] },
+    ];
+  }
+  if (view === 'project') {
+    return [
+      { body: summary, bullets: stats.projectLines.slice(0, 5) },
+      { body: `项目所关联的公司主要包括 ${joinRankedLabels(stats.companies, 5)}。`, bullets: stats.companyLines.slice(0, 5) },
+      { body: `参与候选人覆盖 ${stats.candidateCount} 位，代表候选人具备 ${joinRankedLabels(stats.skills, 5)} 等能力组合。`, bullets: stats.candidateLines.slice(0, 5) },
+      { body: `技术关键词主要集中在 ${joinRankedLabels(stats.skills, 6)}。`, bullets: stats.skillLines.slice(0, 5) },
+      { body: '交付信号主要来自简历中的项目主题、岗位角色和最近公司信息，适合用于项目匹配与候选人筛选。', bullets: [
+        '优先关注与目标项目场景一致的候选人',
+        '优先采信明确写出项目主题和角色职责的简历',
+      ] },
+      { body: '项目维度页面更适合做“项目找人”场景下的第一轮对齐，后续可再结合人才维度细看背景与稳定性。', bullets: [
+        '同一项目主题可继续下钻到技能覆盖和公司背景',
+      ] },
+    ];
+  }
+  if (view === 'skill') {
+    return [
+      { body: summary, bullets: stats.skillLines.slice(0, 5) },
+      { body: `高频技能主要集中在 ${joinRankedLabels(stats.skills, 6)}，可直接用于技能盘点和关键词检索。`, bullets: stats.candidateLines.slice(0, 5) },
+      { body: `技能来源公司主要包括 ${joinRankedLabels(stats.companies, 5)}。`, bullets: stats.companyLines.slice(0, 5) },
+      { body: `技能所关联的代表项目主要包括 ${joinRankedLabels(stats.projects, 5)}。`, bullets: stats.projectLines.slice(0, 5) },
+      { body: '技能维度页面更适合回答“某类技能有哪些人、分布在哪些公司、对应哪些项目”。', bullets: [
+        '优先看高频技能与最近公司的组合',
+        '再看技能是否能落到具体项目和场景',
+      ] },
+      { body: '当前页面只保留知识库可见的技能、公司和项目线索，适合作为技能筛选和岗位匹配的证据层。', bullets: [
+        '不把技能页误写成客户汇报页或人才总览页',
+      ] },
+    ];
+  }
+  return [
+    { body: summary, bullets: stats.candidateLines.slice(0, 5) },
+    { body: `学历与背景主要集中在 ${joinRankedLabels(stats.educations, 4) || '待补充'}，候选人覆盖 ${joinRankedLabels(stats.companies, 4)} 等公司背景${compensationText}。`, bullets: stats.educations.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+    { body: `最近公司主要集中在 ${joinRankedLabels(stats.companies, 5)}。`, bullets: stats.companyLines.slice(0, 5) },
+    { body: `代表项目主要覆盖 ${joinRankedLabels(stats.projects, 5)}。`, bullets: stats.projectLines.slice(0, 5) },
+    { body: `核心能力主要集中在 ${joinRankedLabels(stats.skills, 6)}。`, bullets: stats.skillLines.slice(0, 5) },
+    { body: '人才维度页面适合作为候选人初筛页，优先看最近公司、项目场景与技能组合，再结合薪资和工作年限做匹配判断。', bullets: [
+      '先看候选人背景是否贴近目标行业',
+      '再看代表项目是否与目标岗位高度相关',
+      '最后结合技能与薪资线索做初筛',
+    ] },
+  ];
+}
+
+function buildResumePageCharts(view: ResumeRequestView, stats: ResumePageStats) {
+  if (view === 'company') {
+    return [
+      { title: '公司覆盖分布', items: stats.companies.slice(0, 8) },
+      { title: '技能热点分布', items: stats.skills.slice(0, 8) },
+    ];
+  }
+  if (view === 'project') {
+    return [
+      { title: '项目覆盖分布', items: stats.projects.slice(0, 8) },
+      { title: '公司分布', items: stats.companies.slice(0, 8) },
+    ];
+  }
+  if (view === 'skill') {
+    return [
+      { title: '技能覆盖分布', items: stats.skills.slice(0, 8) },
+      { title: '公司覆盖分布', items: stats.companies.slice(0, 8) },
+    ];
+  }
+  if (view === 'client') {
+    return [
+      { title: '技能热度', items: stats.skills.slice(0, 8) },
+      { title: '公司背景分布', items: stats.companies.slice(0, 8) },
+    ];
+  }
+  return [
+    { title: '技能覆盖分布', items: stats.skills.slice(0, 8) },
+    { title: '公司背景分布', items: stats.companies.slice(0, 8) },
+  ];
+}
+
+function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
+  const stats = buildResumePageStats(buildResumePageEntries(documents));
+  const summary = buildResumePageSummary(view, documents.length, stats);
+  const sectionTitles = envelope?.pageSections?.length ? envelope.pageSections : defaultResumePageSections(view);
+  const blueprints = buildResumeSectionBlueprints(view, summary, stats);
+
+  return {
+    type: 'page',
+    title: buildResumePageTitle(view, envelope),
+    content: summary,
+    format: 'html',
+    page: {
+      summary,
+      cards: buildResumePageCards(view, documents.length, stats),
+      sections: sectionTitles.map((title, index) => {
+        const section = blueprints[index] || { body: '', bullets: [] as string[] };
+        return {
+          title,
+          body: section.body || (index === 0 ? summary : ''),
+          bullets: section.bullets || [],
+        };
+      }),
+      charts: buildResumePageCharts(view, stats),
+    },
+  };
+}
+
+function countResumePipeEchoSections(sections: Array<{ title?: string; body?: string; bullets?: string[] }>) {
+  return sections.filter((section) => (
+    sanitizeText(section.body).includes(' | ')
+    || (section.bullets || []).some((item) => sanitizeText(item).includes(' | '))
+  )).length;
+}
+
+function hasExpectedResumeTitle(view: ResumeRequestView, title: string) {
+  const normalized = normalizeText(title);
+  if (!normalized) return false;
+  if (view === 'client') {
+    return containsAny(normalized, ['client', 'customer', '\u5ba2\u6237', '\u6c47\u62a5', '\u63a8\u8350', '\u5339\u914d']);
+  }
+  if (view === 'skill') return containsAny(normalized, ['skill', '\u6280\u80fd']);
+  if (view === 'company') return containsAny(normalized, ['company', '\u516c\u53f8']);
+  if (view === 'project') return containsAny(normalized, ['project', '\u9879\u76ee']);
+  return containsAny(normalized, ['talent', 'candidate', '\u4eba\u624d', '\u5019\u9009\u4eba']);
+}
+
+function hasSuspiciousResumeHardMetrics(view: ResumeRequestView, text: string) {
+  if (view !== 'company' && view !== 'project' && view !== 'client') return false;
+  return /(?:\d+(?:\.\d+)?%|\d+(?:\.\d+)?(?:亿|万|k|K)|\d+\+)/.test(text);
+}
+
+function shouldUseResumePageFallback(
+  view: ResumeRequestView,
+  title: string,
+  page: NonNullable<Exclude<ChatOutput, { type: 'answer' }>['page']>,
+) {
+  const cards = page.cards || [];
+  const sections = page.sections || [];
+  const charts = page.charts || [];
+  const pageText = [
+    title,
+    page.summary || '',
+    ...cards.flatMap((card) => [card.label || '', card.value || '', card.note || '']),
+    ...sections.flatMap((section) => [section.title || '', section.body || '', ...(section.bullets || [])]),
+  ]
+    .map((item) => sanitizeText(item))
+    .filter(Boolean)
+    .join('\n');
+
+  const pipeEchoSections = countResumePipeEchoSections(sections);
+  if (!hasExpectedResumeTitle(view, title)) return true;
+  if ((view === 'client' || view === 'skill') && pipeEchoSections >= 2) return true;
+  if (pipeEchoSections >= 3 && charts.length <= 1) return true;
+  if (hasSuspiciousResumeHardMetrics(view, pageText)) return true;
+  return false;
 }
 
 function wrapPageOutputAsKind(kind: 'page' | 'pdf' | 'ppt', page: KnowledgePageOutput): ChatOutput {
@@ -1114,7 +1528,7 @@ export function buildKnowledgeFallbackOutput(
   documents: ParsedDocument[],
   envelope?: ReportTemplateEnvelope | null,
 ): ChatOutput {
-  const view = detectResumeRequestView(requestText);
+  const view = resolveResumeRequestView(requestText);
   const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
 
   if (resumeDocuments.length) {
@@ -1206,6 +1620,7 @@ export function normalizeReportOutput(
   requestText: string,
   rawContent: string,
   envelope?: ReportTemplateEnvelope | null,
+  documents: ParsedDocument[] = [],
 ): ChatOutput {
   const parsed = tryParseJsonPayload(rawContent);
   const root = isObject(parsed) ? parsed : {};
@@ -1240,7 +1655,7 @@ export function normalizeReportOutput(
       return buildPromptEchoFallbackOutput(kind, title, requestText, envelope);
     }
 
-    return {
+    const normalizedOutput: ChatOutput = {
       type: kind === 'page' ? 'page' : kind,
       title,
       content: content || summary,
@@ -1258,6 +1673,16 @@ export function normalizeReportOutput(
         charts,
       },
     };
+
+    const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+    if (resumeDocuments.length && normalizedOutput.page) {
+      const view = resolveResumeRequestView(requestText);
+      if (shouldUseResumePageFallback(view, normalizedOutput.title, normalizedOutput.page)) {
+        return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope);
+      }
+    }
+
+    return normalizedOutput;
   }
 
   const tableSource =

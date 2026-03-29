@@ -212,6 +212,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       requestText,
       cloud.content,
       activeEnvelope,
+      supply.effectiveRetrieval.documents,
     );
   } catch {
     output = buildKnowledgeFallbackOutput(

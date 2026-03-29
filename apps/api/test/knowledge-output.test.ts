@@ -234,7 +234,166 @@ test('buildKnowledgeFallbackOutput should clean noisy resume candidate names for
   assert.equal(output.page?.cards?.[1]?.value, '3');
   assert.doesNotMatch(output.page?.sections?.[0]?.body || '', /\bRESUME\b|年龄：/i);
   assert.doesNotMatch((output.page?.charts?.[0]?.items || []).map((item) => item.label).join('|'), /\bRESUME\b|年龄/i);
-  assert.match(output.page?.sections?.[1]?.body || '', /夏天宇|何先生|吴楚镰/);
+  assert.match(JSON.stringify(output.page), /夏天宇|何先生|吴楚镰/);
+});
+
+test('buildKnowledgeFallbackOutput should create a client-facing resume page for client requests', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '夏天宇简历.pdf',
+      ext: '.pdf',
+      title: '夏天宇简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '夏天宇，5年经验，阿里斑马网络产品经理，负责智能座舱和 AIGC 平台项目。',
+      excerpt: '夏天宇，5年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '夏天宇',
+        latestCompany: '阿里斑马网络',
+        yearsOfExperience: '5年经验',
+        education: '本科',
+        skills: ['产品设计', 'Axure', '需求分析'],
+        projectHighlights: ['智能座舱系统产品规划', 'AIGC 平台产品规划'],
+      },
+    },
+    {
+      path: 'resume-2.pdf',
+      name: '谢泽强简历.pdf',
+      ext: '.pdf',
+      title: '谢泽强简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '谢泽强，16年经验，深圳达实智能股份有限公司，负责智慧园区和智能化项目。',
+      excerpt: '谢泽强，16年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '谢泽强',
+        latestCompany: '深圳达实智能股份有限公司',
+        yearsOfExperience: '16年经验',
+        education: '大专',
+        skills: ['项目管理', '智慧园区', '解决方案'],
+        projectHighlights: ['智慧园区项目交付', '智能化项目解决方案'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中全部时间范围的简历，为客户汇报准备一页可视化静态页，需要突出人才概览、代表项目、核心技能、匹配建议和 AI 综合分析。',
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '简历客户汇报静态页');
+  assert.deepEqual(
+    output.page?.sections?.map((item) => item.title),
+    ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析'],
+  );
+  assert.doesNotMatch(output.page?.sections?.[1]?.body || '', /\s\|\s/);
+  assert.match((output.page?.sections?.[1]?.bullets || []).join('\n'), /夏天宇|谢泽强/);
+});
+
+test('normalizeReportOutput should fallback low-quality resume client pages to deterministic client view', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '夏天宇简历.pdf',
+      ext: '.pdf',
+      title: '夏天宇简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '夏天宇，5年经验，阿里斑马网络产品经理，负责智能座舱和 AIGC 平台项目。',
+      excerpt: '夏天宇，5年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '夏天宇',
+        latestCompany: '阿里斑马网络',
+        yearsOfExperience: '5年经验',
+        education: '本科',
+        skills: ['产品设计', 'Axure', '需求分析'],
+        projectHighlights: ['智能座舱系统产品规划', 'AIGC 平台产品规划'],
+      },
+    },
+  ];
+
+  const output = normalizeReportOutput(
+    'page',
+    '请基于人才简历知识库中全部时间范围的简历，为客户汇报准备一页可视化静态页，需要突出人才概览、代表项目、核心技能、匹配建议和 AI 综合分析。',
+    JSON.stringify({
+      title: '简历人才维度静态页',
+      summary: '当前基于库内 10 份简历整理出 40 条技能条目，可直接用于招聘筛选。',
+      sections: [
+        { title: '人才概览', body: '产品设计 | 夏天宇简历 | 产品设计 | 创立了一个集成人工智能' },
+        { title: '核心能力', body: 'Java | 夏天宇简历 | Java | 创立了一个集成人工智能' },
+      ],
+      charts: [{ title: '技能覆盖分布', items: [{ label: '产品设计', value: 1 }] }],
+    }),
+    null,
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '简历客户汇报静态页');
+  assert.deepEqual(
+    output.page?.sections?.map((item) => item.title),
+    ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析'],
+  );
+  assert.doesNotMatch(JSON.stringify(output.page), /\s\|\s/);
+});
+
+test('normalizeReportOutput should fallback suspicious hard-metric resume company pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '谢泽强简历.pdf',
+      ext: '.pdf',
+      title: '谢泽强简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '谢泽强，16年经验，深圳达实智能股份有限公司，负责智慧园区和智能化项目。',
+      excerpt: '谢泽强，16年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '谢泽强',
+        latestCompany: '深圳达实智能股份有限公司',
+        yearsOfExperience: '16年经验',
+        education: '大专',
+        skills: ['项目管理', '智慧园区', '解决方案'],
+        projectHighlights: ['智慧园区项目交付', '智能化项目解决方案'],
+      },
+    },
+  ];
+
+  const output = normalizeReportOutput(
+    'page',
+    '请基于人才简历知识库中全部时间范围的简历，按公司维度整理涉及公司的 IT 项目信息，生成数据可视化静态页报表。',
+    JSON.stringify({
+      title: '简历公司维度 IT 项目静态页',
+      summary: '覆盖 8 份简历，涉及 7 家公司。',
+      cards: [{ label: 'IT项目信号', value: '12+', note: '示例' }],
+      sections: [
+        { title: '重点项目分布', body: '虎牙全球研发总部项目：总投资15亿元' },
+        { title: '候选人覆盖', body: '李明轩：三平台年销售额从1.2亿提升至1.8亿' },
+      ],
+    }),
+    null,
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '简历公司维度 IT 项目静态页');
+  assert.doesNotMatch(JSON.stringify(output.page), /15亿元|12\+|1\.2亿|1\.8亿/);
+  assert.equal(output.page?.cards?.[2]?.value, '2');
 });
 
 test('normalizeReportOutput should convert supply-echo json into readable concept page output', () => {
