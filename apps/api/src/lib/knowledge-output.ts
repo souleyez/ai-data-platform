@@ -632,8 +632,9 @@ function sanitizeResumeProjectHighlight(value: unknown) {
     .split(/工作经历|核心能力|教育背景|联系方式/u)[0]
     .trim();
   if (!text) return '';
-  if (text.length > 80) return '';
+  if (text.length > 50) return '';
   if (/related_to|mailto:|@/i.test(text)) return '';
+  if (/[；;]/u.test(text)) return '';
   if (!/(项目|project|系统|平台|方案|智能|座舱|消防|园区|aigc|物联网|交付|改造|运营|电商|风控|看板|中台|研发)/i.test(text)) return '';
   return text;
 }
@@ -660,14 +661,14 @@ function extractResumeEducation(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return '';
   const direct = text.match(/(博士|研究生|硕士|MBA|本科|大专|专科|中专)/i);
-  return sanitizeText(direct?.[1] || text);
+  return sanitizeText(direct?.[1] || '');
 }
 
 function extractResumeYears(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return '';
   const match = text.match(/(\d{1,2}年(?:工作)?经验)/);
-  return sanitizeText(match?.[1] || text);
+  return sanitizeText(match?.[1] || '');
 }
 
 function getResumeDisplayName(entry: ResumePageEntry) {
@@ -675,7 +676,7 @@ function getResumeDisplayName(entry: ResumePageEntry) {
     entry.candidateName
     || extractResumeCandidateNameFromText(entry.sourceTitle)
     || extractResumeCandidateNameFromText(buildResumeFileBaseName(entry.sourceName))
-    || entry.sourceName
+    || ''
   );
 }
 
@@ -829,7 +830,7 @@ function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
     salaryLines,
   };
 
-  stats.candidateLines = entries.slice(0, 6).map(buildResumeCandidateLine);
+  stats.candidateLines = entries.filter((entry) => getResumeDisplayName(entry)).slice(0, 6).map(buildResumeCandidateLine);
   stats.companyLines = companies.map((item) => buildResumeCompanyLine(item, stats)).slice(0, 6);
   stats.projectLines = projects.map((item) => buildResumeProjectLine(item, stats)).slice(0, 6);
   stats.skillLines = skills.map((item) => buildResumeSkillLine(item, stats)).slice(0, 6);
