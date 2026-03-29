@@ -127,6 +127,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           chatHistory,
           existingState,
           sessionUser: input.sessionUser,
+          debugResumePage: input.debugResumePage === true,
         });
         libraries = result.libraries;
         output = result.output;
@@ -134,6 +135,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         intent = result.intent;
         mode = result.mode;
         conversationState = result.conversationState;
+        debug = result.debug || null;
       }
     } catch (error) {
       fallbackReason = summarizeError(error);

@@ -29,6 +29,7 @@ export type GeneralKnowledgeDispatchResult = {
   output: ChatOutput;
   intent: 'general' | 'report';
   mode: 'openclaw';
+  debug?: Record<string, unknown> | null;
   conversationState: KnowledgeConversationState | null;
 };
 
@@ -69,6 +70,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   chatHistory: ChatHistoryItem[];
   existingState: KnowledgeConversationState | null;
   sessionUser?: string;
+  debugResumePage?: boolean;
 }): Promise<GeneralKnowledgeDispatchResult> {
   const { prompt, chatHistory, existingState, sessionUser } = input;
 
@@ -80,6 +82,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       output: { type: 'answer', content },
       intent: 'general',
       mode: 'openclaw',
+      debug: null,
       conversationState: null,
     };
   }
@@ -97,6 +100,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       output: { type: 'answer', content: cloud.content },
       intent: 'general',
       mode: 'openclaw',
+      debug: null,
       conversationState: null,
     };
   }
@@ -119,6 +123,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       timeRange,
       contentFocus,
       sessionUser,
+      debugResumePage: input.debugResumePage === true,
       chatHistory,
     });
 
@@ -128,6 +133,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       output: result.output,
       intent: result.intent,
       mode: result.mode,
+      debug: result.debug || null,
       conversationState: null,
     };
   }
@@ -152,6 +158,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       output: result.output,
       intent: result.intent,
       mode: result.mode,
+      debug: null,
       conversationState: null,
     };
   }
@@ -180,6 +187,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     output: { type: 'answer', content: cloud.content },
     intent: 'general',
     mode: 'openclaw',
+    debug: null,
     conversationState: null,
   };
 }
