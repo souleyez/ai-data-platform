@@ -64,22 +64,26 @@ function sanitizeStringArray(value: unknown, maxLength = 80) {
 function extractStrongDisplayNameFromContext(value: unknown) {
   const text = sanitizeText(value, 240);
   if (!text) return '';
+  const sentencePrefixPattern = /^(?:\u5728|\u4e8e|\u4ece|\u5bf9|\u5411|\u548c|\u4e0e|\u53ca|\u7531|\u5c06|\u628a|\u6765\u81ea)[\u4e00-\u9fff]{1,3}$/u;
+  const tokenScanAllowed = /(?:resume|\u7b80\u5386|\u59d3\u540d|\u5019\u9009\u4eba)/iu.test(text);
 
   const patterns = [
+    /(?:resume|\u7b80\u5386)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/iu,
     /(?:\u59d3\u540d|\u5019\u9009\u4eba)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/u,
     /^([\u4e00-\u9fff\u00b7]{2,4})(?:\u7b80\u5386|，|,|\s|\u7537|\u5973|\u6c42\u804c|\u5de5\u4f5c|\u73b0\u5c45|\u672c\u79d1|\u7855\u58eb|\u7814\u7a76\u751f|MBA|\u5927\u4e13|\u535a\u58eb)/u,
   ];
 
   for (const pattern of patterns) {
     const candidate = sanitizeText(text.match(pattern)?.[1], 40);
-    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    if (!candidate || isWeakResumeCandidateName(candidate) || sentencePrefixPattern.test(candidate)) continue;
     return candidate;
   }
 
+  if (!tokenScanAllowed) return '';
   const tokens = text.match(/[\u4e00-\u9fff\u00b7]{2,4}/gu) || [];
   for (const token of tokens.slice(0, 8)) {
     const candidate = sanitizeText(token, 40);
-    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    if (!candidate || isWeakResumeCandidateName(candidate) || sentencePrefixPattern.test(candidate)) continue;
     return candidate;
   }
 
@@ -88,12 +92,13 @@ function extractStrongDisplayNameFromContext(value: unknown) {
 
 function resolveResumeDisplayName(primary: unknown, contextValues: unknown[]) {
   const direct = sanitizeText(primary, 60);
-  if (direct && !isWeakResumeCandidateName(direct)) return direct;
+  const directIsWeak = direct ? isWeakResumeCandidateName(direct) : false;
+  if (direct && !directIsWeak) return direct;
   for (const value of contextValues) {
     const recovered = extractStrongDisplayNameFromContext(value);
     if (recovered) return recovered;
   }
-  return direct;
+  return directIsWeak ? '' : direct;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -155,6 +160,7 @@ function sanitizeProjectLead(value: unknown) {
     text = text.replace(RESUME_PROJECT_LEAD_PATTERN, '').trim();
   }
 
+  text = text.replace(/^(?:\u8fc7)(?=[\u4e00-\u9fffA-Za-z0-9])/u, '').trim();
   return text;
 }
 

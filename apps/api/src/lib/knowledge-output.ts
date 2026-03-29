@@ -663,12 +663,14 @@ function sanitizeResumeCandidateName(value: unknown) {
   if (/^(?:default|sample|test|demo|resume)[a-z0-9-]*$/i.test(text)) return '';
   if (/^[a-z0-9-]{8,}$/i.test(text)) return '';
   if (/^(?:个人简历|候选人简历)$/u.test(text)) return '';
+  if (/^(?:\u5728|\u4e8e|\u4ece|\u5bf9|\u5411|\u548c|\u4e0e|\u53ca|\u7531|\u5c06|\u628a|\u6765\u81ea)[\u4e00-\u9fff]{1,3}$/u.test(text)) return '';
   return isLikelyResumePersonName(text) ? text : '';
 }
 
 function extractResumeCandidateNameFromText(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return '';
+  const tokenScanAllowed = /(?:resume|\u7b80\u5386|\u59d3\u540d|\u5019\u9009\u4eba)/iu.test(text);
 
   const direct = sanitizeResumeCandidateName(text);
   if (direct) return direct;
@@ -687,6 +689,7 @@ function extractResumeCandidateNameFromText(value: unknown) {
   }
 
   const tokenMatches = text.match(/[\u4e00-\u9fff·]{2,12}/gu) || [];
+  if (!tokenScanAllowed) return '';
   for (const token of tokenMatches.slice(0, 12)) {
     const candidate = sanitizeResumeCandidateName(token);
     if (candidate) return candidate;
@@ -698,8 +701,10 @@ function extractResumeCandidateNameFromText(value: unknown) {
 function extractStrongResumeCandidateName(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return '';
+  const tokenScanAllowed = /(?:resume|\u7b80\u5386|\u59d3\u540d|\u5019\u9009\u4eba)/iu.test(text);
 
   const patterns = [
+    /(?:resume|\u7b80\u5386)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/iu,
     /(?:\u59d3\u540d|\u5019\u9009\u4eba)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/u,
     /^([\u4e00-\u9fff\u00b7]{2,4})(?:\u7b80\u5386|，|,|\s|\u7537|\u5973|\u6c42\u804c|\u5de5\u4f5c|\u73b0\u5c45|\u672c\u79d1|\u7855\u58eb|\u7814\u7a76\u751f|MBA|\u5927\u4e13|\u535a\u58eb)/u,
   ];
@@ -710,6 +715,7 @@ function extractStrongResumeCandidateName(value: unknown) {
     return candidate;
   }
 
+  if (!tokenScanAllowed) return '';
   const tokenMatches = text.match(/[\u4e00-\u9fff\u00b7]{2,4}/gu) || [];
   for (const token of tokenMatches.slice(0, 8)) {
     const candidate = sanitizeResumeCandidateName(token);
@@ -742,7 +748,8 @@ function pickResumeDisplayName(values: unknown[]) {
     }
   }
 
-  return strongCandidates[0] || weakCandidates[0] || '';
+  const weakDisplayCandidate = weakCandidates.find((candidate) => !/^(?:\u7537\u6027|\u5973\u6027|\u7537|\u5973|\u6c42\u804c\u610f\u5411|\u57fa\u672c\u4fe1\u606f|\u4e2a\u4eba\u4fe1\u606f|\u76ee\u6807\u5c97\u4f4d|\u5e94\u8058\u5c97\u4f4d|\u5f53\u524d\u804c\u4f4d|\d+\+?\u5e74|\d+\u5e74|\u5e74\u5de5\u4f5c\u7ecf|\u5de5\u4f5c\u7ecf\u9a8c|\u5de5\u4f5c\u5e74\u9650|\u5e74\u7ecf\u9a8c)$/u.test(candidate));
+  return strongCandidates[0] || weakDisplayCandidate || '';
 }
 
 function sanitizeResumeCompany(value: unknown) {
@@ -785,7 +792,7 @@ function sanitizeResumeProjectHighlightStrict(value: unknown) {
   const text = sanitizeResumeProjectHighlight(value);
   if (!text) return '';
   const explicitMatch = text.match(STRICT_RESUME_PROJECT_SUFFIX_PATTERN);
-  const candidate = sanitizeText(explicitMatch?.[1] || text);
+  const candidate = sanitizeText((explicitMatch?.[1] || text).replace(/^(?:\u8fc7)(?=[\u4e00-\u9fffA-Za-z0-9])/u, ''));
   if (!candidate) return '';
   if (STRICT_RESUME_GENERIC_PROJECT_LABELS.has(candidate)) return '';
   if (/^(?:[a-z][\u3001\uFF0C\uFF1A\s]*)/i.test(candidate)) return '';

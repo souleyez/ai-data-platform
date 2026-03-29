@@ -238,6 +238,36 @@ test('buildResumeDisplaySeedProfiles should recover concise project labels from 
   assert.match(JSON.stringify(profiles[0]?.displayProjects || []), /\u652f\u4ed8\u4e2d\u53f0/);
 });
 
+test('buildResumeDisplaySeedProfiles should drop generic role labels and trim leading project fragments', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-g.docx',
+      name: 'resume-g.docx',
+      ext: '.docx',
+      title: '\u6c42\u804c\u610f\u5411',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '\u5728\u5e7f\u5dde\u6c47\u805a\u667a\u80fd\u79d1\u6280\u53c2\u4e0e\u8fc7\u5171\u4eab\u5145\u7535\u7cfb\u7edf\u4e0eAI\u89c6\u89c9\u5e94\u7528\u5efa\u8bbe\u3002',
+      excerpt: '\u53c2\u4e0e\u8fc7\u5171\u4eab\u5145\u7535\u7cfb\u7edf\u4ea4\u4ed8\u3002',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '\u6c42\u804c\u610f\u5411',
+        latestCompany: '\u5e7f\u5dde\u6c47\u805a\u667a\u80fd\u79d1\u6280',
+        yearsOfExperience: '10 years',
+        projectHighlights: ['\u8fc7\u5171\u4eab\u5145\u7535\u7cfb\u7edf'],
+        skills: ['Java', 'Go'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0]?.displayName, '');
+  assert.match(JSON.stringify(profiles[0]?.displayProjects || []), /\u5171\u4eab\u5145\u7535\u7cfb\u7edf/);
+  assert.doesNotMatch(JSON.stringify(profiles[0]?.displayProjects || []), /\u8fc7\u5171\u4eab\u5145\u7535\u7cfb\u7edf|\u6c42\u804c\u610f\u5411/);
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;

@@ -49,7 +49,7 @@ function stripSkillLabelPrefix(value: string) {
 export function isWeakResumeCandidateName(value: unknown) {
   const text = normalizeText(value, 40);
   if (!text) return false;
-  if (/^(?:\u7537\u6027|\u5973\u6027|\u7537|\u5973)$/u.test(text)) return true;
+  if (/^(?:\u7537\u6027|\u5973\u6027|\u7537|\u5973|\u6c42\u804c\u610f\u5411|\u57fa\u672c\u4fe1\u606f|\u4e2a\u4eba\u4fe1\u606f|\u76ee\u6807\u5c97\u4f4d|\u5e94\u8058\u5c97\u4f4d|\u5f53\u524d\u804c\u4f4d)$/u.test(text)) return true;
   if (/^(?:\d+\+?\u5e74|\d+\u5e74|\u5e74\u5de5\u4f5c\u7ecf|\u5de5\u4f5c\u7ecf\u9a8c|\u5de5\u4f5c\u5e74\u9650|\u5e74\u7ecf\u9a8c)$/u.test(text)) return true;
   return /^[\u4e00-\u9fff\u00b7]{1,3}(?:\u5148\u751f|\u5973\u58eb|\u8001\u5e08|\u540c\u5b66)$/u.test(text);
 }
