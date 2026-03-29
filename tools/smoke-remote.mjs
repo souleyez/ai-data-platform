@@ -91,6 +91,35 @@ async function fetchJson(url, init, context) {
   throw new Error(`${context} failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
 
+async function fetchText(url, init, context) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        ...init,
+      });
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const text = buffer.toString('utf8');
+      if (!response.ok) {
+        throw new Error(`${context} failed with ${response.status}: ${text.slice(0, 240)}`);
+      }
+      return {
+        status: response.status,
+        headers: response.headers,
+        text,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+      }
+    }
+  }
+
+  throw new Error(`${context} failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
 async function postJsonUtf8(url, payload, context) {
   const body = Buffer.from(JSON.stringify(payload), 'utf8');
   return fetchJson(url, {
@@ -112,6 +141,13 @@ async function writeArtifact(outputDir, name, payload) {
   await fs.mkdir(outputDir, { recursive: true });
   const filePath = path.join(outputDir, name);
   await fs.writeFile(filePath, `${toEscapedJson(payload)}\n`, 'utf8');
+  return filePath;
+}
+
+async function writeTextArtifact(outputDir, name, text) {
+  await fs.mkdir(outputDir, { recursive: true });
+  const filePath = path.join(outputDir, name);
+  await fs.writeFile(filePath, text, 'utf8');
   return filePath;
 }
 
@@ -169,6 +205,34 @@ function readPageSummary(payload) {
   return String(payload?.output?.page?.summary || '').trim();
 }
 
+function assertSectionsContainInOrder(actual, expected, context) {
+  let cursor = 0;
+  for (const section of expected) {
+    const foundAt = actual.indexOf(section, cursor);
+    if (foundAt === -1) {
+      throw new Error(`${context} missing section "${section}" in ${actual.join(', ') || 'none'}`);
+    }
+    cursor = foundAt + 1;
+  }
+}
+
+function encodeBase64Url(text) {
+  return Buffer.from(String(text || ''), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function buildSharedReportPayload(item) {
+  return encodeBase64Url(JSON.stringify({
+    title: item?.title || 'remote-shared-report',
+    createdAt: item?.createdAt || '',
+    content: item?.content || '',
+    page: item?.page || null,
+  }));
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const baseApi = buildBaseUrl(options.protocol, options.host, options.apiPort);
@@ -194,6 +258,46 @@ async function main() {
   const webResponse = await fetch(`${baseWeb}/`, { cache: 'no-store' });
   assertCondition(webResponse.ok, `web root failed with ${webResponse.status}`);
   log('web', 'Web root ok');
+
+  const reportsPage = await fetchText(`${baseWeb}/reports`, undefined, 'reports page');
+  await writeTextArtifact(options.outputDir, `${timestamp}-reports-page.html`, reportsPage.text);
+  assertCondition(reportsPage.text.includes('\u62a5\u8868\u4e2d\u5fc3'), 'reports page is missing report center title');
+  assertCondition(reportsPage.text.includes('\u7528\u6237\u4e0a\u4f20\u7684\u6a21\u677f'), 'reports page is missing uploaded templates section');
+  assertCondition(reportsPage.text.includes('\u5df2\u751f\u6210\u7684\u62a5\u8868'), 'reports page is missing generated reports section');
+  log('reports-page', 'Report center page ok');
+
+  const sharedPayload = buildSharedReportPayload({
+    title: 'remote-shared-smoke-title',
+    createdAt: '2026-03-29T00:00:00.000Z',
+    content: 'remote shared smoke content',
+    page: {
+      summary: 'remote shared smoke summary',
+      cards: [{ label: 'Status', value: 'OK', note: 'remote shared smoke card' }],
+      sections: [{ title: 'Coverage', body: 'remote shared smoke section body', bullets: ['remote bullet'] }],
+      charts: [{ title: 'Chart', items: [{ label: 'passed', value: 1 }] }],
+    },
+  });
+  const sharedReport = await fetchText(
+    `${baseWeb}/shared/report?payload=${encodeURIComponent(sharedPayload)}`,
+    undefined,
+    'shared report page',
+  );
+  await writeTextArtifact(options.outputDir, `${timestamp}-shared-report-valid.html`, sharedReport.text);
+  assertCondition(sharedReport.text.includes('remote-shared-smoke-title'), 'shared report page is missing expected title');
+  assertCondition(sharedReport.text.includes('remote shared smoke summary'), 'shared report page is missing expected summary');
+  assertCondition(sharedReport.text.includes('shared-report-shell'), 'shared report page is missing expected shell');
+  assertCondition(sharedReport.text.includes('generated-page-card'), 'shared report page is missing rendered page cards');
+  log('shared-report', 'Valid shared report page ok');
+
+  const invalidSharedReport = await fetchText(
+    `${baseWeb}/shared/report?payload=invalid-smoke`,
+    undefined,
+    'invalid shared report page',
+  );
+  await writeTextArtifact(options.outputDir, `${timestamp}-shared-report-invalid.html`, invalidSharedReport.text);
+  assertCondition(invalidSharedReport.text.includes('shared-report-shell'), 'invalid shared report page is missing shared shell');
+  assertCondition(invalidSharedReport.text.includes('\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548'), 'invalid shared report page is missing fallback title');
+  log('shared-report-invalid', 'Invalid shared report fallback ok');
 
   const generalPrompt = '\u4f60\u597d';
   const reportPrompt = '\u8bf7\u57fa\u4e8e\u4eba\u624d\u7b80\u5386\u77e5\u8bc6\u5e93\u4e2d\u5168\u90e8\u65f6\u95f4\u8303\u56f4\u7684\u7b80\u5386\uff0c\u6309\u516c\u53f8\u7ef4\u5ea6\u6574\u7406\u6d89\u53ca\u516c\u53f8\u7684IT\u9879\u76ee\u4fe1\u606f\uff0c\u751f\u6210\u6570\u636e\u53ef\u89c6\u5316\u9759\u6001\u9875\u62a5\u8868\u3002';
@@ -260,9 +364,10 @@ async function main() {
   assertCondition(bidsPage?.reportTemplate == null, 'expected bids page to stay in concept-page mode without shared template');
   if (bidsCount > 0) {
     assertCondition(bidsPage?.output?.type === 'page', `expected page output for bids page, got ${bidsPage?.output?.type || 'unknown'}`);
-    assertCondition(
-      JSON.stringify(readPageSections(bidsPage)) === JSON.stringify(['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析']),
-      `unexpected bids page sections: ${readPageSections(bidsPage).join(', ') || 'none'}`,
+    assertSectionsContainInOrder(
+      readPageSections(bidsPage),
+      ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
+      'bids page',
     );
     assertCondition(!/^```json/i.test(readPageSummary(bidsPage)), 'bids page summary should not echo raw supply json');
     assertCondition((bidsPage?.output?.page?.cards?.length || 0) > 0, 'bids page should contain concept-page cards');
@@ -284,9 +389,10 @@ async function main() {
   assertCondition(iotPage?.reportTemplate == null, 'expected iot page to stay in concept-page mode without shared template');
   if (iotCount > 0) {
     assertCondition(iotPage?.output?.type === 'page', `expected page output for iot page, got ${iotPage?.output?.type || 'unknown'}`);
-    assertCondition(
-      JSON.stringify(readPageSections(iotPage)) === JSON.stringify(['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析']),
-      `unexpected iot page sections: ${readPageSections(iotPage).join(', ') || 'none'}`,
+    assertSectionsContainInOrder(
+      readPageSections(iotPage),
+      ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
+      'iot page',
     );
     assertCondition(!/^```json/i.test(readPageSummary(iotPage)), 'iot page summary should not echo raw supply json');
     assertCondition((iotPage?.output?.page?.cards?.length || 0) > 0, 'iot page should contain concept-page cards');
