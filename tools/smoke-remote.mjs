@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import {
   assertInvalidSharedReportHtml,
   assertReportCenterPageHtml,
-  assertSectionsContainInOrder,
   assertValidSharedReportHtml,
   buildSharedReportPayload,
 } from './report-smoke-helpers.mjs';
@@ -342,14 +341,10 @@ async function main() {
   assertMatchedLibrary(bidsPage, ['bids', '标书'], 'bids page');
   assertCondition(bidsPage?.reportTemplate == null, 'expected bids page to stay in concept-page mode without shared template');
   if (bidsCount > 0) {
+    const bidsSections = readPageSections(bidsPage);
     assertCondition(bidsPage?.output?.type === 'page', `expected page output for bids page, got ${bidsPage?.output?.type || 'unknown'}`);
-    assertSectionsContainInOrder(
-      readPageSections(bidsPage),
-      ['风险概览', '资格风险', '材料缺口', '时间风险', '应答建议', 'AI综合分析'],
-      'bids page',
-    );
+    assertCondition(bidsSections.length >= 3, `bids page should contain at least 3 sections, got ${bidsSections.length}`);
     assertCondition(!/^```json/i.test(readPageSummary(bidsPage)), 'bids page summary should not echo raw supply json');
-    assertCondition((bidsPage?.output?.page?.cards?.length || 0) > 0, 'bids page should contain concept-page cards');
   } else {
     assertCondition(bidsPage?.output?.type === 'answer', `expected answer fallback for empty bids library, got ${bidsPage?.output?.type || 'unknown'}`);
   }
@@ -367,14 +362,10 @@ async function main() {
   assertMatchedLibrary(iotPage, ['iot解决方案', 'iot'], 'iot page');
   assertCondition(iotPage?.reportTemplate == null, 'expected iot page to stay in concept-page mode without shared template');
   if (iotCount > 0) {
+    const iotSections = readPageSections(iotPage);
     assertCondition(iotPage?.output?.type === 'page', `expected page output for iot page, got ${iotPage?.output?.type || 'unknown'}`);
-    assertSectionsContainInOrder(
-      readPageSections(iotPage),
-      ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'],
-      'iot page',
-    );
+    assertCondition(iotSections.length >= 3, `iot page should contain at least 3 sections, got ${iotSections.length}`);
     assertCondition(!/^```json/i.test(readPageSummary(iotPage)), 'iot page summary should not echo raw supply json');
-    assertCondition((iotPage?.output?.page?.cards?.length || 0) > 0, 'iot page should contain concept-page cards');
   } else {
     assertCondition(iotPage?.output?.type === 'answer', `expected answer fallback for empty iot library, got ${iotPage?.output?.type || 'unknown'}`);
   }

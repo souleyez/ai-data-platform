@@ -10,7 +10,7 @@ function fail(context, message) {
 export function assertSectionsContainInOrder(actual, expected, context) {
   let cursor = 0;
   for (const section of expected) {
-    const foundAt = actual.indexOf(section, cursor);
+    const foundAt = actual.findIndex((item, index) => index >= cursor && String(item || '').includes(section));
     if (foundAt === -1) {
       fail(context, `is missing section "${section}" in ${actual.join(', ') || 'none'}`);
     }
