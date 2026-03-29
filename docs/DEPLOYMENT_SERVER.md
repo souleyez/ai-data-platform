@@ -124,6 +124,12 @@ corepack pnpm smoke:remote:utf8 -- --host 120.24.251.24
 corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root -Password '<server-password>'
 ```
 
+If the SSH password contains shell-sensitive characters, prefer setting `$env:AI_DATA_PLATFORM_REMOTE_PASSWORD` and omit `-Password`:
+```powershell
+$env:AI_DATA_PLATFORM_REMOTE_PASSWORD = '<server-password>'
+corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root
+```
+
 切到其他项目或机器时，主要替换这些参数：
 
 - `-ProjectDir`
@@ -137,7 +143,9 @@ corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root -Password '<server
 `deploy:remote` now runs a remote git-worktree preflight before `fetch / pull`.
 
 - Default mode is fail-fast: any tracked or untracked repo change blocks deployment.
+- Protected runtime paths are ignored by default: `storage/files/uploads` and `deploy/server/*.env` will be reported but will not block deploy.
 - Use `corepack pnpm deploy:remote:preflight -- -Host 120.24.251.24 -User root -Password '<server-password>'` to inspect remote status without deploying.
+- If the SSH password contains shell-sensitive characters, set `$env:AI_DATA_PLATFORM_REMOTE_PASSWORD` first and omit `-Password`; `deploy-remote.ps1` reads that variable automatically.
 - Use `-RemoteWorktreeMode stash-safe` only when you explicitly want the deploy script to stash safe repo paths before pull.
 - `stash-safe` excludes `storage/files/uploads` and `deploy/server/*.env`, so runtime uploads and server env files stay untouched.
 - If remote code changes remain after `stash-safe`, the script still fails and prints the remaining paths for manual cleanup.

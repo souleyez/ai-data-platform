@@ -4,6 +4,7 @@ param(
   [Alias('User')]
   [string]$RemoteUser = 'root',
   [string]$Password = '',
+  [string]$PasswordEnvVar = 'AI_DATA_PLATFORM_REMOTE_PASSWORD',
   [string]$ProjectDir = '/srv/ai-data-platform',
   [string]$Branch = 'master',
   [string]$RemoteName = 'origin',
@@ -19,8 +20,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (-not $Password -and $PasswordEnvVar) {
+  $Password = [Environment]::GetEnvironmentVariable($PasswordEnvVar)
+}
+
 if (-not $Password) {
-  throw 'Password is required. Pass -Password or configure a secret wrapper.'
+  throw ('Password is required. Pass -Password, set $env:{0}, or configure a secret wrapper.' -f $PasswordEnvVar)
 }
 
 $root = Split-Path -Parent $PSScriptRoot

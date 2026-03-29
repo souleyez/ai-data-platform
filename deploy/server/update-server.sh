@@ -25,14 +25,61 @@ collect_worktree_status() {
   git status --porcelain=v1 --untracked-files=all
 }
 
-print_worktree_status() {
+normalize_status_path() {
+  local raw_path="${1:-}"
+  local normalized="${raw_path%\"}"
+  normalized="${normalized#\"}"
+  normalized="${normalized//\\/\/}"
+  while [[ "$normalized" == *'//'*
+  ]]; do
+    normalized="${normalized//\/\//\/}"
+  done
+  printf '%s' "${normalized,,}"
+}
+
+is_protected_worktree_path() {
+  local normalized
+  normalized="$(normalize_status_path "$1")"
+  [[ "$normalized" == storage/files/uploads/* ]] && return 0
+  [[ "$normalized" == */storage/files/uploads/* ]] && return 0
+  [[ "$normalized" == deploy/server/*.env ]] && return 0
+  [[ "$normalized" == */deploy/server/*.env ]] && return 0
+  return 1
+}
+
+filter_worktree_status() {
+  local mode="${1:-blocking}"
+  local status_lines="${2:-}"
+  local matched=()
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    local path_part="${line:3}"
+    local is_protected='false'
+    if is_protected_worktree_path "$path_part"; then
+      is_protected='true'
+    fi
+
+    if [[ "$mode" == "protected" && "$is_protected" == 'true' ]]; then
+      matched+=("$line")
+    fi
+    if [[ "$mode" == "blocking" && "$is_protected" != 'true' ]]; then
+      matched+=("$line")
+    fi
+  done <<< "$status_lines"
+
+  printf '%s\n' "${matched[@]}"
+}
+
+print_status_lines() {
   local status_lines="${1:-}"
+  local heading="${2:-Remote worktree is dirty:}"
   if [[ -z "$status_lines" ]]; then
     echo "Remote worktree is clean."
     return 0
   fi
 
-  echo "Remote worktree is dirty:"
+  echo "$heading"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     echo "  $line"
@@ -51,15 +98,26 @@ stash_safe_worktree_paths() {
 }
 
 ensure_remote_worktree_ready() {
-  local status_lines
-  status_lines="$(collect_worktree_status)"
-  if [[ -z "$status_lines" ]]; then
+  local raw_status_lines
+  raw_status_lines="$(collect_worktree_status)"
+  local blocking_status_lines
+  blocking_status_lines="$(filter_worktree_status blocking "$raw_status_lines")"
+  local protected_status_lines
+  protected_status_lines="$(filter_worktree_status protected "$raw_status_lines")"
+
+  if [[ -z "$blocking_status_lines" ]]; then
     echo "==> Remote worktree preflight: clean"
+    if [[ -n "$protected_status_lines" ]]; then
+      print_status_lines "$protected_status_lines" "Protected runtime paths are dirty but ignored for deploy:"
+    fi
     return 0
   fi
 
   echo "==> Remote worktree preflight: dirty"
-  print_worktree_status "$status_lines"
+  print_status_lines "$blocking_status_lines"
+  if [[ -n "$protected_status_lines" ]]; then
+    print_status_lines "$protected_status_lines" "Protected runtime paths ignored for deploy:"
+  fi
 
   case "$REMOTE_WORKTREE_MODE" in
     fail)
@@ -69,13 +127,21 @@ ensure_remote_worktree_ready() {
     stash-safe)
       echo "==> Remote worktree preflight: stashing safe repo paths"
       stash_safe_worktree_paths
-      status_lines="$(collect_worktree_status)"
-      if [[ -n "$status_lines" ]]; then
+      raw_status_lines="$(collect_worktree_status)"
+      blocking_status_lines="$(filter_worktree_status blocking "$raw_status_lines")"
+      protected_status_lines="$(filter_worktree_status protected "$raw_status_lines")"
+      if [[ -n "$blocking_status_lines" ]]; then
         echo "Remote worktree is still dirty after stash-safe. Remaining paths require manual cleanup." >&2
-        print_worktree_status "$status_lines"
+        print_status_lines "$blocking_status_lines"
+        if [[ -n "$protected_status_lines" ]]; then
+          print_status_lines "$protected_status_lines" "Protected runtime paths ignored for deploy:"
+        fi
         return "$DIRTY_WORKTREE_EXIT_CODE"
       fi
       echo "==> Remote worktree preflight: cleared by stash-safe"
+      if [[ -n "$protected_status_lines" ]]; then
+        print_status_lines "$protected_status_lines" "Protected runtime paths remain untouched:"
+      fi
       ;;
     *)
       echo "Unsupported REMOTE_WORKTREE_MODE: $REMOTE_WORKTREE_MODE" >&2
