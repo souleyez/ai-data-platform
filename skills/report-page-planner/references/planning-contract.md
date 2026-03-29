@@ -1,0 +1,26 @@
+Planning contract for client-facing static pages:
+
+- The page should be readable by a business or customer-facing reader without extra explanation.
+- The first screen should answer: what this page is about, what the key finding is, and why the reader should care.
+- Use cards for fast summary, sections for explanation, and charts only when they clarify structure or trend.
+- Use knowledge evidence first:
+  - facts
+  - counts
+  - dates
+  - entities
+  - named modules
+  - named companies
+  - named documents
+- Use model completion only for:
+  - headline polishing
+  - concise summary synthesis
+  - cross-section insight
+  - action suggestion
+  - explicit uncertainty notes
+- Do not fabricate:
+  - precise metrics
+  - dates
+  - milestones
+  - performance claims
+  - business impact claims
+- If coverage is weak, lower the page ambition and make the weakness visible.

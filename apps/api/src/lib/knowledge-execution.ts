@@ -29,6 +29,10 @@ import {
   prepareKnowledgeScope,
   prepareKnowledgeSupply,
 } from './knowledge-supply.js';
+import {
+  buildReportPlan,
+  buildReportPlanContextBlock,
+} from './report-planner.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type KnowledgeExecutionInput = {
@@ -141,11 +145,30 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       requestedKind,
       requestedTemplateKey,
     );
-  const skillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
+  const supplySkillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
     'references/supply-contract.md',
   ]);
+  const plannerSkillInstruction = requestedKind === 'page'
+    ? await loadWorkspaceSkillBundle('report-page-planner', [
+      'references/planning-contract.md',
+    ])
+    : '';
+  const reportPlan = requestedKind === 'page'
+    ? buildReportPlan({
+      requestText,
+      templateTaskHint,
+      conceptPageMode,
+      selectedTemplates,
+      retrieval: supply.effectiveRetrieval,
+      libraries: resolvedLibraries,
+    })
+    : null;
+  const reportPlanContext = reportPlan ? buildReportPlanContextBlock(reportPlan) : '';
+  const skillInstruction = [supplySkillInstruction, plannerSkillInstruction]
+    .filter(Boolean)
+    .join('\n\n');
   const templateContext = conceptPageMode ? '' : buildTemplateContextBlock(selectedTemplates);
-  const activeEnvelope = conceptPageMode ? null : (selectedTemplates[0]?.envelope || null);
+  const activeEnvelope = reportPlan?.envelope || (conceptPageMode ? null : (selectedTemplates[0]?.envelope || null));
   const conceptPageContext = conceptPageMode
     ? buildConceptPageSupplyBlock({
       requestText,
@@ -165,6 +188,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       chatHistory: supply.knowledgeChatHistory,
       contextBlocks: [
         conceptPageContext,
+        reportPlanContext,
         templateContext,
         buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
           timeRange: input.timeRange,

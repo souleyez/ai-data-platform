@@ -102,3 +102,41 @@ test('normalizePersistedReportState should drop invalid records and keep support
   assert.equal(normalized.outputs.length, 1);
   assert.equal(normalized.outputs[0]?.groupKey, 'bids');
 });
+
+test('normalizePersistedReportState should preserve dynamic page planner metadata', () => {
+  const normalized = normalizePersistedReportState({
+    version: REPORT_STATE_VERSION,
+    outputs: [
+      {
+        id: 'output-dynamic-1',
+        groupKey: 'bids',
+        groupLabel: 'bids',
+        title: '动态标书页',
+        outputType: 'page',
+        kind: 'page',
+        summary: 'ok',
+        dynamicSource: {
+          enabled: true,
+          request: '按风险维度生成静态页',
+          outputType: 'page',
+          conceptMode: true,
+          libraries: [{ key: 'bids', label: 'bids' }],
+          sourceFingerprint: 'doc-a',
+          planAudience: 'client',
+          planObjective: 'Create a customer-ready bid analysis page.',
+          planTemplateMode: 'concept-page',
+          planSectionTitles: ['风险概览', '资格风险', 'AI综合分析'],
+          planCardLabels: ['资料覆盖', '高风险主题'],
+          planChartTitles: ['风险主题分布'],
+          planUpdatedAt: '2026-03-29T10:00:00.000Z',
+        },
+      },
+    ],
+  });
+
+  assert.equal(normalized.outputs[0]?.dynamicSource?.planAudience, 'client');
+  assert.equal(normalized.outputs[0]?.dynamicSource?.planTemplateMode, 'concept-page');
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planSectionTitles, ['风险概览', '资格风险', 'AI综合分析']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planCardLabels, ['资料覆盖', '高风险主题']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planChartTitles, ['风险主题分布']);
+});

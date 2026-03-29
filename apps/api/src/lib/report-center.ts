@@ -7,6 +7,7 @@ import { loadDocumentLibraries } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
 import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
+import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
 import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
@@ -86,6 +87,13 @@ export type ReportDynamicSource = {
   sourceFingerprint?: string;
   sourceDocumentCount?: number;
   sourceUpdatedAt?: string;
+  planAudience?: string;
+  planObjective?: string;
+  planTemplateMode?: string;
+  planSectionTitles?: string[];
+  planCardLabels?: string[];
+  planChartTitles?: string[];
+  planUpdatedAt?: string;
 };
 
 export type ReportOutputRecord = {
@@ -513,6 +521,19 @@ function normalizeDynamicSource(
     sourceFingerprint: String(dynamicSource?.sourceFingerprint || '').trim(),
     sourceDocumentCount: Number(dynamicSource?.sourceDocumentCount || 0),
     sourceUpdatedAt: String(dynamicSource?.sourceUpdatedAt || '').trim(),
+    planAudience: String(dynamicSource?.planAudience || '').trim(),
+    planObjective: String(dynamicSource?.planObjective || '').trim(),
+    planTemplateMode: String(dynamicSource?.planTemplateMode || '').trim(),
+    planSectionTitles: Array.isArray(dynamicSource?.planSectionTitles)
+      ? dynamicSource.planSectionTitles.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planCardLabels: Array.isArray(dynamicSource?.planCardLabels)
+      ? dynamicSource.planCardLabels.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planChartTitles: Array.isArray(dynamicSource?.planChartTitles)
+      ? dynamicSource.planChartTitles.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planUpdatedAt: String(dynamicSource?.planUpdatedAt || '').trim(),
   };
 }
 
@@ -610,6 +631,111 @@ function summarizeDocuments(documents: Array<{ title?: string; name?: string; su
     .join('；');
 }
 
+function normalizePlannerMetricText(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasPlannerMetricKeyword(text: string, keywords: string[]) {
+  return keywords.some((keyword) => text.includes(normalizePlannerMetricText(keyword)));
+}
+
+function buildDynamicPlanSummary(input: {
+  title: string;
+  libraries: Array<{ key?: string; label?: string }>;
+  documentCount: number;
+  detailedCount: number;
+  topTopics: Array<[string, number]>;
+  latestUpdatedAt: string;
+}) {
+  const librarySummary = input.libraries.map((item) => item.label || item.key).filter(Boolean).join('、') || '当前知识库';
+  const topicSummary = input.topTopics.map(([name]) => name).slice(0, 4).join('、') || '暂无明确主题';
+  const updatedAt = input.latestUpdatedAt ? `最近更新为 ${input.latestUpdatedAt.slice(0, 10)}。` : '';
+  return `当前已按「${input.title || '数据可视化静态页'}」结构，基于 ${librarySummary} 中 ${input.documentCount} 份资料动态生成页面，其中 ${input.detailedCount} 份已完成进阶解析。当前重点主题包括 ${topicSummary}。${updatedAt}`.trim();
+}
+
+function buildDynamicPlanCard(
+  label: string,
+  source: ReportDynamicSource,
+  latestDocuments: Array<Record<string, unknown>>,
+  detailedCount: number,
+  topTopics: Array<[string, number]>,
+  topSchemas: Array<[string, number]>,
+  latestUpdatedAt: string,
+) {
+  const normalizedLabel = normalizePlannerMetricText(label);
+  const primaryTopic = topTopics[0]?.[0] || '暂无明确主题';
+  const primarySchema = topSchemas[0]?.[0] || '未识别';
+  const updatedDate = latestUpdatedAt ? latestUpdatedAt.slice(0, 10) : '-';
+
+  if (hasPlannerMetricKeyword(normalizedLabel, ['资料', '数量', '覆盖', 'evidence'])) {
+    return {
+      label,
+      value: String(latestDocuments.length),
+      note: '当前参与动态页面生成的库内文档数',
+    };
+  }
+  if (hasPlannerMetricKeyword(normalizedLabel, ['进阶', '详细', '解析', 'detailed'])) {
+    return {
+      label,
+      value: String(detailedCount),
+      note: '已完成详细解析的资料数',
+    };
+  }
+  if (hasPlannerMetricKeyword(normalizedLabel, ['类型', 'schema', '结构'])) {
+    return {
+      label,
+      value: primarySchema,
+      note: topSchemas.map(([name, count]) => `${name} ${count}`).join('、') || '暂无稳定类型',
+    };
+  }
+  if (hasPlannerMetricKeyword(normalizedLabel, ['更新', '时间', '日期'])) {
+    return {
+      label,
+      value: updatedDate,
+      note: source.timeRange || '默认全量范围',
+    };
+  }
+  if (hasPlannerMetricKeyword(normalizedLabel, ['建议', '行动', '优先', '应答'])) {
+    return {
+      label,
+      value: source.contentFocus || primaryTopic,
+      note: source.request || '按当前动态页目标持续筛选重点材料',
+    };
+  }
+  return {
+    label,
+    value: primaryTopic,
+    note: topTopics.map(([name, count]) => `${name} ${count}`).join('、') || '暂无高频主题',
+  };
+}
+
+function buildDynamicPlanChartItems(
+  title: string,
+  topTopics: Array<[string, number]>,
+  topSchemas: Array<[string, number]>,
+) {
+  const normalizedTitle = normalizePlannerMetricText(title);
+  const useSchemas = hasPlannerMetricKeyword(normalizedTitle, ['文档', '类型', 'schema']);
+  const items = useSchemas ? topSchemas : topTopics;
+  return items.map(([label, value]) => ({ label, value }));
+}
+
+function buildDynamicPlanMetadata(plan: ReturnType<typeof buildReportPlan>) {
+  return {
+    planAudience: plan.audience,
+    planObjective: plan.objective,
+    planTemplateMode: plan.templateMode,
+    planSectionTitles: plan.sections.map((item) => item.title),
+    planCardLabels: plan.cards.map((item) => item.label),
+    planChartTitles: plan.charts.map((item) => item.title),
+  };
+}
+
 function buildDynamicSectionBody(
   title: string,
   source: ReportDynamicSource,
@@ -674,10 +800,6 @@ function buildDynamicPageRecord(
     .map((item) => `${String(item.path || item.name || '')}:${String(item.detailParsedAt || item.cloudStructuredAt || item.summary || '').slice(0, 48)}`)
     .join('|');
 
-  if (sourceFingerprint && source.sourceFingerprint === sourceFingerprint) {
-    return record;
-  }
-
   const conceptMode = Boolean(source.conceptMode) || !String(source.templateKey || '').trim();
   const envelope = conceptMode
     ? buildConceptPageEnvelope(group, source.request || record.title || record.summary || '')
@@ -686,13 +808,66 @@ function buildDynamicPageRecord(
       : template
         ? buildSharedTemplateEnvelope(template)
         : buildConceptPageEnvelope(group, source.request || record.title || record.summary || '');
+  const templateTaskHint = inferReportPlanTaskHint({
+    requestText: source.request || record.title || record.summary || '',
+    groupKey: group?.key,
+    groupLabel: group?.label,
+    templateKey: conceptMode ? '' : (template?.key || source.templateKey || record.templateKey),
+    templateLabel: conceptMode ? '' : (template?.label || source.templateLabel || record.templateLabel),
+    kind: 'page',
+  });
+  const reportPlan = buildReportPlan({
+    requestText: source.request || record.title || record.summary || '',
+    templateTaskHint,
+    conceptPageMode: conceptMode,
+    baseEnvelope: envelope,
+    retrieval: {
+      documents: latestDocuments as ParsedDocument[],
+      evidenceMatches: [],
+      meta: {
+        stages: ['rule'],
+        vectorEnabled: false,
+        candidateCount: latestDocuments.length,
+        rerankedCount: latestDocuments.length,
+        intent: 'generic',
+        templateTask: templateTaskHint || 'general',
+      },
+    } as Parameters<typeof buildReportPlan>[0]['retrieval'],
+    libraries: source.libraries,
+  });
+  const planMetadata = buildDynamicPlanMetadata(reportPlan);
+
+  if (
+    sourceFingerprint
+    && source.sourceFingerprint === sourceFingerprint
+    && JSON.stringify({
+      planAudience: source.planAudience || '',
+      planObjective: source.planObjective || '',
+      planTemplateMode: source.planTemplateMode || '',
+      planSectionTitles: source.planSectionTitles || [],
+      planCardLabels: source.planCardLabels || [],
+      planChartTitles: source.planChartTitles || [],
+    }) === JSON.stringify(planMetadata)
+  ) {
+    return record;
+  }
+
   const displayTemplateLabel = conceptMode
     ? '数据可视化静态页'
     : (source.templateLabel || template?.label || record.templateLabel || '数据可视化静态页');
   const summary = latestDocuments.length
-    ? `当前已基于 ${latestDocuments.length} 份库内资料生成动态页面，其中 ${detailedCount} 份已完成进阶解析。主要主题包括 ${topTopics.map(([name]) => name).slice(0, 4).join('、') || '暂无明确主题'}。`
+    ? buildDynamicPlanSummary({
+      title: reportPlan.envelope.title,
+      libraries: source.libraries,
+      documentCount: latestDocuments.length,
+      detailedCount,
+      topTopics,
+      latestUpdatedAt,
+    })
     : '当前知识库中暂无符合条件的资料，页面保持空状态。';
-  const sections = (envelope.pageSections || ['摘要', '重点分析', '行动建议', 'AI综合分析']).map((title) => ({
+  const sections = (reportPlan.sections.length
+    ? reportPlan.sections.map((item) => item.title)
+    : (envelope.pageSections || ['摘要', '重点分析', '行动建议', 'AI综合分析'])).map((title) => ({
     title,
     body: title === 'AI综合分析'
       ? `该页面会随着知识库内容变化自动刷新，当前最值得优先关注的是 ${topTopics.map(([name]) => name).slice(0, 2).join('、') || '资料质量与更新频率'}。`
@@ -704,6 +879,26 @@ function buildDynamicPageRecord(
           .map((item) => String(item.title || item.name || '').trim())
           .filter(Boolean),
   }));
+  const cards = (reportPlan.cards.length ? reportPlan.cards : [
+    { label: '资料数量' },
+    { label: '进阶解析' },
+    { label: '主要类型' },
+    { label: '最近更新' },
+  ]).map((card) => buildDynamicPlanCard(
+    card.label,
+    source,
+    latestDocuments,
+    detailedCount,
+    topTopics,
+    topSchemas,
+    latestUpdatedAt,
+  ));
+  const charts = reportPlan.charts
+    .map((chart) => ({
+      title: chart.title,
+      items: buildDynamicPlanChartItems(chart.title, topTopics, topSchemas),
+    }))
+    .filter((chart) => chart.items.length);
 
   return attachLocalReportAnalysis({
     ...record,
@@ -711,23 +906,9 @@ function buildDynamicPageRecord(
     summary: `${displayTemplateLabel} 已按当前知识库内容动态刷新。`,
     page: {
       summary,
-      cards: [
-        { label: '资料数量', value: String(latestDocuments.length), note: '当前参与页面生成的库内文档数' },
-        { label: '进阶解析', value: String(detailedCount), note: '已完成详细解析的文档数' },
-        { label: '主要类型', value: topSchemas[0]?.[0] || '未识别', note: topSchemas.map(([name, count]) => `${name} ${count}`).join('、') },
-        { label: '最近更新', value: latestUpdatedAt ? latestUpdatedAt.slice(0, 10) : '-', note: source.timeRange || '默认全量范围' },
-      ],
+      cards,
       sections,
-      charts: [
-        {
-          title: '文档类型分布',
-          items: topSchemas.map(([label, value]) => ({ label, value })),
-        },
-        {
-          title: '主题热点分布',
-          items: topTopics.map(([label, value]) => ({ label, value })),
-        },
-      ].filter((chart) => chart.items.length),
+      charts,
     },
     dynamicSource: {
       ...source,
@@ -739,6 +920,8 @@ function buildDynamicPageRecord(
       sourceFingerprint,
       sourceDocumentCount: latestDocuments.length,
       sourceUpdatedAt: latestUpdatedAt,
+      ...planMetadata,
+      planUpdatedAt: new Date().toISOString(),
     },
   });
 }

@@ -1,0 +1,178 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type { RetrievalResult } from '../src/lib/document-retrieval.js';
+import {
+  buildReportPlan,
+  buildReportPlanContextBlock,
+  inferReportPlanTaskHint,
+} from '../src/lib/report-planner.js';
+import type { SelectedKnowledgeTemplate } from '../src/lib/knowledge-template.js';
+
+function makeRetrieval(overrides?: Partial<RetrievalResult>): RetrievalResult {
+  return {
+    documents: [
+      {
+        path: 'storage/files/uploads/bid-a.pdf',
+        name: 'bid-a.pdf',
+        ext: '.pdf',
+        title: '投标响应资料',
+        category: 'bid',
+        parseStatus: 'parsed',
+        summary: '包含资格条件、材料清单和应答要求。',
+        excerpt: '包含资格条件、材料清单和应答要求。',
+        extractedChars: 1200,
+        schemaType: 'bid',
+        topicTags: ['资格风险', '材料缺口'],
+        parseStage: 'detailed',
+      },
+      {
+        path: 'storage/files/uploads/bid-b.pdf',
+        name: 'bid-b.pdf',
+        ext: '.pdf',
+        title: '项目招标说明',
+        category: 'bid',
+        parseStatus: 'parsed',
+        summary: '包含交付范围、时间节点和评分规则。',
+        excerpt: '包含交付范围、时间节点和评分规则。',
+        extractedChars: 1100,
+        schemaType: 'bid',
+        topicTags: ['时间风险', '交付要求'],
+        parseStage: 'quick',
+      },
+    ],
+    evidenceMatches: [],
+    meta: {
+      stages: ['rule', 'rerank'],
+      vectorEnabled: false,
+      candidateCount: 2,
+      rerankedCount: 2,
+      intent: 'generic',
+      templateTask: 'bids-static-page',
+    },
+    ...overrides,
+  };
+}
+
+function makeSelectedTemplate(): SelectedKnowledgeTemplate {
+  return {
+    group: {
+      key: 'bids',
+      label: 'bids',
+      description: '标书知识库',
+      triggerKeywords: ['标书', '招标', '投标'],
+      defaultTemplateKey: 'bids-static-page',
+      templates: [],
+      referenceImages: [],
+    },
+    template: {
+      key: 'bids-static-page',
+      label: '标书摘要静态页',
+      type: 'static-page',
+      description: '标书摘要静态页模板',
+      supported: true,
+      referenceImages: [],
+    },
+    envelope: {
+      title: '标书风险维度静态页',
+      fixedStructure: ['按风险维度组织标书内容'],
+      variableZones: ['风险概览', '资格风险', '材料缺口', '应答建议'],
+      outputHint: '输出适合客户和团队传阅的静态页',
+      pageSections: ['风险概览', '资格风险', '材料缺口', '应答建议', 'AI综合分析'],
+    },
+  };
+}
+
+test('buildReportPlan should produce a client-facing page plan with reusable envelope', () => {
+  const plan = buildReportPlan({
+    requestText: '请基于 bids 知识库按风险维度生成可视化静态页报表。',
+    templateTaskHint: 'bids-static-page',
+    conceptPageMode: true,
+    selectedTemplates: [makeSelectedTemplate()],
+    retrieval: makeRetrieval(),
+    libraries: [{ key: 'bids', label: 'bids' }],
+  });
+
+  assert.equal(plan.audience, 'client');
+  assert.equal(plan.templateMode, 'concept-page');
+  assert.equal(plan.envelope.title, '标书风险维度静态页');
+  assert.deepEqual(plan.envelope.pageSections, ['风险概览', '资格风险', '材料缺口', '应答建议', 'AI综合分析']);
+  assert.ok(plan.cards.length >= 3);
+  assert.ok(plan.sections.some((item) => item.title === 'AI综合分析' && item.completionMode === 'knowledge-plus-model'));
+  assert.match(plan.objective, /bid analysis page/i);
+  assert.deepEqual(plan.knowledgeScope.dominantTopics, ['资格风险', '材料缺口', '时间风险', '交付要求']);
+});
+
+test('buildReportPlanContextBlock should expose planning constraints for the generator', () => {
+  const plan = buildReportPlan({
+    requestText: '请基于 IOT 解决方案知识库生成可视化静态页。',
+    templateTaskHint: 'iot-static-page',
+    conceptPageMode: false,
+    selectedTemplates: [],
+    retrieval: makeRetrieval({
+      documents: [
+        {
+          path: 'storage/files/uploads/iot-a.pdf',
+          name: 'iot-a.pdf',
+          ext: '.pdf',
+          title: 'IOT 方案资料',
+          category: 'technical',
+          parseStatus: 'parsed',
+          summary: '包含设备、网关、平台和接口能力。',
+          excerpt: '包含设备、网关、平台和接口能力。',
+          extractedChars: 1300,
+          schemaType: 'technical',
+          topicTags: ['设备接入', '平台能力'],
+          parseStage: 'detailed',
+        },
+      ],
+      meta: {
+        stages: ['rule'],
+        vectorEnabled: false,
+        candidateCount: 1,
+        rerankedCount: 1,
+        intent: 'iot',
+        templateTask: 'iot-static-page',
+      },
+    }),
+    libraries: [{ key: 'iot', label: 'IOT解决方案' }],
+  });
+
+  const block = buildReportPlanContextBlock(plan);
+  assert.match(block, /Audience: client/);
+  assert.match(block, /Template mode: shared-template/);
+  assert.match(block, /Planned sections:/);
+  assert.match(block, /Planned cards:/);
+  assert.match(block, /Knowledge libraries: IOT解决方案/);
+});
+
+test('inferReportPlanTaskHint should resolve domain page hints from request, group, and template signals', () => {
+  assert.equal(
+    inferReportPlanTaskHint({
+      requestText: '请基于 bids 知识库输出静态页',
+      kind: 'page',
+    }),
+    'bids-static-page',
+  );
+  assert.equal(
+    inferReportPlanTaskHint({
+      groupLabel: 'IOT解决方案',
+      templateLabel: 'IOT 解决方案静态页',
+      kind: 'page',
+    }),
+    'iot-static-page',
+  );
+  assert.equal(
+    inferReportPlanTaskHint({
+      requestText: '请按简历候选人维度整理客户汇报页',
+      kind: 'page',
+    }),
+    'resume-comparison',
+  );
+  assert.equal(
+    inferReportPlanTaskHint({
+      requestText: '请整理合同风险要点',
+      kind: 'page',
+    }),
+    'contract-risk',
+  );
+});

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Report Page Planner"
+  short_description: "Client-facing planning for knowledge-grounded static pages"
+  default_prompt: "Use $report-page-planner to decide the page objective, cards, charts, sections, and evidence boundary before generating the final static page."

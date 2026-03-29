@@ -13,6 +13,7 @@ test('buildKnowledgeConceptPagePrompt should emphasize concept-page generation w
 
   assert.match(prompt, /concept page structure/i);
   assert.match(prompt, /Do not force a shared template skeleton/i);
+  assert.match(prompt, /evidence and planning layer/i);
   assert.doesNotMatch(prompt, /Follow the shared template envelope closely/i);
 });
 
@@ -24,5 +25,6 @@ test('buildKnowledgeOutputPrompt should keep template-first behavior for non-pag
   );
 
   assert.match(prompt, /Follow the shared template envelope closely/i);
+  assert.match(prompt, /report-planning directives/i);
   assert.match(prompt, /Follow template A exactly\./i);
 });

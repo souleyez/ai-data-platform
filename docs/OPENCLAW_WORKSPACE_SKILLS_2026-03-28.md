@@ -40,6 +40,7 @@ This bootstrap does three things:
 
 - `document-deep-parse` - created
 - `knowledge-report-supply` - created
+- `report-page-planner` - created
 - `datasource-body-extract` - created
 - `template-learning`
 
@@ -57,6 +58,10 @@ This bootstrap does three things:
   - Purpose: clean正文 extraction and denoising for datasource capture before ingestion
   - Output: strict JSON with page type, summary, clean body, key sections, candidate links, quality signals, and warnings
   - Scope: `web_public`, `web_login`, and `web_discovery` captures, especially noisy portal and landing pages
+- `report-page-planner`
+  - Purpose: evidence-aware planning for client-facing visual static pages before final generation
+  - Output: report objective, stable page sections, card/chart priorities, and model-completion boundaries
+  - Scope: knowledge-backed page generation in chat and dynamic page refresh in report center
 
 ## Guardrails
 

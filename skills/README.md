@@ -19,6 +19,7 @@ Planned skill families for this project:
 
 - `document-deep-parse`
 - `knowledge-report-supply`
+- `report-page-planner`
 - `datasource-body-extract`
 - `template-learning`
 
