@@ -12,6 +12,7 @@ Goal:
 Rules:
 - Return strict JSON only.
 - Prefer real candidate names over role titles, placeholders, file slugs, or generic labels.
+- Avoid honorific-only masked names such as `某先生` / `某女士` when stronger real names are present in the source context.
 - Prefer stable organization names over departments, descriptions, or malformed text fragments.
 - Prefer project nouns such as project/system/platform names over responsibility sentences.
 - Prefer reusable skill labels over single-character fragments, placeholders, or narrative text.

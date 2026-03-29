@@ -651,3 +651,90 @@ test('normalizeReportOutput should convert request-echo pages into readable fall
   assert.match(output.page?.sections?.[0]?.body || '', /未稳定产出结构化页面内容/);
   assert.match(output.page?.sections?.[1]?.body || '', /原始请求：请基于 IOT解决方案/);
 });
+
+test('buildKnowledgeFallbackOutput should prefer stronger names and diversified project showcase for client pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-a.pdf',
+      name: 'resume-a.pdf',
+      ext: '.pdf',
+      title: '曾海峰简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '曾海峰，11年经验，广州正善诚合互联网科技有限公司，全栈工程师，负责支付中台交付。',
+      excerpt: '曾海峰，11年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '曾先生',
+        latestCompany: '广州正善诚合互联网科技有限公司',
+        yearsOfExperience: '11年工作经验',
+        skills: ['Python', 'Go', 'SQL'],
+        projectHighlights: ['支付中台'],
+      },
+    },
+    {
+      path: 'resume-b.pdf',
+      name: 'resume-b.pdf',
+      ext: '.pdf',
+      title: '向若谷简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '向若谷，26年经验，广州伟昊科技，负责视频安防平台和智能园区综合业务管理平台。',
+      excerpt: '向若谷，26年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '向若谷',
+        latestCompany: '广州伟昊科技',
+        yearsOfExperience: '26年工作经验',
+        skills: ['Java', '架构设计'],
+        projectHighlights: ['视频安防平台', '智能园区综合业务管理平台'],
+      },
+    },
+    {
+      path: 'resume-c.pdf',
+      name: 'resume-c.pdf',
+      ext: '.pdf',
+      title: '陈森聪简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '陈森聪，7年经验，广州卓勤信息技术有限公司，负责智慧园区管理平台。',
+      excerpt: '陈森聪，7年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '陈森聪',
+        latestCompany: '广州卓勤信息技术有限公司',
+        yearsOfExperience: '7年工作经验',
+        skills: ['Java', 'SQL'],
+        projectHighlights: ['智慧园区管理平台'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中的全部简历，为客户汇报准备一页可视化静态页，突出代表候选人、代表项目、技能覆盖和匹配建议。',
+    documents,
+    {
+      title: '简历客户汇报静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '生成客户汇报型静态页',
+      pageSections: ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.match(JSON.stringify(output.page), /曾海峰/);
+  assert.doesNotMatch(JSON.stringify(output.page), /曾先生/);
+  const projectSection = output.page?.sections?.find((item) => item.title === '代表项目');
+  const projectText = JSON.stringify(projectSection);
+  assert.match(projectText, /支付中台/);
+  assert.match(projectText, /视频安防平台|智能园区综合业务管理平台/);
+  assert.match(projectText, /智慧园区管理平台/);
+});

@@ -1,6 +1,6 @@
 import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
-import { canonicalizeResumeFields } from './resume-canonicalizer.js';
+import { canonicalizeResumeFields, isWeakResumeCandidateName } from './resume-canonicalizer.js';
 import { selectResumeDisplayCompany } from './resume-display-company.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
@@ -38,6 +38,13 @@ function buildProfileKey(profile: Pick<ResumeDisplayProfile, 'sourcePath' | 'sou
   return `${sanitizeText(profile.sourcePath, 320)}::${sanitizeText(profile.sourceName, 160)}`;
 }
 
+function shouldAttemptModelRefinement(seedProfiles: ResumeDisplayProfile[]) {
+  if (!seedProfiles.length) return false;
+  const weakNameCount = seedProfiles.filter((profile) => isWeakResumeCandidateName(profile.displayName)).length;
+  const projectRichProfiles = seedProfiles.filter((profile) => (profile.displayProjects || []).length > 0).length;
+  return weakNameCount > 0 || projectRichProfiles < Math.min(3, seedProfiles.length);
+}
+
 function sanitizeText(value: unknown, maxLength = 240) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -49,6 +56,41 @@ function sanitizeStringArray(value: unknown, maxLength = 80) {
   return value
     .map((item) => sanitizeText(item, maxLength))
     .filter(Boolean);
+}
+
+function extractStrongDisplayNameFromContext(value: unknown) {
+  const text = sanitizeText(value, 240);
+  if (!text) return '';
+
+  const patterns = [
+    /(?:\u59d3\u540d|\u5019\u9009\u4eba)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/u,
+    /^([\u4e00-\u9fff\u00b7]{2,4})(?:\u7b80\u5386|，|,|\s|\u7537|\u5973|\u6c42\u804c|\u5de5\u4f5c|\u73b0\u5c45|\u672c\u79d1|\u7855\u58eb|\u7814\u7a76\u751f|MBA|\u5927\u4e13|\u535a\u58eb)/u,
+  ];
+
+  for (const pattern of patterns) {
+    const candidate = sanitizeText(text.match(pattern)?.[1], 40);
+    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    return candidate;
+  }
+
+  const tokens = text.match(/[\u4e00-\u9fff\u00b7]{2,4}/gu) || [];
+  for (const token of tokens.slice(0, 8)) {
+    const candidate = sanitizeText(token, 40);
+    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    return candidate;
+  }
+
+  return '';
+}
+
+function resolveResumeDisplayName(primary: unknown, contextValues: unknown[]) {
+  const direct = sanitizeText(primary, 60);
+  if (direct && !isWeakResumeCandidateName(direct)) return direct;
+  for (const value of contextValues) {
+    const recovered = extractStrongDisplayNameFromContext(value);
+    if (recovered) return recovered;
+  }
+  return direct;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -144,7 +186,13 @@ function buildSeedProfileFromDocument(item: ParsedDocument) {
     fullText: item.fullText,
   });
 
-  const displayName = sanitizeText(canonical?.candidateName, 60);
+  const displayName = resolveResumeDisplayName(canonical?.candidateName, [
+    item.title,
+    item.summary,
+    item.excerpt,
+    item.name,
+    item.fullText,
+  ]);
   const displayCompany = selectResumeDisplayCompany([
     canonical?.latestCompany,
     ...(canonical?.companies || []),
@@ -197,6 +245,7 @@ async function buildSystemPrompt() {
     'Return strict JSON only. No markdown. No explanation.',
     'Your task is to transform noisy resume retrieval inputs into display-ready profile slots for report generation.',
     'Prefer real human names, stable organization labels, concise project nouns, and reusable skill labels.',
+    'Avoid honorific-only masked names such as 某先生 or 某女士 when stronger real names exist in the document context.',
     'For displayCompany, prefer enterprise employer labels. Reject associations, alumni groups, research institutes, universities, and similar non-enterprise organizations unless they are explicitly part of a company name.',
     'Reject placeholders, sample slugs, generic labels, role-only titles, file-name fragments, long responsibility sentences, and malformed organization text.',
     skillInstruction,
@@ -233,7 +282,12 @@ function normalizeProfile(raw: unknown) {
   return {
     sourcePath,
     sourceName,
-    displayName: sanitizeText(canonical?.candidateName, 60),
+    displayName: resolveResumeDisplayName(canonical?.candidateName, [
+      sourceName,
+      raw.title,
+      raw.summary,
+      displaySummary,
+    ]),
     displayCompany: selectResumeDisplayCompany([
       canonical?.latestCompany,
       ...(canonical?.companies || []),
@@ -317,7 +371,7 @@ export async function runResumeDisplayProfileResolver(input: {
   const documents = input.documents.filter((item) => item.schemaType === 'resume').slice(0, 8);
   const seedProfiles = buildResumeDisplaySeedProfiles(documents);
   if (!documents.length) return null;
-  if (seedProfiles.length >= 4) {
+  if (seedProfiles.length >= 4 && !shouldAttemptModelRefinement(seedProfiles)) {
     return { profiles: seedProfiles };
   }
   if (!isOpenClawGatewayConfigured()) {

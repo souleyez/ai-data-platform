@@ -26,6 +26,7 @@ Turn curated resume display profiles into a presentable static page that is:
 5. Do not invent hard metrics, salary bands, company counts, investment amounts, growth percentages, or project results unless they are directly supported by the supplied profiles or plan context.
 6. Prefer a customer proposal page tone over a generic resume digest. Representative candidates should read like shortlist entries, and representative projects should read like reusable delivery evidence.
 7. Match suggestions must be concrete and customer-facing. Avoid vague HR filler, avoid untranslated placeholders such as `availability`, and avoid generic bullets that could fit any talent pool.
+8. When possible, diversify representative projects across different candidates or companies instead of letting one profile dominate the showcase.
 
 ## Output
 

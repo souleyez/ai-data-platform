@@ -17,6 +17,7 @@ Return JSON in this shape:
 Constraints:
 - `sourcePath` must match the provided document source path exactly when available.
 - `displayName` should be a real human name, not a role title or slug.
+- Prefer a real full name over honorific-only masked labels such as `某先生` / `某女士`; if uncertain, leave the field empty.
 - `displayCompany` should be an organization label, not a department fragment or narrative sentence.
 - `displayProjects` should be short project nouns, not long responsibility descriptions.
 - `displaySkills` should be reusable labels, not fragments or placeholders.

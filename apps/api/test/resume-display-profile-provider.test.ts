@@ -180,6 +180,35 @@ test('buildResumeDisplaySeedProfiles should recover enterprise employer from sum
   assert.equal(profiles[0]?.displayCompany, '广州汇聚智能科技');
 });
 
+test('buildResumeDisplaySeedProfiles should prefer full names over honorific-only aliases when context is stronger', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-e.docx',
+      name: 'resume-e.docx',
+      ext: '.docx',
+      title: '曾海峰简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '曾海峰，11年经验，广州正善诚合互联网科技有限公司，全栈工程师，负责支付中台和数据服务交付。',
+      excerpt: '曾海峰，11年经验。',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '曾先生',
+        latestCompany: '广州正善诚合互联网科技有限公司',
+        yearsOfExperience: '11年',
+        skills: ['Python', 'Go', 'SQL'],
+        projectHighlights: ['支付中台'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0]?.displayName, '曾海峰');
+  assert.equal(profiles[0]?.displayCompany, '广州正善诚合互联网科技有限公司');
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;

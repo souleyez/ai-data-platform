@@ -3,7 +3,7 @@ import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
 import { sanitizeResumeDisplayCompany } from './resume-display-company.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
-import { mergeResumeFields } from './resume-canonicalizer.js';
+import { isWeakResumeCandidateName, mergeResumeFields } from './resume-canonicalizer.js';
 
 export type ChatOutput =
   | { type: 'answer'; content: string }
@@ -47,6 +47,15 @@ type ResumePageEntry = {
   sourceTitle: string;
   summary: string;
 };
+type ResumeShowcaseProject = {
+  label: string;
+  value: number;
+  ownerName: string;
+  ownerKey: string;
+  company: string;
+  companyKey: string;
+  fit: string;
+};
 type ResumePageStats = {
   entries: ResumePageEntry[];
   candidateCount: number;
@@ -64,6 +73,7 @@ type ResumePageStats = {
   salaryLines: string[];
   showcaseCandidateNames: string[];
   showcaseProjectLabels: string[];
+  showcaseProjects: ResumeShowcaseProject[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -652,6 +662,7 @@ function sanitizeResumeCandidateName(value: unknown) {
   if (/^(resume|姓名|年龄|工作经验|年工作经验|邮箱|电话|手机|个人|基本信息)$/i.test(text)) return '';
   if (/^(?:default|sample|test|demo|resume)[a-z0-9-]*$/i.test(text)) return '';
   if (/^[a-z0-9-]{8,}$/i.test(text)) return '';
+  if (/^(?:个人简历|候选人简历)$/u.test(text)) return '';
   return isLikelyResumePersonName(text) ? text : '';
 }
 
@@ -682,6 +693,56 @@ function extractResumeCandidateNameFromText(value: unknown) {
   }
 
   return '';
+}
+
+function extractStrongResumeCandidateName(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+
+  const patterns = [
+    /(?:\u59d3\u540d|\u5019\u9009\u4eba)[:：]?\s*([\u4e00-\u9fff\u00b7]{2,4})/u,
+    /^([\u4e00-\u9fff\u00b7]{2,4})(?:\u7b80\u5386|，|,|\s|\u7537|\u5973|\u6c42\u804c|\u5de5\u4f5c|\u73b0\u5c45|\u672c\u79d1|\u7855\u58eb|\u7814\u7a76\u751f|MBA|\u5927\u4e13|\u535a\u58eb)/u,
+  ];
+
+  for (const pattern of patterns) {
+    const candidate = sanitizeResumeCandidateName(text.match(pattern)?.[1]);
+    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    return candidate;
+  }
+
+  const tokenMatches = text.match(/[\u4e00-\u9fff\u00b7]{2,4}/gu) || [];
+  for (const token of tokenMatches.slice(0, 8)) {
+    const candidate = sanitizeResumeCandidateName(token);
+    if (!candidate || isWeakResumeCandidateName(candidate)) continue;
+    return candidate;
+  }
+
+  return '';
+}
+
+function pickResumeDisplayName(values: unknown[]) {
+  const strongCandidates: string[] = [];
+  const weakCandidates: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    const candidates = [
+      sanitizeResumeCandidateName(value),
+      extractStrongResumeCandidateName(value),
+      extractResumeCandidateNameFromText(value),
+    ].filter(Boolean);
+    for (const candidate of candidates) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (isWeakResumeCandidateName(candidate)) {
+        weakCandidates.push(candidate);
+        continue;
+      }
+      strongCandidates.push(candidate);
+    }
+  }
+
+  return strongCandidates[0] || weakCandidates[0] || '';
 }
 
 function sanitizeResumeCompany(value: unknown) {
@@ -780,7 +841,12 @@ function extractResumeYears(value: unknown) {
 }
 
 function getResumeDisplayName(entry: ResumePageEntry) {
-  return sanitizeResumeCandidateName(entry.candidateName);
+  return pickResumeDisplayName([
+    entry.candidateName,
+    entry.sourceTitle,
+    buildResumeFileBaseName(entry.sourceName),
+    entry.summary,
+  ]);
 }
 
 function buildResumePageEntries(documents: ParsedDocument[], displayProfiles: ResumeDisplayProfile[] = []): ResumePageEntry[] {
@@ -792,7 +858,16 @@ function buildResumePageEntries(documents: ParsedDocument[], displayProfiles: Re
       const resumeFields = item.resumeFields || {};
       const canonicalFields = getCanonicalResumeFields(item);
       const displayProfile = displayProfileMap.get(normalizeText(item.path)) || displayProfileMap.get(normalizeText(item.name));
-      const candidateName = sanitizeResumeCandidateName(displayProfile?.displayName || canonicalFields?.candidateName);
+      const candidateName = pickResumeDisplayName([
+        displayProfile?.displayName,
+        canonicalFields?.candidateName,
+        resumeFields.candidateName,
+        profile.candidateName,
+        item.title,
+        buildResumeFileBaseName(item.name),
+        displayProfile?.displaySummary,
+        item.summary,
+      ]);
       const companies = normalizeUniqueStrings([
         sanitizeResumeDisplayCompany(displayProfile?.displayCompany),
         ...(canonicalFields?.companies || []).map((entry) => sanitizeResumeDisplayCompany(sanitizeResumeCompany(entry))),
@@ -895,7 +970,8 @@ function parseResumeExperienceYears(value: string) {
 
 function scoreResumeEntry(entry: ResumePageEntry) {
   let score = 0;
-  if (getResumeDisplayName(entry)) score += 18;
+  const displayName = getResumeDisplayName(entry);
+  if (displayName) score += isWeakResumeCandidateName(displayName) ? 6 : 18;
   if (entry.latestCompany) score += 14;
   if (entry.itProjectHighlights.length) score += 12 + Math.min(entry.itProjectHighlights.length, 3) * 2;
   else if (entry.projectHighlights.length) score += 6 + Math.min(entry.projectHighlights.length, 3);
@@ -917,7 +993,7 @@ function sortResumeEntriesForClientShowcase(entries: ResumePageEntry[]) {
   ));
 }
 
-function buildWeightedResumeProjectCounts(entries: ResumePageEntry[], limit = 10) {
+function buildWeightedResumeProjectCountIndex(entries: ResumePageEntry[]) {
   const counts = new Map<string, { label: string; value: number; priority: number }>();
   for (const entry of entries) {
     const priority = scoreResumeEntry(entry);
@@ -937,6 +1013,12 @@ function buildWeightedResumeProjectCounts(entries: ResumePageEntry[], limit = 10
     }
   }
 
+  return counts;
+}
+
+function buildWeightedResumeProjectCounts(entries: ResumePageEntry[], limit = 10) {
+  const counts = buildWeightedResumeProjectCountIndex(entries);
+
   return [...counts.values()]
     .sort((left, right) => (
       right.value - left.value
@@ -945,6 +1027,80 @@ function buildWeightedResumeProjectCounts(entries: ResumePageEntry[], limit = 10
     ))
     .slice(0, limit)
     .map(({ label, value }) => ({ label, value }));
+}
+
+function buildResumeProjectShowcase(entries: ResumePageEntry[], limit = 5): ResumeShowcaseProject[] {
+  const counts = buildWeightedResumeProjectCountIndex(entries);
+  const candidates: Array<ResumeShowcaseProject & { priority: number }> = [];
+
+  for (const entry of entries) {
+    const ownerName = getResumeDisplayName(entry);
+    const ownerKey = normalizeText(ownerName || entry.sourceName || entry.latestCompany || 'resume-project');
+    const companyKey = normalizeText(entry.latestCompany || ownerName || 'resume-company');
+    const fit = buildResumeCandidateFit(entry);
+    const labels = normalizeUniqueStrings(
+      entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights,
+      6,
+    );
+
+    for (const label of labels) {
+      const normalized = normalizeText(label);
+      if (!normalized) continue;
+      const count = counts.get(normalized);
+      candidates.push({
+        label: count?.label || label,
+        value: count?.value || 1,
+        ownerName,
+        ownerKey,
+        company: entry.latestCompany,
+        companyKey,
+        fit,
+        priority: count?.priority || scoreResumeEntry(entry),
+      });
+    }
+  }
+
+  candidates.sort((left, right) => (
+    right.value - left.value
+    || right.priority - left.priority
+    || left.label.localeCompare(right.label, 'zh-CN')
+  ));
+
+  const selected: ResumeShowcaseProject[] = [];
+  const usedLabels = new Set<string>();
+  const usedOwners = new Set<string>();
+  const usedCompanies = new Set<string>();
+
+  const selectWith = (predicate: (item: ResumeShowcaseProject & { priority: number }) => boolean) => {
+    for (const candidate of candidates) {
+      if (selected.length >= limit) break;
+      const labelKey = normalizeText(candidate.label);
+      if (!labelKey || usedLabels.has(labelKey)) continue;
+      if (!predicate(candidate)) continue;
+      usedLabels.add(labelKey);
+      if (candidate.ownerKey) usedOwners.add(candidate.ownerKey);
+      if (candidate.companyKey) usedCompanies.add(candidate.companyKey);
+      selected.push({
+        label: candidate.label,
+        value: candidate.value,
+        ownerName: candidate.ownerName,
+        ownerKey: candidate.ownerKey,
+        company: candidate.company,
+        companyKey: candidate.companyKey,
+        fit: candidate.fit,
+      });
+    }
+  };
+
+  selectWith((candidate) => candidate.ownerKey ? !usedOwners.has(candidate.ownerKey) : true);
+  if (selected.length < limit) {
+    selectWith((candidate) => candidate.companyKey ? !usedCompanies.has(candidate.companyKey) : true);
+  }
+  if (selected.length < limit) {
+    selectWith(() => true);
+  }
+
+  return selected;
 }
 
 function buildResumeCandidateFit(entry: ResumePageEntry) {
@@ -973,6 +1129,13 @@ function buildResumeCompanyLine(item: { label: string; value: number }, stats: R
     .slice(0, 3);
   const candidateText = relatedCandidates.length ? `；代表候选人 ${relatedCandidates.join('、')}` : '';
   return `${item.label}：覆盖 ${item.value} 份简历${candidateText}`;
+}
+
+function buildResumeShowcaseProjectLine(item: ResumeShowcaseProject) {
+  const ownerText = item.ownerName ? `：代表候选人 ${item.ownerName}` : '';
+  const companyText = item.company ? `，关联公司 ${item.company}` : '';
+  const fitText = item.fit ? `；匹配 ${item.fit}` : '';
+  return `${item.label}${ownerText}${companyText}${fitText}`;
 }
 
 function buildResumeProjectLine(item: { label: string; value: number }, stats: ResumePageStats) {
@@ -1023,6 +1186,7 @@ function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
   const rankedEntries = sortResumeEntriesForClientShowcase(entries);
   const companies = buildRankedLabelCounts(rankedEntries.map((entry) => entry.latestCompany).filter(Boolean), 8);
   const projects = buildWeightedResumeProjectCounts(rankedEntries, 10);
+  const showcaseProjects = buildResumeProjectShowcase(rankedEntries, 5);
   const skills = buildRankedLabelCounts(rankedEntries.flatMap((entry) => entry.skills).filter(Boolean), 10);
   const educations = buildRankedLabelCounts(rankedEntries.map((entry) => entry.education).filter(Boolean), 6);
   const salaryLines = normalizeUniqueStrings(
@@ -1049,17 +1213,25 @@ function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
     salaryLines,
     showcaseCandidateNames: [],
     showcaseProjectLabels: [],
+    showcaseProjects,
   };
 
   stats.candidateLines = rankedEntries.filter((entry) => getResumeDisplayName(entry)).slice(0, 6).map(buildResumeCandidateLine);
   stats.companyLines = companies.map((item) => buildResumeCompanyLine(item, stats)).slice(0, 6);
-  stats.projectLines = projects.map((item) => buildResumeProjectLine(item, stats)).slice(0, 6);
+  const showcaseProjectLabels = new Set(showcaseProjects.map((item) => normalizeText(item.label)).filter(Boolean));
+  stats.projectLines = [
+    ...showcaseProjects.map((item) => buildResumeShowcaseProjectLine(item)),
+    ...projects
+      .filter((item) => !showcaseProjectLabels.has(normalizeText(item.label)))
+      .map((item) => buildResumeProjectLine(item, stats)),
+  ].slice(0, 6);
   stats.skillLines = skills.map((item) => buildResumeSkillLine(item, stats)).slice(0, 6);
-  stats.showcaseCandidateNames = rankedEntries
-    .map((entry) => getResumeDisplayName(entry))
-    .filter(Boolean)
-    .slice(0, 3);
-  stats.showcaseProjectLabels = projects.map((item) => item.label).slice(0, 3);
+  const rankedCandidateNames = normalizeUniqueStrings(rankedEntries.map((entry) => getResumeDisplayName(entry)).filter(Boolean), 6);
+  stats.showcaseCandidateNames = [
+    ...rankedCandidateNames.filter((name) => !isWeakResumeCandidateName(name)),
+    ...rankedCandidateNames.filter((name) => isWeakResumeCandidateName(name)),
+  ].slice(0, 3);
+  stats.showcaseProjectLabels = showcaseProjects.map((item) => item.label).slice(0, 3);
   return stats;
 }
 
@@ -1516,7 +1688,7 @@ function buildResumeSectionBlueprints(view: ResumeRequestView, summary: string, 
         bullets: [
           `shortlist 候选人：${stats.showcaseCandidateNames.join('、')}`,
           `重点公司：${joinRankedLabels(stats.companies, 4)}`,
-          `代表项目：${joinRankedLabels(stats.projects, 3)}`,
+          `代表项目：${stats.showcaseProjectLabels.join('、') || joinRankedLabels(stats.projects, 3)}`,
         ].filter(Boolean),
       },
       {
@@ -1524,7 +1696,7 @@ function buildResumeSectionBlueprints(view: ResumeRequestView, summary: string, 
         bullets: stats.candidateLines.slice(0, 5),
       },
       {
-        body: `代表项目聚焦 ${joinRankedLabels(stats.projects, 5)} 等方向，更适合用于客户场景映射和交付经验说明。`,
+        body: `代表项目聚焦 ${stats.showcaseProjectLabels.join('、') || joinRankedLabels(stats.projects, 5)} 等方向，更适合用于客户场景映射和交付经验说明。`,
         bullets: stats.projectLines.slice(0, 5),
       },
       {

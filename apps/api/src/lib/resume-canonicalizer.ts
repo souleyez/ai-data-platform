@@ -46,6 +46,12 @@ function stripSkillLabelPrefix(value: string) {
   return value.replace(/^(?:技能|技能标签|核心技能|专业技能|技术栈)[:：]?\s*/i, '').trim();
 }
 
+export function isWeakResumeCandidateName(value: unknown) {
+  const text = normalizeText(value, 40);
+  if (!text) return false;
+  return /^[\u4e00-\u9fff\u00b7]{1,3}(?:\u5148\u751f|\u5973\u58eb|\u8001\u5e08|\u540c\u5b66)$/u.test(text);
+}
+
 function isLikelyPersonName(value: string) {
   const text = normalizeText(value, 40);
   if (!text) return false;
@@ -112,16 +118,23 @@ function pickCandidateName(fields: ResumeFields | null | undefined, context: Res
     ...(fields?.candidateName ? [fields.candidateName] : []),
     ...collectContextTexts(context).flatMap((value) => extractNameCandidates(value)),
   ]);
+  const strongCandidates: string[] = [];
+  const weakCandidates: string[] = [];
 
   for (const candidate of candidates) {
     const normalized = normalizeText(candidate, 40)
       .replace(/^(?:简历|个人简历|候选人)[:：]?\s*/i, '')
       .replace(/(?:简历|履历)$/i, '')
       .trim();
-    if (isLikelyPersonName(normalized)) return normalized;
+    if (!isLikelyPersonName(normalized)) continue;
+    if (isWeakResumeCandidateName(normalized)) {
+      weakCandidates.push(normalized);
+      continue;
+    }
+    strongCandidates.push(normalized);
   }
 
-  return '';
+  return strongCandidates[0] || weakCandidates[0] || '';
 }
 
 function canonicalizeScalar(value: unknown, maxLength = 60, blockPattern?: RegExp) {

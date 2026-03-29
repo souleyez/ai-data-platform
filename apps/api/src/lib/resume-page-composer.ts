@@ -3,6 +3,7 @@ import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter
 import type { ReportPlan } from './report-planner.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
+import { isWeakResumeCandidateName } from './resume-canonicalizer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 type ComposerPromptMode = 'rich' | 'compact';
@@ -12,6 +13,13 @@ export type ResumePageComposerExecution = {
   error: string;
   attemptMode: ComposerPromptMode | '';
   attemptedModes: ComposerPromptMode[];
+};
+
+type ComposerProjectShowcaseItem = {
+  label: string;
+  value: number;
+  displayName: string;
+  displayCompany: string;
 };
 
 function sanitizeText(value: unknown, maxLength = 240) {
@@ -38,9 +46,17 @@ function buildRankedCountList(values: string[], limit = 6) {
     .slice(0, limit);
 }
 
+function buildShowcaseProfiles(profiles: ResumeDisplayProfile[], limit: number) {
+  return [
+    ...profiles.filter((profile) => !isWeakResumeCandidateName(profile.displayName)),
+    ...profiles.filter((profile) => isWeakResumeCandidateName(profile.displayName)),
+  ].slice(0, limit);
+}
+
 function scoreDisplayProfile(profile: ResumeDisplayProfile) {
   let score = 0;
-  if (sanitizeText(profile.displayName, 80)) score += 16;
+  const displayName = sanitizeText(profile.displayName, 80);
+  if (displayName) score += isWeakResumeCandidateName(displayName) ? 6 : 16;
   if (sanitizeText(profile.displayCompany, 160)) score += 14;
   score += Math.min((profile.displayProjects || []).length, 3) * 5;
   score += Math.min((profile.displaySkills || []).length, 4) * 3;
@@ -57,6 +73,73 @@ function sortDisplayProfilesForComposer(profiles: ResumeDisplayProfile[]) {
   ));
 }
 
+function buildDiversifiedProjectShowcase(profiles: ResumeDisplayProfile[], limit = 5): ComposerProjectShowcaseItem[] {
+  const counts = buildRankedCountList(profiles.flatMap((profile) => profile.displayProjects || []), 24);
+  const countMap = new Map(counts.map((item) => [sanitizeText(item.label, 120).toLowerCase(), item]));
+  const candidates: Array<ComposerProjectShowcaseItem & { ownerKey: string; companyKey: string; priority: number }> = [];
+
+  for (const profile of profiles) {
+    const ownerName = sanitizeText(profile.displayName, 80);
+    const displayCompany = sanitizeText(profile.displayCompany, 160);
+    const ownerKey = sanitizeText(ownerName || profile.sourceName || profile.sourcePath, 160).toLowerCase();
+    const companyKey = sanitizeText(displayCompany || ownerName || profile.sourceName, 160).toLowerCase();
+    const labels = [...new Set((profile.displayProjects || []).map((item) => sanitizeText(item, 80)).filter(Boolean))];
+
+    for (const label of labels) {
+      const labelKey = label.toLowerCase();
+      const count = countMap.get(labelKey);
+      candidates.push({
+        label: count?.label || label,
+        value: count?.value || 1,
+        displayName: ownerName,
+        displayCompany,
+        ownerKey,
+        companyKey,
+        priority: scoreDisplayProfile(profile),
+      });
+    }
+  }
+
+  candidates.sort((left, right) => (
+    right.value - left.value
+    || right.priority - left.priority
+    || left.label.localeCompare(right.label, 'zh-CN')
+  ));
+
+  const selected: ComposerProjectShowcaseItem[] = [];
+  const usedLabels = new Set<string>();
+  const usedOwners = new Set<string>();
+  const usedCompanies = new Set<string>();
+
+  const selectWith = (predicate: (item: ComposerProjectShowcaseItem & { ownerKey: string; companyKey: string; priority: number }) => boolean) => {
+    for (const candidate of candidates) {
+      if (selected.length >= limit) break;
+      const labelKey = candidate.label.toLowerCase();
+      if (!labelKey || usedLabels.has(labelKey)) continue;
+      if (!predicate(candidate)) continue;
+      usedLabels.add(labelKey);
+      if (candidate.ownerKey) usedOwners.add(candidate.ownerKey);
+      if (candidate.companyKey) usedCompanies.add(candidate.companyKey);
+      selected.push({
+        label: candidate.label,
+        value: candidate.value,
+        displayName: candidate.displayName,
+        displayCompany: candidate.displayCompany,
+      });
+    }
+  };
+
+  selectWith((candidate) => candidate.ownerKey ? !usedOwners.has(candidate.ownerKey) : true);
+  if (selected.length < limit) {
+    selectWith((candidate) => candidate.companyKey ? !usedCompanies.has(candidate.companyKey) : true);
+  }
+  if (selected.length < limit) {
+    selectWith(() => true);
+  }
+
+  return selected;
+}
+
 function buildComposerContext(input: {
   requestText: string;
   reportPlan?: ReportPlan | null;
@@ -66,6 +149,7 @@ function buildComposerContext(input: {
 }, mode: ComposerPromptMode) {
   const isCompact = mode === 'compact';
   const rankedProfiles = sortDisplayProfilesForComposer(input.displayProfiles);
+  const showcaseProfiles = buildShowcaseProfiles(rankedProfiles, isCompact ? 3 : 4);
   return {
     requestText: sanitizeText(input.requestText, 240),
     envelope: input.envelope ? {
@@ -89,13 +173,13 @@ function buildComposerContext(input: {
       })),
     } : null,
     showcase: {
-      topCandidates: rankedProfiles.slice(0, isCompact ? 3 : 4).map((profile) => ({
+      topCandidates: showcaseProfiles.map((profile) => ({
         displayName: sanitizeText(profile.displayName, 80),
         displayCompany: sanitizeText(profile.displayCompany, 160),
         displayProjects: (profile.displayProjects || []).slice(0, isCompact ? 1 : 2),
         displaySkills: (profile.displaySkills || []).slice(0, isCompact ? 2 : 3),
       })),
-      topProjects: buildRankedCountList(rankedProfiles.flatMap((profile) => profile.displayProjects || []), isCompact ? 3 : 5),
+      topProjects: buildDiversifiedProjectShowcase(rankedProfiles, isCompact ? 3 : 5),
       topSkills: buildRankedCountList(rankedProfiles.flatMap((profile) => profile.displaySkills || []), isCompact ? 4 : 6),
       topCompanies: buildRankedCountList(rankedProfiles.map((profile) => profile.displayCompany), isCompact ? 3 : 5),
     },
@@ -131,8 +215,9 @@ async function buildSystemPrompt() {
     'Your task is to compose a final client-facing static page from the supplied report plan and resume display profiles.',
     'Treat the output as a customer shortlist page or proposal page, not a generic resume digest.',
     'Treat display profiles as the primary evidence layer for names, companies, projects, skills, and summaries.',
+    'Avoid honorific-only masked names such as 某先生 or 某女士 when stronger names exist in the supplied profiles.',
     'If a profile is ambiguous, skip it instead of copying weak file-name fragments or raw resume noise.',
-    'For representative candidates and representative projects, prefer the strongest shortlist-worthy evidence instead of exhaustive dumping.',
+    'For representative candidates and representative projects, prefer the strongest shortlist-worthy evidence and keep the project showcase diversified across candidates when possible.',
     'Keep match suggestions concrete and customer-facing. Avoid generic HR filler and avoid untranslated placeholders such as availability.',
     'Keep the page readable, presentation-ready, and structurally aligned with the supplied envelope.',
     skillInstruction,
