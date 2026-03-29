@@ -1,6 +1,7 @@
-import type { ParsedDocument } from './document-parser.js';
+import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
+import { mergeResumeFields } from './resume-canonicalizer.js';
 
 export type ChatOutput =
   | { type: 'answer'; content: string }
@@ -555,6 +556,34 @@ function getResumeProfile(item: ParsedDocument) {
   return (item.structuredProfile || {}) as Record<string, unknown>;
 }
 
+function getCanonicalResumeFields(item: ParsedDocument) {
+  const profile = getResumeProfile(item) as ResumeFields;
+  const resumeFields = item.resumeFields || {};
+  return mergeResumeFields(
+    [
+      {
+        ...resumeFields,
+        candidateName: sanitizeResumeCandidateName(resumeFields.candidateName),
+        latestCompany: sanitizeResumeCompany(resumeFields.latestCompany),
+        companies: toStringArray(resumeFields.companies).map((entry) => sanitizeResumeCompany(entry)).filter(Boolean),
+      },
+      {
+        ...profile,
+        candidateName: sanitizeResumeCandidateName(profile.candidateName),
+        latestCompany: sanitizeResumeCompany(profile.latestCompany),
+        companies: toStringArray(profile.companies).map((entry) => sanitizeResumeCompany(entry)).filter(Boolean),
+      },
+    ],
+    {
+      title: item.title,
+      sourceName: item.name,
+      summary: item.summary,
+      excerpt: item.excerpt,
+      fullText: item.fullText,
+    },
+  );
+}
+
 function normalizeUniqueStrings(values: unknown[], limit = 8) {
   const result: string[] = [];
   const seen = new Set<string>();
@@ -619,9 +648,15 @@ function sanitizeResumeCompany(value: unknown) {
     .split(/[，。；]/u)[0]
     .trim();
   if (!text) return '';
+  const hasExplicitOrgSuffix = /(公司|集团|股份|银行|研究院|研究所|学院|大学|协会|中心|医院|平台)$/u.test(text);
   if (/@/.test(text)) return '';
   if (text.length > 40) return '';
+  if (/^(?:\d+年|[一二三四五六七八九十]+年)/u.test(text)) return '';
+  if (/^(?:负责|参与|主导|推进|完成|统筹|带领|领导|帮助|协助|推动|实现|从0)/u.test(text)) return '';
+  if (/^(?:AIGC|AI|BI|ERP|CRM|MES|WMS|SaaS|IoT|IOT)[A-Za-z0-9\u4e00-\u9fff·()（）\-/]{0,12}(?:智能|科技|信息|软件|网络|系统|平台)?$/i.test(text)) return '';
   if (/电话|手机|邮箱|工作经验|年工作经验|年龄|求职|简历|resume|负责|创立|建立|经营|销售额|同比|工作经历|核心能力|related_to/i.test(text)) return '';
+  if (/营收|增长|成功/u.test(text)) return '';
+  if (/(智能化|信息化)/u.test(text) && !hasExplicitOrgSuffix) return '';
   if (/\d{4}/.test(text)) return '';
   return text;
 }
@@ -672,46 +707,33 @@ function extractResumeYears(value: unknown) {
 }
 
 function getResumeDisplayName(entry: ResumePageEntry) {
-  return (
-    entry.candidateName
-    || extractResumeCandidateNameFromText(entry.sourceTitle)
-    || extractResumeCandidateNameFromText(buildResumeFileBaseName(entry.sourceName))
-    || ''
-  );
+  return sanitizeResumeCandidateName(entry.candidateName);
 }
 
 function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] {
   return documents
     .filter((item) => item.schemaType === 'resume')
     .map((item) => {
-      const profile = getResumeProfile(item);
-      const candidateName =
-        sanitizeResumeCandidateName(profile.candidateName)
-        || extractResumeCandidateNameFromText(profile.candidateName)
-        || extractResumeCandidateNameFromText(item.title)
-        || extractResumeCandidateNameFromText(buildResumeFileBaseName(item.name))
-        || extractResumeCandidateNameFromText(item.summary)
-        || extractResumeCandidateNameFromText(item.excerpt);
+      const profile = getResumeProfile(item) as ResumeFields;
+      const resumeFields = item.resumeFields || {};
+      const canonicalFields = getCanonicalResumeFields(item);
+      const candidateName = sanitizeResumeCandidateName(canonicalFields?.candidateName);
       const companies = normalizeUniqueStrings([
-        ...toStringArray(profile.companies),
-        profile.latestCompany,
+        ...(canonicalFields?.companies || []).map((entry) => sanitizeResumeCompany(entry)),
+        sanitizeResumeCompany(canonicalFields?.latestCompany),
+        ...toStringArray(resumeFields.companies).map((entry) => sanitizeResumeCompany(entry)),
+        sanitizeResumeCompany(resumeFields.latestCompany),
+        ...toStringArray(profile.companies).map((entry) => sanitizeResumeCompany(entry)),
+        sanitizeResumeCompany(profile.latestCompany),
         extractResumeCompanyFromText(item.summary),
         extractResumeCompanyFromText(item.title),
       ], 4);
-      const latestCompany = sanitizeResumeCompany(profile.latestCompany) || companies[0] || '';
-      const projectHighlights = normalizeUniqueStrings([
-        ...toStringArray(profile.projectHighlights).map((entry) => sanitizeResumeProjectHighlight(entry)),
-        ...toStringArray(profile.highlights)
-          .filter((entry) => /(项目|project|系统|平台|交付|架构|实施|开发)/i.test(entry))
-          .map((entry) => sanitizeResumeProjectHighlight(entry)),
-      ], 6);
-      const itProjectHighlights = normalizeUniqueStrings([
-        ...toStringArray(profile.itProjectHighlights).map((entry) => sanitizeResumeProjectHighlight(entry)),
-        ...projectHighlights.filter((entry) => /(it|项目|系统|平台|接口|架构|开发|实施|技术|api)/i.test(entry)),
-      ], 6);
-      const skills = normalizeUniqueStrings(profile.skills as unknown[] || [], 8);
-      const education = extractResumeEducation(profile.education || item.summary);
-      const yearsOfExperience = extractResumeYears(profile.yearsOfExperience || item.summary);
+      const latestCompany = companies[0] || '';
+      const projectHighlights = normalizeUniqueStrings(canonicalFields?.projectHighlights || [], 6);
+      const itProjectHighlights = normalizeUniqueStrings(canonicalFields?.itProjectHighlights || [], 6);
+      const skills = normalizeUniqueStrings(canonicalFields?.skills || [], 8);
+      const education = sanitizeText(canonicalFields?.education);
+      const yearsOfExperience = sanitizeText(canonicalFields?.yearsOfExperience);
 
       return {
         candidateName,
@@ -721,15 +743,22 @@ function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] 
         skills,
         projectHighlights,
         itProjectHighlights,
-        highlights: normalizeUniqueStrings(profile.highlights as unknown[] || [], 8),
-        expectedCity: sanitizeText(profile.expectedCity),
-        expectedSalary: sanitizeText(profile.expectedSalary),
+        highlights: normalizeUniqueStrings(canonicalFields?.highlights || [], 8),
+        expectedCity: sanitizeText(canonicalFields?.expectedCity),
+        expectedSalary: sanitizeText(canonicalFields?.expectedSalary),
         sourceName: item.name,
         sourceTitle: item.title,
         summary: sanitizeText(item.summary),
       };
     })
-    .filter((entry) => entry.candidateName || entry.latestCompany || entry.skills.length || entry.projectHighlights.length);
+    .filter((entry) => (
+      entry.candidateName
+      || entry.latestCompany
+      || entry.skills.length
+      || entry.projectHighlights.length
+      || entry.itProjectHighlights.length
+      || entry.highlights.length
+    ));
 }
 
 function buildRankedLabelCounts(values: string[], limit = 8) {

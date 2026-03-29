@@ -237,6 +237,50 @@ test('buildKnowledgeFallbackOutput should clean noisy resume candidate names for
   assert.match(JSON.stringify(output.page), /夏天宇|何先生|吴楚镰/);
 });
 
+test('buildKnowledgeFallbackOutput should suppress noisy resume company and project fragments in pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '1774599818136-王五简历.pdf',
+      ext: '.pdf',
+      title: '求职意向',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '王五，10年以上工作经验，最近任职广州云岚数码有限公司，负责智能座舱系统产品规划和交付。',
+      excerpt: '王五，10年以上工作经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '求职意向',
+        latestCompany: '帮助企业从0做成功5个年营收数千万的软件',
+        companies: ['AIGC智能', '广州云岚数码有限公司，运营经理'],
+        education: '本科',
+        skills: ['产品设计', 'AIGC', '需求分析'],
+        projectHighlights: ['负责项目的全面管理，保证项目按时交付并完成跨部门协调', '智能座舱系统产品规划'],
+        itProjectHighlights: ['负责项目的全面管理，保证项目按时交付并完成跨部门协调'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中全部时间范围的简历，按公司维度整理涉及公司的 IT 项目信息，生成数据可视化静态页报表。',
+    documents,
+    {
+      title: '简历公司维度 IT 项目静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按公司维度整理简历中的 IT 项目经历',
+      pageSections: ['公司概览', '重点项目分布', '候选人覆盖', '技术关键词', '风险与机会', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.match(JSON.stringify(output.page), /王五|广州云岚数码有限公司|智能座舱系统产品规划/);
+  assert.doesNotMatch(JSON.stringify(output.page), /求职意向|AIGC智能|帮助企业从0做成功5个年营收数千万的软件|负责项目的全面管理/);
+});
+
 test('buildKnowledgeFallbackOutput should create a client-facing resume page for client requests', () => {
   const documents: ParsedDocument[] = [
     {
