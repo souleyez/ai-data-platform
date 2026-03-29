@@ -9,15 +9,18 @@ export type ResumeCanonicalizationContext = {
 };
 
 const RESUME_HINT_PATTERN = /\b(?:resume|curriculum vitae|cv)\b|简历|履历|候选人|求职/i;
-const NAME_NOISE_PATTERN = /^(?:resume|cv|简历|个人简历|候选人|姓名|name|求职意向|基本信息|建立同比)$/i;
+const NAME_NOISE_PATTERN = /^(?:resume|cv|简历|个人简历|候选人|姓名|name|求职意向|基本信息|建立同比|年龄|男|女|本人|我的|并制作)$/i;
+const NAME_ROLE_PATTERN = /(?:经理|总监|工程师|主管|专员|顾问|销售|运营|产品|设计师|程序员|开发|leader|负责人)$/i;
 const CONTACT_NOISE_PATTERN = /联系电话|电话|手机|邮箱|email|wechat|微信|qq|mail/i;
 const ROLE_NOISE_PATTERN = /求职意向|目标岗位|应聘岗位|当前职位|岗位职责|工作职责|工作内容|负责|参与|带领|管理/i;
-const COMPANY_SUFFIX_PATTERN = /(?:有限责任公司|有限公司|股份有限公司|股份公司|集团|科技|信息|软件|网络|系统|智能|电子|研究院|研究所|学院|大学|协会|中心|银行|医院|平台)/i;
-const COMPANY_NOISE_PATTERN = /项目|职责|负责|参与|教育|学历|专业|经验|年限|薪资|期望|电话|邮箱|联系|技能|证书|住址|地址|年龄|婚姻|自我评价|简历|候选人/i;
+const COMPANY_SUFFIX_PATTERN = /(?:有限责任公司|有限公司|股份有限公司|股份公司|公司|集团|科技|信息|软件|网络|系统|智能|电子|研究院|研究所|学院|大学|协会|中心|银行|医院|平台)/i;
+const COMPANY_NOISE_PATTERN = /项目|职责|负责|参与|教育|学历|专业|经验|年限|薪资|期望|电话|邮箱|联系|技能|证书|住址|地址|年龄|婚姻|自我评价|简历|候选人|基本信息|核心能力|related_to/i;
+const COMPANY_ACTION_PATTERN = /^(?:负责|参与|主导|推进|完成|统筹|带领|领导|帮助|协助|推动|实现|从0|熟悉|擅长|精通|我的|并|及|和)/;
 const PROJECT_KEYWORD_PATTERN = /(?:项目|系统|平台|应用|工程|方案|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|AIGC|AI|广告投放|风控|物业|社区|电商|运营平台|数据平台|管理平台|智慧)/i;
-const PROJECT_NOISE_PATTERN = /电话|邮箱|学历|教育|专业|期望|薪资|求职|工作经历|教育经历|自我评价|简历|候选人/i;
+const PROJECT_NOISE_PATTERN = /电话|邮箱|学历|教育|专业|期望|薪资|求职|工作经历|教育经历|自我评价|简历|候选人|related_to|基本信息/i;
 const PROJECT_ACTION_PATTERN = /^(?:负责|参与|主导|推进|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接)/;
 const DEGREE_PATTERN = /(博士后|博士|硕士|研究生|MBA|EMBA|本科|学士|大专|专科|中专|高中)/i;
+const SKILL_NOISE_PATTERN = /^(?:求职意向|基本信息|我的|并制作|related_to)$/i;
 function uniqStrings(values: Array<string | undefined | null>) {
   return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
 }
@@ -39,10 +42,15 @@ function stripCommonLabelPrefix(value: string) {
   return value.replace(/^(?:姓名|name|候选人|简历|个人简历|目标岗位|应聘岗位|求职意向|当前职位|最近公司|公司|项目经历|项目|学历|专业)[:：]?\s*/i, '').trim();
 }
 
+function stripSkillLabelPrefix(value: string) {
+  return value.replace(/^(?:技能|技能标签|核心技能|专业技能|技术栈)[:：]?\s*/i, '').trim();
+}
+
 function isLikelyPersonName(value: string) {
   const text = normalizeText(value, 40);
   if (!text) return false;
   if (NAME_NOISE_PATTERN.test(text)) return false;
+  if (NAME_ROLE_PATTERN.test(text)) return false;
   if (CONTACT_NOISE_PATTERN.test(text)) return false;
   if (/[,:;|/\\()（）【】[\]<>]/.test(text)) return false;
   if (/\d{2,}/.test(text)) return false;
@@ -196,7 +204,12 @@ function canonicalizeCompany(value: string) {
       .replace(/[，,；;:：|]+$/g, '')
       .trim();
     if (!normalized) continue;
+    const hasExplicitOrgSuffix = /(?:有限责任公司|有限公司|股份有限公司|股份公司|公司|集团|银行|研究院|研究所|学院|大学|协会|中心|医院)$/i.test(normalized);
     if (COMPANY_NOISE_PATTERN.test(normalized)) continue;
+    if (COMPANY_ACTION_PATTERN.test(normalized)) continue;
+    if (/^(?:\d+年|[一二三四五六七八九十]+年)/u.test(normalized)) continue;
+    if (/(智能化|信息化|等信息)/u.test(normalized) && !hasExplicitOrgSuffix) continue;
+    if (normalized.length > 24 && !hasExplicitOrgSuffix) continue;
     if (/^[A-Z0-9][A-Za-z0-9& .-]{1,18}(智能|科技|信息|软件|网络|系统|平台|电子)$/i.test(normalized)) continue;
     return normalized;
   }
@@ -215,15 +228,35 @@ function canonicalizeCompanies(fields: ResumeFields | null | undefined, context:
 }
 
 function cleanProjectFragment(value: string) {
-  const normalized = stripCommonLabelPrefix(normalizeText(value, 160));
+  const normalized = stripCommonLabelPrefix(normalizeText(value, 160))
+    .replace(/^[•●⚫·\-\d.,、)\s]+/u, '')
+    .trim();
   if (!normalized) return '';
   if (PROJECT_NOISE_PATTERN.test(normalized)) return '';
+  if (/^(?:核心能力|基本信息|工作经历|教育背景|项目职责)[:：]/.test(normalized)) return '';
   if (/^(?:负责|参与|主导|推进|完成|统筹|带领|领导).{0,12}项目(?:的|管理|经验|工作)/.test(normalized)) return '';
+  if (PROJECT_ACTION_PATTERN.test(normalized) && /[与和及、]/u.test(normalized)) return '';
   if (PROJECT_ACTION_PATTERN.test(normalized) && !PROJECT_KEYWORD_PATTERN.test(normalized)) return '';
 
   const colonSplit = normalized.split(/[:：]/).map((item) => item.trim()).filter(Boolean);
   if (colonSplit.length >= 2 && PROJECT_KEYWORD_PATTERN.test(colonSplit[0]) && colonSplit[0].length <= 36) {
     return colonSplit[0];
+  }
+
+  const phraseSource = normalized
+    .replace(/^(?:(?:负责|参与|主导|推进|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接|跟进|制定|搭建|制作|管理)\s*(?:了|过|并)?)+/u, '')
+    .trim();
+  const explicitProject = phraseSource.match(/([\u4e00-\u9fffA-Za-z0-9·()（）\-/]{2,28}(?:项目|系统|平台|应用|工程|方案|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI))/i);
+  if (explicitProject?.[1]) {
+    let projectText = explicitProject[1].trim();
+    const suffixMatch = projectText.match(/(项目|系统|平台|应用|工程|方案|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI)$/i);
+    if (/[与和及、]/u.test(projectText)) {
+      const firstSegment = projectText.split(/[与和及、]/u).map((item) => item.trim()).filter(Boolean)[0] || projectText;
+      projectText = suffixMatch?.[1] && !firstSegment.endsWith(suffixMatch[1]) ? `${firstSegment}${suffixMatch[1]}` : firstSegment;
+    }
+    if (projectText && !COMPANY_NOISE_PATTERN.test(projectText)) {
+      return projectText;
+    }
   }
 
   const segments = normalized
@@ -267,9 +300,9 @@ function canonicalizeItProjectHighlights(fields: ResumeFields | null | undefined
 function canonicalizeSkills(fields: ResumeFields | null | undefined) {
   const values = uniqStrings((fields?.skills || []).flatMap((item) => normalizeText(item, 80).split(/[、/|,，]/)));
   return values
-    .map((item) => stripCommonLabelPrefix(item))
+    .map((item) => stripSkillLabelPrefix(item))
     .map((item) => item.replace(/\bmysql\b/i, 'MySQL').replace(/\bredis\b/i, 'Redis').replace(/\bkafka\b/i, 'Kafka').replace(/\bsql\b/i, 'SQL').replace(/\bjava\b/i, 'Java').replace(/\bgo\b/i, 'Go').replace(/\bpython\b/i, 'Python'))
-    .filter((item) => item && item.length <= 30 && !COMPANY_NOISE_PATTERN.test(item) && !CONTACT_NOISE_PATTERN.test(item))
+    .filter((item) => item && item.length >= 2 && item.length <= 30 && !SKILL_NOISE_PATTERN.test(item) && !COMPANY_NOISE_PATTERN.test(item) && !CONTACT_NOISE_PATTERN.test(item))
     .slice(0, 12);
 }
 
@@ -306,7 +339,7 @@ export function canonicalizeResumeFields(
 
   const candidateName = pickCandidateName(fields, context);
   const companies = canonicalizeCompanies(fields, context);
-  const latestCompany = canonicalizeCompany(fields?.latestCompany || companies[0] || '');
+  const latestCompany = canonicalizeCompany(fields?.latestCompany || '') || companies[0] || '';
   const projectHighlights = canonicalizeProjectHighlights(fields);
   const itProjectHighlights = canonicalizeItProjectHighlights(fields, projectHighlights);
   const skills = canonicalizeSkills(fields);

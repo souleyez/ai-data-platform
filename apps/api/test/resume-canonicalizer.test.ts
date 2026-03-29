@@ -67,3 +67,31 @@ test('mergeResumeFields should prefer supported deep-parse slots and keep canoni
   assert.ok(merged?.skills?.includes('Spring Boot'));
   assert.ok(!(merged?.skills || []).includes('求职意向'));
 });
+
+test('canonicalizeResumeFields should reject role labels and list fragments as names, companies, projects and skills', () => {
+  const result = canonicalizeResumeFields({
+    candidateName: '高级运营经理',
+    latestCompany: '擅长物联网平台',
+    companies: ['基本信息', '中国建设银行', '三维可视化及BIM运维等信息'],
+    projectHighlights: [
+      '1.领导开发了物联网云平台',
+      '铁 related_to 算法工程师',
+      '核心能力：多平台电商经营分析、商品运营、库存管理',
+      '负责医院智能化与零售信息化项目',
+    ],
+    skills: ['我的', '铁', '项目跟进', '需求分析'],
+  }, {
+    title: '曹伟煊简历',
+    sourceName: '曹伟煊简历.pdf',
+    summary: '曹伟煊，16年经验，中国建设银行架构师，负责物联网云平台建设。',
+  });
+
+  assert.equal(result?.candidateName, '曹伟煊');
+  assert.equal(result?.latestCompany, '中国建设银行');
+  assert.deepEqual(result?.companies, ['中国建设银行']);
+  assert.ok((result?.projectHighlights || []).includes('物联网云平台'));
+  assert.ok(!(result?.projectHighlights || []).some((entry) => /related_to|核心能力|医院智能化与零售信息化项目/.test(entry)));
+  assert.ok((result?.skills || []).includes('需求分析'));
+  assert.ok(!(result?.skills || []).includes('我的'));
+  assert.ok(!(result?.skills || []).includes('铁'));
+});
