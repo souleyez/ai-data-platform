@@ -281,6 +281,47 @@ test('buildKnowledgeFallbackOutput should suppress noisy resume company and proj
   assert.doesNotMatch(JSON.stringify(output.page), /求职意向|AIGC智能|帮助企业从0做成功5个年营收数千万的软件|负责项目的全面管理/);
 });
 
+test('buildKnowledgeFallbackOutput should suppress slug-like names and bim phrase companies in pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.docx',
+      name: 'default-sample-resume-senior-ops-manager.docx',
+      ext: '.docx',
+      title: '个人简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '9年经验，负责抖音三平台运营增长，涉及三维可视化及BIM运维等信息。',
+      excerpt: '9年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '个人',
+        latestCompany: '三维可视化及BIM运维等信息',
+        skills: ['运营管理', '数据分析'],
+        projectHighlights: ['抖音三平台'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中全部时间范围的简历，按人才维度整理候选人背景和项目信息，生成数据可视化静态页报表。',
+    documents,
+    {
+      title: '简历人才维度静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按人才维度整理简历信息',
+      pageSections: ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.doesNotMatch(JSON.stringify(output.page), /default-sample-resume-senior-ops-manager|个人|三维可视化及BIM运维等信息/);
+  assert.match(JSON.stringify(output.page), /抖音三平台/);
+});
+
 test('buildKnowledgeFallbackOutput should create a client-facing resume page for client requests', () => {
   const documents: ParsedDocument[] = [
     {

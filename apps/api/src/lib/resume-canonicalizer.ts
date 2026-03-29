@@ -9,7 +9,7 @@ export type ResumeCanonicalizationContext = {
 };
 
 const RESUME_HINT_PATTERN = /\b(?:resume|curriculum vitae|cv)\b|简历|履历|候选人|求职/i;
-const NAME_NOISE_PATTERN = /^(?:resume|cv|简历|个人简历|候选人|姓名|name|求职意向|基本信息|建立同比|年龄|男|女|本人|我的|并制作)$/i;
+const NAME_NOISE_PATTERN = /^(?:resume|cv|简历|个人简历|候选人|姓名|name|求职意向|基本信息|建立同比|年龄|男|女|本人|我的|并制作|个人)$/i;
 const NAME_ROLE_PATTERN = /(?:经理|总监|工程师|主管|专员|顾问|销售|运营|产品|设计师|程序员|开发|leader|负责人)$/i;
 const CONTACT_NOISE_PATTERN = /联系电话|电话|手机|邮箱|email|wechat|微信|qq|mail/i;
 const ROLE_NOISE_PATTERN = /求职意向|目标岗位|应聘岗位|当前职位|岗位职责|工作职责|工作内容|负责|参与|带领|管理/i;
@@ -53,6 +53,8 @@ function isLikelyPersonName(value: string) {
   if (NAME_ROLE_PATTERN.test(text)) return false;
   if (CONTACT_NOISE_PATTERN.test(text)) return false;
   if (COMPANY_SUFFIX_PATTERN.test(text)) return false;
+  if (/^(?:default|sample|test|demo|resume)[a-z0-9-]*$/i.test(text)) return false;
+  if (/^[a-z0-9-]{8,}$/i.test(text)) return false;
   if (/^(?:负责|参与|主导|推进|推动|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接|擅长|保障|协调)/u.test(text)) return false;
   if (/[,:;|/\\()（）【】[\]<>]/.test(text)) return false;
   if (/\d{2,}/.test(text)) return false;

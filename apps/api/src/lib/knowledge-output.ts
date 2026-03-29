@@ -606,7 +606,9 @@ function buildResumeFileBaseName(value: string) {
 function sanitizeResumeCandidateName(value: unknown) {
   const text = sanitizeText(value);
   if (!text) return '';
-  if (/^(resume|姓名|年龄|工作经验|年工作经验|邮箱|电话|手机)$/i.test(text)) return '';
+  if (/^(resume|姓名|年龄|工作经验|年工作经验|邮箱|电话|手机|个人|基本信息)$/i.test(text)) return '';
+  if (/^(?:default|sample|test|demo|resume)[a-z0-9-]*$/i.test(text)) return '';
+  if (/^[a-z0-9-]{8,}$/i.test(text)) return '';
   return isLikelyResumePersonName(text) ? text : '';
 }
 
@@ -657,6 +659,8 @@ function sanitizeResumeCompany(value: unknown) {
   if (/电话|手机|邮箱|工作经验|年工作经验|年龄|求职|简历|resume|负责|创立|建立|经营|销售额|同比|工作经历|核心能力|related_to/i.test(text)) return '';
   if (/营收|增长|成功/u.test(text)) return '';
   if (/(智能化|信息化)/u.test(text) && !hasExplicitOrgSuffix) return '';
+  if (/(?:可视化|BIM|等信息)/iu.test(text) && !hasExplicitOrgSuffix) return '';
+  if (/大学[\u4e00-\u9fff]{1,4}$/u.test(text) && !/(大学|学院|研究院)$/u.test(text)) return '';
   if (/\d{4}/.test(text)) return '';
   return text;
 }
