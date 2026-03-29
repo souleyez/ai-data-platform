@@ -116,3 +116,51 @@ test('normalizeReportOutput should normalize generic resume page titles into cli
     documents,
   ), false);
 });
+
+test('normalizeReportOutput should hydrate resume client pages with cards and charts when composer omits them', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: 'resume-1.pdf',
+      ext: '.pdf',
+      title: '夏天宇简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '夏天宇，5年经验，阿里斑马网络产品经理，负责智能座舱和 AIGC 平台项目。',
+      excerpt: '夏天宇，5年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '夏天宇',
+        latestCompany: '阿里斑马网络',
+        skills: ['产品设计', 'AIGC', '智能座舱'],
+        projectHighlights: ['智能座舱平台项目', 'AIGC 能力平台项目'],
+      },
+    },
+  ];
+
+  const output = normalizeReportOutput(
+    'page',
+    '请基于简历库生成一页客户汇报静态页',
+    JSON.stringify({
+      title: '简历人才维度静态页',
+      summary: '聚焦一位具备智能座舱与 AIGC 背景的候选人。',
+      sections: [
+        { title: '人才概览', body: '候选人聚焦产品与平台协同，适合客户沟通场景。' },
+        { title: '项目经历', body: '核心项目覆盖智能座舱平台和 AIGC 能力平台。' },
+        { title: 'AI综合分析', body: '整体画像更适合作为客户沟通和能力展示样板。' },
+      ],
+    }),
+    null,
+    documents,
+    [],
+    { allowResumeFallback: false },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '简历客户汇报静态页');
+  assert.equal(output.page?.sections?.[0]?.title, '人才概览');
+  assert.ok((output.page?.cards || []).length > 0);
+  assert.ok((output.page?.charts || []).length > 0);
+});

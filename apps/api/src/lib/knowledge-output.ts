@@ -1528,6 +1528,22 @@ function buildResumePageOutput(
   };
 }
 
+function hydrateResumePageVisualShell(
+  view: ResumeRequestView,
+  documents: ParsedDocument[],
+  envelope: ReportTemplateEnvelope | null | undefined,
+  displayProfiles: ResumeDisplayProfile[],
+  page: KnowledgePageOutput['page'],
+) {
+  const fallbackPage = buildResumePageOutput(view, documents, envelope, displayProfiles).page;
+  return {
+    summary: page.summary || fallbackPage.summary,
+    cards: page.cards?.length ? page.cards : fallbackPage.cards,
+    sections: page.sections?.length ? page.sections : fallbackPage.sections,
+    charts: page.charts?.length ? page.charts : fallbackPage.charts,
+  };
+}
+
 function countResumePipeEchoSections(sections: Array<{ title?: string; body?: string; bullets?: string[] }>) {
   return sections.filter((section) => (
     sanitizeText(section.body).includes(' | ')
@@ -1851,6 +1867,16 @@ export function normalizeReportOutput(
         charts,
       },
     };
+
+    if (resumeDocuments.length && normalizedOutput.page) {
+      normalizedOutput.page = hydrateResumePageVisualShell(
+        resumeView,
+        resumeDocuments,
+        envelope,
+        displayProfiles,
+        normalizedOutput.page,
+      );
+    }
 
     if (resumeDocuments.length && normalizedOutput.page && options.allowResumeFallback !== false) {
       if (shouldUseResumePageFallback(resumeView, normalizedOutput.title, normalizedOutput.page)) {
