@@ -191,13 +191,14 @@ test('adaptSelectedTemplatesForRequest should switch order page envelope by plat
     '请基于订单分析库按平台维度输出静态页，重点看天猫、京东、抖音的销量趋势和库存。',
   );
 
-  assert.equal(adapted[0]?.envelope.title, '订单平台维度静态页');
+  assert.equal(adapted[0]?.envelope.title, '订单渠道经营驾驶舱');
   assert.deepEqual(adapted[0]?.envelope.pageSections, [
-    '经营摘要',
-    '平台对比',
-    '品类覆盖',
-    '销量趋势',
-    '库存与备货建议',
+    '经营总览',
+    '渠道结构',
+    '平台角色与增量来源',
+    'SKU动销焦点',
+    '库存与补货',
+    '异常波动解释',
     'AI综合分析',
   ]);
 });

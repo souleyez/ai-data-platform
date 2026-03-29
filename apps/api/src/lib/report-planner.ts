@@ -136,7 +136,7 @@ function buildFallbackSections(templateTaskHint?: KnowledgeTemplateTaskHint | nu
     case 'paper-static-page':
       return ['研究概览', '核心发现', '证据质量', '行动建议', 'AI综合分析'];
     case 'order-static-page':
-      return ['经营摘要', '重点分析', '异常与机会', '行动建议', 'AI综合分析'];
+      return ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'];
     case 'iot-static-page':
       return ['方案概览', '核心模块', '接口与集成', '交付与风险', 'AI综合分析'];
     default:
@@ -157,7 +157,7 @@ function buildFallbackTitle(
     case 'paper-static-page':
       return '客户汇报型论文综述页';
     case 'order-static-page':
-      return '客户汇报型经营静态页';
+      return '客户汇报型多渠道经营驾驶舱';
     case 'iot-static-page':
       return '客户汇报型 IOT 方案静态页';
     default:
@@ -206,7 +206,7 @@ function buildObjective(
     case 'paper-static-page':
       return `Create a readable research insight page from ${primaryLabel}, turning paper evidence into a clear decision-oriented overview.`;
     case 'order-static-page':
-      return `Create an operating review page from ${primaryLabel}, surfacing business change, anomalies, and next actions.`;
+      return `Create a multi-channel, multi-SKU operating cockpit from ${primaryLabel}, highlighting channel mix, SKU concentration, inventory health, and replenishment priorities.`;
     case 'iot-static-page':
       return `Create a solution overview page from ${primaryLabel}, showing modules, integrations, delivery shape, and business value.`;
     default:
@@ -239,10 +239,11 @@ function buildCardPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | unde
       ];
     case 'order-static-page':
       return [
-        { label: '资料覆盖', purpose: 'Show how much order evidence is included.' },
-        { label: '平台/品类', purpose: 'Summarize the most visible operating scope.' },
-        { label: '异常波动', purpose: 'Highlight meaningful deviations or changes.' },
-        { label: '行动建议', purpose: 'Show the highest-value next step.' },
+        { label: '渠道GMV', purpose: 'Show the channel mix and where revenue concentration actually sits.' },
+        { label: '动销SKU', purpose: 'Show how many SKUs are truly contributing to sell-through instead of sitting idle.' },
+        { label: '高风险SKU', purpose: 'Surface SKUs with stockout, overstock, or margin pressure.' },
+        { label: '库存健康', purpose: 'Summarize whether the inventory structure can safely support the next cycle.' },
+        { label: '补货优先级', purpose: 'Show the most urgent replenishment or allocation actions.' },
       ];
     case 'iot-static-page':
       return [
@@ -280,8 +281,10 @@ function buildChartPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | und
       ];
     case 'order-static-page':
       return [
-        { title: '主题热点分布', purpose: 'Show repeated operating topics.' },
-        { title: '文档类型分布', purpose: 'Show the evidence composition behind the page.' },
+        { title: '渠道贡献结构', purpose: 'Show how business volume is distributed across marketplaces and channels.' },
+        { title: 'SKU动销/库存风险矩阵', purpose: 'Show which SKUs are both important and operationally fragile.' },
+        { title: '月度GMV与库存指数联动', purpose: 'Show whether growth and inventory health are moving together or drifting apart.' },
+        { title: '补货优先级队列', purpose: 'Show which replenishment actions should be handled first.' },
       ];
     case 'iot-static-page':
       return [
@@ -304,21 +307,21 @@ function buildSectionPurpose(title: string) {
       completionMode: 'knowledge-plus-model' as const,
     };
   }
-  if (/建议|行动|应答|应对/i.test(title)) {
+  if (/建议|行动|应答|应对|补货|优先级/i.test(title)) {
     return {
       purpose: 'Turn evidence into a clear next-step recommendation.',
       evidenceFocus: 'High-confidence findings, gaps, and practical actions.',
       completionMode: 'knowledge-plus-model' as const,
     };
   }
-  if (/风险|缺口|异常/i.test(title)) {
+  if (/风险|缺口|异常|波动/i.test(title)) {
     return {
       purpose: 'Highlight what can block delivery, understanding, or decision-making.',
       evidenceFocus: 'Risk signals, missing evidence, and unstable areas.',
       completionMode: 'knowledge-first' as const,
     };
   }
-  if (/概览|概况|摘要|总览/i.test(title)) {
+  if (/概览|概况|摘要|总览|渠道结构/i.test(title)) {
     return {
       purpose: 'Open with a clear conclusion and scope summary that a client can scan fast.',
       evidenceFocus: 'Library scope, coverage, and dominant signals.',

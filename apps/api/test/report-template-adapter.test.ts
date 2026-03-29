@@ -69,8 +69,42 @@ test('adaptTemplateEnvelopeForRequest should keep order platform page sections',
     '请基于订单分析知识库按平台维度输出静态页，重点看天猫、京东、抖音平台的销量趋势和库存。',
   );
 
-  assert.equal(result.title, '订单平台维度静态页');
-  assert.deepEqual(result.pageSections, ['经营摘要', '平台对比', '品类覆盖', '销量趋势', '库存与备货建议', 'AI综合分析']);
+  assert.equal(result.title, '订单渠道经营驾驶舱');
+  assert.deepEqual(result.pageSections, ['经营总览', '渠道结构', '平台角色与增量来源', 'SKU动销焦点', '库存与补货', '异常波动解释', 'AI综合分析']);
+});
+
+test('adaptTemplateEnvelopeForRequest should upgrade generic order page into a cockpit shell', () => {
+  const result = adaptTemplateEnvelopeForRequest(
+    makeGroup({
+      key: '订单分析',
+      label: '订单分析',
+      description: '订单经营知识库',
+      triggerKeywords: ['订单', '销售', '库存'],
+    }),
+    makeEnvelope(),
+    'page',
+    '请基于订单分析知识库输出经营驾驶舱，重点看增长结构和行动建议。',
+  );
+
+  assert.equal(result.title, '订单多渠道经营驾驶舱');
+  assert.deepEqual(result.pageSections, ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析']);
+});
+
+test('adaptTemplateEnvelopeForRequest should keep order stock cockpit sections', () => {
+  const result = adaptTemplateEnvelopeForRequest(
+    makeGroup({
+      key: '订单分析',
+      label: '订单分析',
+      description: '订单经营知识库',
+      triggerKeywords: ['订单', '销售', '库存'],
+    }),
+    makeEnvelope(),
+    'page',
+    '请基于订单分析知识库按库存维度输出静态页，重点看库存健康、周转和补货优先级。',
+  );
+
+  assert.equal(result.title, '库存与补货驾驶舱');
+  assert.deepEqual(result.pageSections, ['经营总览', '库存健康', '高风险SKU', '动销与周转', '补货优先级', '异常波动解释', 'AI综合分析']);
 });
 
 test('adaptTemplateEnvelopeForRequest should keep paper result page sections', () => {
