@@ -1827,9 +1827,15 @@ export function normalizeReportOutput(
       return buildPromptEchoFallbackOutput(kind, title, requestText, envelope);
     }
 
+    const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+    const resumeView = resumeDocuments.length ? resolveResumeRequestView(requestText) : 'generic';
+    const normalizedTitle = resumeDocuments.length
+      ? buildResumePageTitle(resumeView, envelope)
+      : title;
+
     const normalizedOutput: ChatOutput = {
       type: kind === 'page' ? 'page' : kind,
-      title,
+      title: normalizedTitle,
       content: content || summary,
       format: kind === 'page' ? 'html' : kind,
       page: {
@@ -1846,10 +1852,8 @@ export function normalizeReportOutput(
       },
     };
 
-    const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
     if (resumeDocuments.length && normalizedOutput.page && options.allowResumeFallback !== false) {
-      const view = resolveResumeRequestView(requestText);
-      if (shouldUseResumePageFallback(view, normalizedOutput.title, normalizedOutput.page)) {
+      if (shouldUseResumePageFallback(resumeView, normalizedOutput.title, normalizedOutput.page)) {
         return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope, displayProfiles);
       }
     }

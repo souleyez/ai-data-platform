@@ -150,6 +150,10 @@ function buildSeedProfileFromDocument(item: ParsedDocument) {
     ...(canonical?.companies || []),
     profile.latestCompany,
     ...(Array.isArray(profile.companies) ? profile.companies : []),
+    item.summary,
+    item.excerpt,
+    item.fullText,
+    item.title,
   ], 120);
   const displayProjects = sanitizeStringArray(
     canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : canonical?.projectHighlights,
@@ -212,6 +216,8 @@ function normalizeProfile(raw: unknown) {
   const displayCompany = selectResumeDisplayCompany([
     raw.displayCompany,
     ...(Array.isArray(raw.companies) ? raw.companies : []),
+    raw.displaySummary,
+    raw.summary,
   ], 160);
 
   const canonical = canonicalizeResumeFields({

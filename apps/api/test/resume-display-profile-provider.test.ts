@@ -151,6 +151,35 @@ test('buildResumeDisplaySeedProfiles should prefer enterprise employers over ass
   assert.doesNotMatch(profiles[0]?.displaySummary || '', /联合会|研究院/);
 });
 
+test('buildResumeDisplaySeedProfiles should recover enterprise employer from summary text', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-d.docx',
+      name: 'resume-d.docx',
+      ext: '.docx',
+      title: 'Wang Lei Resume',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '王磊，10年经验，先后服务于川渝MBA企业家联合会及西南校友经济研究院、广州汇聚智能科技，负责智慧园区管理平台。',
+      excerpt: '王磊，10年经验。',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '王磊',
+        latestCompany: '',
+        companies: [],
+        yearsOfExperience: '10年',
+        skills: ['Java', 'SQL'],
+        projectHighlights: ['智慧园区管理平台'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0]?.displayCompany, '广州汇聚智能科技');
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;
