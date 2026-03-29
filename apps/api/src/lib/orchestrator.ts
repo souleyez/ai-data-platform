@@ -16,6 +16,7 @@ export type ChatRequestInput = {
   sessionUser?: string;
   chatHistory?: ChatHistoryItem[];
   mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+  debugResumePage?: boolean;
   confirmedRequest?: string;
   preferredLibraries?: Array<{ key: string; label: string }>;
   conversationState?: unknown;
@@ -90,6 +91,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     fallbackReason,
   } = buildFallbackResponse(gatewayConfigured, requestMode);
   let reportTemplate: { key: string; label: string; type: string } | null = null;
+  let debug: Record<string, unknown> | null = null;
 
   if (gatewayConfigured) {
     try {
@@ -109,6 +111,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           timeRange: existingState?.timeRange,
           contentFocus: existingState?.contentFocus,
           sessionUser: input.sessionUser,
+          debugResumePage: input.debugResumePage === true,
           chatHistory,
         });
         libraries = result.libraries;
@@ -117,6 +120,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         intent = result.intent;
         mode = result.mode;
         reportTemplate = result.reportTemplate || null;
+        debug = result.debug || null;
       } else {
         const result = await runGeneralKnowledgeAwareChat({
           prompt,
@@ -169,6 +173,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       gatewayConfigured,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
     },
+    debug,
     conversationState,
     latencyMs: 120,
   };

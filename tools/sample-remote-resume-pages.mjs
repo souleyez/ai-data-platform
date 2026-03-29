@@ -7,6 +7,7 @@ function parseArgs(argv) {
     host: process.env.AIDP_REMOTE_HOST || '120.24.251.24',
     webPort: process.env.AIDP_REMOTE_WEB_PORT || '3002',
     outputDir: path.join(process.cwd(), 'tmp', 'resume-remote-samples'),
+    only: '',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -30,6 +31,11 @@ function parseArgs(argv) {
     if (value === '--output-dir' && next) {
       options.outputDir = next;
       index += 1;
+      continue;
+    }
+    if (value === '--only' && next) {
+      options.only = next;
+      index += 1;
     }
   }
 
@@ -43,6 +49,7 @@ function buildBaseUrl(protocol, host, port) {
 function simplify(payload) {
   const output = payload?.output || {};
   const page = output?.page || {};
+  const resumeDebug = payload?.debug?.resumePage || null;
   return {
     intent: payload?.intent || '',
     libraries: Array.isArray(payload?.libraries) ? payload.libraries.map((item) => item.label || item.key) : [],
@@ -59,6 +66,16 @@ function simplify(payload) {
       : [],
     charts: Array.isArray(page?.charts) ? page.charts : [],
     reportTemplate: payload?.reportTemplate || null,
+    debug: resumeDebug
+      ? {
+        templateMode: resumeDebug.templateMode || '',
+        displayProfileCount: Array.isArray(resumeDebug.displayProfiles) ? resumeDebug.displayProfiles.length : 0,
+        initialNeedsFallback: resumeDebug.initialNeedsFallback === true,
+        composerAttempted: Boolean(resumeDebug.composerModelContent),
+        composerNeedsFallback: resumeDebug.composerNeedsFallback,
+        finalStage: resumeDebug.finalStage || '',
+      }
+      : null,
   };
 }
 
@@ -116,12 +133,25 @@ async function main() {
       prompt: '\u8bf7\u57fa\u4e8e\u4eba\u624d\u7b80\u5386\u77e5\u8bc6\u5e93\u4e2d\u5168\u90e8\u65f6\u95f4\u8303\u56f4\u7684\u7b80\u5386\uff0c\u4e3a\u5ba2\u6237\u6c47\u62a5\u51c6\u5907\u4e00\u9875\u53ef\u89c6\u5316\u9759\u6001\u9875\uff0c\u9700\u8981\u7a81\u51fa\u4eba\u624d\u6982\u89c8\u3001\u4ee3\u8868\u9879\u76ee\u3001\u6838\u5fc3\u6280\u80fd\u3001\u5339\u914d\u5efa\u8bae\u548c AI \u7efc\u5408\u5206\u6790\u3002',
     },
   ];
+  const onlyKeys = String(options.only || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const activePrompts = onlyKeys.length
+    ? prompts.filter((item) => onlyKeys.includes(item.key))
+    : prompts;
 
-  for (const item of prompts) {
-    const payload = await postJsonUtf8(`${baseWeb}/api/chat`, { prompt: item.prompt }, item.key);
+  for (const item of activePrompts) {
+    const payload = await postJsonUtf8(`${baseWeb}/api/chat`, {
+      prompt: item.prompt,
+      debugResumePage: true,
+    }, item.key);
     const simplified = simplify(payload);
     await writeArtifact(options.outputDir, `${timestamp}-${item.key}.json`, payload);
     await writeArtifact(options.outputDir, `${timestamp}-${item.key}-summary.json`, simplified);
+    if (payload?.debug?.resumePage) {
+      await writeArtifact(options.outputDir, `${timestamp}-${item.key}-debug.json`, payload.debug.resumePage);
+    }
     console.log(`[sample] ${item.key} -> ${simplified.title || 'untitled'} | ${simplified.libraries.join(', ')}`);
   }
 }

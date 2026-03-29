@@ -49,7 +49,40 @@ export type KnowledgeExecutionInput = {
   timeRange?: string;
   contentFocus?: string;
   sessionUser?: string;
+  debugResumePage?: boolean;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
+};
+
+export type ResumePageDebugTrace = {
+  requestText: string;
+  templateMode: 'concept-page' | 'shared-template';
+  envelope: {
+    title: string;
+    pageSections: string[];
+    outputHint: string;
+  } | null;
+  reportPlan: {
+    objective: string;
+    sections: string[];
+    cards: string[];
+    charts: string[];
+  } | null;
+  displayProfiles: Array<{
+    sourcePath: string;
+    sourceName: string;
+    displayName: string;
+    displayCompany: string;
+    displayProjects: string[];
+    displaySkills: string[];
+    displaySummary: string;
+  }>;
+  initialModelContent: string;
+  initialOutput: ChatOutput | null;
+  initialNeedsFallback: boolean;
+  composerModelContent: string;
+  composerOutput: ChatOutput | null;
+  composerNeedsFallback: boolean | null;
+  finalStage: 'initial-output' | 'composer-output' | 'fallback-output' | 'catch-fallback-output';
 };
 
 export type KnowledgeExecutionResult = {
@@ -59,6 +92,9 @@ export type KnowledgeExecutionResult = {
   intent: 'report';
   mode: 'openclaw';
   reportTemplate?: { key: string; label: string; type: string } | null;
+  debug?: {
+    resumePage?: ResumePageDebugTrace;
+  } | null;
 };
 
 export type KnowledgeAnswerInput = {
@@ -183,6 +219,43 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : null;
   const resumeDisplayProfileContext = buildResumeDisplayProfileContextBlock(resumeDisplayProfileResolution);
+  const resumePageDebugTrace: ResumePageDebugTrace | null = input.debugResumePage && requestedKind === 'page'
+    ? {
+      requestText,
+      templateMode: conceptPageMode ? 'concept-page' : 'shared-template',
+      envelope: activeEnvelope
+        ? {
+          title: activeEnvelope.title || '',
+          pageSections: activeEnvelope.pageSections || [],
+          outputHint: activeEnvelope.outputHint || '',
+        }
+        : null,
+      reportPlan: reportPlan
+        ? {
+          objective: reportPlan.objective || '',
+          sections: (reportPlan.sections || []).map((item) => item.title),
+          cards: (reportPlan.cards || []).map((item) => item.label),
+          charts: (reportPlan.charts || []).map((item) => item.title),
+        }
+        : null,
+      displayProfiles: (resumeDisplayProfileResolution?.profiles || []).map((profile) => ({
+        sourcePath: profile.sourcePath,
+        sourceName: profile.sourceName,
+        displayName: profile.displayName,
+        displayCompany: profile.displayCompany,
+        displayProjects: profile.displayProjects,
+        displaySkills: profile.displaySkills,
+        displaySummary: profile.displaySummary,
+      })),
+      initialModelContent: '',
+      initialOutput: null,
+      initialNeedsFallback: false,
+      composerModelContent: '',
+      composerOutput: null,
+      composerNeedsFallback: null,
+      finalStage: 'initial-output',
+    }
+    : null;
   const conceptPageContext = conceptPageMode
     ? buildConceptPageSupplyBlock({
       requestText,
@@ -222,6 +295,10 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         ),
     });
 
+    if (resumePageDebugTrace) {
+      resumePageDebugTrace.initialModelContent = cloud.content;
+    }
+
     const initialOutput = normalizeReportOutput(
       requestedKind,
       requestText,
@@ -234,6 +311,10 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
 
     const needsResumeRetry = requestedKind === 'page'
       && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
+    if (resumePageDebugTrace) {
+      resumePageDebugTrace.initialOutput = initialOutput;
+      resumePageDebugTrace.initialNeedsFallback = needsResumeRetry;
+    }
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
     if (canComposeResumePage) {
@@ -246,6 +327,10 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         sessionUser: input.sessionUser,
       });
 
+      if (resumePageDebugTrace) {
+        resumePageDebugTrace.composerModelContent = composedContent || '';
+      }
+
       if (composedContent) {
         const composedOutput = normalizeReportOutput(
           requestedKind,
@@ -256,9 +341,19 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           resumeDisplayProfileResolution?.profiles || [],
           { allowResumeFallback: false },
         );
+        const composerNeedsFallback = shouldUseResumePageFallbackOutput(
+          requestText,
+          composedOutput,
+          supply.effectiveRetrieval.documents,
+        );
+        if (resumePageDebugTrace) {
+          resumePageDebugTrace.composerOutput = composedOutput;
+          resumePageDebugTrace.composerNeedsFallback = composerNeedsFallback;
+        }
 
-        if (!shouldUseResumePageFallbackOutput(requestText, composedOutput, supply.effectiveRetrieval.documents)) {
+        if (!composerNeedsFallback) {
           output = composedOutput;
+          if (resumePageDebugTrace) resumePageDebugTrace.finalStage = 'composer-output';
         } else {
           output = needsResumeRetry
             ? buildKnowledgeFallbackOutput(
@@ -269,6 +364,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
               resumeDisplayProfileResolution?.profiles || [],
             )
             : initialOutput;
+          if (resumePageDebugTrace) {
+            resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
+          }
         }
       } else {
         output = needsResumeRetry
@@ -280,6 +378,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
             resumeDisplayProfileResolution?.profiles || [],
           )
           : initialOutput;
+        if (resumePageDebugTrace) {
+          resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
+        }
       }
     } else {
       output = needsResumeRetry
@@ -291,6 +392,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           resumeDisplayProfileResolution?.profiles || [],
         )
         : initialOutput;
+      if (resumePageDebugTrace) {
+        resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
+      }
     }
   } catch {
     output = buildKnowledgeFallbackOutput(
@@ -300,6 +404,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       activeEnvelope,
       resumeDisplayProfileResolution?.profiles || [],
     );
+    if (resumePageDebugTrace) {
+      resumePageDebugTrace.finalStage = 'catch-fallback-output';
+    }
   }
 
   return {
@@ -315,6 +422,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           type: selectedTemplates[0].template.type,
         }
       : null,
+    debug: resumePageDebugTrace ? { resumePage: resumePageDebugTrace } : null,
   };
 }
 

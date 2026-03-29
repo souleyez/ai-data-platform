@@ -8,6 +8,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       promptBase64?: string;
       sessionUser?: string;
       mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+      debugResumePage?: boolean;
       confirmedRequest?: string;
       preferredLibraries?: Array<{ key?: string; label?: string }>;
       chatHistory?: Array<{ role?: string; content?: string }>;
@@ -40,6 +41,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
             .filter((item) => item.key || item.label)
         : [],
       sessionUser: body.sessionUser,
+      debugResumePage: body.debugResumePage === true,
       conversationState: body.conversationState ?? null,
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory
