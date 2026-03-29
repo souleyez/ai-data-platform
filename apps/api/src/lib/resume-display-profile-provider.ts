@@ -17,6 +17,10 @@ export type ResumeDisplayProfileResolution = {
   profiles: ResumeDisplayProfile[];
 };
 
+function buildProfileKey(profile: Pick<ResumeDisplayProfile, 'sourcePath' | 'sourceName'>) {
+  return `${sanitizeText(profile.sourcePath, 320)}::${sanitizeText(profile.sourceName, 160)}`;
+}
+
 function sanitizeText(value: unknown, maxLength = 240) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -70,6 +74,45 @@ function buildDocumentContext(item: ParsedDocument) {
     canonicalResumeFields: canonical || {},
     rawResumeFields: profile,
   };
+}
+
+function buildSeedProfileFromDocument(item: ParsedDocument) {
+  const profile = (item.resumeFields || item.structuredProfile || {}) as ResumeFields;
+  const canonical = canonicalizeResumeFields(profile, {
+    title: item.title,
+    sourceName: item.name,
+    summary: item.summary,
+    excerpt: item.excerpt,
+    fullText: item.fullText,
+  });
+
+  const displayName = sanitizeText(canonical?.candidateName, 60);
+  const displayCompany = sanitizeText(canonical?.latestCompany || canonical?.companies?.[0], 120);
+  const displayProjects = sanitizeStringArray(
+    canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : canonical?.projectHighlights,
+    80,
+  ).slice(0, 4);
+  const displaySkills = sanitizeStringArray(canonical?.skills, 40).slice(0, 6);
+  const displaySummary = sanitizeText(
+    canonical?.highlights?.[0]
+      || [canonical?.currentRole, canonical?.yearsOfExperience, canonical?.education, displayCompany].filter(Boolean).join(' | ')
+      || item.summary,
+    240,
+  );
+
+  if (!displayName && !displayCompany && !displayProjects.length && !displaySkills.length && !displaySummary) {
+    return null;
+  }
+
+  return {
+    sourcePath: item.path,
+    sourceName: item.name,
+    displayName,
+    displayCompany,
+    displayProjects,
+    displaySkills,
+    displaySummary,
+  } satisfies ResumeDisplayProfile;
 }
 
 async function buildSystemPrompt() {
@@ -151,20 +194,56 @@ export function buildResumeDisplayProfileContextBlock(resolution: ResumeDisplayP
   ].join('\n\n');
 }
 
+export function buildResumeDisplaySeedProfiles(documents: ParsedDocument[]) {
+  return documents
+    .filter((item) => item.schemaType === 'resume')
+    .slice(0, 8)
+    .map((item) => buildSeedProfileFromDocument(item))
+    .filter(Boolean) as ResumeDisplayProfile[];
+}
+
+function mergeResumeDisplayProfiles(primary: ResumeDisplayProfile[], fallback: ResumeDisplayProfile[]) {
+  const merged = new Map<string, ResumeDisplayProfile>();
+
+  for (const profile of fallback) {
+    merged.set(buildProfileKey(profile), profile);
+  }
+
+  for (const profile of primary) {
+    const key = buildProfileKey(profile);
+    const previous = merged.get(key);
+    merged.set(key, {
+      sourcePath: profile.sourcePath || previous?.sourcePath || '',
+      sourceName: profile.sourceName || previous?.sourceName || '',
+      displayName: profile.displayName || previous?.displayName || '',
+      displayCompany: profile.displayCompany || previous?.displayCompany || '',
+      displayProjects: profile.displayProjects?.length ? profile.displayProjects : (previous?.displayProjects || []),
+      displaySkills: profile.displaySkills?.length ? profile.displaySkills : (previous?.displaySkills || []),
+      displaySummary: profile.displaySummary || previous?.displaySummary || '',
+    });
+  }
+
+  return [...merged.values()].filter((profile) => profile.displayName || profile.displayCompany || profile.displayProjects.length || profile.displaySkills.length || profile.displaySummary);
+}
+
 export async function runResumeDisplayProfileResolver(input: {
   requestText: string;
   documents: ParsedDocument[];
   sessionUser?: string;
 }): Promise<ResumeDisplayProfileResolution | null> {
-  const documents = input.documents.filter((item) => item.schemaType === 'resume').slice(0, 10);
-  if (!documents.length || !isOpenClawGatewayConfigured()) return null;
+  const documents = input.documents.filter((item) => item.schemaType === 'resume').slice(0, 8);
+  const seedProfiles = buildResumeDisplaySeedProfiles(documents);
+  if (!documents.length) return null;
+  if (!isOpenClawGatewayConfigured()) {
+    return seedProfiles.length ? { profiles: seedProfiles } : null;
+  }
 
   const systemPrompt = await buildSystemPrompt();
   const prompt = [
     `Request: ${sanitizeText(input.requestText, 240)}`,
     'Resolve display-ready resume profiles for the following matched documents.',
     JSON.stringify({
-      profiles: documents.map((item) => buildDocumentContext(item)),
+      profiles: documents.slice(0, 6).map((item) => buildDocumentContext(item)),
     }, null, 2),
   ].join('\n\n');
 
@@ -174,8 +253,14 @@ export async function runResumeDisplayProfileResolver(input: {
       systemPrompt,
       sessionUser: input.sessionUser,
     });
-    return parseResumeDisplayProfileResponse(result.content);
+    const parsed = parseResumeDisplayProfileResponse(result.content);
+    if (!parsed?.profiles?.length) {
+      return seedProfiles.length ? { profiles: seedProfiles } : null;
+    }
+    return {
+      profiles: mergeResumeDisplayProfiles(parsed.profiles, seedProfiles),
+    };
   } catch {
-    return null;
+    return seedProfiles.length ? { profiles: seedProfiles } : null;
   }
 }

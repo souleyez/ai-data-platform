@@ -271,56 +271,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : '';
 
-  let output: ChatOutput;
-  let executionStage = 'initial-model';
+  let output: ChatOutput | null = null;
+  let executionStage = 'composer-model';
   try {
-    const cloud = await runOpenClawChat({
-      prompt: requestText,
-      sessionUser: input.sessionUser,
-      chatHistory: supply.knowledgeChatHistory,
-      contextBlocks: [
-        conceptPageContext,
-        reportPlanContext,
-        resumeDisplayProfileContext,
-        templateContext,
-        buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
-          timeRange: input.timeRange,
-          contentFocus: input.contentFocus,
-        }),
-      ].filter(Boolean),
-      systemPrompt: conceptPageMode
-        ? buildKnowledgeConceptPagePrompt(
-          skillInstruction,
-          buildReportInstruction(requestedKind),
-        )
-        : buildKnowledgeOutputPrompt(
-          skillInstruction,
-          templateInstruction,
-          buildReportInstruction(requestedKind),
-        ),
-    });
-
-    if (resumePageDebugTrace) {
-      resumePageDebugTrace.initialModelContent = cloud.content;
-    }
-
-    executionStage = 'initial-normalize';
-    const initialOutput = normalizeReportOutput(
-      requestedKind,
-      requestText,
-      cloud.content,
-      activeEnvelope,
-      supply.effectiveRetrieval.documents,
-      resumeDisplayProfileResolution?.profiles || [],
-      { allowResumeFallback: false },
-    );
-
-    const needsResumeRetry = requestedKind === 'page'
-      && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
-    if (resumePageDebugTrace) {
-      resumePageDebugTrace.initialOutput = initialOutput;
-      resumePageDebugTrace.initialNeedsFallback = needsResumeRetry;
-    }
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
     if (canComposeResumePage) {
@@ -362,35 +315,60 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         if (!composerNeedsFallback) {
           output = composedOutput;
           if (resumePageDebugTrace) resumePageDebugTrace.finalStage = 'composer-output';
-        } else {
-          output = needsResumeRetry
-            ? buildKnowledgeFallbackOutput(
-              requestedKind,
-              requestText,
-              supply.effectiveRetrieval.documents,
-              activeEnvelope,
-              resumeDisplayProfileResolution?.profiles || [],
-            )
-            : initialOutput;
-          if (resumePageDebugTrace) {
-            resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
-          }
-        }
-      } else {
-        output = needsResumeRetry
-          ? buildKnowledgeFallbackOutput(
-            requestedKind,
-            requestText,
-            supply.effectiveRetrieval.documents,
-            activeEnvelope,
-            resumeDisplayProfileResolution?.profiles || [],
-          )
-          : initialOutput;
-        if (resumePageDebugTrace) {
-          resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
         }
       }
-    } else {
+    }
+
+    if (!output) {
+      executionStage = 'initial-model';
+      const cloud = await runOpenClawChat({
+        prompt: requestText,
+        sessionUser: input.sessionUser,
+        chatHistory: supply.knowledgeChatHistory,
+        contextBlocks: [
+          conceptPageContext,
+          reportPlanContext,
+          resumeDisplayProfileContext,
+          templateContext,
+          buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
+            timeRange: input.timeRange,
+            contentFocus: input.contentFocus,
+          }),
+        ].filter(Boolean),
+        systemPrompt: conceptPageMode
+          ? buildKnowledgeConceptPagePrompt(
+            skillInstruction,
+            buildReportInstruction(requestedKind),
+          )
+          : buildKnowledgeOutputPrompt(
+            skillInstruction,
+            templateInstruction,
+            buildReportInstruction(requestedKind),
+          ),
+      });
+
+      if (resumePageDebugTrace) {
+        resumePageDebugTrace.initialModelContent = cloud.content;
+      }
+
+      executionStage = 'initial-normalize';
+      const initialOutput = normalizeReportOutput(
+        requestedKind,
+        requestText,
+        cloud.content,
+        activeEnvelope,
+        supply.effectiveRetrieval.documents,
+        resumeDisplayProfileResolution?.profiles || [],
+        { allowResumeFallback: false },
+      );
+
+      const needsResumeRetry = requestedKind === 'page'
+        && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
+      if (resumePageDebugTrace) {
+        resumePageDebugTrace.initialOutput = initialOutput;
+        resumePageDebugTrace.initialNeedsFallback = needsResumeRetry;
+      }
+
       output = needsResumeRetry
         ? buildKnowledgeFallbackOutput(
           requestedKind,
@@ -421,10 +399,18 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     }
   }
 
+  const finalOutput = output || buildKnowledgeFallbackOutput(
+    requestedKind,
+    requestText,
+    supply.effectiveRetrieval.documents,
+    activeEnvelope,
+    resumeDisplayProfileResolution?.profiles || [],
+  );
+
   return {
     libraries: resolvedLibraries,
-    output,
-    content: output.content,
+    output: finalOutput,
+    content: finalOutput.content,
     intent: 'report',
     mode: 'openclaw',
     reportTemplate: !conceptPageMode && selectedTemplates[0]
