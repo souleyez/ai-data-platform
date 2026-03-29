@@ -1,5 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import {
+  assertInvalidSharedReportHtml,
+  assertReportCenterPageHtml,
+  assertValidSharedReportHtml,
+  buildSharedReportPayload,
+} from './report-smoke-helpers.mjs';
 
 const baseWeb = process.env.AIDP_WEB_BASE_URL || 'http://127.0.0.1:3002';
 const baseApi = process.env.AIDP_API_BASE_URL || 'http://127.0.0.1:3100';
@@ -78,11 +84,7 @@ async function ensureHealthy() {
   const reports = await fetch(`${baseWeb}/reports`, { cache: 'no-store' });
   if (!reports.ok) throw new Error(`web reports page failed with ${reports.status}`);
   const reportsHtml = await reports.text();
-  for (const sectionLabel of ['\u7528\u6237\u4e0a\u4f20\u7684\u6a21\u677f', '\u5df2\u751f\u6210\u7684\u62a5\u8868']) {
-    if (!reportsHtml.includes(sectionLabel)) {
-      throw new Error(`web reports page is missing section label: ${sectionLabel}`);
-    }
-  }
+  assertReportCenterPageHtml(reportsHtml, 'web reports page');
 
   log('health', 'API, document center, and report center are reachable');
 }
@@ -182,25 +184,6 @@ function findReportOutput(state, outputId) {
   return Array.isArray(state?.outputRecords)
     ? state.outputRecords.find((item) => item?.id === outputId)
     : null;
-}
-
-function encodeBase64Url(text) {
-  return Buffer.from(String(text || ''), 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
-}
-
-function buildSharedReportPayload(item) {
-  if (!item || item.kind !== 'page') return '';
-
-  return encodeBase64Url(JSON.stringify({
-    title: item.title || '\u9759\u6001\u5206\u6790\u9875',
-    createdAt: item.createdAt || '',
-    content: item.content || '',
-    page: item.page || null,
-  }));
 }
 
 async function waitForReportGroup() {
@@ -371,19 +354,7 @@ async function verifySharedReportPage(item) {
   }
 
   const html = await response.text();
-  const title = String(item?.title || '').trim();
-  if (!title || !html.includes(title)) {
-    throw new Error('shared report page did not render the expected report title');
-  }
-  if (!html.includes('shared-report-shell') || !html.includes('shared-report-card')) {
-    throw new Error('shared report page is missing the expected shared page shell');
-  }
-  if (item?.page?.summary && !html.includes(String(item.page.summary))) {
-    throw new Error('shared report page did not render the expected page summary');
-  }
-  if (item?.page?.cards?.length && !html.includes('generated-page-card')) {
-    throw new Error('shared report page did not render the expected page cards');
-  }
+  assertValidSharedReportHtml(html, item, 'shared report page');
 
   log('reports', 'Shared report page renders valid payload content');
 }
@@ -397,12 +368,7 @@ async function verifyInvalidSharedReportPage() {
   }
 
   const html = await response.text();
-  if (!html.includes('shared-report-shell') || !html.includes('shared-report-card')) {
-    throw new Error('invalid shared report page is missing the shared page fallback shell');
-  }
-  if (!html.includes('\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548')) {
-    throw new Error('invalid shared report page did not render the expected fallback title');
-  }
+  assertInvalidSharedReportHtml(html, 'invalid shared report page');
 
   log('reports', 'Shared report page rejects invalid payload with fallback content');
 }

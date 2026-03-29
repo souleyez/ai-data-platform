@@ -761,10 +761,17 @@ function resolveOutputTypeLabel(kind?: 'table' | 'page' | 'ppt' | 'pdf', templat
 }
 
 type PersistedState = {
-  groups?: Array<Pick<ReportGroup, 'key' | 'label' | 'description' | 'triggerKeywords' | 'defaultTemplateKey' | 'templates' | 'referenceImages'>>;
-  templates?: SharedReportTemplate[];
-  outputs?: ReportOutputRecord[];
+  version: number;
+  groups: Array<Pick<ReportGroup, 'key' | 'label' | 'description' | 'triggerKeywords' | 'defaultTemplateKey' | 'templates' | 'referenceImages'>>;
+  templates: SharedReportTemplate[];
+  outputs: ReportOutputRecord[];
 };
+
+type LegacyPersistedState = Partial<PersistedState> & {
+  version?: number;
+};
+
+export const REPORT_STATE_VERSION = 1;
 
 function buildId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -775,18 +782,279 @@ async function ensureDirs() {
   await fs.mkdir(REPORT_REFERENCE_DIR, { recursive: true });
 }
 
-async function readState(): Promise<PersistedState> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeTextField(value: unknown) {
+  return String(value || '').trim();
+}
+
+function normalizeStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => normalizeTextField(item)).filter(Boolean)
+    : [];
+}
+
+function normalizeStoredTemplateType(value: unknown): ReportTemplateType {
+  const normalized = normalizeTextField(value);
+  return ['table', 'static-page', 'ppt', 'document'].includes(normalized)
+    ? (normalized as ReportTemplateType)
+    : 'document';
+}
+
+function normalizeStoredReferenceSourceType(value: unknown): ReportReferenceSourceType | undefined {
+  const normalized = normalizeTextField(value);
+  return ['word', 'ppt', 'spreadsheet', 'image', 'web-link', 'other'].includes(normalized)
+    ? (normalized as ReportReferenceSourceType)
+    : undefined;
+}
+
+function normalizeStoredGroupTemplate(value: unknown): ReportGroupTemplate | null {
+  if (!isRecord(value)) return null;
+
+  const key = normalizeTextField(value.key);
+  if (!key) return null;
+
+  return {
+    key,
+    label: normalizeTextField(value.label) || key,
+    type: normalizeStoredTemplateType(value.type),
+    description: normalizeTextField(value.description),
+    supported: value.supported !== false,
+  };
+}
+
+function normalizeStoredGroup(value: unknown): PersistedState['groups'][number] | null {
+  if (!isRecord(value)) return null;
+
+  const key = normalizeTextField(value.key);
+  if (!key) return null;
+
+  return {
+    key,
+    label: normalizeTextField(value.label) || key,
+    description: normalizeTextField(value.description),
+    triggerKeywords: normalizeStringList(value.triggerKeywords),
+    defaultTemplateKey: normalizeTextField(value.defaultTemplateKey),
+    templates: Array.isArray(value.templates)
+      ? value.templates.map((item) => normalizeStoredGroupTemplate(item)).filter(Boolean) as ReportGroupTemplate[]
+      : [],
+    referenceImages: Array.isArray(value.referenceImages)
+      ? value.referenceImages.map((item) => normalizeReportReferenceImage(item as Partial<ReportReferenceImage>)).filter(Boolean) as ReportReferenceImage[]
+      : [],
+  };
+}
+
+function normalizeStoredSharedTemplate(value: unknown): SharedReportTemplate | null {
+  if (!isRecord(value)) return null;
+
+  const key = normalizeTextField(value.key);
+  if (!key) return null;
+
+  return {
+    key,
+    label: normalizeTextField(value.label) || key,
+    type: normalizeStoredTemplateType(value.type),
+    description: normalizeTextField(value.description),
+    supported: value.supported !== false,
+    isDefault: Boolean(value.isDefault),
+    origin: normalizeTextField(value.origin) === 'system' ? 'system' : 'user',
+    createdAt: normalizeTextField(value.createdAt),
+    referenceImages: Array.isArray(value.referenceImages)
+      ? value.referenceImages.map((item) => normalizeReportReferenceImage(item as Partial<ReportReferenceImage>)).filter(Boolean) as ReportReferenceImage[]
+      : [],
+  };
+}
+
+function normalizeStoredLibraries(value: unknown): Array<{ key?: string; label?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const key = normalizeTextField(item.key);
+      const label = normalizeTextField(item.label);
+      return key || label ? { key, label } : null;
+    })
+    .filter(Boolean) as Array<{ key?: string; label?: string }>;
+}
+
+function normalizeStoredPageCard(value: unknown) {
+  if (!isRecord(value)) return null;
+  const label = normalizeTextField(value.label);
+  const rawValue = normalizeTextField(value.value);
+  const note = normalizeTextField(value.note);
+  return label || rawValue || note
+    ? { label, value: rawValue, note }
+    : null;
+}
+
+function normalizeStoredPageSection(value: unknown) {
+  if (!isRecord(value)) return null;
+  const title = normalizeTextField(value.title);
+  const body = normalizeTextField(value.body);
+  const bullets = normalizeStringList(value.bullets);
+  return title || body || bullets.length
+    ? { title, body, bullets }
+    : null;
+}
+
+function normalizeStoredPageChart(value: unknown) {
+  if (!isRecord(value)) return null;
+  const title = normalizeTextField(value.title);
+  const items = Array.isArray(value.items)
+    ? value.items
+      .map((item) => {
+        if (!isRecord(item)) return null;
+        const label = normalizeTextField(item.label);
+        const numericValue = Number(item.value);
+        return label
+          ? {
+            label,
+            value: Number.isFinite(numericValue) ? numericValue : 0,
+          }
+          : null;
+      })
+      .filter(Boolean) as Array<{ label?: string; value?: number }>
+    : [];
+
+  return title || items.length ? { title, items } : null;
+}
+
+function normalizeStoredPage(value: unknown): ReportOutputRecord['page'] | null {
+  if (!isRecord(value)) return null;
+
+  const summary = normalizeTextField(value.summary);
+  const cards: Array<{ label?: string; value?: string; note?: string }> = Array.isArray(value.cards)
+    ? value.cards.map((item) => normalizeStoredPageCard(item)).filter(Boolean) as Array<{ label?: string; value?: string; note?: string }>
+    : [];
+  const sections: Array<{ title?: string; body?: string; bullets?: string[] }> = Array.isArray(value.sections)
+    ? value.sections.map((item) => normalizeStoredPageSection(item)).filter(Boolean) as Array<{ title?: string; body?: string; bullets?: string[] }>
+    : [];
+  const charts: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }> = Array.isArray(value.charts)
+    ? value.charts.map((item) => normalizeStoredPageChart(item)).filter(Boolean) as Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>
+    : [];
+
+  return summary || cards.length || sections.length || charts.length
+    ? { summary, cards, sections, charts }
+    : null;
+}
+
+function normalizeStoredTable(value: unknown): ReportOutputRecord['table'] | null {
+  if (!isRecord(value)) return null;
+
+  const columns = normalizeStringList(value.columns);
+  const rows = Array.isArray(value.rows)
+    ? value.rows
+      .filter((item) => Array.isArray(item))
+      .map((row) => (row as unknown[]).map((cell) => {
+        if (cell == null) return null;
+        if (typeof cell === 'number') return cell;
+        return String(cell);
+      }))
+    : [];
+  const title = normalizeTextField(value.title);
+
+  return columns.length || rows.length || title
+    ? { columns, rows, title }
+    : null;
+}
+
+function normalizeStoredOutputKind(value: unknown): ReportOutputRecord['kind'] | undefined {
+  const normalized = normalizeTextField(value);
+  return ['table', 'page', 'ppt', 'pdf'].includes(normalized)
+    ? (normalized as ReportOutputRecord['kind'])
+    : undefined;
+}
+
+function normalizeStoredOutput(value: unknown): ReportOutputRecord | null {
+  if (!isRecord(value)) return null;
+
+  const id = normalizeTextField(value.id);
+  const groupKey = normalizeTextField(value.groupKey) || normalizeTextField(value.groupLabel);
+  if (!id || !groupKey) return null;
+
+  const groupLabel = normalizeTextField(value.groupLabel) || groupKey;
+  const templateKey = normalizeTextField(value.templateKey);
+  const templateLabel = normalizeTextField(value.templateLabel) || templateKey || '数据可视化静态页';
+  const kind = normalizeStoredOutputKind(value.kind || value.outputType);
+  const outputType = normalizeTextField(value.outputType) || kind || 'page';
+  const title = normalizeTextField(value.title) || `${groupLabel} 输出`;
+  const summary = normalizeTextField(value.summary) || normalizeTextField(value.content);
+  const libraries = normalizeStoredLibraries(value.libraries);
+
+  return {
+    id,
+    groupKey,
+    groupLabel,
+    templateKey,
+    templateLabel,
+    title,
+    outputType,
+    kind,
+    format: normalizeTextField(value.format),
+    createdAt: normalizeTextField(value.createdAt) || '1970-01-01T00:00:00.000Z',
+    status: 'ready',
+    summary,
+    triggerSource: normalizeTextField(value.triggerSource) === 'chat' ? 'chat' : 'report-center',
+    content: normalizeTextField(value.content),
+    table: normalizeStoredTable(value.table),
+    page: normalizeStoredPage(value.page),
+    libraries,
+    downloadUrl: normalizeTextField(value.downloadUrl),
+    dynamicSource: normalizeDynamicSource(
+      isRecord(value.dynamicSource) ? value.dynamicSource as Partial<ReportDynamicSource> : null,
+      {
+        request: title || summary,
+        kind,
+        templateKey,
+        templateLabel,
+        libraries,
+      },
+    ),
+  };
+}
+
+export function normalizePersistedReportState(raw: unknown): PersistedState {
+  const state = isRecord(raw) ? raw as LegacyPersistedState : {};
+  return {
+    version: REPORT_STATE_VERSION,
+    groups: Array.isArray(state.groups)
+      ? state.groups.map((item) => normalizeStoredGroup(item)).filter(Boolean) as PersistedState['groups']
+      : [],
+    templates: Array.isArray(state.templates)
+      ? state.templates.map((item) => normalizeStoredSharedTemplate(item)).filter(Boolean) as SharedReportTemplate[]
+      : [],
+    outputs: Array.isArray(state.outputs)
+      ? state.outputs.map((item) => normalizeStoredOutput(item)).filter(Boolean) as ReportOutputRecord[]
+      : [],
+  };
+}
+
+async function readState(): Promise<{ state: PersistedState; migrated: boolean }> {
   try {
     const raw = await fs.readFile(REPORT_STATE_FILE, 'utf8');
-    return JSON.parse(raw) as PersistedState;
+    const parsed = JSON.parse(raw) as unknown;
+    const state = normalizePersistedReportState(parsed);
+    return {
+      state,
+      migrated: JSON.stringify(parsed) !== JSON.stringify(state),
+    };
   } catch {
-    return {};
+    return {
+      state: normalizePersistedReportState(null),
+      migrated: false,
+    };
   }
 }
 
 async function writeState(state: PersistedState) {
   await ensureDirs();
-  await fs.writeFile(REPORT_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  await fs.writeFile(
+    REPORT_STATE_FILE,
+    JSON.stringify(normalizePersistedReportState(state), null, 2),
+    'utf8',
+  );
 }
 
 function isFormulaLibrary(label: string, key: string) {
@@ -1594,6 +1862,7 @@ export function resolveReportGroup(groups: ReportGroup[], groupKeyOrLabel: strin
 
 async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutputRecord[], templates?: SharedReportTemplate[]) {
   await writeState({
+    version: REPORT_STATE_VERSION,
     groups: groups.map((group) => ({
       key: group.key,
       label: group.label,
@@ -1603,13 +1872,13 @@ async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutput
       templates: group.templates,
       referenceImages: group.referenceImages,
     })),
-    templates: Array.isArray(templates) ? templates : undefined,
-    outputs,
+    templates: Array.isArray(templates) ? templates : [],
+    outputs: Array.isArray(outputs) ? outputs : [],
   });
 }
 
 export async function loadReportCenterState() {
-  const [state, libraries] = await Promise.all([readState(), loadDocumentLibraries()]);
+  const [{ state, migrated }, libraries] = await Promise.all([readState(), loadDocumentLibraries()]);
   const storedGroups = Array.isArray(state.groups) ? state.groups : [];
   const groups = libraries.map((library) => {
     const base = buildGroupFromLibrary(library.label, library.key);
@@ -1672,7 +1941,7 @@ export async function loadReportCenterState() {
     });
   }
 
-  if (changed || refreshedChanged) {
+  if (migrated || changed || refreshedChanged) {
     await saveGroupsAndOutputs(groups, nextOutputs, templates);
   }
 

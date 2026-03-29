@@ -5,6 +5,11 @@ import {
   type ReportTemplateEnvelope,
   type SharedReportTemplate,
 } from './report-center.js';
+import {
+  adaptConceptRequestEnvelope,
+  BID_CONCEPT_RULES,
+  IOT_CONCEPT_RULES,
+} from './concept-request-rules.js';
 import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 
 export type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
@@ -454,6 +459,7 @@ function adaptBidEnvelope(
   kind: KnowledgeOutputKind,
   view: BidRequestView,
 ): ReportTemplateEnvelope {
+  return adaptConceptRequestEnvelope(envelope, kind, view, BID_CONCEPT_RULES);
   if (view === 'generic') return envelope;
 
   if (kind === 'page') {
@@ -646,6 +652,7 @@ function adaptIotEnvelope(
   kind: KnowledgeOutputKind,
   view: IotRequestView,
 ): ReportTemplateEnvelope {
+  return adaptConceptRequestEnvelope(envelope, kind, view, IOT_CONCEPT_RULES);
   if (view === 'generic') return envelope;
 
   if (kind === 'page') {

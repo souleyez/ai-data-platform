@@ -1,5 +1,12 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import {
+  assertInvalidSharedReportHtml,
+  assertReportCenterPageHtml,
+  assertSectionsContainInOrder,
+  assertValidSharedReportHtml,
+  buildSharedReportPayload,
+} from './report-smoke-helpers.mjs';
 
 function parseArgs(argv) {
   const options = {
@@ -205,34 +212,6 @@ function readPageSummary(payload) {
   return String(payload?.output?.page?.summary || '').trim();
 }
 
-function assertSectionsContainInOrder(actual, expected, context) {
-  let cursor = 0;
-  for (const section of expected) {
-    const foundAt = actual.indexOf(section, cursor);
-    if (foundAt === -1) {
-      throw new Error(`${context} missing section "${section}" in ${actual.join(', ') || 'none'}`);
-    }
-    cursor = foundAt + 1;
-  }
-}
-
-function encodeBase64Url(text) {
-  return Buffer.from(String(text || ''), 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
-}
-
-function buildSharedReportPayload(item) {
-  return encodeBase64Url(JSON.stringify({
-    title: item?.title || 'remote-shared-report',
-    createdAt: item?.createdAt || '',
-    content: item?.content || '',
-    page: item?.page || null,
-  }));
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const baseApi = buildBaseUrl(options.protocol, options.host, options.apiPort);
@@ -261,9 +240,7 @@ async function main() {
 
   const reportsPage = await fetchText(`${baseWeb}/reports`, undefined, 'reports page');
   await writeTextArtifact(options.outputDir, `${timestamp}-reports-page.html`, reportsPage.text);
-  assertCondition(reportsPage.text.includes('\u62a5\u8868\u4e2d\u5fc3'), 'reports page is missing report center title');
-  assertCondition(reportsPage.text.includes('\u7528\u6237\u4e0a\u4f20\u7684\u6a21\u677f'), 'reports page is missing uploaded templates section');
-  assertCondition(reportsPage.text.includes('\u5df2\u751f\u6210\u7684\u62a5\u8868'), 'reports page is missing generated reports section');
+  assertReportCenterPageHtml(reportsPage.text, 'reports page');
   log('reports-page', 'Report center page ok');
 
   const sharedPayload = buildSharedReportPayload({
@@ -283,10 +260,13 @@ async function main() {
     'shared report page',
   );
   await writeTextArtifact(options.outputDir, `${timestamp}-shared-report-valid.html`, sharedReport.text);
-  assertCondition(sharedReport.text.includes('remote-shared-smoke-title'), 'shared report page is missing expected title');
-  assertCondition(sharedReport.text.includes('remote shared smoke summary'), 'shared report page is missing expected summary');
-  assertCondition(sharedReport.text.includes('shared-report-shell'), 'shared report page is missing expected shell');
-  assertCondition(sharedReport.text.includes('generated-page-card'), 'shared report page is missing rendered page cards');
+  assertValidSharedReportHtml(sharedReport.text, {
+    title: 'remote-shared-smoke-title',
+    page: {
+      summary: 'remote shared smoke summary',
+      cards: [{ label: 'Status', value: 'OK', note: 'remote shared smoke card' }],
+    },
+  }, 'shared report page');
   log('shared-report', 'Valid shared report page ok');
 
   const invalidSharedReport = await fetchText(
@@ -295,8 +275,7 @@ async function main() {
     'invalid shared report page',
   );
   await writeTextArtifact(options.outputDir, `${timestamp}-shared-report-invalid.html`, invalidSharedReport.text);
-  assertCondition(invalidSharedReport.text.includes('shared-report-shell'), 'invalid shared report page is missing shared shell');
-  assertCondition(invalidSharedReport.text.includes('\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548'), 'invalid shared report page is missing fallback title');
+  assertInvalidSharedReportHtml(invalidSharedReport.text, 'invalid shared report page');
   log('shared-report-invalid', 'Invalid shared report fallback ok');
 
   const generalPrompt = '\u4f60\u597d';
