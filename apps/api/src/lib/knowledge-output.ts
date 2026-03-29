@@ -611,10 +611,30 @@ function extractResumeCandidateNameFromText(value: unknown) {
 }
 
 function sanitizeResumeCompany(value: unknown) {
-  const text = sanitizeText(value);
+  const raw = sanitizeText(value);
+  if (!raw) return '';
+  const text = raw
+    .replace(/^(至今|现任|历任|曾任|负责过|负责|就职于|任职于)\s*/u, '')
+    .split(/核心能力|工作经历|项目经历|教育背景|联系方式/u)[0]
+    .split(/[，。；]/u)[0]
+    .trim();
   if (!text) return '';
   if (/@/.test(text)) return '';
-  if (/电话|手机|邮箱|工作经验|年工作经验|年龄|求职|简历|resume/i.test(text)) return '';
+  if (text.length > 40) return '';
+  if (/电话|手机|邮箱|工作经验|年工作经验|年龄|求职|简历|resume|负责|创立|建立|经营|销售额|同比|工作经历|核心能力|related_to/i.test(text)) return '';
+  if (/\d{4}/.test(text)) return '';
+  return text;
+}
+
+function sanitizeResumeProjectHighlight(value: unknown) {
+  const text = sanitizeText(value)
+    .replace(/^[•●⚫\-\d.\s]+/u, '')
+    .split(/工作经历|核心能力|教育背景|联系方式/u)[0]
+    .trim();
+  if (!text) return '';
+  if (text.length > 80) return '';
+  if (/related_to|mailto:|@/i.test(text)) return '';
+  if (!/(项目|project|系统|平台|方案|智能|座舱|消防|园区|aigc|物联网|交付|改造|运营|电商|风控|看板|中台|研发)/i.test(text)) return '';
   return text;
 }
 
@@ -650,6 +670,15 @@ function extractResumeYears(value: unknown) {
   return sanitizeText(match?.[1] || text);
 }
 
+function getResumeDisplayName(entry: ResumePageEntry) {
+  return (
+    entry.candidateName
+    || extractResumeCandidateNameFromText(entry.sourceTitle)
+    || extractResumeCandidateNameFromText(buildResumeFileBaseName(entry.sourceName))
+    || entry.sourceName
+  );
+}
+
 function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] {
   return documents
     .filter((item) => item.schemaType === 'resume')
@@ -670,11 +699,13 @@ function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] 
       ], 4);
       const latestCompany = sanitizeResumeCompany(profile.latestCompany) || companies[0] || '';
       const projectHighlights = normalizeUniqueStrings([
-        ...toStringArray(profile.projectHighlights),
-        ...toStringArray(profile.highlights).filter((entry) => /(项目|project|系统|平台|交付|架构|实施|开发)/i.test(entry)),
+        ...toStringArray(profile.projectHighlights).map((entry) => sanitizeResumeProjectHighlight(entry)),
+        ...toStringArray(profile.highlights)
+          .filter((entry) => /(项目|project|系统|平台|交付|架构|实施|开发)/i.test(entry))
+          .map((entry) => sanitizeResumeProjectHighlight(entry)),
       ], 6);
       const itProjectHighlights = normalizeUniqueStrings([
-        ...toStringArray(profile.itProjectHighlights),
+        ...toStringArray(profile.itProjectHighlights).map((entry) => sanitizeResumeProjectHighlight(entry)),
         ...projectHighlights.filter((entry) => /(it|项目|系统|平台|接口|架构|开发|实施|技术|api)/i.test(entry)),
       ], 6);
       const skills = normalizeUniqueStrings(profile.skills as unknown[] || [], 8);
@@ -729,7 +760,7 @@ function joinRankedLabels(items: Array<{ label: string; value: number }>, limit 
 
 function buildResumeCandidateLine(entry: ResumePageEntry) {
   const parts = [
-    entry.candidateName || entry.sourceTitle || entry.sourceName,
+    getResumeDisplayName(entry),
     entry.latestCompany ? `最近公司 ${entry.latestCompany}` : '',
     entry.yearsOfExperience || '',
     entry.education ? `学历 ${entry.education}` : '',
@@ -741,7 +772,7 @@ function buildResumeCandidateLine(entry: ResumePageEntry) {
 function buildResumeCompanyLine(item: { label: string; value: number }, stats: ResumePageStats) {
   const relatedCandidates = stats.entries
     .filter((entry) => entry.latestCompany === item.label)
-    .map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName)
+    .map((entry) => getResumeDisplayName(entry))
     .filter(Boolean)
     .slice(0, 3);
   const candidateText = relatedCandidates.length ? `；代表候选人 ${relatedCandidates.join('、')}` : '';
@@ -752,7 +783,7 @@ function buildResumeProjectLine(item: { label: string; value: number }, stats: R
   const owner = stats.entries.find((entry) => (
     entry.itProjectHighlights.includes(item.label) || entry.projectHighlights.includes(item.label)
   ));
-  const ownerText = owner?.candidateName || owner?.sourceTitle || owner?.sourceName || '';
+  const ownerText = owner ? getResumeDisplayName(owner) : '';
   const companyText = owner?.latestCompany ? `，关联公司 ${owner.latestCompany}` : '';
   return `${item.label}${ownerText ? `：代表候选人 ${ownerText}` : ''}${companyText}`;
 }
@@ -760,7 +791,7 @@ function buildResumeProjectLine(item: { label: string; value: number }, stats: R
 function buildResumeSkillLine(item: { label: string; value: number }, stats: ResumePageStats) {
   const candidates = stats.entries
     .filter((entry) => entry.skills.includes(item.label))
-    .map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName)
+    .map((entry) => getResumeDisplayName(entry))
     .filter(Boolean)
     .slice(0, 3);
   return `${item.label}：覆盖 ${item.value} 位候选人${candidates.length ? `；代表候选人 ${candidates.join('、')}` : ''}`;
@@ -783,7 +814,7 @@ function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
 
   const stats: ResumePageStats = {
     entries,
-    candidateCount: new Set(entries.map((entry) => entry.candidateName || entry.sourceTitle || entry.sourceName).filter(Boolean)).size,
+    candidateCount: new Set(entries.map((entry) => getResumeDisplayName(entry)).filter(Boolean)).size,
     companyCount: companies.length,
     projectCount: projects.length,
     skillCount: skills.length,
@@ -940,7 +971,7 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
 
   for (const entry of buildResumePageEntries(documents)) {
-    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const candidate = getResumeDisplayName(entry);
     const effectiveCompanies = entry.latestCompany ? [entry.latestCompany] : [UNKNOWN_COMPANY];
     const effectiveProjects = entry.itProjectHighlights.length
       ? entry.itProjectHighlights.slice(0, 6)
@@ -988,7 +1019,7 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
 function buildResumeProjectRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
   for (const entry of buildResumePageEntries(documents)) {
-    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const candidate = getResumeDisplayName(entry);
     const company = entry.latestCompany || UNKNOWN_COMPANY;
     const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
     for (const project of projects.slice(0, 6)) {
@@ -1009,7 +1040,7 @@ function buildResumeProjectRows(documents: ParsedDocument[]) {
 function buildResumeTalentRows(documents: ParsedDocument[]) {
   return buildResumePageEntries(documents)
     .map((entry) => [
-      entry.candidateName || entry.sourceTitle || entry.sourceName,
+      getResumeDisplayName(entry),
       entry.education,
       entry.latestCompany,
       entry.skills.slice(0, 6).join(' / '),
@@ -1025,7 +1056,7 @@ function buildResumeTalentRows(documents: ParsedDocument[]) {
 function buildResumeSkillRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
   for (const entry of buildResumePageEntries(documents)) {
-    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const candidate = getResumeDisplayName(entry);
     const latestCompany = entry.latestCompany || UNKNOWN_COMPANY;
     const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
     for (const skill of entry.skills.slice(0, 8)) {
@@ -1161,7 +1192,7 @@ function defaultResumePageSections(view: ResumeRequestView) {
 }
 
 function buildResumePageTitle(view: ResumeRequestView, envelope?: ReportTemplateEnvelope | null) {
-  if (envelope?.title) return envelope.title;
+  if (envelope?.title && hasExpectedResumeTitle(view, envelope.title)) return envelope.title;
   if (view === 'client') return '简历客户汇报静态页';
   if (view === 'company') return '简历公司维度 IT 项目静态页';
   if (view === 'project') return '简历项目维度静态页';
@@ -1335,7 +1366,8 @@ function buildResumePageCharts(view: ResumeRequestView, stats: ResumePageStats) 
 function buildResumePageOutput(view: ResumeRequestView, documents: ParsedDocument[], envelope?: ReportTemplateEnvelope | null): KnowledgePageOutput {
   const stats = buildResumePageStats(buildResumePageEntries(documents));
   const summary = buildResumePageSummary(view, documents.length, stats);
-  const sectionTitles = envelope?.pageSections?.length ? envelope.pageSections : defaultResumePageSections(view);
+  const shouldUseEnvelopeSections = Boolean(envelope?.pageSections?.length) && hasExpectedResumeTitle(view, envelope?.title || '');
+  const sectionTitles = shouldUseEnvelopeSections ? (envelope?.pageSections || []) : defaultResumePageSections(view);
   const blueprints = buildResumeSectionBlueprints(view, summary, stats);
 
   return {
