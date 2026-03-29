@@ -100,5 +100,6 @@ test('isWeakResumeCandidateName should treat masked honorifics and gender-only l
   assert.equal(isWeakResumeCandidateName('\u66fe\u5148\u751f'), true);
   assert.equal(isWeakResumeCandidateName('\u7537\u6027'), true);
   assert.equal(isWeakResumeCandidateName('\u5973'), true);
+  assert.equal(isWeakResumeCandidateName('\u5e74\u5de5\u4f5c\u7ecf'), true);
   assert.equal(isWeakResumeCandidateName('\u66fe\u6d77\u5cf0'), false);
 });

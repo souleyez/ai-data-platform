@@ -171,6 +171,7 @@ function sanitizeSeedProject(value: unknown) {
   if (/^(?:\u5728|\u4e86)\S*/u.test(candidate)) return '';
   if (/[\u4e0e\u53ca\u548c\u3001/]/u.test(candidate)) return '';
   if (/(?:\u6210\u529f|\u63d0\u4f9b|\u5b8c\u6210|\u63a8\u5e7f|\u6307\u5bfc|\u81f4\u529b|\u8d1f\u8d23|\u53c2\u4e0e|\u4e3b\u5bfc|\u642d\u5efa|\u5efa\u8bbe|\u5f00\u53d1|\u8bbe\u8ba1|\u7ef4\u62a4|\u4f18\u5316|\u63a8\u8fdb|\u652f\u6301|\u4ea4\u4ed8|\u843d\u5730|\u5b9e\u65bd)/u.test(candidate)) return '';
+  if (/(?:\d+\u4e2a|\u4e0a\u767e\u4e2a|\u591a\u4e2a|\u7cfb\u7edf\u7b49|\u7b49\u4e0a\u767e\u4e2a)/u.test(candidate)) return '';
   if (/\u9879\u76ee$/u.test(candidate) && !/(?:[A-Za-z0-9]|ERP|CRM|MES|WMS|SRM|BI|IoT|IOT|AIGC|AI|\u5e73\u53f0|\u7cfb\u7edf|\u4e2d\u53f0)/u.test(candidate)) return '';
   if (/^[\u4e00-\u9fff]{1}(?:\u5e73\u53f0|\u7cfb\u7edf|\u9879\u76ee|\u65b9\u6848|\u4e2d\u53f0)$/u.test(candidate)) return '';
   if (/[;；,，。]/u.test(candidate)) return '';
