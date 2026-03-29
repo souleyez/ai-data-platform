@@ -123,14 +123,25 @@ test('erp datasource run should emit readonly module summaries', async () => {
 
   assert.equal(result.run?.status, 'success');
   assert.equal(runs.length, 1);
-  assert.equal(runs[0]?.resultSummaries?.length, 8);
+  assert.ok((runs[0]?.resultSummaries?.length || 0) >= 11);
   assert.match(runs[0]?.resultSummaries?.[0]?.summary || '', /target|transport|readiness/i);
   assert.match(runs[0]?.resultSummaries?.[1]?.summary || '', /GET \/openapi\/ping|GET \/portal\/login|GET \/snapshot/i);
+  assert.ok(
+    (runs[0]?.resultSummaries || []).some((item) =>
+      item.label === 'capture:objective' && /list_then_detail|portal_export|hybrid/.test(item.summary || ''),
+    ),
+  );
+  assert.ok(
+    (runs[0]?.resultSummaries || []).some((item) =>
+      item.label === 'capture:orders' && /cursor|dedupe/.test(item.summary || ''),
+    ),
+  );
   assert.ok(
     (runs[0]?.resultSummaries || []).some((item) =>
       /list_then_detail|portal_export|dashboard_snapshot/.test(item.summary || ''),
     ),
   );
+  assert.match(runs[0]?.summary || '', /Order capture contract:/i);
 });
 
 test('web_public datasource run should create a successful run with an ingested document', async () => {

@@ -19,6 +19,10 @@ import {
 import { buildDatabaseExecutionPlan, buildDatabaseRunSummaryItems } from './datasource-database-connector.js';
 import { getDatasourceCredentialSecret } from './datasource-credentials.js';
 import { buildErpExecutionPlan, buildErpRunSummaryItems } from './datasource-erp-connector.js';
+import {
+  buildErpOrderCaptureSummaryItems,
+  runErpOrderCapturePlanner,
+} from './datasource-erp-order-capture.js';
 import { computeNextRunAt } from './datasource-schedule.js';
 
 function buildSyntheticRun(
@@ -151,14 +155,28 @@ export async function runDatasourceDefinition(id: string) {
 
   if (definition.kind === 'erp') {
     const plan = buildErpExecutionPlan(definition);
-    const resultSummaries = buildErpRunSummaryItems(plan);
+    const captureResolution = await runErpOrderCapturePlanner({
+      definition,
+      executionPlan: plan,
+    });
+    const baseSummaries = buildErpRunSummaryItems(plan);
+    const captureSummaries = buildErpOrderCaptureSummaryItems(plan, captureResolution);
+    const resultSummaries = [
+      ...baseSummaries.slice(0, 5),
+      ...captureSummaries,
+      ...baseSummaries.slice(5),
+    ];
     const status = plan.validationWarnings.length ? 'partial' : 'success';
+    const summary = [
+      plan.summary,
+      `Order capture contract: ${captureResolution.plan.captureMode} via ${captureResolution.plan.login.entryPath || '/'} (${captureResolution.provider}).`,
+    ].join(' ');
     const run = await appendDatasourceRun({
-      ...buildSyntheticRun(definition, status, plan.summary),
+      ...buildSyntheticRun(definition, status, summary),
       discoveredCount: plan.modules.length,
       capturedCount: plan.modules.length,
       resultSummaries,
-      summary: plan.summary,
+      summary,
     });
     const nextDefinition = await getDatasourceDefinition(definition.id);
     return { definition: nextDefinition, task: null, run };
