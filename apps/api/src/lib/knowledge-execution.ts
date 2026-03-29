@@ -79,6 +79,7 @@ export type ResumePageDebugTrace = {
   initialModelContent: string;
   initialOutput: ChatOutput | null;
   initialNeedsFallback: boolean;
+  composerAttempted: boolean;
   composerModelContent: string;
   composerOutput: ChatOutput | null;
   composerNeedsFallback: boolean | null;
@@ -252,6 +253,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       initialModelContent: '',
       initialOutput: null,
       initialNeedsFallback: false,
+      composerAttempted: false,
       composerModelContent: '',
       composerOutput: null,
       composerNeedsFallback: null,
@@ -277,6 +279,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
     if (canComposeResumePage) {
+      if (resumePageDebugTrace) {
+        resumePageDebugTrace.composerAttempted = true;
+      }
       executionStage = 'composer-model';
       const composedContent = await runResumePageComposer({
         requestText,
@@ -315,6 +320,19 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         if (!composerNeedsFallback) {
           output = composedOutput;
           if (resumePageDebugTrace) resumePageDebugTrace.finalStage = 'composer-output';
+        }
+      }
+
+      if (!output) {
+        output = buildKnowledgeFallbackOutput(
+          requestedKind,
+          requestText,
+          supply.effectiveRetrieval.documents,
+          activeEnvelope,
+          resumeDisplayProfileResolution?.profiles || [],
+        );
+        if (resumePageDebugTrace) {
+          resumePageDebugTrace.finalStage = 'fallback-output';
         }
       }
     }

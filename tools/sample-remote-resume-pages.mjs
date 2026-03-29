@@ -71,7 +71,7 @@ function simplify(payload) {
         templateMode: resumeDebug.templateMode || '',
         displayProfileCount: Array.isArray(resumeDebug.displayProfiles) ? resumeDebug.displayProfiles.length : 0,
         initialNeedsFallback: resumeDebug.initialNeedsFallback === true,
-        composerAttempted: Boolean(resumeDebug.composerModelContent),
+        composerAttempted: resumeDebug.composerAttempted === true,
         composerNeedsFallback: resumeDebug.composerNeedsFallback,
         errorStage: resumeDebug.errorStage || '',
         errorMessage: resumeDebug.errorMessage || '',

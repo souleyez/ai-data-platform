@@ -234,6 +234,9 @@ export async function runResumeDisplayProfileResolver(input: {
   const documents = input.documents.filter((item) => item.schemaType === 'resume').slice(0, 8);
   const seedProfiles = buildResumeDisplaySeedProfiles(documents);
   if (!documents.length) return null;
+  if (seedProfiles.length >= 4) {
+    return { profiles: seedProfiles };
+  }
   if (!isOpenClawGatewayConfigured()) {
     return seedProfiles.length ? { profiles: seedProfiles } : null;
   }

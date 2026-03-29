@@ -27,42 +27,34 @@ function buildComposerContext(input: {
     } : null,
     plan: input.reportPlan ? {
       objective: sanitizeText(input.reportPlan.objective, 240),
-      stylePriorities: input.reportPlan.stylePriorities || [],
-      evidenceRules: input.reportPlan.evidenceRules || [],
-      completionRules: input.reportPlan.completionRules || [],
-      cards: (input.reportPlan.cards || []).map((item) => ({
+      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, 4),
+      cards: (input.reportPlan.cards || []).slice(0, 4).map((item) => ({
         label: sanitizeText(item.label, 80),
-        purpose: sanitizeText(item.purpose, 160),
       })),
-      charts: (input.reportPlan.charts || []).map((item) => ({
+      charts: (input.reportPlan.charts || []).slice(0, 2).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, 160),
       })),
       sections: (input.reportPlan.sections || []).map((item) => ({
         title: sanitizeText(item.title, 80),
         purpose: sanitizeText(item.purpose, 160),
-        evidenceFocus: sanitizeText(item.evidenceFocus, 160),
-        completionMode: item.completionMode,
+        evidenceFocus: sanitizeText(item.evidenceFocus, 120),
       })),
-      knowledgeScope: input.reportPlan.knowledgeScope,
     } : null,
-    profiles: input.displayProfiles.map((profile) => ({
+    profiles: input.displayProfiles.slice(0, 6).map((profile) => ({
       sourcePath: sanitizeText(profile.sourcePath, 320),
       sourceName: sanitizeText(profile.sourceName, 160),
       displayName: sanitizeText(profile.displayName, 80),
       displayCompany: sanitizeText(profile.displayCompany, 160),
-      displayProjects: profile.displayProjects || [],
-      displaySkills: profile.displaySkills || [],
-      displaySummary: sanitizeText(profile.displaySummary, 240),
+      displayProjects: (profile.displayProjects || []).slice(0, 2),
+      displaySkills: (profile.displaySkills || []).slice(0, 4),
+      displaySummary: sanitizeText(profile.displaySummary, 120),
     })),
     supportingDocuments: input.documents
       .filter((item) => item.schemaType === 'resume')
-      .slice(0, 10)
+      .slice(0, 4)
       .map((item) => ({
-        path: sanitizeText(item.path, 320),
         name: sanitizeText(item.name, 160),
         title: sanitizeText(item.title, 120),
-        summary: sanitizeText(item.summary, 240),
       })),
   };
 }
