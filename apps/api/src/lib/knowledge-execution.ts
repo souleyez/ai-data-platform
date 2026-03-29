@@ -4,6 +4,7 @@ import {
   buildKnowledgeMissMessage,
   buildReportInstruction,
   normalizeReportOutput,
+  shouldUseResumePageFallbackOutput,
   type ChatOutput,
 } from './knowledge-output.js';
 import { detectOutputKind } from './knowledge-plan.js';
@@ -37,6 +38,7 @@ import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
 } from './resume-display-profile-provider.js';
+import { runResumePageComposer } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type KnowledgeExecutionInput = {
@@ -220,14 +222,69 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         ),
     });
 
-    output = normalizeReportOutput(
+    const initialOutput = normalizeReportOutput(
       requestedKind,
       requestText,
       cloud.content,
       activeEnvelope,
       supply.effectiveRetrieval.documents,
       resumeDisplayProfileResolution?.profiles || [],
+      { allowResumeFallback: false },
     );
+
+    const needsResumeRetry = requestedKind === 'page'
+      && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
+
+    if (needsResumeRetry && (resumeDisplayProfileResolution?.profiles || []).length) {
+      const composedContent = await runResumePageComposer({
+        requestText,
+        reportPlan,
+        envelope: activeEnvelope,
+        documents: supply.effectiveRetrieval.documents,
+        displayProfiles: resumeDisplayProfileResolution?.profiles || [],
+        sessionUser: input.sessionUser,
+      });
+
+      if (composedContent) {
+        const composedOutput = normalizeReportOutput(
+          requestedKind,
+          requestText,
+          composedContent,
+          activeEnvelope,
+          supply.effectiveRetrieval.documents,
+          resumeDisplayProfileResolution?.profiles || [],
+          { allowResumeFallback: false },
+        );
+
+        output = shouldUseResumePageFallbackOutput(requestText, composedOutput, supply.effectiveRetrieval.documents)
+          ? buildKnowledgeFallbackOutput(
+            requestedKind,
+            requestText,
+            supply.effectiveRetrieval.documents,
+            activeEnvelope,
+            resumeDisplayProfileResolution?.profiles || [],
+          )
+          : composedOutput;
+      } else {
+        output = buildKnowledgeFallbackOutput(
+          requestedKind,
+          requestText,
+          supply.effectiveRetrieval.documents,
+          activeEnvelope,
+          resumeDisplayProfileResolution?.profiles || [],
+        );
+      }
+    } else {
+      output = needsResumeRetry
+        ? buildKnowledgeFallbackOutput(
+          requestedKind,
+          requestText,
+          supply.effectiveRetrieval.documents,
+          activeEnvelope,
+          resumeDisplayProfileResolution?.profiles || [],
+        )
+        : initialOutput;
+    }
   } catch {
     output = buildKnowledgeFallbackOutput(
       requestedKind,

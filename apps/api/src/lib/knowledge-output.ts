@@ -25,6 +25,10 @@ export type ChatOutput =
       } | null;
     };
 
+export type NormalizeReportOutputOptions = {
+  allowResumeFallback?: boolean;
+};
+
 type JsonRecord = Record<string, unknown>;
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill' | 'client';
 type ResumePageEntry = {
@@ -1737,6 +1741,7 @@ export function normalizeReportOutput(
   envelope?: ReportTemplateEnvelope | null,
   documents: ParsedDocument[] = [],
   displayProfiles: ResumeDisplayProfile[] = [],
+  options: NormalizeReportOutputOptions = {},
 ): ChatOutput {
   const parsed = tryParseJsonPayload(rawContent);
   const root = isObject(parsed) ? parsed : {};
@@ -1791,7 +1796,7 @@ export function normalizeReportOutput(
     };
 
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
-    if (resumeDocuments.length && normalizedOutput.page) {
+    if (resumeDocuments.length && normalizedOutput.page && options.allowResumeFallback !== false) {
       const view = resolveResumeRequestView(requestText);
       if (shouldUseResumePageFallback(view, normalizedOutput.title, normalizedOutput.page)) {
         return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope, displayProfiles);
@@ -1858,4 +1863,15 @@ export function normalizeReportOutput(
       rows: finalRows,
     },
   };
+}
+
+export function shouldUseResumePageFallbackOutput(
+  requestText: string,
+  output: ChatOutput,
+  documents: ParsedDocument[] = [],
+) {
+  const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+  if (!resumeDocuments.length || output.type === 'answer' || !('page' in output) || !output.page) return false;
+  const view = resolveResumeRequestView(requestText);
+  return shouldUseResumePageFallback(view, output.title, output.page);
 }
