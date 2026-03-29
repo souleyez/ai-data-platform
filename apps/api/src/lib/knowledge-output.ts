@@ -62,6 +62,8 @@ type ResumePageStats = {
   projectLines: string[];
   skillLines: string[];
   salaryLines: string[];
+  showcaseCandidateNames: string[];
+  showcaseProjectLabels: string[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -885,13 +887,80 @@ function joinRankedLabels(items: Array<{ label: string; value: number }>, limit 
     .join('、');
 }
 
+function parseResumeExperienceYears(value: string) {
+  const match = sanitizeText(value).match(/(\d{1,2})(?:\+)?\s*(?:年|yrs?|years?)/iu);
+  if (!match) return 0;
+  return Number(match[1] || 0);
+}
+
+function scoreResumeEntry(entry: ResumePageEntry) {
+  let score = 0;
+  if (getResumeDisplayName(entry)) score += 18;
+  if (entry.latestCompany) score += 14;
+  if (entry.itProjectHighlights.length) score += 12 + Math.min(entry.itProjectHighlights.length, 3) * 2;
+  else if (entry.projectHighlights.length) score += 6 + Math.min(entry.projectHighlights.length, 3);
+  score += Math.min(entry.skills.length, 4) * 3;
+  if (entry.education) score += 2;
+  if (entry.summary || entry.highlights.length) score += 2;
+  score += Math.min(parseResumeExperienceYears(entry.yearsOfExperience), 20);
+  return score;
+}
+
+function sortResumeEntriesForClientShowcase(entries: ResumePageEntry[]) {
+  return [...entries].sort((left, right) => (
+    scoreResumeEntry(right) - scoreResumeEntry(left)
+    || right.itProjectHighlights.length - left.itProjectHighlights.length
+    || right.projectHighlights.length - left.projectHighlights.length
+    || right.skills.length - left.skills.length
+    || parseResumeExperienceYears(right.yearsOfExperience) - parseResumeExperienceYears(left.yearsOfExperience)
+    || getResumeDisplayName(left).localeCompare(getResumeDisplayName(right), 'zh-CN')
+  ));
+}
+
+function buildWeightedResumeProjectCounts(entries: ResumePageEntry[], limit = 10) {
+  const counts = new Map<string, { label: string; value: number; priority: number }>();
+  for (const entry of entries) {
+    const priority = scoreResumeEntry(entry);
+    const labels = (entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights)
+      .map((item) => sanitizeText(item))
+      .filter(Boolean);
+    for (const label of labels) {
+      const normalized = normalizeText(label);
+      if (!normalized) continue;
+      const next = counts.get(normalized);
+      if (next) {
+        next.value += 1;
+        next.priority = Math.max(next.priority, priority);
+        continue;
+      }
+      counts.set(normalized, { label, value: 1, priority });
+    }
+  }
+
+  return [...counts.values()]
+    .sort((left, right) => (
+      right.value - left.value
+      || right.priority - left.priority
+      || left.label.localeCompare(right.label, 'zh-CN')
+    ))
+    .slice(0, limit)
+    .map(({ label, value }) => ({ label, value }));
+}
+
+function buildResumeCandidateFit(entry: ResumePageEntry) {
+  return normalizeUniqueStrings([
+    ...(entry.itProjectHighlights.length ? entry.itProjectHighlights.slice(0, 1) : entry.projectHighlights.slice(0, 1)),
+    ...entry.skills.slice(0, 2),
+  ], 3).join(' / ');
+}
+
 function buildResumeCandidateLine(entry: ResumePageEntry) {
   const parts = [
     getResumeDisplayName(entry),
-    entry.latestCompany ? `最近公司 ${entry.latestCompany}` : '',
+    entry.latestCompany ? `${entry.latestCompany}` : '',
     entry.yearsOfExperience || '',
     entry.education ? `学历 ${entry.education}` : '',
-    entry.skills.length ? `技能 ${entry.skills.slice(0, 3).join(' / ')}` : '',
+    buildResumeCandidateFit(entry) ? `匹配 ${buildResumeCandidateFit(entry)}` : '',
   ].filter(Boolean);
   return parts.join('，');
 }
@@ -912,7 +981,8 @@ function buildResumeProjectLine(item: { label: string; value: number }, stats: R
   ));
   const ownerText = owner ? getResumeDisplayName(owner) : '';
   const companyText = owner?.latestCompany ? `，关联公司 ${owner.latestCompany}` : '';
-  return `${item.label}${ownerText ? `：代表候选人 ${ownerText}` : ''}${companyText}`;
+  const fitText = owner ? buildResumeCandidateFit(owner) : '';
+  return `${item.label}${ownerText ? `：代表候选人 ${ownerText}` : ''}${companyText}${fitText ? `；匹配 ${fitText}` : ''}`;
 }
 
 function buildResumeSkillLine(item: { label: string; value: number }, stats: ResumePageStats) {
@@ -924,24 +994,47 @@ function buildResumeSkillLine(item: { label: string; value: number }, stats: Res
   return `${item.label}：覆盖 ${item.value} 位候选人${candidates.length ? `；代表候选人 ${candidates.join('、')}` : ''}`;
 }
 
+function buildResumeClientRecommendationLines(stats: ResumePageStats) {
+  const lines: string[] = [];
+  const shortlist = stats.entries
+    .map((entry) => getResumeDisplayName(entry))
+    .filter(Boolean)
+    .slice(0, 3);
+  if (shortlist.length) {
+    lines.push(`首轮 shortlist 可优先沟通 ${shortlist.join('、')}，先做客户场景贴合度验证。`);
+  }
+  const topProjects = stats.showcaseProjectLabels.slice(0, 2);
+  if (topProjects.length) {
+    lines.push(`若目标场景接近 ${topProjects.join('、')}，优先核验同类项目中的实际角色、交付范围和协同深度。`);
+  }
+  const topSkills = joinRankedLabels(stats.skills, 3);
+  if (topSkills) {
+    lines.push(`技术岗位可先按 ${topSkills} 这组高频技能做交叉筛选，再补充具体业务经验判断。`);
+  }
+  if (stats.salaryLines.length) {
+    lines.push(`进入客户深聊前，建议补齐 ${stats.salaryLines.slice(0, 2).join('、')} 等薪资边界与到岗时间。`);
+  } else {
+    lines.push('进入客户深聊前，建议补齐到岗时间、城市偏好和薪资边界。');
+  }
+  return lines.slice(0, 4);
+}
+
 function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
-  const companies = buildRankedLabelCounts(entries.map((entry) => entry.latestCompany).filter(Boolean), 8);
-  const projects = buildRankedLabelCounts(
-    entries.flatMap((entry) => (entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights)).filter(Boolean),
-    10,
-  );
-  const skills = buildRankedLabelCounts(entries.flatMap((entry) => entry.skills).filter(Boolean), 10);
-  const educations = buildRankedLabelCounts(entries.map((entry) => entry.education).filter(Boolean), 6);
+  const rankedEntries = sortResumeEntriesForClientShowcase(entries);
+  const companies = buildRankedLabelCounts(rankedEntries.map((entry) => entry.latestCompany).filter(Boolean), 8);
+  const projects = buildWeightedResumeProjectCounts(rankedEntries, 10);
+  const skills = buildRankedLabelCounts(rankedEntries.flatMap((entry) => entry.skills).filter(Boolean), 10);
+  const educations = buildRankedLabelCounts(rankedEntries.map((entry) => entry.education).filter(Boolean), 6);
   const salaryLines = normalizeUniqueStrings(
-    entries
+    rankedEntries
       .map((entry) => entry.expectedSalary)
       .filter(Boolean),
     6,
   );
 
   const stats: ResumePageStats = {
-    entries,
-    candidateCount: new Set(entries.map((entry) => getResumeDisplayName(entry)).filter(Boolean)).size,
+    entries: rankedEntries,
+    candidateCount: new Set(rankedEntries.map((entry) => getResumeDisplayName(entry)).filter(Boolean)).size,
     companyCount: companies.length,
     projectCount: projects.length,
     skillCount: skills.length,
@@ -954,12 +1047,19 @@ function buildResumePageStats(entries: ResumePageEntry[]): ResumePageStats {
     projectLines: [],
     skillLines: [],
     salaryLines,
+    showcaseCandidateNames: [],
+    showcaseProjectLabels: [],
   };
 
-  stats.candidateLines = entries.filter((entry) => getResumeDisplayName(entry)).slice(0, 6).map(buildResumeCandidateLine);
+  stats.candidateLines = rankedEntries.filter((entry) => getResumeDisplayName(entry)).slice(0, 6).map(buildResumeCandidateLine);
   stats.companyLines = companies.map((item) => buildResumeCompanyLine(item, stats)).slice(0, 6);
   stats.projectLines = projects.map((item) => buildResumeProjectLine(item, stats)).slice(0, 6);
   stats.skillLines = skills.map((item) => buildResumeSkillLine(item, stats)).slice(0, 6);
+  stats.showcaseCandidateNames = rankedEntries
+    .map((entry) => getResumeDisplayName(entry))
+    .filter(Boolean)
+    .slice(0, 3);
+  stats.showcaseProjectLabels = projects.map((item) => item.label).slice(0, 3);
   return stats;
 }
 
@@ -1334,7 +1434,10 @@ function buildResumePageTitle(view: ResumeRequestView, envelope?: ReportTemplate
 
 function buildResumePageSummary(view: ResumeRequestView, documentCount: number, stats: ResumePageStats) {
   const shared = `当前基于库内 ${documentCount} 份简历，整理出 ${stats.candidateCount} 位候选人、${stats.companyCount} 家关联公司和 ${stats.projectCount} 条项目线索。`;
-  if (view === 'client') return `${shared} 当前页面采用客户汇报视角，重点展示代表候选人、核心技能和匹配建议。`;
+  if (view === 'talent') {
+    const shortlistText = stats.showcaseCandidateNames.length ? `优先展示 ${stats.showcaseCandidateNames.join('、')} 等 shortlist 候选人。` : '';
+    return `${shared} 当前页面采用客户汇报视角，重点展示代表候选人、代表项目、核心技能和匹配建议。${shortlistText}`;
+  }
   if (view === 'company') return `${shared} 当前页面按公司维度组织，适合快速查看目标公司的项目经验覆盖和人才结构。`;
   if (view === 'project') return `${shared} 当前页面按项目维度组织，适合对比代表项目、参与候选人和技术方向。`;
   if (view === 'skill') {
@@ -1346,10 +1449,30 @@ function buildResumePageSummary(view: ResumeRequestView, documentCount: number, 
 function buildResumePageCards(view: ResumeRequestView, documentCount: number, stats: ResumePageStats) {
   if (view === 'client') {
     return [
-      { label: '候选人覆盖', value: String(stats.candidateCount), note: '进入本页主展示的人才数量' },
-      { label: '公司覆盖', value: String(stats.companyCount), note: '可用于客户汇报的企业背景数量' },
-      { label: '项目匹配', value: String(stats.projectCount), note: '可用于客户沟通的代表项目线索' },
-      { label: '技能热点', value: joinRankedLabels(stats.skills, 3) || String(stats.skillCount), note: '高频能力标签与可复用技能主题' },
+      {
+        label: '候选人覆盖',
+        value: String(stats.candidateCount),
+        note: stats.showcaseCandidateNames.length
+          ? `优先 shortlist：${stats.showcaseCandidateNames.join('、')}`
+          : '进入本页主展示的人才数量',
+      },
+      {
+        label: '公司覆盖',
+        value: String(stats.companyCount),
+        note: joinRankedLabels(stats.companies, 2) || '可用于客户汇报的企业背景数量',
+      },
+      {
+        label: '项目匹配',
+        value: String(stats.projectCount),
+        note: stats.showcaseProjectLabels.length
+          ? `代表项目：${stats.showcaseProjectLabels.slice(0, 2).join('、')}`
+          : '可用于客户沟通的代表项目线索',
+      },
+      {
+        label: '技能热点',
+        value: joinRankedLabels(stats.skills, 3) || String(stats.skillCount),
+        note: `高频能力主题：${joinRankedLabels(stats.skills, 2) || '待补充'}`,
+      },
     ];
   }
   if (view === 'company') {
@@ -1387,6 +1510,38 @@ function buildResumePageCards(view: ResumeRequestView, documentCount: number, st
 function buildResumeSectionBlueprints(view: ResumeRequestView, summary: string, stats: ResumePageStats) {
   const compensationText = stats.salaryLines.length ? `；期望薪资线索包括 ${stats.salaryLines.slice(0, 3).join('、')}` : '';
   if (view === 'client') {
+    return [
+      {
+        body: summary,
+        bullets: [
+          `shortlist 候选人：${stats.showcaseCandidateNames.join('、')}`,
+          `重点公司：${joinRankedLabels(stats.companies, 4)}`,
+          `代表项目：${joinRankedLabels(stats.projects, 3)}`,
+        ].filter(Boolean),
+      },
+      {
+        body: `本页优先展示更适合进入客户首轮沟通的候选人，主要来自 ${joinRankedLabels(stats.companies, 4)} 等企业背景。`,
+        bullets: stats.candidateLines.slice(0, 5),
+      },
+      {
+        body: `代表项目聚焦 ${joinRankedLabels(stats.projects, 5)} 等方向，更适合用于客户场景映射和交付经验说明。`,
+        bullets: stats.projectLines.slice(0, 5),
+      },
+      {
+        body: `核心技能以 ${joinRankedLabels(stats.skills, 6)} 为主，覆盖后端交付、平台建设、产品协同等关键能力。`,
+        bullets: stats.skillLines.slice(0, 5),
+      },
+      {
+        body: `建议围绕 shortlist 候选人、相似项目场景和高频技能组合三条线做并行筛选${compensationText}。`,
+        bullets: buildResumeClientRecommendationLines(stats),
+      },
+      { body: '当前页以知识库证据为主、AI归纳为辅，适合作为客户沟通和内部筛选的第一版展示页。', bullets: [
+        '优先核验代表项目与最近公司是否与目标岗位高度相关',
+        '当证据不足时，以保守描述替代自由补完',
+      ] },
+    ];
+  }
+  if (view === 'talent') {
     return [
       { body: summary, bullets: [joinRankedLabels(stats.skills, 4), joinRankedLabels(stats.companies, 4), `代表项目 ${joinRankedLabels(stats.projects, 3)}`].filter(Boolean) },
       { body: `代表候选人主要集中在 ${joinRankedLabels(stats.companies, 4)} 等背景公司，可直接用于客户展示与初筛沟通。`, bullets: stats.candidateLines.slice(0, 5) },

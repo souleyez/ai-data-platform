@@ -384,6 +384,68 @@ test('buildKnowledgeFallbackOutput should create a client-facing resume page for
   assert.match((output.page?.sections?.[1]?.bullets || []).join('\n'), /夏天宇|谢泽强/);
 });
 
+test('buildKnowledgeFallbackOutput should rank stronger shortlist candidates and project evidence first for client pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-a.pdf',
+      name: '李明简历.pdf',
+      ext: '.pdf',
+      title: '李明简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '李明，5年经验，甲科技后端工程师，参与 Alpha 平台。',
+      excerpt: '李明，5年经验。',
+      extractedChars: 1024,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '李明',
+        latestCompany: '甲科技有限公司',
+        yearsOfExperience: '5年经验',
+        education: '本科',
+        skills: ['Java'],
+        projectHighlights: ['Alpha平台'],
+      },
+    },
+    {
+      path: 'resume-b.pdf',
+      name: '王强简历.pdf',
+      ext: '.pdf',
+      title: '王强简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '王强，15年经验，乙科技技术负责人，主导智慧园区管理平台与视频安防平台。',
+      excerpt: '王强，15年经验。',
+      extractedChars: 1024,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '王强',
+        latestCompany: '乙科技有限公司',
+        yearsOfExperience: '15年经验',
+        education: '本科',
+        skills: ['Java', 'Go', 'IoT'],
+        projectHighlights: ['智慧园区管理平台', '视频安防平台'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中的全部简历，为客户汇报准备一页可视化静态页，突出代表候选人、代表项目和匹配建议。',
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.page?.cards?.[0]?.label, '候选人覆盖');
+  assert.match(output.page?.cards?.[0]?.note || '', /王强/);
+  assert.match(output.page?.cards?.[2]?.note || '', /智慧园区管理平台|视频安防平台/);
+  assert.match(output.page?.sections?.[1]?.bullets?.[0] || '', /王强/);
+  assert.match(output.page?.sections?.[2]?.bullets?.[0] || '', /智慧园区管理平台|视频安防平台/);
+  assert.match((output.page?.sections?.[4]?.bullets || []).join('\n'), /shortlist|到岗时间/);
+  assert.doesNotMatch((output.page?.sections?.[4]?.bullets || []).join('\n'), /availability/i);
+});
+
 test('buildKnowledgeFallbackOutput should suppress non-enterprise organization labels in client pages', () => {
   const documents: ParsedDocument[] = [
     {
