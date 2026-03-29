@@ -184,6 +184,25 @@ function findReportOutput(state, outputId) {
     : null;
 }
 
+function encodeBase64Url(text) {
+  return Buffer.from(String(text || ''), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function buildSharedReportPayload(item) {
+  if (!item || item.kind !== 'page') return '';
+
+  return encodeBase64Url(JSON.stringify({
+    title: item.title || '\u9759\u6001\u5206\u6790\u9875',
+    createdAt: item.createdAt || '',
+    content: item.content || '',
+    page: item.page || null,
+  }));
+}
+
 async function waitForReportGroup() {
   const state = await poll(async () => {
     const payload = await loadReportState('report center group list');
@@ -340,6 +359,54 @@ async function verifyGeneratedReport(outputId) {
   return record;
 }
 
+async function verifySharedReportPage(item) {
+  const payload = buildSharedReportPayload(item);
+  if (!payload) throw new Error('shared report payload could not be created for page report');
+
+  const response = await fetch(`${baseWeb}/shared/report?payload=${encodeURIComponent(payload)}`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`shared report page failed with ${response.status}`);
+  }
+
+  const html = await response.text();
+  const title = String(item?.title || '').trim();
+  if (!title || !html.includes(title)) {
+    throw new Error('shared report page did not render the expected report title');
+  }
+  if (!html.includes('shared-report-shell') || !html.includes('shared-report-card')) {
+    throw new Error('shared report page is missing the expected shared page shell');
+  }
+  if (item?.page?.summary && !html.includes(String(item.page.summary))) {
+    throw new Error('shared report page did not render the expected page summary');
+  }
+  if (item?.page?.cards?.length && !html.includes('generated-page-card')) {
+    throw new Error('shared report page did not render the expected page cards');
+  }
+
+  log('reports', 'Shared report page renders valid payload content');
+}
+
+async function verifyInvalidSharedReportPage() {
+  const response = await fetch(`${baseWeb}/shared/report?payload=invalid-smoke`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`invalid shared report page failed with ${response.status}`);
+  }
+
+  const html = await response.text();
+  if (!html.includes('shared-report-shell') || !html.includes('shared-report-card')) {
+    throw new Error('invalid shared report page is missing the shared page fallback shell');
+  }
+  if (!html.includes('\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548')) {
+    throw new Error('invalid shared report page did not render the expected fallback title');
+  }
+
+  log('reports', 'Shared report page rejects invalid payload with fallback content');
+}
+
 async function reviseGeneratedReport(outputId, previousSummary) {
   const instruction = `Highlight risk actions for local smoke ${smokeId}`;
   const payload = await fetchJson(`${baseWeb}/api/reports/output/${encodeURIComponent(outputId)}/revise`, {
@@ -484,6 +551,8 @@ async function runReportCenterChecks() {
 
   createdReportOutputId = await createGeneratedReport(createdFileTemplateKey);
   const initialReport = await verifyGeneratedReport(createdReportOutputId);
+  await verifySharedReportPage(initialReport);
+  await verifyInvalidSharedReportPage();
   const revisedReport = await reviseGeneratedReport(createdReportOutputId, initialReport?.summary || '');
   await exportGeneratedReportPptx(revisedReport);
   await deleteGeneratedReport(createdReportOutputId);
