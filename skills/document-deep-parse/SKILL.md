@@ -28,6 +28,7 @@ This skill is for structured enrichment, not user-facing answering. Focus on ext
 - Keep `evidenceBlocks` to 3-8 high-value items.
 - Prefer evidence that helps retrieval and downstream report generation.
 - Use short, normalized strings for tags and intent slots.
+- For resumes, fill `resumeFields` only when the text explicitly supports them.
 - Leave arrays empty instead of guessing.
 - Use confidence values between `0` and `1`.
 

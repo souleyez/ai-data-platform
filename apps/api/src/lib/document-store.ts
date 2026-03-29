@@ -7,6 +7,7 @@ import { loadDocumentCategoryConfig } from './document-config.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 import { upsertDocumentVectorIndex } from './document-vector-index.js';
 import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
+import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import { loadRetainedDocuments } from './retained-documents.js';
 
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || STORAGE_FILES_DIR;
@@ -116,36 +117,6 @@ function normalizeDoseLabel(value: string) {
   return text.replace(/\bcfu\b/gi, 'CFU').replace(/\biu\b/gi, 'IU');
 }
 
-function sanitizeResumeFields(fields: ParsedDocument['resumeFields']) {
-  if (!fields) return undefined;
-  const normalize = (value?: string) => String(value || '').replace(/\s+/g, ' ').trim();
-  const isGoodName = (value?: string) => {
-    const text = normalize(value);
-    if (!text) return false;
-    if (/@/.test(text) || /\d{5,}/.test(text)) return false;
-    if (/联系电话|电话|手机|邮箱|email/i.test(text)) return false;
-    return true;
-  };
-  const normalizeList = (values?: string[]) => uniqStrings(values).map(normalize).filter(Boolean);
-  const sanitized = {
-    candidateName: isGoodName(fields.candidateName) ? normalize(fields.candidateName) : '',
-    targetRole: normalize(fields.targetRole),
-    currentRole: normalize(fields.currentRole),
-    yearsOfExperience: normalize(fields.yearsOfExperience),
-    education: normalize(fields.education),
-    major: normalize(fields.major),
-    expectedCity: normalize(fields.expectedCity),
-    expectedSalary: normalize(fields.expectedSalary),
-    latestCompany: normalize(fields.latestCompany),
-    companies: normalizeList(fields.companies),
-    skills: normalizeList(fields.skills),
-    highlights: normalizeList(fields.highlights),
-    projectHighlights: normalizeList(fields.projectHighlights),
-    itProjectHighlights: normalizeList(fields.itProjectHighlights),
-  };
-  return Object.values(sanitized).some((value) => Array.isArray(value) ? value.length : Boolean(value)) ? sanitized : undefined;
-}
-
 function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
   const allowedStrains = uniqStrings(item.intentSlots?.strains).filter(isValidStrainCandidate).map(normalizeStrainLabel).filter(Boolean);
   const allowedDoses = uniqStrings(item.intentSlots?.doses)
@@ -174,7 +145,7 @@ function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
     : item.category;
   const bizCategory = forceGenericNoise ? 'general' : item.bizCategory;
 
-  return {
+  return refreshDerivedSchemaProfile({
     ...item,
     schemaType,
     category,
@@ -206,8 +177,16 @@ function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
       organizations: uniqStrings(item.intentSlots?.organizations),
       metrics: uniqStrings(item.intentSlots?.metrics),
     },
-    resumeFields: schemaType === 'resume' ? sanitizeResumeFields(item.resumeFields) : undefined,
-  };
+    resumeFields: schemaType === 'resume'
+      ? canonicalizeResumeFields(item.resumeFields, {
+        title: item.title || item.name,
+        sourceName: item.name,
+        summary: item.summary,
+        excerpt: item.excerpt,
+        fullText: item.fullText,
+      })
+      : undefined,
+  });
 }
 
 export type DocumentEvidenceMatch = {

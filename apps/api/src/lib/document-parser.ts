@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
 import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
+import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import { buildAugmentedEnv, getOcrMyPdfCommandCandidates, getPythonCommandCandidates } from './runtime-executables.js';
 import { extractWithUIEWorker } from './uie-process-client.js';
 
@@ -1262,7 +1263,13 @@ function extractResumeFields(text: string, title: string, entities: StructuredEn
   if (fields.candidateName && !isLikelyResumePersonName(fields.candidateName)) {
     fields.candidateName = inferResumeNameFromTitle(titleText);
   }
-  return hasAnyValue ? fields : undefined;
+  return hasAnyValue
+    ? canonicalizeResumeFields(fields, {
+      title,
+      sourceName: title,
+      fullText: text,
+    })
+    : undefined;
 }
 
 function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'high' | undefined {

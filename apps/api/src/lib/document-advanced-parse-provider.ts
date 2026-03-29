@@ -26,10 +26,11 @@ function buildSystemPrompt() {
     'You are a document-structuring assistant for a private enterprise knowledge base.',
     'Return strict JSON only. No markdown. No explanation.',
     'Use this schema:',
-    '{"summary":"","topicTags":[],"riskLevel":"low|medium|high","evidenceBlocks":[{"title":"","text":""}],"entities":[{"text":"","type":"","confidence":0.8,"evidenceText":""}],"claims":[{"subject":"","predicate":"","object":"","confidence":0.8,"evidenceText":""}],"intentSlots":{"audiences":[],"ingredients":[],"strains":[],"benefits":[],"doses":[],"organizations":[],"metrics":[]}}',
+    '{"summary":"","topicTags":[],"riskLevel":"low|medium|high","evidenceBlocks":[{"title":"","text":""}],"entities":[{"text":"","type":"","confidence":0.8,"evidenceText":""}],"claims":[{"subject":"","predicate":"","object":"","confidence":0.8,"evidenceText":""}],"intentSlots":{"audiences":[],"ingredients":[],"strains":[],"benefits":[],"doses":[],"organizations":[],"metrics":[]},"resumeFields":{"candidateName":"","targetRole":"","currentRole":"","yearsOfExperience":"","education":"","major":"","expectedCity":"","expectedSalary":"","latestCompany":"","companies":[],"skills":[],"highlights":[],"projectHighlights":[],"itProjectHighlights":[]}}',
     'Do not invent facts.',
     'Keep 3-8 high-value evidence blocks.',
     'Prefer professional signals for contracts, formulas, technical documents, resumes, and research papers.',
+    'For resumes, populate resumeFields when the source text supports them. Leave unknown fields empty or omit them.',
   ].join(' ');
 }
 

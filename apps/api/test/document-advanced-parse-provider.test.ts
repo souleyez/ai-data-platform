@@ -38,10 +38,12 @@ test('buildDocumentAdvancedParseSystemPrompt should include workspace skill cont
   const skillPrompt = await buildDocumentAdvancedParseSystemPrompt('openclaw-skill');
 
   assert.match(chatPrompt, /document-structuring assistant/i);
+  assert.match(chatPrompt, /resumeFields/);
   assert.doesNotMatch(chatPrompt, /Workspace skill: document-deep-parse/);
   assert.match(skillPrompt, /Workspace skill: document-deep-parse/);
   assert.match(skillPrompt, /Document Deep Parse/);
   assert.match(skillPrompt, /Output Schema/);
+  assert.match(skillPrompt, /resumeFields/);
 });
 
 test('openclaw-skill provider should stay project-side and return null when gateway is not configured', async () => {

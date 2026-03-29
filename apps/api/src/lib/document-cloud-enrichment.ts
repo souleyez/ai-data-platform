@@ -8,6 +8,7 @@ import type {
 } from './document-parser.js';
 import { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
+import { mergeResumeFields } from './resume-canonicalizer.js';
 
 type CloudEvidenceBlock = {
   title?: string;
@@ -37,6 +38,7 @@ type CloudDocumentStructure = {
   entities?: CloudEntity[];
   claims?: CloudClaim[];
   intentSlots?: IntentSlots;
+  resumeFields?: Partial<ResumeFields>;
 };
 
 const CLOUD_ENRICH_ENABLED = process.env.ENABLE_OPENCLAW_DOCUMENT_STRUCTURING !== '0';
@@ -84,12 +86,17 @@ function buildDocumentContext(item: ParsedDocument) {
     .join('\n');
   const fullText = sanitizeText(item.fullText || '', Math.max(1200, MAX_PROMPT_CHARS));
 
+  const existingResumeFields = item.resumeFields && Object.values(item.resumeFields).some((value) => Array.isArray(value) ? value.length : Boolean(value))
+    ? `Existing resume fields: ${sanitizeText(JSON.stringify(item.resumeFields), 800)}`
+    : '';
+
   return [
     `Title: ${item.title || item.name}`,
     `Category: ${item.category}`,
     `Business category: ${item.bizCategory}`,
     `Existing summary: ${sanitizeText(item.summary, 500)}`,
     `Existing tags: ${(item.topicTags || []).join(', ') || 'none'}`,
+    existingResumeFields,
     `Excerpt: ${sanitizeText(item.excerpt, 1000)}`,
     evidence ? `Existing evidence blocks:\n${evidence}` : '',
     fullText ? `Source text excerpt:\n${fullText}` : '',
@@ -230,6 +237,16 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
   const topicTags = uniqStrings([...(item.topicTags || []), ...(structured.topicTags || [])]).slice(0, 16);
   const intentSlots = mergeIntentSlots(item.intentSlots, structured.intentSlots);
   const summary = sanitizeText(structured.summary, 500) || item.summary;
+  const resumeFields = mergeResumeFields(
+    [structured.resumeFields as ResumeFields | undefined, item.resumeFields as ResumeFields | undefined],
+    {
+      title: item.title || item.name,
+      sourceName: item.name,
+      summary,
+      excerpt: item.excerpt,
+      fullText: item.fullText,
+    },
+  );
   const schemaDerived = deriveSchemaProfile({
     category: item.category,
     bizCategory: item.bizCategory,
@@ -237,7 +254,7 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
     topicTags,
     summary,
     contractFields: item.contractFields,
-    resumeFields: item.resumeFields as ResumeFields | undefined,
+    resumeFields,
   });
 
   return refreshDerivedSchemaProfile({
@@ -251,6 +268,7 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
     entities,
     claims,
     intentSlots,
+    resumeFields,
     riskLevel: structured.riskLevel || item.riskLevel,
     schemaType: schemaDerived.schemaType,
     structuredProfile: schemaDerived.structuredProfile,

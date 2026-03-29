@@ -1,0 +1,69 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  canonicalizeResumeFields,
+  mergeResumeFields,
+} from '../src/lib/resume-canonicalizer.js';
+
+test('canonicalizeResumeFields should clean noisy resume slots into stable page-friendly fields', () => {
+  const result = canonicalizeResumeFields({
+    candidateName: '建立同比',
+    yearsOfExperience: '1年工作经验',
+    education: '本科（计算机相关）',
+    latestCompany: '广州云岚数码有限公司，运营经理，主导耳机与智能穿戴品类从0到1搭建',
+    skills: [' Java ', 'MySQL / Redis', '求职意向'],
+    projectHighlights: [
+      '系统搭建与上线: 领导团队成功从零开始搭建并准时上线复杂的广告投放系统',
+      '负责项目的全面管理，包括技术研发、市场推广和客户服务',
+    ],
+    highlights: ['求职意向'],
+  }, {
+    title: '夏天宇简历',
+    sourceName: '夏天宇简历.docx',
+    summary: '候选人夏天宇，求职方向产品经理，1年工作经验。',
+  });
+
+  assert.equal(result?.candidateName, '夏天宇');
+  assert.equal(result?.yearsOfExperience, '1年');
+  assert.equal(result?.education, '本科');
+  assert.equal(result?.latestCompany, '广州云岚数码有限公司');
+  assert.ok(result?.skills?.includes('Java'));
+  assert.ok(result?.skills?.includes('MySQL'));
+  assert.ok(result?.skills?.includes('Redis'));
+  assert.ok(result?.projectHighlights?.includes('系统搭建与上线'));
+  assert.ok(!(result?.projectHighlights || []).some((entry) => /负责项目的全面管理/.test(entry)));
+});
+
+test('mergeResumeFields should prefer supported deep-parse slots and keep canonical arrays', () => {
+  const merged = mergeResumeFields([
+    {
+      candidateName: '谢泽强',
+      latestCompany: '深圳达实智能股份有限公司',
+      yearsOfExperience: '10年以上工作经验',
+      education: '硕士研究生',
+      companies: ['深圳达实智能股份有限公司'],
+      projectHighlights: ['AIGC内容生成平台'],
+      skills: ['Java', 'Spring Boot'],
+    },
+    {
+      candidateName: 'RESUME',
+      latestCompany: 'AIGC智能',
+      companies: ['AIGC智能'],
+      projectHighlights: ['负责项目的全面管理，包括技术研发和市场推广'],
+      skills: ['Java', '求职意向'],
+    },
+  ], {
+    sourceName: '谢泽强简历.pdf',
+    title: '谢泽强简历',
+  });
+
+  assert.equal(merged?.candidateName, '谢泽强');
+  assert.equal(merged?.latestCompany, '深圳达实智能股份有限公司');
+  assert.equal(merged?.yearsOfExperience, '10+年');
+  assert.equal(merged?.education, '硕士');
+  assert.deepEqual(merged?.companies, ['深圳达实智能股份有限公司']);
+  assert.deepEqual(merged?.projectHighlights, ['AIGC内容生成平台']);
+  assert.ok(merged?.skills?.includes('Java'));
+  assert.ok(merged?.skills?.includes('Spring Boot'));
+  assert.ok(!(merged?.skills || []).includes('求职意向'));
+});

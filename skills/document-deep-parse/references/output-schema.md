@@ -38,6 +38,22 @@ Return a single JSON object using this shape:
     "doses": [],
     "organizations": [],
     "metrics": []
+  },
+  "resumeFields": {
+    "candidateName": "",
+    "targetRole": "",
+    "currentRole": "",
+    "yearsOfExperience": "",
+    "education": "",
+    "major": "",
+    "expectedCity": "",
+    "expectedSalary": "",
+    "latestCompany": "",
+    "companies": [],
+    "skills": [],
+    "highlights": [],
+    "projectHighlights": [],
+    "itProjectHighlights": []
   }
 }
 ```
@@ -71,6 +87,11 @@ Return a single JSON object using this shape:
 - `intentSlots`
   - fill with reusable query terms for downstream retrieval and reporting
   - prefer normalized nouns or noun phrases
+
+- `resumeFields`
+  - optional and only needed for resume-like documents
+  - fill candidate, company, role, education, skill, and project slots when the text clearly supports them
+  - prefer short canonical strings over long sentence fragments
 
 ## Quality bar
 
