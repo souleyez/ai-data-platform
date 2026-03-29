@@ -137,6 +137,9 @@ corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root
 - `-HealthUrl`
 - `-Services`
 - `-BuildPackages`
+- `-HealthTimeout`
+
+`HEALTH_TIMEOUT` is the post-restart readiness budget. The deploy script now retries the health probe until the timeout expires instead of failing on the first refused connection.
 
 ### Remote Preflight
 

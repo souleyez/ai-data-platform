@@ -9,6 +9,7 @@ BUILD_PACKAGES="${BUILD_PACKAGES:-api web worker}"
 SERVICES="${SERVICES:-ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3100/api/health}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-20}"
+HEALTH_RETRY_INTERVAL="${HEALTH_RETRY_INTERVAL:-2}"
 REMOTE_WORKTREE_MODE="${REMOTE_WORKTREE_MODE:-fail}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 STASH_MESSAGE="${STASH_MESSAGE:-ai-data-platform deploy preflight $(date -u +%Y%m%dT%H%M%SZ)}"
@@ -150,6 +151,35 @@ ensure_remote_worktree_ready() {
   esac
 }
 
+wait_for_health() {
+  local deadline=$((SECONDS + HEALTH_TIMEOUT))
+  local last_error=''
+  local health_output=''
+
+  while true; do
+    if health_output="$(curl --fail --silent --show-error --max-time "$HEALTH_RETRY_INTERVAL" "$HEALTH_URL" 2>&1)"; then
+      printf '%s\n' "$health_output"
+      return 0
+    fi
+
+    last_error="$health_output"
+    if (( SECONDS >= deadline )); then
+      [[ -n "$last_error" ]] && echo "$last_error" >&2
+      echo "Health check did not recover within ${HEALTH_TIMEOUT}s." >&2
+      return 1
+    fi
+
+    local remaining=$((deadline - SECONDS))
+    local sleep_for="$HEALTH_RETRY_INTERVAL"
+    if (( remaining < sleep_for )); then
+      sleep_for="$remaining"
+    fi
+    [[ -n "$last_error" ]] && echo "$last_error" >&2
+    echo "Health check not ready yet; retrying in ${sleep_for}s (${remaining}s remaining)." >&2
+    sleep "$sleep_for"
+  done
+}
+
 ensure_remote_worktree_ready
 
 if [[ "$PREFLIGHT_ONLY" == "1" ]]; then
@@ -175,6 +205,5 @@ systemctl restart $SERVICES
 systemctl is-active $SERVICES
 
 echo "==> Health check: $HEALTH_URL"
-curl --fail --silent --show-error --max-time "$HEALTH_TIMEOUT" "$HEALTH_URL"
-echo
+wait_for_health
 echo "Deployment finished."
