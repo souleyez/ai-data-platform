@@ -73,6 +73,8 @@ function simplify(payload) {
         initialNeedsFallback: resumeDebug.initialNeedsFallback === true,
         composerAttempted: Boolean(resumeDebug.composerModelContent),
         composerNeedsFallback: resumeDebug.composerNeedsFallback,
+        errorStage: resumeDebug.errorStage || '',
+        errorMessage: resumeDebug.errorMessage || '',
         finalStage: resumeDebug.finalStage || '',
       }
       : null,

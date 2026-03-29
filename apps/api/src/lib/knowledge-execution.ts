@@ -82,6 +82,8 @@ export type ResumePageDebugTrace = {
   composerModelContent: string;
   composerOutput: ChatOutput | null;
   composerNeedsFallback: boolean | null;
+  errorStage: string;
+  errorMessage: string;
   finalStage: 'initial-output' | 'composer-output' | 'fallback-output' | 'catch-fallback-output';
 };
 
@@ -253,6 +255,8 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       composerModelContent: '',
       composerOutput: null,
       composerNeedsFallback: null,
+      errorStage: '',
+      errorMessage: '',
       finalStage: 'initial-output',
     }
     : null;
@@ -268,6 +272,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     : '';
 
   let output: ChatOutput;
+  let executionStage = 'initial-model';
   try {
     const cloud = await runOpenClawChat({
       prompt: requestText,
@@ -299,6 +304,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       resumePageDebugTrace.initialModelContent = cloud.content;
     }
 
+    executionStage = 'initial-normalize';
     const initialOutput = normalizeReportOutput(
       requestedKind,
       requestText,
@@ -318,6 +324,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
     if (canComposeResumePage) {
+      executionStage = 'composer-model';
       const composedContent = await runResumePageComposer({
         requestText,
         reportPlan,
@@ -332,6 +339,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       }
 
       if (composedContent) {
+        executionStage = 'composer-normalize';
         const composedOutput = normalizeReportOutput(
           requestedKind,
           requestText,
@@ -396,7 +404,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         resumePageDebugTrace.finalStage = needsResumeRetry ? 'fallback-output' : 'initial-output';
       }
     }
-  } catch {
+  } catch (error) {
     output = buildKnowledgeFallbackOutput(
       requestedKind,
       requestText,
@@ -405,6 +413,10 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       resumeDisplayProfileResolution?.profiles || [],
     );
     if (resumePageDebugTrace) {
+      resumePageDebugTrace.errorStage = executionStage;
+      resumePageDebugTrace.errorMessage = error instanceof Error
+        ? error.message
+        : String(error || '');
       resumePageDebugTrace.finalStage = 'catch-fallback-output';
     }
   }
