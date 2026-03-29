@@ -131,3 +131,13 @@ corepack pnpm deploy:remote -- -Host 120.24.251.24 -User root -Password '<server
 - `-HealthUrl`
 - `-Services`
 - `-BuildPackages`
+
+### Remote Preflight
+
+`deploy:remote` now runs a remote git-worktree preflight before `fetch / pull`.
+
+- Default mode is fail-fast: any tracked or untracked repo change blocks deployment.
+- Use `corepack pnpm deploy:remote:preflight -- -Host 120.24.251.24 -User root -Password '<server-password>'` to inspect remote status without deploying.
+- Use `-RemoteWorktreeMode stash-safe` only when you explicitly want the deploy script to stash safe repo paths before pull.
+- `stash-safe` excludes `storage/files/uploads` and `deploy/server/*.env`, so runtime uploads and server env files stay untouched.
+- If remote code changes remain after `stash-safe`, the script still fails and prints the remaining paths for manual cleanup.
