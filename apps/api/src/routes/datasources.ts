@@ -12,6 +12,7 @@ import {
 import {
   deleteDatasourceCredential,
   getDatasourceCredential,
+  getDatasourceCredentialSecret,
   listDatasourceCredentials,
   upsertDatasourceCredential,
 } from '../lib/datasource-credentials.js';
@@ -21,6 +22,9 @@ import {
   pauseDatasourceDefinition,
   runDatasourceDefinition,
 } from '../lib/datasource-execution.js';
+import { buildErpExecutionPlan } from '../lib/datasource-erp-connector.js';
+import { runErpOrderCapturePlanner } from '../lib/datasource-erp-order-capture.js';
+import { runErpSessionBrowserLaunch } from '../lib/datasource-erp-session-launch.js';
 import { planDatasourceFromPrompt } from '../lib/datasource-planning.js';
 import {
   buildDatasourceDocumentSummaryMap,
@@ -398,6 +402,50 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       const message = error instanceof Error ? error.message : 'failed to run datasource definition';
       const code = /not found/i.test(message) ? 404 : 400;
       return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/datasources/definitions/:id/session-launch', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const body = (request.body || {}) as { execute?: boolean };
+    const id = String(params.id || '').trim();
+    const definition = id ? await getDatasourceDefinition(id) : null;
+    if (!definition) {
+      return reply.code(404).send({ error: 'datasource definition not found' });
+    }
+    if (definition.kind !== 'erp') {
+      return reply.code(400).send({ error: 'session launch only supports ERP datasource definitions' });
+    }
+
+    try {
+      const executionPlan = buildErpExecutionPlan(definition);
+      if (executionPlan.preferredTransport !== 'session') {
+        return reply.code(400).send({ error: 'ERP session launch only supports session transport datasources' });
+      }
+
+      const [captureResolution, credentialSecret] = await Promise.all([
+        runErpOrderCapturePlanner({
+          definition,
+          executionPlan,
+        }),
+        definition.credentialRef?.id ? getDatasourceCredentialSecret(definition.credentialRef.id) : Promise.resolve(null),
+      ]);
+
+      const item = await runErpSessionBrowserLaunch({
+        definition,
+        executionPlan,
+        captureResolution,
+        credentialSecret,
+        execute: Boolean(body.execute),
+      });
+
+      return {
+        status: item.execution.status === 'completed' ? 'launched' : 'prepared',
+        item,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed to prepare ERP session launch';
+      return reply.code(400).send({ error: message });
     }
   });
 
