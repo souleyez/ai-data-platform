@@ -18,7 +18,7 @@ const COMPANY_NOISE_PATTERN = /项目|职责|负责|参与|教育|学历|专业|
 const COMPANY_ACTION_PATTERN = /^(?:负责|参与|主导|推进|完成|统筹|带领|领导|帮助|协助|推动|实现|从0|熟悉|擅长|精通|我的|并|及|和)/;
 const PROJECT_KEYWORD_PATTERN = /(?:项目|系统|平台|应用|工程|方案|中台|小程序|APP|网站|商城|ERP|CRM|MES|WMS|SRM|BI|IoT|AIGC|AI|广告投放|风控|物业|社区|电商|运营平台|数据平台|管理平台|智慧)/i;
 const PROJECT_NOISE_PATTERN = /电话|邮箱|学历|教育|专业|期望|薪资|求职|工作经历|教育经历|自我评价|简历|候选人|related_to|基本信息/i;
-const PROJECT_ACTION_PATTERN = /^(?:负责|参与|主导|推进|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接)/;
+const PROJECT_ACTION_PATTERN = /^(?:负责|参与|主导|推进|推动|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接|擅长|保障|协调)/;
 const DEGREE_PATTERN = /(博士后|博士|硕士|研究生|MBA|EMBA|本科|学士|大专|专科|中专|高中)/i;
 const SKILL_NOISE_PATTERN = /^(?:求职意向|基本信息|我的|并制作|related_to)$/i;
 function uniqStrings(values: Array<string | undefined | null>) {
@@ -52,10 +52,13 @@ function isLikelyPersonName(value: string) {
   if (NAME_NOISE_PATTERN.test(text)) return false;
   if (NAME_ROLE_PATTERN.test(text)) return false;
   if (CONTACT_NOISE_PATTERN.test(text)) return false;
+  if (COMPANY_SUFFIX_PATTERN.test(text)) return false;
+  if (/^(?:负责|参与|主导|推进|推动|完成|统筹|带领|领导|优化|设计|开发|实施|维护|对接|擅长|保障|协调)/u.test(text)) return false;
   if (/[,:;|/\\()（）【】[\]<>]/.test(text)) return false;
   if (/\d{2,}/.test(text)) return false;
   if (/^[A-Za-z][A-Za-z\s.-]{1,40}$/.test(text)) return true;
-  if (/^[\u4e00-\u9fff·]{2,12}$/.test(text)) return true;
+  if (/^[\u4e00-\u9fff·]{2,4}$/.test(text)) return true;
+  if (/^[\u4e00-\u9fff·]{2,4}(?:先生|女士)$/.test(text)) return true;
   return false;
 }
 
@@ -209,6 +212,8 @@ function canonicalizeCompany(value: string) {
     if (COMPANY_ACTION_PATTERN.test(normalized)) continue;
     if (/^(?:\d+年|[一二三四五六七八九十]+年)/u.test(normalized)) continue;
     if (/(智能化|信息化|等信息)/u.test(normalized) && !hasExplicitOrgSuffix) continue;
+    if (/(?:可视化|BIM)/iu.test(normalized) && !hasExplicitOrgSuffix) continue;
+    if (/大学[\u4e00-\u9fff]{1,4}$/u.test(normalized) && !/(大学|学院|研究院)$/u.test(normalized)) continue;
     if (normalized.length > 24 && !hasExplicitOrgSuffix) continue;
     if (/^[A-Z0-9][A-Za-z0-9& .-]{1,18}(智能|科技|信息|软件|网络|系统|平台|电子)$/i.test(normalized)) continue;
     return normalized;
