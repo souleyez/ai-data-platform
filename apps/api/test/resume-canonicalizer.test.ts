@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonicalizeResumeFields,
+  isWeakResumeCandidateName,
   mergeResumeFields,
 } from '../src/lib/resume-canonicalizer.js';
 
@@ -94,4 +95,10 @@ test('canonicalizeResumeFields should reject role labels and list fragments as n
   assert.ok((result?.skills || []).includes('需求分析'));
   assert.ok(!(result?.skills || []).includes('我的'));
   assert.ok(!(result?.skills || []).includes('铁'));
+});
+test('isWeakResumeCandidateName should treat masked honorifics and gender-only labels as weak names', () => {
+  assert.equal(isWeakResumeCandidateName('\u66fe\u5148\u751f'), true);
+  assert.equal(isWeakResumeCandidateName('\u7537\u6027'), true);
+  assert.equal(isWeakResumeCandidateName('\u5973'), true);
+  assert.equal(isWeakResumeCandidateName('\u66fe\u6d77\u5cf0'), false);
 });

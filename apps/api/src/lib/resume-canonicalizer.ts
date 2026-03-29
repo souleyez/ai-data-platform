@@ -49,6 +49,7 @@ function stripSkillLabelPrefix(value: string) {
 export function isWeakResumeCandidateName(value: unknown) {
   const text = normalizeText(value, 40);
   if (!text) return false;
+  if (/^(?:\u7537\u6027|\u5973\u6027|\u7537|\u5973)$/u.test(text)) return true;
   return /^[\u4e00-\u9fff\u00b7]{1,3}(?:\u5148\u751f|\u5973\u58eb|\u8001\u5e08|\u540c\u5b66)$/u.test(text);
 }
 
