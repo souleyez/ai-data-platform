@@ -157,6 +157,86 @@ test('buildKnowledgeFallbackOutput should produce resume company table when clou
   assert.equal(output.table?.rows?.[0]?.[1], '张三');
 });
 
+test('buildKnowledgeFallbackOutput should clean noisy resume candidate names for talent pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '1774599818136-夏天宇简历（产品经理）2024.pdf',
+      ext: '.pdf',
+      title: 'RESUME',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: 'RESUME 夏天宇 求职意向：产品经理 5年经验，参与 AIGC 平台和智慧社区项目。',
+      excerpt: 'RESUME 夏天宇 求职意向：产品经理 5年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: 'RESUME',
+        education: '研究生',
+        skills: ['产品设计', 'Axure', '需求分析'],
+        projectHighlights: ['AIGC 平台产品规划', '智慧社区产品设计'],
+      },
+    },
+    {
+      path: 'resume-2.pdf',
+      name: '1774599953283-何先生简历.pdf',
+      ext: '.pdf',
+      title: '男 | 年龄：38岁 | 16782079675',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '何先生，17年工作经验，曾任广州鹰云信息科技有限公司区域总监，负责智慧园区和支付平台项目。',
+      excerpt: '何先生，17年工作经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '年龄',
+        education: '大专',
+        skills: ['销售管理', '项目跟进'],
+        projectHighlights: ['智慧园区项目销售管理', '支付平台交付跟进'],
+      },
+    },
+    {
+      path: 'resume-3.pdf',
+      name: '1774599953287-吴楚镰简历.pdf',
+      ext: '.pdf',
+      title: '邮箱：1187927981@qq.com',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '吴楚镰，29岁，五年软件行业销售经验，负责医院智能化与零售信息化项目。',
+      excerpt: '吴楚镰，29岁。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        education: '大专',
+        skills: ['标书制作', '方案演讲'],
+        projectHighlights: ['医院智能化项目', '零售信息化项目'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '基于人才简历知识库中全部时间范围的简历，按人才维度整理候选人背景和项目信息，生成数据可视化静态页报表。',
+    documents,
+    {
+      title: '简历人才维度静态页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '按人才维度整理简历信息',
+      pageSections: ['人才概览', '学历与背景', '公司经历', '项目经历', '核心能力', 'AI综合分析'],
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.page?.cards?.[1]?.value, '3');
+  assert.doesNotMatch(output.page?.sections?.[0]?.body || '', /\bRESUME\b|年龄：/i);
+  assert.doesNotMatch((output.page?.charts?.[0]?.items || []).map((item) => item.label).join('|'), /\bRESUME\b|年龄/i);
+  assert.match(output.page?.sections?.[1]?.body || '', /夏天宇|何先生|吴楚镰/);
+});
+
 test('normalizeReportOutput should convert supply-echo json into readable concept page output', () => {
   const output = normalizeReportOutput(
     'page',

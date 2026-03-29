@@ -24,6 +24,7 @@ export function buildKnowledgeOutputPrompt(
     skillInstruction,
     'Follow the shared template envelope closely and keep free-form invention to a minimum.',
     'If evidence is incomplete, fill gaps conservatively and keep uncertainty explicit in the content.',
+    'Only use counts, percentages, salary ranges, city distributions, investment amounts, or other hard metrics when they are directly derivable from the supplied evidence.',
     templateInstruction,
     reportInstruction,
   ]
@@ -45,6 +46,7 @@ export function buildKnowledgeConceptPagePrompt(
     'Treat the local system as the evidence and planning layer that narrows files, evidence, and page structure.',
     skillInstruction,
     'If evidence is incomplete, keep the page conservative and make uncertainty explicit.',
+    'Only use counts, percentages, salary ranges, city distributions, investment amounts, or other hard metrics when they are directly derivable from the supplied evidence.',
     reportInstruction,
   ]
     .filter(Boolean)

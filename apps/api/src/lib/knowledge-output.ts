@@ -1,4 +1,5 @@
 import type { ParsedDocument } from './document-parser.js';
+import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
 
 export type ChatOutput =
@@ -24,6 +25,21 @@ export type ChatOutput =
 
 type JsonRecord = Record<string, unknown>;
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill';
+type ResumePageEntry = {
+  candidateName: string;
+  education: string;
+  latestCompany: string;
+  yearsOfExperience: string;
+  skills: string[];
+  projectHighlights: string[];
+  itProjectHighlights: string[];
+  highlights: string[];
+  expectedCity: string;
+  expectedSalary: string;
+  sourceName: string;
+  sourceTitle: string;
+  summary: string;
+};
 type KnowledgePageOutput = {
   type: 'page';
   title: string;
@@ -523,6 +539,151 @@ function getResumeProfile(item: ParsedDocument) {
   return (item.structuredProfile || {}) as Record<string, unknown>;
 }
 
+function normalizeUniqueStrings(values: unknown[], limit = 8) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = sanitizeText(value);
+    if (!text) continue;
+    const normalized = normalizeText(text);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(text);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function buildResumeFileBaseName(value: string) {
+  return sanitizeText(String(value || '').replace(/\.[a-z0-9]+$/i, '').replace(/^\d{8,16}-/, ''));
+}
+
+function sanitizeResumeCandidateName(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  if (/^(resume|姓名|年龄|工作经验|年工作经验|邮箱|电话|手机)$/i.test(text)) return '';
+  return isLikelyResumePersonName(text) ? text : '';
+}
+
+function extractResumeCandidateNameFromText(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+
+  const direct = sanitizeResumeCandidateName(text);
+  if (direct) return direct;
+
+  const patterns = [
+    /resume\s*[:：-]?\s*([\u4e00-\u9fff·]{2,12})/i,
+    /简历\s*[:：-]?\s*([\u4e00-\u9fff·]{2,12})/i,
+    /^([\u4e00-\u9fff·]{2,12})(?:[，,\s]|男|女|求职|工作|现居|本科|硕士|研究生|mba|大专|博士)/i,
+    /([\u4e00-\u9fff·]{2,12})[，,]\d{1,2}岁/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const candidate = sanitizeResumeCandidateName(match?.[1]);
+    if (candidate) return candidate;
+  }
+
+  const tokenMatches = text.match(/[\u4e00-\u9fff·]{2,12}/gu) || [];
+  for (const token of tokenMatches.slice(0, 12)) {
+    const candidate = sanitizeResumeCandidateName(token);
+    if (candidate) return candidate;
+  }
+
+  return '';
+}
+
+function sanitizeResumeCompany(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  if (/@/.test(text)) return '';
+  if (/电话|手机|邮箱|工作经验|年工作经验|年龄|求职|简历|resume/i.test(text)) return '';
+  return text;
+}
+
+function extractResumeCompanyFromText(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+
+  const patterns = [
+    /([\u4e00-\u9fffA-Za-z0-9·()（）\-/]{4,48}(?:股份有限公司|有限责任公司|有限公司|集团|科技有限公司|信息技术有限公司|电子科技有限公司|网络科技有限公司|地产集团|银行|研究院|联合会))/u,
+    /([\u4e00-\u9fffA-Za-z0-9·()（）\-/]{4,48}(?:公司|集团|科技|网络|信息|智能|银行|研究院|联合会))/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const company = sanitizeResumeCompany(match?.[1]);
+    if (company) return company;
+  }
+
+  return '';
+}
+
+function extractResumeEducation(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  const direct = text.match(/(博士|研究生|硕士|MBA|本科|大专|专科|中专)/i);
+  return sanitizeText(direct?.[1] || text);
+}
+
+function extractResumeYears(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  const match = text.match(/(\d{1,2}年(?:工作)?经验)/);
+  return sanitizeText(match?.[1] || text);
+}
+
+function buildResumePageEntries(documents: ParsedDocument[]): ResumePageEntry[] {
+  return documents
+    .filter((item) => item.schemaType === 'resume')
+    .map((item) => {
+      const profile = getResumeProfile(item);
+      const candidateName =
+        sanitizeResumeCandidateName(profile.candidateName)
+        || extractResumeCandidateNameFromText(profile.candidateName)
+        || extractResumeCandidateNameFromText(item.title)
+        || extractResumeCandidateNameFromText(buildResumeFileBaseName(item.name))
+        || extractResumeCandidateNameFromText(item.summary)
+        || extractResumeCandidateNameFromText(item.excerpt);
+      const companies = normalizeUniqueStrings([
+        ...toStringArray(profile.companies),
+        profile.latestCompany,
+        extractResumeCompanyFromText(item.summary),
+        extractResumeCompanyFromText(item.title),
+      ], 4);
+      const latestCompany = sanitizeResumeCompany(profile.latestCompany) || companies[0] || '';
+      const projectHighlights = normalizeUniqueStrings([
+        ...toStringArray(profile.projectHighlights),
+        ...toStringArray(profile.highlights).filter((entry) => /(项目|project|系统|平台|交付|架构|实施|开发)/i.test(entry)),
+      ], 6);
+      const itProjectHighlights = normalizeUniqueStrings([
+        ...toStringArray(profile.itProjectHighlights),
+        ...projectHighlights.filter((entry) => /(it|项目|系统|平台|接口|架构|开发|实施|技术|api)/i.test(entry)),
+      ], 6);
+      const skills = normalizeUniqueStrings(profile.skills as unknown[] || [], 8);
+      const education = extractResumeEducation(profile.education || item.summary);
+      const yearsOfExperience = extractResumeYears(profile.yearsOfExperience || item.summary);
+
+      return {
+        candidateName,
+        education,
+        latestCompany,
+        yearsOfExperience,
+        skills,
+        projectHighlights,
+        itProjectHighlights,
+        highlights: normalizeUniqueStrings(profile.highlights as unknown[] || [], 8),
+        expectedCity: sanitizeText(profile.expectedCity),
+        expectedSalary: sanitizeText(profile.expectedSalary),
+        sourceName: item.name,
+        sourceTitle: item.title,
+        summary: sanitizeText(item.summary),
+      };
+    })
+    .filter((entry) => entry.candidateName || entry.latestCompany || entry.skills.length || entry.projectHighlights.length);
+}
+
 function hasCompanySignal(text: string) {
   return containsAny(text, ['company', 'employer', 'organization', '公司', '雇主']);
 }
@@ -621,22 +782,12 @@ function extractTechKeywords(text: string) {
 function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
 
-  for (const item of documents) {
-    if (item.schemaType !== 'resume') continue;
-    const profile = getResumeProfile(item);
-    const candidate = sanitizeText(profile.candidateName || item.title || item.name) || item.name;
-    const companies = toStringArray(profile.companies).length
-      ? toStringArray(profile.companies)
-      : [sanitizeText(profile.latestCompany)].filter(Boolean);
-    const projectHighlights = toStringArray(profile.itProjectHighlights).length
-      ? toStringArray(profile.itProjectHighlights)
-      : toStringArray(profile.projectHighlights);
-    const effectiveCompanies = companies.length ? companies.slice(0, 4) : [UNKNOWN_COMPANY];
-    const effectiveProjects = projectHighlights.length
-      ? projectHighlights.slice(0, 6)
-      : toStringArray(profile.highlights)
-          .filter((entry) => /(项目|系统|平台|接口|开发|实施|架构|技术|it|api|platform|system)/i.test(entry))
-          .slice(0, 4);
+  for (const entry of buildResumePageEntries(documents)) {
+    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const effectiveCompanies = entry.latestCompany ? [entry.latestCompany] : [UNKNOWN_COMPANY];
+    const effectiveProjects = entry.itProjectHighlights.length
+      ? entry.itProjectHighlights.slice(0, 6)
+      : entry.projectHighlights.slice(0, 4);
 
     if (!effectiveProjects.length) {
       rows.push([
@@ -644,9 +795,9 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
         candidate,
         '未提取到明确 IT 项目',
         '',
-        toStringArray(profile.skills).slice(0, 6).join(' / '),
+        entry.skills.slice(0, 6).join(' / '),
         '',
-        item.name,
+        entry.sourceName,
       ]);
       continue;
     }
@@ -658,9 +809,9 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
           candidate,
           project,
           extractProjectRole(project),
-          extractTechKeywords(project) || toStringArray(profile.skills).slice(0, 6).join(' / '),
+          extractTechKeywords(project) || entry.skills.slice(0, 6).join(' / '),
           extractProjectTimeline(project),
-          item.name,
+          entry.sourceName,
         ]);
       }
     }
@@ -679,23 +830,19 @@ function buildResumeCompanyProjectRows(documents: ParsedDocument[]) {
 
 function buildResumeProjectRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
-  for (const item of documents) {
-    if (item.schemaType !== 'resume') continue;
-    const profile = getResumeProfile(item);
-    const candidate = sanitizeText(profile.candidateName || item.title || item.name) || item.name;
-    const company = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || UNKNOWN_COMPANY;
-    const projects = toStringArray(profile.itProjectHighlights).length
-      ? toStringArray(profile.itProjectHighlights)
-      : toStringArray(profile.projectHighlights);
+  for (const entry of buildResumePageEntries(documents)) {
+    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const company = entry.latestCompany || UNKNOWN_COMPANY;
+    const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
     for (const project of projects.slice(0, 6)) {
       rows.push([
         project,
         company,
         candidate,
         extractProjectRole(project),
-        extractTechKeywords(project) || toStringArray(profile.skills).slice(0, 6).join(' / '),
+        extractTechKeywords(project) || entry.skills.slice(0, 6).join(' / '),
         extractProjectTimeline(project),
-        item.name,
+        entry.sourceName,
       ]);
     }
   }
@@ -703,43 +850,35 @@ function buildResumeProjectRows(documents: ParsedDocument[]) {
 }
 
 function buildResumeTalentRows(documents: ParsedDocument[]) {
-  return documents
-    .filter((item) => item.schemaType === 'resume')
-    .map((item) => {
-      const profile = getResumeProfile(item);
-      return [
-        sanitizeText(profile.candidateName || item.title || item.name) || item.name,
-        sanitizeText(profile.education),
-        sanitizeText(profile.latestCompany),
-        toStringArray(profile.skills).slice(0, 6).join(' / '),
-        sanitizeText(profile.age),
-        sanitizeText(profile.yearsOfExperience),
-        toStringArray(profile.projectHighlights).slice(0, 2).join('；'),
-        item.name,
-      ];
-    })
+  return buildResumePageEntries(documents)
+    .map((entry) => [
+      entry.candidateName || entry.sourceTitle || entry.sourceName,
+      entry.education,
+      entry.latestCompany,
+      entry.skills.slice(0, 6).join(' / '),
+      '',
+      entry.yearsOfExperience,
+      (entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights).slice(0, 2).join('；'),
+      entry.sourceName,
+    ])
     .filter((row) => row.some(Boolean))
     .slice(0, 36);
 }
 
 function buildResumeSkillRows(documents: ParsedDocument[]) {
   const rows: Array<Array<string>> = [];
-  for (const item of documents) {
-    if (item.schemaType !== 'resume') continue;
-    const profile = getResumeProfile(item);
-    const candidate = sanitizeText(profile.candidateName || item.title || item.name) || item.name;
-    const latestCompany = sanitizeText(profile.latestCompany) || toStringArray(profile.companies)[0] || UNKNOWN_COMPANY;
-    const projects = toStringArray(profile.itProjectHighlights).length
-      ? toStringArray(profile.itProjectHighlights)
-      : toStringArray(profile.projectHighlights);
-    for (const skill of toStringArray(profile.skills).slice(0, 8)) {
+  for (const entry of buildResumePageEntries(documents)) {
+    const candidate = entry.candidateName || entry.sourceTitle || entry.sourceName;
+    const latestCompany = entry.latestCompany || UNKNOWN_COMPANY;
+    const projects = entry.itProjectHighlights.length ? entry.itProjectHighlights : entry.projectHighlights;
+    for (const skill of entry.skills.slice(0, 8)) {
       rows.push([
         skill,
         candidate,
         skill,
         latestCompany,
         projects.slice(0, 2).join('；'),
-        item.name,
+        entry.sourceName,
       ]);
     }
   }
