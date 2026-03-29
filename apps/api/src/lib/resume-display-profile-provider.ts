@@ -1,6 +1,7 @@
 import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
+import { selectResumeDisplayCompany } from './resume-display-company.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
 export type ResumeDisplayProfile = {
@@ -144,7 +145,12 @@ function buildSeedProfileFromDocument(item: ParsedDocument) {
   });
 
   const displayName = sanitizeText(canonical?.candidateName, 60);
-  const displayCompany = sanitizeText(canonical?.latestCompany || canonical?.companies?.[0], 120);
+  const displayCompany = selectResumeDisplayCompany([
+    canonical?.latestCompany,
+    ...(canonical?.companies || []),
+    profile.latestCompany,
+    ...(Array.isArray(profile.companies) ? profile.companies : []),
+  ], 120);
   const displayProjects = sanitizeStringArray(
     canonical?.itProjectHighlights?.length ? canonical.itProjectHighlights : canonical?.projectHighlights,
     80,
@@ -187,6 +193,7 @@ async function buildSystemPrompt() {
     'Return strict JSON only. No markdown. No explanation.',
     'Your task is to transform noisy resume retrieval inputs into display-ready profile slots for report generation.',
     'Prefer real human names, stable organization labels, concise project nouns, and reusable skill labels.',
+    'For displayCompany, prefer enterprise employer labels. Reject associations, alumni groups, research institutes, universities, and similar non-enterprise organizations unless they are explicitly part of a company name.',
     'Reject placeholders, sample slugs, generic labels, role-only titles, file-name fragments, long responsibility sentences, and malformed organization text.',
     skillInstruction,
   ]
@@ -202,11 +209,15 @@ function normalizeProfile(raw: unknown) {
   const displayProjects = sanitizeStringArray(raw.displayProjects, 80).slice(0, 4);
   const displaySkills = sanitizeStringArray(raw.displaySkills, 40).slice(0, 6);
   const displaySummary = sanitizeText(raw.displaySummary, 240);
+  const displayCompany = selectResumeDisplayCompany([
+    raw.displayCompany,
+    ...(Array.isArray(raw.companies) ? raw.companies : []),
+  ], 160);
 
   const canonical = canonicalizeResumeFields({
     candidateName: sanitizeText(raw.displayName, 80),
-    latestCompany: sanitizeText(raw.displayCompany, 160),
-    companies: sanitizeStringArray(raw.displayCompany ? [raw.displayCompany] : [], 160),
+    latestCompany: displayCompany,
+    companies: displayCompany ? [displayCompany] : [],
     skills: displaySkills,
   }, {
     sourceName,
@@ -217,7 +228,11 @@ function normalizeProfile(raw: unknown) {
     sourcePath,
     sourceName,
     displayName: sanitizeText(canonical?.candidateName, 60),
-    displayCompany: sanitizeText(canonical?.latestCompany || canonical?.companies?.[0], 120),
+    displayCompany: selectResumeDisplayCompany([
+      canonical?.latestCompany,
+      ...(canonical?.companies || []),
+      displayCompany,
+    ], 120),
     displayProjects: displayProjects.length ? displayProjects : sanitizeStringArray(canonical?.projectHighlights, 80).slice(0, 4),
     displaySkills: displaySkills.length ? displaySkills : sanitizeStringArray(canonical?.skills, 40).slice(0, 6),
     displaySummary,

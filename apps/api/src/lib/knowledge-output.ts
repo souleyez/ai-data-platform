@@ -1,6 +1,7 @@
 import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
+import { sanitizeResumeDisplayCompany } from './resume-display-company.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
 import { mergeResumeFields } from './resume-canonicalizer.js';
 
@@ -791,15 +792,15 @@ function buildResumePageEntries(documents: ParsedDocument[], displayProfiles: Re
       const displayProfile = displayProfileMap.get(normalizeText(item.path)) || displayProfileMap.get(normalizeText(item.name));
       const candidateName = sanitizeResumeCandidateName(displayProfile?.displayName || canonicalFields?.candidateName);
       const companies = normalizeUniqueStrings([
-        sanitizeResumeCompany(displayProfile?.displayCompany),
-        ...(canonicalFields?.companies || []).map((entry) => sanitizeResumeCompany(entry)),
-        sanitizeResumeCompany(canonicalFields?.latestCompany),
-        ...toStringArray(resumeFields.companies).map((entry) => sanitizeResumeCompany(entry)),
-        sanitizeResumeCompany(resumeFields.latestCompany),
-        ...toStringArray(profile.companies).map((entry) => sanitizeResumeCompany(entry)),
-        sanitizeResumeCompany(profile.latestCompany),
-        extractResumeCompanyFromText(item.summary),
-        extractResumeCompanyFromText(item.title),
+        sanitizeResumeDisplayCompany(displayProfile?.displayCompany),
+        ...(canonicalFields?.companies || []).map((entry) => sanitizeResumeDisplayCompany(sanitizeResumeCompany(entry))),
+        sanitizeResumeDisplayCompany(sanitizeResumeCompany(canonicalFields?.latestCompany)),
+        ...toStringArray(resumeFields.companies).map((entry) => sanitizeResumeDisplayCompany(sanitizeResumeCompany(entry))),
+        sanitizeResumeDisplayCompany(sanitizeResumeCompany(resumeFields.latestCompany)),
+        ...toStringArray(profile.companies).map((entry) => sanitizeResumeDisplayCompany(sanitizeResumeCompany(entry))),
+        sanitizeResumeDisplayCompany(sanitizeResumeCompany(profile.latestCompany)),
+        sanitizeResumeDisplayCompany(extractResumeCompanyFromText(item.summary)),
+        sanitizeResumeDisplayCompany(extractResumeCompanyFromText(item.title)),
       ], 4);
       const latestCompany = companies[0] || '';
       const projectHighlights = normalizeUniqueStrings(

@@ -121,6 +121,36 @@ test('buildResumeDisplaySeedProfiles should suppress weak project phrases and no
   assert.match(profiles[0]?.displaySummary || '', /解决方案经理|深圳达实智能股份有限公司|Java/);
 });
 
+test('buildResumeDisplaySeedProfiles should prefer enterprise employers over association labels', () => {
+  const profiles = buildResumeDisplaySeedProfiles([
+    {
+      path: 'storage/files/uploads/resume-c.docx',
+      name: 'resume-c.docx',
+      ext: '.docx',
+      title: 'Li Ming Resume',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '李明，8年经验，曾任川渝MBA企业家联合会及西南校友经济研究院项目顾问，后加入广州阿凡提电子科技有限公司。',
+      excerpt: '李明，8年经验。',
+      extractedChars: 2048,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '李明',
+        latestCompany: '川渝MBA企业家联合会及西南校友经济研究院',
+        companies: ['川渝MBA企业家联合会及西南校友经济研究院', '广州阿凡提电子科技有限公司'],
+        yearsOfExperience: '8年',
+        skills: ['Java', 'SQL'],
+        projectHighlights: ['智慧园区管理平台'],
+      },
+    },
+  ] as ParsedDocument[]);
+
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0]?.displayCompany, '广州阿凡提电子科技有限公司');
+  assert.doesNotMatch(profiles[0]?.displaySummary || '', /联合会|研究院/);
+});
+
 test('runResumeDisplayProfileResolver should fall back to local seed profiles when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;

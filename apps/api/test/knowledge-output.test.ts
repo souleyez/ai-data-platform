@@ -384,6 +384,44 @@ test('buildKnowledgeFallbackOutput should create a client-facing resume page for
   assert.match((output.page?.sections?.[1]?.bullets || []).join('\n'), /夏天宇|谢泽强/);
 });
 
+test('buildKnowledgeFallbackOutput should suppress non-enterprise organization labels in client pages', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'resume-1.pdf',
+      name: '李明简历.pdf',
+      ext: '.pdf',
+      title: '李明简历',
+      category: 'resume',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: '李明，8年经验，曾任川渝MBA企业家联合会及西南校友经济研究院项目顾问，后加入广州阿凡提电子科技有限公司，负责智慧园区管理平台。',
+      excerpt: '李明，8年经验。',
+      extractedChars: 1280,
+      schemaType: 'resume',
+      structuredProfile: {
+        candidateName: '李明',
+        latestCompany: '川渝MBA企业家联合会及西南校友经济研究院',
+        companies: ['川渝MBA企业家联合会及西南校友经济研究院', '广州阿凡提电子科技有限公司'],
+        yearsOfExperience: '8年',
+        education: '本科',
+        skills: ['Java', 'SQL'],
+        projectHighlights: ['智慧园区管理平台'],
+      },
+    },
+  ];
+
+  const output = buildKnowledgeFallbackOutput(
+    'page',
+    '请基于人才简历知识库中的全部简历，为客户汇报准备一页可视化静态页。',
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  const pageJson = JSON.stringify(output.page);
+  assert.match(pageJson, /李明|广州阿凡提电子科技有限公司|智慧园区管理平台/);
+  assert.doesNotMatch(pageJson, /川渝MBA企业家联合会及西南校友经济研究院/);
+});
+
 test('normalizeReportOutput should fallback low-quality resume client pages to deterministic client view', () => {
   const documents: ParsedDocument[] = [
     {
