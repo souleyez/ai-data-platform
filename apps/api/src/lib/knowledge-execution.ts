@@ -234,8 +234,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
 
     const needsResumeRetry = requestedKind === 'page'
       && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
+    const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
 
-    if (needsResumeRetry && (resumeDisplayProfileResolution?.profiles || []).length) {
+    if (canComposeResumePage) {
       const composedContent = await runResumePageComposer({
         requestText,
         reportPlan,
@@ -256,7 +257,21 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           { allowResumeFallback: false },
         );
 
-        output = shouldUseResumePageFallbackOutput(requestText, composedOutput, supply.effectiveRetrieval.documents)
+        if (!shouldUseResumePageFallbackOutput(requestText, composedOutput, supply.effectiveRetrieval.documents)) {
+          output = composedOutput;
+        } else {
+          output = needsResumeRetry
+            ? buildKnowledgeFallbackOutput(
+              requestedKind,
+              requestText,
+              supply.effectiveRetrieval.documents,
+              activeEnvelope,
+              resumeDisplayProfileResolution?.profiles || [],
+            )
+            : initialOutput;
+        }
+      } else {
+        output = needsResumeRetry
           ? buildKnowledgeFallbackOutput(
             requestedKind,
             requestText,
@@ -264,15 +279,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
             activeEnvelope,
             resumeDisplayProfileResolution?.profiles || [],
           )
-          : composedOutput;
-      } else {
-        output = buildKnowledgeFallbackOutput(
-          requestedKind,
-          requestText,
-          supply.effectiveRetrieval.documents,
-          activeEnvelope,
-          resumeDisplayProfileResolution?.profiles || [],
-        );
+          : initialOutput;
       }
     } else {
       output = needsResumeRetry
