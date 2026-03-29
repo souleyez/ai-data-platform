@@ -176,3 +176,45 @@ test('inferReportPlanTaskHint should resolve domain page hints from request, gro
     'contract-risk',
   );
 });
+
+test('buildReportPlan should use client-facing resume sections and planned visuals', () => {
+  const plan = buildReportPlan({
+    requestText: '请基于简历库生成客户汇报型静态页',
+    templateTaskHint: 'resume-comparison',
+    conceptPageMode: true,
+    selectedTemplates: [],
+    retrieval: {
+      documents: [
+        {
+          path: 'storage/files/uploads/resume-a.pdf',
+          name: 'resume-a.pdf',
+          ext: '.pdf',
+          title: '夏天宇简历',
+          category: 'resume',
+          parseStatus: 'parsed',
+          summary: '夏天宇，阿里斑马网络产品经理，负责智能座舱与 AIGC 项目。',
+          excerpt: '夏天宇，5年经验。',
+          extractedChars: 1200,
+          schemaType: 'resume',
+          topicTags: ['智能座舱', 'AIGC'],
+          parseStage: 'detailed',
+        },
+      ],
+      evidenceMatches: [],
+      meta: {
+        stages: ['rule'],
+        vectorEnabled: false,
+        candidateCount: 1,
+        rerankedCount: 1,
+        intent: 'resume',
+        templateTask: 'resume-comparison',
+      },
+    },
+    libraries: [{ key: 'resume', label: '简历' }],
+  });
+
+  assert.equal(plan.envelope.title, '简历客户汇报静态页');
+  assert.deepEqual(plan.envelope.pageSections, ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析']);
+  assert.deepEqual(plan.cards.map((item) => item.label), ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
+  assert.deepEqual(plan.charts.map((item) => item.title), ['公司覆盖分布', '技能热点分布']);
+});

@@ -130,7 +130,7 @@ export function inferReportPlanTaskHint(input: ReportPlanTaskHintInput): Knowled
 function buildFallbackSections(templateTaskHint?: KnowledgeTemplateTaskHint | null) {
   switch (templateTaskHint) {
     case 'resume-comparison':
-      return ['人才概览', '项目与经历', '核心能力', '行动建议', 'AI综合分析'];
+      return ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析'];
     case 'bids-static-page':
       return ['摘要', '重点分析', '风险提示', '应答建议', 'AI综合分析'];
     case 'paper-static-page':
@@ -151,7 +151,7 @@ function buildFallbackTitle(
   const primaryLabel = libraryLabels[0] || '知识库';
   switch (templateTaskHint) {
     case 'resume-comparison':
-      return '客户汇报型人才静态页';
+      return '简历客户汇报静态页';
     case 'bids-static-page':
       return '客户汇报型标书静态页';
     case 'paper-static-page':
@@ -167,7 +167,9 @@ function buildFallbackTitle(
 
 function resolveBaseEnvelope(input: ReportPlannerInput, libraryLabels: string[]) {
   const selectedEnvelope = input.selectedTemplates?.[0]?.envelope || input.baseEnvelope || null;
-  const pageSections = selectedEnvelope?.pageSections?.length
+  const pageSections = input.templateTaskHint === 'resume-comparison'
+    ? buildFallbackSections(input.templateTaskHint)
+    : selectedEnvelope?.pageSections?.length
     ? [...selectedEnvelope.pageSections]
     : buildFallbackSections(input.templateTaskHint);
 
@@ -218,8 +220,8 @@ function buildCardPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | unde
       return [
         { label: '候选人覆盖', purpose: 'Show how many candidates and profiles support the page.' },
         { label: '公司覆盖', purpose: 'Show employer breadth and business context.' },
-        { label: '项目信号', purpose: 'Highlight project density and delivery relevance.' },
-        { label: '核心能力', purpose: 'Summarize the most reusable capability signals.' },
+        { label: '项目匹配', purpose: 'Highlight delivery-fit and project relevance for customer review.' },
+        { label: '技能热点', purpose: 'Summarize the strongest reusable capability signals.' },
       ];
     case 'bids-static-page':
       return [

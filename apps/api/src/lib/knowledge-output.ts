@@ -1346,10 +1346,10 @@ function buildResumePageSummary(view: ResumeRequestView, documentCount: number, 
 function buildResumePageCards(view: ResumeRequestView, documentCount: number, stats: ResumePageStats) {
   if (view === 'client') {
     return [
-      { label: '简历数量', value: String(documentCount), note: '参与本次客户页生成的简历数量' },
-      { label: '候选人覆盖', value: String(stats.candidateCount), note: '已识别出的候选人数量' },
-      { label: '公司覆盖', value: String(stats.companyCount), note: '关联公司或组织数量' },
-      { label: '项目线索', value: String(stats.projectCount), note: '可展示的代表项目线索' },
+      { label: '候选人覆盖', value: String(stats.candidateCount), note: '进入本页主展示的人才数量' },
+      { label: '公司覆盖', value: String(stats.companyCount), note: '可用于客户汇报的企业背景数量' },
+      { label: '项目匹配', value: String(stats.projectCount), note: '可用于客户沟通的代表项目线索' },
+      { label: '技能热点', value: joinRankedLabels(stats.skills, 3) || String(stats.skillCount), note: '高频能力标签与可复用技能主题' },
     ];
   }
   if (view === 'company') {
@@ -1536,11 +1536,45 @@ function hydrateResumePageVisualShell(
   page: KnowledgePageOutput['page'],
 ) {
   const fallbackPage = buildResumePageOutput(view, documents, envelope, displayProfiles).page;
+  const mergeCards = (
+    primary: NonNullable<KnowledgePageOutput['page']['cards']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.label || item.value || item.note || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.label || item.value || item.note || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+  const mergeCharts = (
+    primary: NonNullable<KnowledgePageOutput['page']['charts']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['charts']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.title || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.title || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+  const minCardCount = view === 'client' ? 4 : 0;
+  const minChartCount = view === 'client' ? 2 : 0;
   return {
     summary: page.summary || fallbackPage.summary,
-    cards: page.cards?.length ? page.cards : fallbackPage.cards,
+    cards: mergeCards(page.cards || [], fallbackPage.cards || [], minCardCount),
     sections: page.sections?.length ? page.sections : fallbackPage.sections,
-    charts: page.charts?.length ? page.charts : fallbackPage.charts,
+    charts: mergeCharts(page.charts || [], fallbackPage.charts || [], minChartCount),
   };
 }
 
