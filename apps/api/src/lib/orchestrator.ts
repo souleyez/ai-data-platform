@@ -92,6 +92,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   } = buildFallbackResponse(gatewayConfigured, requestMode);
   let reportTemplate: { key: string; label: string; type: string } | null = null;
   let debug: Record<string, unknown> | null = null;
+  let routeKind = 'general';
+  let evidenceMode: string | null = null;
+  let intentContract: Record<string, unknown> | null = null;
 
   if (gatewayConfigured) {
     try {
@@ -136,6 +139,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         mode = result.mode;
         conversationState = result.conversationState;
         debug = result.debug || null;
+        routeKind = result.routeKind || 'general';
+        evidenceMode = result.evidenceMode || null;
+        intentContract = result.intentContract || null;
       }
     } catch (error) {
       fallbackReason = summarizeError(error);
@@ -144,6 +150,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       output = { type: 'answer', content };
       mode = 'fallback';
       conversationState = null;
+      routeKind = 'general';
+      evidenceMode = null;
+      intentContract = null;
     }
   }
 
@@ -171,9 +180,12 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     permissions: { mode: 'read-only' as const },
     orchestration: {
       mode,
+      routeKind,
       docMatches: libraries.length,
+      evidenceMode,
       gatewayConfigured,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
+      intentContract,
     },
     debug,
     conversationState,

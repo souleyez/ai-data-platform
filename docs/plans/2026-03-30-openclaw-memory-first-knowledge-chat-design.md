@@ -373,6 +373,20 @@ Deliverables:
 - reduced library-match branching
 - reduced follow-up heuristics
 
+Phase 2 implementation note:
+
+- thin router lives in `apps/api/src/lib/knowledge-chat-router.ts`
+- current general chat dispatch now routes through:
+  - `general`
+  - `catalog`
+  - `detail`
+  - `output`
+- `general` remains only as the outer non-knowledge fallback; knowledge routing itself is reduced to `catalog / detail / output`
+- runtime trace now surfaces:
+  - `orchestration.routeKind`
+  - `orchestration.evidenceMode`
+  - `orchestration.intentContract`
+
 ### Phase 3: Live Detail Skill
 
 Add a dedicated detail skill that takes:

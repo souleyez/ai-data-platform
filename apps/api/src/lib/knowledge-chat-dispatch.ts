@@ -1,23 +1,22 @@
 import { loadDocumentLibraries } from './document-libraries.js';
-import {
-  buildKnowledgeDocumentContext,
-  buildRecentUploadedContext,
-  inferKnowledgeLibraries,
-  looksLikeDocumentDetailFollowup,
-} from './knowledge-context.js';
 import { executeKnowledgeAnswer, executeKnowledgeOutput } from './knowledge-execution.js';
+import {
+  resolveKnowledgeChatRoute,
+  type KnowledgeChatRouteKind,
+  type KnowledgeEvidenceMode,
+  type KnowledgeIntentContract,
+} from './knowledge-chat-router.js';
 import {
   explicitlyRejectsKnowledgeMode,
   isKnowledgeCancelPhrase,
-  looksLikeKnowledgeAnswerIntent,
-  looksLikeKnowledgeOutputIntent,
 } from './knowledge-intent.js';
 import {
-  extractExplicitKnowledgeFocus,
-  extractNormalizedContentFocus,
-  extractNormalizedTimeRange,
+  parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
+import {
+  buildKnowledgeCatalogPrompt,
+} from './knowledge-prompts.js';
 import { runOpenClawChat } from './openclaw-adapter.js';
 import type { ChatOutput } from './knowledge-output.js';
 
@@ -31,38 +30,26 @@ export type GeneralKnowledgeDispatchResult = {
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
   conversationState: KnowledgeConversationState | null;
+  routeKind?: KnowledgeChatRouteKind;
+  evidenceMode?: KnowledgeEvidenceMode | null;
+  intentContract?: KnowledgeIntentContract | null;
 };
 
-function resolveContentFocus(prompt: string) {
-  return extractExplicitKnowledgeFocus(prompt) || extractNormalizedContentFocus(prompt);
-}
+function buildCatalogContextBlock(
+  libraries: Array<{ key: string; label: string }>,
+  contract: KnowledgeIntentContract,
+) {
+  const libraryText = libraries.length
+    ? libraries.map((item) => item.label || item.key).join('、')
+    : '当前知识目录';
 
-function dedupeContextBlocks(blocks: string[]) {
-  return [...new Set(blocks.map((item) => String(item || '').trim()).filter(Boolean))];
-}
-
-function buildDocumentLibraryRefs(documents: Array<{
-  groups?: string[];
-  confirmedGroups?: string[];
-  bizCategory?: string;
-  schemaType?: string;
-}>) {
-  const refs = new Map<string, { key: string; label: string }>();
-
-  for (const item of documents) {
-    const groups = [...(item.confirmedGroups || []), ...(item.groups || [])].filter(Boolean);
-    if (groups.length) {
-      for (const group of groups) {
-        if (!refs.has(group)) refs.set(group, { key: group, label: group });
-      }
-      continue;
-    }
-
-    const fallback = item.bizCategory || item.schemaType || 'document';
-    if (!refs.has(fallback)) refs.set(fallback, { key: fallback, label: fallback });
-  }
-
-  return Array.from(refs.values()).slice(0, 4);
+  return [
+    `Current route: catalog`,
+    `Evidence state: catalog_memory`,
+    `Preferred libraries: ${libraryText}`,
+    `Target scope: ${contract.targetScope}`,
+    `Normalized request: ${contract.normalizedRequest}`,
+  ].join('\n');
 }
 
 export async function runGeneralKnowledgeAwareChat(input: {
@@ -84,6 +71,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: 'openclaw',
       debug: null,
       conversationState: null,
+      routeKind: 'general',
+      evidenceMode: null,
+      intentContract: null,
     };
   }
 
@@ -102,26 +92,25 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: 'openclaw',
       debug: null,
       conversationState: null,
+      routeKind: 'general',
+      evidenceMode: null,
+      intentContract: null,
     };
   }
 
   const documentLibraries = await loadDocumentLibraries();
-  const inferredLibraries = await inferKnowledgeLibraries(prompt, chatHistory, documentLibraries);
-  const hasDocumentDetailFollowup = looksLikeDocumentDetailFollowup(prompt, chatHistory);
-  const timeRange = extractNormalizedTimeRange(prompt);
-  const contentFocus = resolveContentFocus(prompt);
-
-  if (looksLikeKnowledgeOutputIntent({
+  const routeDecision = await resolveKnowledgeChatRoute({
     prompt,
-    libraries: inferredLibraries,
-    hasDocumentDetailFollowup,
-  })) {
+    chatHistory,
+    libraries: documentLibraries,
+    sessionUser,
+  });
+
+  if (routeDecision.route === 'output') {
     const result = await executeKnowledgeOutput({
       prompt,
-      confirmedRequest: prompt,
-      preferredLibraries: inferredLibraries,
-      timeRange,
-      contentFocus,
+      confirmedRequest: routeDecision.contract.normalizedRequest || prompt,
+      preferredLibraries: routeDecision.libraries,
       sessionUser,
       debugResumePage: input.debugResumePage === true,
       chatHistory,
@@ -134,20 +123,17 @@ export async function runGeneralKnowledgeAwareChat(input: {
       intent: result.intent,
       mode: result.mode,
       debug: result.debug || null,
-      conversationState: null,
+      conversationState: parseKnowledgeConversationState(input.existingState),
+      routeKind: 'output',
+      evidenceMode: routeDecision.evidenceMode,
+      intentContract: routeDecision.contract,
     };
   }
 
-  if (looksLikeKnowledgeAnswerIntent({
-    prompt,
-    libraries: inferredLibraries,
-    hasDocumentDetailFollowup,
-  })) {
+  if (routeDecision.route === 'detail') {
     const result = await executeKnowledgeAnswer({
-      prompt,
-      preferredLibraries: inferredLibraries,
-      timeRange,
-      contentFocus,
+      prompt: routeDecision.contract.normalizedRequest || prompt,
+      preferredLibraries: routeDecision.libraries,
       sessionUser,
       chatHistory,
     });
@@ -160,34 +146,53 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: result.mode,
       debug: null,
       conversationState: null,
+      routeKind: 'detail',
+      evidenceMode: routeDecision.evidenceMode,
+      intentContract: routeDecision.contract,
     };
   }
 
-  const [documentFollowup, recentUploadedContext] = await Promise.all([
-    buildKnowledgeDocumentContext(prompt, chatHistory),
-    buildRecentUploadedContext(),
-  ]);
-  const followupPaths = new Set(documentFollowup.documents.map((item) => item.path));
-  const recentLibraryRefs = buildDocumentLibraryRefs(
-    recentUploadedContext.documents.filter((item) => !followupPaths.has(item.path)),
-  );
+  if (routeDecision.route === 'catalog') {
+    const cloud = await runOpenClawChat({
+      prompt: routeDecision.contract.normalizedRequest || prompt,
+      sessionUser,
+      chatHistory,
+      systemPrompt: buildKnowledgeCatalogPrompt(),
+      contextBlocks: [
+        buildCatalogContextBlock(routeDecision.libraries, routeDecision.contract),
+      ],
+    });
+
+    return {
+      libraries: routeDecision.libraries,
+      content: cloud.content,
+      output: { type: 'answer', content: cloud.content },
+      intent: routeDecision.libraries.length ? 'report' : 'general',
+      mode: 'openclaw',
+      debug: null,
+      conversationState: null,
+      routeKind: 'catalog',
+      evidenceMode: routeDecision.evidenceMode,
+      intentContract: routeDecision.contract,
+    };
+  }
+
   const cloud = await runOpenClawChat({
     prompt,
     sessionUser,
     chatHistory,
-    contextBlocks: dedupeContextBlocks([
-      ...documentFollowup.contextBlocks,
-      ...recentUploadedContext.contextBlocks,
-    ]),
   });
 
   return {
-    libraries: [...buildDocumentLibraryRefs(documentFollowup.documents), ...recentLibraryRefs].slice(0, 4),
+    libraries: [],
     content: cloud.content,
     output: { type: 'answer', content: cloud.content },
     intent: 'general',
     mode: 'openclaw',
     debug: null,
     conversationState: null,
+    routeKind: 'general',
+    evidenceMode: null,
+    intentContract: routeDecision.contract,
   };
 }

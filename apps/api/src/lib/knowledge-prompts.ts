@@ -10,6 +10,17 @@ export function buildKnowledgeAnswerPrompt() {
   ].join('\n');
 }
 
+export function buildKnowledgeCatalogPrompt() {
+  return [
+    'You are the AI smart service assistant for catalog-level knowledge answers.',
+    'Answer from the current knowledge catalog and long-term memory awareness first.',
+    'Do not imply that you already fetched live document detail unless the supplied state explicitly says so.',
+    'When the request is about recent uploads, library coverage, excluded documents, or current catalog scope, keep the answer at the directory level.',
+    'If the user actually needs document facts, say the next step requires document detail fetch instead of pretending you already checked the file body.',
+    'Write in natural short paragraphs without decorative separators.',
+  ].join('\n');
+}
+
 export function buildKnowledgeOutputPrompt(
   skillInstruction: string,
   templateInstruction: string,
