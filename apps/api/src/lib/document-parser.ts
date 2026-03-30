@@ -322,6 +322,14 @@ function hasUtf16BeBom(buffer: Buffer) {
   return buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff;
 }
 
+function isExactUtf8RoundTrip(buffer: Buffer) {
+  try {
+    return Buffer.from(buffer.toString('utf8'), 'utf8').equals(buffer);
+  } catch {
+    return false;
+  }
+}
+
 function scoreDecodedText(text: string) {
   if (!text) return -1000;
 
@@ -360,6 +368,12 @@ async function readTextWithBestEffortEncoding(filePath: string) {
 
   if (hasUtf16BeBom(buffer)) {
     return { text: new TextDecoder('utf-16be').decode(buffer), encoding: 'utf16be' };
+  }
+
+  // Prefer UTF-8 when the raw bytes round-trip exactly. This avoids misclassifying
+  // mostly-ASCII CSV files with a small amount of Chinese text as gb18030.
+  if (isExactUtf8RoundTrip(buffer)) {
+    return { text: buffer.toString('utf8'), encoding: 'utf8' };
   }
 
   const candidates: Array<{ text: string; encoding: string }> = [
@@ -1044,8 +1058,16 @@ export function detectBizCategory(filePath: string, category: string, text = '',
   }
 
   const evidence = buildEvidence(filePath, text);
+  const hasOrderFieldSignal = /(order_id|order_count|units_sold|net_sales|gross_profit|gross_margin|avg_order_value|refund_total|discount_total|shop_name)/i.test(evidence);
+  const hasInventoryFieldSignal = /(inventory_index|days_of_cover|safety_stock|replenishment_priority|risk_flag|platform_focus|warehouse|inbound_7d)/i.test(evidence);
+  const hasOrderPathSignal = /(?:order|orders|sales)[-_/\\]/i.test(filePath);
+  const hasInventoryPathSignal = /(?:inventory|stock|sku)[-_/\\]/i.test(filePath);
   if (category === 'resume' || RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'general';
   if (scoreHints(evidence, ['发票', '票据', '凭据', 'invoice']) >= 4) return 'invoice';
+  if (hasOrderFieldSignal) return 'order';
+  if (hasInventoryFieldSignal) return 'inventory';
+  if (hasInventoryPathSignal) return 'inventory';
+  if (hasOrderPathSignal) return 'order';
   if (scoreHints(evidence, ['订单', '回款', '销售', 'order']) >= 4) return 'order';
   if (scoreHints(evidence, ['客服', '工单', '投诉', 'service']) >= 4) return 'service';
   if (scoreHints(evidence, ['库存', 'sku', '出入库', 'inventory']) >= 4) return 'inventory';
@@ -1290,6 +1312,30 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     if (/(前端|frontend|react|vue)/i.test(normalized)) tags.push('前端开发');
     if (/(技术总监|技术负责人|cto)/i.test(normalized)) tags.push('技术管理');
     return tags;
+  }
+
+  if (bizCategory === 'order' || bizCategory === 'inventory') {
+    const normalized = text.toLowerCase();
+    const tags = [bizCategory === 'inventory' ? '库存监控' : '订单分析'];
+    if (/(tmall|jd|douyin|pinduoduo|kuaishou|wechatmall|天猫|京东|抖音|拼多多|快手|小程序)/i.test(normalized)) {
+      tags.push('渠道经营');
+    }
+    if (/(sku|category|品类|类目|耳机|智能穿戴|智能家居|平板周边|手机配件|电脑外设)/i.test(normalized)) {
+      tags.push('SKU结构');
+    }
+    if (/(inventory|stock|inventory_index|days_of_cover|safety_stock|库存|周转|安全库存)/i.test(normalized)) {
+      tags.push('库存管理');
+    }
+    if (/(replenishment|restock|备货|补货|调拨|priority|优先级)/i.test(normalized)) {
+      tags.push('备货建议');
+    }
+    if (/(yoy|mom|forecast|gmv|net_sales|gross_margin|同比|环比|预测|净销售额|毛利)/i.test(normalized)) {
+      tags.push('经营复盘');
+    }
+    if (/(risk_flag|anomaly|warning|异常|风险|波动|overstock|stockout)/i.test(normalized)) {
+      tags.push('异常波动');
+    }
+    return [...new Set(tags)];
   }
 
   if (category !== 'technical' && category !== 'paper' && bizCategory !== 'paper') return [];

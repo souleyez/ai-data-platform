@@ -53,6 +53,7 @@ export function inferSchemaType(
     )
   );
   if (hasResumeHint || hasStrongResumeFields) return 'resume' as const;
+  if (bizCategory === 'order' || bizCategory === 'inventory') return 'report' as const;
   if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
   if (topicTags.includes('奶粉配方')) return 'formula' as const;
   if (

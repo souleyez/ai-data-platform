@@ -2006,6 +2006,140 @@ function collectOrderProfileStrings(item: ParsedDocument, keys: string[]) {
   });
 }
 
+function extractOrderCsvTable(item: ParsedDocument, limit = 80) {
+  const source = String(item.fullText || '')
+    .replace(/\r/g, '')
+    .trim();
+  if (!source || !source.includes(',')) return null;
+
+  const lines = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+
+  const headers = lines[0]
+    .split(',')
+    .map((cell) => normalizeText(cell))
+    .filter(Boolean);
+  if (headers.length < 2) return null;
+
+  const rows = lines
+    .slice(1, limit + 1)
+    .map((line) => line.split(',').map((cell) => sanitizeText(cell)))
+    .filter((row) => row.some(Boolean));
+  if (!rows.length) return null;
+
+  return { headers, rows };
+}
+
+function collectOrderCsvValues(
+  item: ParsedDocument,
+  headerAliases: string[],
+  limit = 24,
+  dedupe = true,
+) {
+  const table = extractOrderCsvTable(item, Math.max(limit * 4, 24));
+  if (!table) return [];
+
+  const aliases = new Set(headerAliases.map((alias) => normalizeText(alias)));
+  const indexes = table.headers.flatMap((header, index) => (aliases.has(header) ? [index] : []));
+  if (!indexes.length) return [];
+
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const row of table.rows) {
+    for (const index of indexes) {
+      const value = sanitizeText(row[index]);
+      if (!value) continue;
+      const key = normalizeText(value);
+      if (dedupe && seen.has(key)) continue;
+      if (dedupe) seen.add(key);
+      values.push(value);
+      if (values.length >= limit) return values;
+    }
+  }
+
+  return values;
+}
+
+function collectOrderCsvMetricSignals(item: ParsedDocument) {
+  const table = extractOrderCsvTable(item, 12);
+  const csvSignals: string[] = [];
+  if (table) {
+    const headerSet = new Set(table.headers);
+    const mappings = [
+      { aliases: ['net_sales', 'net amount', 'net_amount'], label: '净销售额' },
+      { aliases: ['gross_profit'], label: '毛利额' },
+      { aliases: ['gross_margin'], label: '毛利率' },
+      { aliases: ['avg_order_value'], label: '客单价' },
+      { aliases: ['order_count'], label: '订单量' },
+      { aliases: ['units_sold', 'quantity'], label: '销量' },
+      { aliases: ['discount_total', 'discount_amount'], label: '折扣额' },
+      { aliases: ['refund_total', 'refund_amount'], label: '退款额' },
+      { aliases: ['inventory_index'], label: '库存指数' },
+      { aliases: ['days_of_cover'], label: '库存覆盖天数' },
+      { aliases: ['safety_stock'], label: '安全库存' },
+      { aliases: ['inventory_before', 'inventory_after'], label: '库存水位' },
+    ];
+    for (const mapping of mappings) {
+      if (mapping.aliases.some((alias) => headerSet.has(normalizeText(alias)))) {
+        csvSignals.push(mapping.label);
+      }
+    }
+  }
+
+  return [
+    ...collectOrderProfileStrings(item, ['metricSignals', 'keyMetrics']).map(formatOrderSignalLabel),
+    ...csvSignals,
+  ];
+}
+
+function collectOrderCsvSupportingLines(item: ParsedDocument, limit = 3) {
+  const table = extractOrderCsvTable(item, Math.max(limit * 6, 12));
+  if (!table) return [];
+
+  const findValue = (row: string[], aliases: string[]) => {
+    const aliasSet = new Set(aliases.map((alias) => normalizeText(alias)));
+    for (let index = 0; index < table.headers.length; index += 1) {
+      if (!aliasSet.has(table.headers[index])) continue;
+      const value = sanitizeText(row[index]);
+      if (value) return value;
+    }
+    return '';
+  };
+
+  const prioritizedRows = [...table.rows].sort((left, right) => {
+    const leftScore = [findValue(left, ['risk_flag', 'risk', 'inventory_risk', 'anomaly_note']), findValue(left, ['replenishment_priority', 'recommendation'])].filter(Boolean).length;
+    const rightScore = [findValue(right, ['risk_flag', 'risk', 'inventory_risk', 'anomaly_note']), findValue(right, ['replenishment_priority', 'recommendation'])].filter(Boolean).length;
+    return rightScore - leftScore;
+  });
+
+  return prioritizedRows
+    .slice(0, limit)
+    .map((row) => {
+      const platform = findValue(row, ['platform', 'platform_focus']) || '多渠道';
+      const category = findValue(row, ['category']) || '重点品类';
+      const sku = findValue(row, ['sku']) || '';
+      const netSales = findValue(row, ['net_sales', 'net_amount']);
+      const inventoryIndex = findValue(row, ['inventory_index', 'days_of_cover']);
+      const risk = findValue(row, ['risk_flag', 'risk', 'inventory_risk', 'anomaly_note']);
+      const action = findValue(row, ['replenishment_priority', 'recommendation']);
+      return [
+        platform,
+        category,
+        sku,
+        netSales ? `净销售额 ${netSales}` : '',
+        inventoryIndex ? `库存信号 ${inventoryIndex}` : '',
+        risk ? `风险 ${risk}` : '',
+        action ? `动作 ${action}` : '',
+      ]
+        .filter(Boolean)
+        .join(' / ');
+    })
+    .filter(Boolean);
+}
+
 function collectOrderChannelSignals(item: ParsedDocument) {
   const text = normalizeText([item.title, item.summary, item.excerpt, item.name].join(' '));
   const inferred = [
@@ -2019,6 +2153,7 @@ function collectOrderChannelSignals(item: ParsedDocument) {
 
   return [
     ...collectOrderProfileStrings(item, ['platforms', 'platformSignals']).map(formatOrderSignalLabel),
+    ...collectOrderCsvValues(item, ['platform', 'platform_focus'], 48, false).map(formatOrderSignalLabel),
     ...inferred,
   ];
 }
@@ -2040,24 +2175,34 @@ function collectOrderCategorySignals(item: ParsedDocument) {
     ...toStringArray(item.topicTags),
     ...toStringArray(item.groups),
     ...collectOrderProfileStrings(item, ['categorySignals']),
+    ...collectOrderCsvValues(item, ['category'], 48, false),
   ]
     .map((value) => sanitizeText(value).slice(0, 60).trim())
     .filter((value) => value && !ignored.has(value.toLowerCase()));
 }
 
 function collectOrderMetricSignals(item: ParsedDocument) {
-  return collectOrderProfileStrings(item, ['metricSignals', 'keyMetrics']).map(formatOrderSignalLabel);
+  return collectOrderCsvMetricSignals(item);
 }
 
 function collectOrderReplenishmentSignals(item: ParsedDocument) {
-  return collectOrderProfileStrings(item, ['replenishmentSignals', 'forecastSignals', 'operatingSignals']).map(formatOrderSignalLabel);
+  return [
+    ...collectOrderProfileStrings(item, ['replenishmentSignals', 'forecastSignals', 'operatingSignals']).map(formatOrderSignalLabel),
+    ...collectOrderCsvValues(item, ['replenishment_priority', 'recommendation']).map(formatOrderSignalLabel),
+  ];
 }
 
 function collectOrderAnomalySignals(item: ParsedDocument) {
-  return collectOrderProfileStrings(item, ['anomalySignals']).map(formatOrderSignalLabel);
+  return [
+    ...collectOrderProfileStrings(item, ['anomalySignals']).map(formatOrderSignalLabel),
+    ...collectOrderCsvValues(item, ['risk_flag', 'risk', 'inventory_risk']).map(formatOrderSignalLabel),
+  ];
 }
 
 function buildOrderSupportingLines(documents: ParsedDocument[]) {
+  const csvLines = documents.flatMap((item) => collectOrderCsvSupportingLines(item, 2));
+  if (csvLines.length) return csvLines.slice(0, 6);
+
   return documents
     .slice(0, 5)
     .map((item) => {
@@ -2507,6 +2652,8 @@ export function buildKnowledgeFallbackOutput(
 ): ChatOutput {
   const view = resolveResumeRequestView(requestText);
   const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+  const orderDocuments = documents.filter(isOrderInventoryDocument);
+  const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
 
   if (resumeDocuments.length) {
     if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
@@ -2589,6 +2736,11 @@ export function buildKnowledgeFallbackOutput(
     }
   }
 
+  if (orderDocuments.length && (kind === 'page' || kind === 'pdf' || kind === 'ppt')) {
+    const page = buildOrderPageOutput(orderView, orderDocuments, envelope);
+    return wrapPageOutputAsKind(kind, page);
+  }
+
   return buildGenericFallbackOutput(kind, requestText, '', envelope);
 }
 
@@ -2629,15 +2781,20 @@ export function normalizeReportOutput(
       : rawSections;
     const charts = normalizeCharts(pageSource.charts || payload.charts || root.charts);
     const effectiveSections = alignedSections.length ? alignedSections : rawSections;
-
-    if (looksLikePromptEchoPage(requestText, summary, content, cards, effectiveSections)) {
-      return buildPromptEchoFallbackOutput(kind, title, requestText, envelope);
-    }
-
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
     const orderDocuments = documents.filter(isOrderInventoryDocument);
     const resumeView = resumeDocuments.length ? resolveResumeRequestView(requestText) : 'generic';
     const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
+
+    if (looksLikePromptEchoPage(requestText, summary, content, cards, effectiveSections)) {
+      if (orderDocuments.length) {
+        return buildKnowledgeFallbackOutput(kind, requestText, orderDocuments, envelope, displayProfiles);
+      }
+      if (resumeDocuments.length) {
+        return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope, displayProfiles);
+      }
+      return buildPromptEchoFallbackOutput(kind, title, requestText, envelope);
+    }
     const normalizedTitle = resumeDocuments.length
       ? buildResumePageTitle(resumeView, envelope)
       : orderDocuments.length
