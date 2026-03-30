@@ -493,7 +493,7 @@ If prompts rely on memory-only facts for deep questions, the model will answer a
 Mitigation:
 
 - require live detail fetch for detail/output classes
-- keep memory cards intentionally shallow
+- keep memory cards intentionally shallow by default, but allow adaptive deeper cards for small libraries during early-stage testing
 
 ### Risk 3: Over-cleanup
 

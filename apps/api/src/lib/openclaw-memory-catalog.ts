@@ -22,6 +22,10 @@ const CHANGES_DIR = path.join(CATALOG_ROOT, 'changes');
 const ARCHIVE_DIR = path.join(CHANGES_DIR, 'archive');
 const STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
 const CATALOG_DOCUMENT_LIMIT = Math.max(1000, Number(process.env.OPENCLAW_MEMORY_CATALOG_DOCUMENT_LIMIT || 20000));
+const SMALL_LIBRARY_DETAIL_LIMIT = Math.max(3, Number(process.env.OPENCLAW_MEMORY_SMALL_LIBRARY_DETAIL_LIMIT || 20));
+const MEDIUM_LIBRARY_DETAIL_LIMIT = Math.max(SMALL_LIBRARY_DETAIL_LIMIT + 1, Number(process.env.OPENCLAW_MEMORY_MEDIUM_LIBRARY_DETAIL_LIMIT || 80));
+
+export type CatalogMemoryDetailLevel = 'shallow' | 'medium' | 'deep';
 
 export type OpenClawMemoryLibrarySnapshot = {
   key: string;
@@ -35,6 +39,7 @@ export type OpenClawMemoryLibrarySnapshot = {
   latestUpdateAt: string;
   representativeDocumentTitles: string[];
   suggestedQuestionTypes: string[];
+  memoryDetailLevel: CatalogMemoryDetailLevel;
 };
 
 export type OpenClawMemoryCatalogSnapshot = {
@@ -50,14 +55,28 @@ type CatalogDocumentCard = OpenClawMemoryDocumentState & {
   path: string;
   title: string;
   name: string;
+  bizCategory: string;
+  schemaType: string;
   parseStatus: string;
   parseStage: string;
+  topicTags: string[];
+  detailLevel: CatalogMemoryDetailLevel;
+  keyFacts: string[];
+  evidenceHighlights: string[];
 };
 
 function sanitizeText(value: unknown, maxLength = 240) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
   return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...` : text;
+}
+
+function sanitizeList(values: unknown[], maxLength = 80, limit = 6) {
+  return [...new Set(values.map((item) => sanitizeText(item, maxLength)).filter(Boolean))].slice(0, limit);
+}
+
+function sanitizeFact(value: unknown, maxLength = 160) {
+  return sanitizeText(value, maxLength).replace(/^[-:：\s]+/, '').trim();
 }
 
 function slugifyKey(value: string) {
@@ -110,6 +129,186 @@ function deriveSuggestedQuestionTypes(library: DocumentLibrary) {
   return ['catalog lookup', 'detail answer', 'structured output'];
 }
 
+export function resolveCatalogMemoryDetailLevel(documentCount: number): CatalogMemoryDetailLevel {
+  if (documentCount <= SMALL_LIBRARY_DETAIL_LIMIT) return 'deep';
+  if (documentCount <= MEDIUM_LIBRARY_DETAIL_LIMIT) return 'medium';
+  return 'shallow';
+}
+
+function looksLikeDelimitedLine(value: string) {
+  const text = sanitizeText(value, 240);
+  if (!text) return false;
+  return ((text.match(/,/g) || []).length >= 4) || ((text.match(/\|/g) || []).length >= 4);
+}
+
+export function selectCatalogMemoryTitle(item: Pick<ParsedDocument, 'title' | 'name' | 'path'>) {
+  const title = sanitizeText(item.title || '', 160);
+  if (title && !looksLikeDelimitedLine(title)) return title;
+  const fromName = sanitizeText(path.parse(item.name || path.basename(item.path)).name, 160);
+  if (fromName) return fromName;
+  return sanitizeText(path.basename(item.path), 160);
+}
+
+function buildResumeMemoryFacts(item: ParsedDocument) {
+  const fields = item.resumeFields || {};
+  const facts = [
+    fields.candidateName ? `Candidate: ${sanitizeFact(fields.candidateName)}` : '',
+    fields.targetRole ? `Target role: ${sanitizeFact(fields.targetRole)}` : '',
+    fields.currentRole ? `Current role: ${sanitizeFact(fields.currentRole)}` : '',
+    fields.latestCompany ? `Latest company: ${sanitizeFact(fields.latestCompany)}` : '',
+    fields.yearsOfExperience ? `Experience: ${sanitizeFact(fields.yearsOfExperience)}` : '',
+    fields.education ? `Education: ${sanitizeFact(fields.education)}` : '',
+    fields.skills?.length ? `Skills: ${sanitizeList(fields.skills, 40, 5).join(', ')}` : '',
+    fields.projectHighlights?.length ? `Projects: ${sanitizeList(fields.projectHighlights, 60, 3).join(' | ')}` : '',
+  ];
+  return facts.filter(Boolean);
+}
+
+function hasMeaningfulResumeSignals(item: ParsedDocument) {
+  const fields = item.resumeFields || {};
+  return Boolean(
+    sanitizeFact(fields.candidateName)
+    || sanitizeFact(fields.targetRole)
+    || sanitizeFact(fields.currentRole)
+    || sanitizeFact(fields.latestCompany)
+    || sanitizeFact(fields.yearsOfExperience)
+    || sanitizeFact(fields.education)
+    || sanitizeList(fields.skills || [], 40, 3).length
+    || sanitizeList(fields.projectHighlights || [], 60, 2).length
+    || sanitizeList(fields.itProjectHighlights || [], 60, 2).length
+  );
+}
+
+function shouldIncludeResumeMemoryFacts(item: ParsedDocument) {
+  if (item.category === 'resume') return hasMeaningfulResumeSignals(item);
+  if (item.bizCategory && item.bizCategory !== 'general') return false;
+  return item.schemaType === 'resume' && hasMeaningfulResumeSignals(item);
+}
+
+function buildContractMemoryFacts(item: ParsedDocument) {
+  const fields = item.contractFields || {};
+  const facts = [
+    fields.contractNo ? `Contract no: ${sanitizeFact(fields.contractNo)}` : '',
+    fields.amount ? `Amount: ${sanitizeFact(fields.amount)}` : '',
+    fields.paymentTerms ? `Payment terms: ${sanitizeFact(fields.paymentTerms)}` : '',
+    fields.duration ? `Duration: ${sanitizeFact(fields.duration)}` : '',
+  ];
+  return facts.filter(Boolean);
+}
+
+function hasMeaningfulContractSignals(item: ParsedDocument) {
+  const fields = item.contractFields || {};
+  return Boolean(
+    sanitizeFact(fields.contractNo)
+    || sanitizeFact(fields.amount)
+    || sanitizeFact(fields.paymentTerms)
+    || sanitizeFact(fields.duration)
+  );
+}
+
+function shouldIncludeContractMemoryFacts(item: ParsedDocument) {
+  if (item.category === 'contract' || item.bizCategory === 'contract') {
+    return hasMeaningfulContractSignals(item);
+  }
+  return item.schemaType === 'contract' && hasMeaningfulContractSignals(item);
+}
+
+function humanizeStructuredProfileKey(key: string) {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
+function resolveStructuredProfileKeys(item: ParsedDocument) {
+  if (shouldIncludeResumeMemoryFacts(item)) {
+    return ['companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'];
+  }
+  if (item.bizCategory === 'order' || item.bizCategory === 'inventory') {
+    return [
+      'platforms',
+      'platformSignals',
+      'categorySignals',
+      'metricSignals',
+      'replenishmentSignals',
+      'anomalySignals',
+      'highlights',
+      'organizations',
+    ];
+  }
+  if (shouldIncludeContractMemoryFacts(item)) {
+    return ['organizations', 'metrics', 'highlights'];
+  }
+  if (item.schemaType === 'report') {
+    return ['platforms', 'categorySignals', 'metricSignals', 'anomalySignals', 'highlights', 'organizations'];
+  }
+  return [
+    'platforms',
+    'platformSignals',
+    'categorySignals',
+    'metricSignals',
+    'replenishmentSignals',
+    'anomalySignals',
+    'companies',
+    'skills',
+    'highlights',
+    'projectHighlights',
+    'itProjectHighlights',
+    'benefits',
+    'ingredients',
+    'audiences',
+    'organizations',
+  ];
+}
+
+function buildStructuredProfileFacts(item: ParsedDocument) {
+  const profile = item.structuredProfile;
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return [];
+  const preferredKeys = resolveStructuredProfileKeys(item);
+  const facts: string[] = [];
+  for (const key of preferredKeys) {
+    const raw = (profile as Record<string, unknown>)[key];
+    if (Array.isArray(raw)) {
+      const values = sanitizeList(raw, 40, 5);
+      if (values.length) facts.push(`${humanizeStructuredProfileKey(key)}: ${values.join(', ')}`);
+      continue;
+    }
+    const text = sanitizeFact(raw, 120);
+    if (text) facts.push(`${humanizeStructuredProfileKey(key)}: ${text}`);
+  }
+  return facts;
+}
+
+function buildEvidenceHighlights(item: ParsedDocument, limit = 3) {
+  const chunks = Array.isArray(item.evidenceChunks) ? item.evidenceChunks : [];
+  if (chunks.length) {
+    return sanitizeList(chunks.map((chunk) => chunk.text), 140, limit);
+  }
+  const excerpt = sanitizeText(item.excerpt || item.summary || '', 180);
+  return excerpt ? [excerpt] : [];
+}
+
+export function buildCatalogMemoryDetail(item: ParsedDocument, detailLevel: CatalogMemoryDetailLevel) {
+  const topicTags = sanitizeList(item.topicTags || [], 40, detailLevel === 'deep' ? 8 : 4);
+  const typedFacts = [
+    ...(shouldIncludeResumeMemoryFacts(item) ? buildResumeMemoryFacts(item) : []),
+    ...(shouldIncludeContractMemoryFacts(item) ? buildContractMemoryFacts(item) : []),
+  ];
+  const allFacts = sanitizeList([
+    ...typedFacts,
+    ...buildStructuredProfileFacts(item),
+  ], 180, detailLevel === 'deep' ? 8 : detailLevel === 'medium' ? 4 : 0);
+  const evidenceHighlights = detailLevel === 'shallow'
+    ? []
+    : buildEvidenceHighlights(item, detailLevel === 'deep' ? 3 : 1);
+
+  return {
+    topicTags,
+    keyFacts: allFacts,
+    evidenceHighlights,
+  };
+}
+
 function buildDocumentFingerprint(card: {
   libraryKeys: string[];
   title: string;
@@ -118,6 +317,10 @@ function buildDocumentFingerprint(card: {
   updatedAt: string;
   parseStatus: string;
   parseStage: string;
+  topicTags: string[];
+  keyFacts: string[];
+  evidenceHighlights: string[];
+  detailLevel: CatalogMemoryDetailLevel;
 }) {
   return JSON.stringify({
     libraryKeys: card.libraryKeys,
@@ -127,34 +330,61 @@ function buildDocumentFingerprint(card: {
     updatedAt: card.updatedAt,
     parseStatus: card.parseStatus,
     parseStage: card.parseStage,
+    topicTags: card.topicTags,
+    keyFacts: card.keyFacts,
+    evidenceHighlights: card.evidenceHighlights,
+    detailLevel: card.detailLevel,
   });
 }
 
-function buildDocumentCard(item: ParsedDocument, libraries: DocumentLibrary[]): CatalogDocumentCard {
+function resolveDocumentLibraryKeys(item: ParsedDocument, libraries: DocumentLibrary[]) {
   const matchedLibraries = libraries
     .filter((library) => documentMatchesLibrary(item, library))
     .map((library) => library.key);
-  const libraryKeys = matchedLibraries.length
+  return matchedLibraries.length
     ? matchedLibraries
     : [...new Set((item.confirmedGroups?.length ? item.confirmedGroups : item.groups || []).filter(Boolean))];
-  const title = sanitizeText(item.title || item.name || path.basename(item.path), 160);
+}
+
+function resolveLibraryScopedDetailLevel(libraryKeys: string[], libraryDocumentCounts: Map<string, number>) {
+  const scopedCounts = libraryKeys
+    .map((key) => libraryDocumentCounts.get(key))
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  if (!scopedCounts.length) return 'shallow' as const;
+  return resolveCatalogMemoryDetailLevel(Math.min(...scopedCounts));
+}
+
+function buildDocumentCard(
+  item: ParsedDocument,
+  libraryKeys: string[],
+  libraryDocumentCounts: Map<string, number>,
+): CatalogDocumentCard {
+  const title = selectCatalogMemoryTitle(item);
   const summary = sanitizeText(item.summary || item.excerpt || '', 280);
   const availability = resolveAvailability(item);
   const updatedAt = extractDocumentUpdatedAt(item);
   const parseStatus = sanitizeText(item.parseStatus, 40);
   const parseStage = sanitizeText(item.parseStage, 40);
+  const detailLevel = resolveLibraryScopedDetailLevel(libraryKeys, libraryDocumentCounts);
+  const detail = buildCatalogMemoryDetail(item, detailLevel);
 
   return {
     id: buildDocumentId(item.path),
     path: item.path,
     title,
     name: sanitizeText(item.name || path.basename(item.path), 160),
+    bizCategory: sanitizeText(item.bizCategory, 40),
+    schemaType: sanitizeText(item.schemaType, 40),
     libraryKeys,
     summary,
     availability,
     updatedAt,
     parseStatus,
     parseStage,
+    topicTags: detail.topicTags,
+    detailLevel,
+    keyFacts: detail.keyFacts,
+    evidenceHighlights: detail.evidenceHighlights,
     fingerprint: buildDocumentFingerprint({
       libraryKeys,
       title,
@@ -163,6 +393,10 @@ function buildDocumentCard(item: ParsedDocument, libraries: DocumentLibrary[]): 
       updatedAt,
       parseStatus,
       parseStage,
+      topicTags: detail.topicTags,
+      keyFacts: detail.keyFacts,
+      evidenceHighlights: detail.evidenceHighlights,
+      detailLevel,
     }),
   };
 }
@@ -197,6 +431,7 @@ function buildLibrarySnapshot(library: DocumentLibrary, cards: CatalogDocumentCa
     latestUpdateAt,
     representativeDocumentTitles: cards.slice(0, 5).map((item) => item.title),
     suggestedQuestionTypes: deriveSuggestedQuestionTypes(library),
+    memoryDetailLevel: resolveCatalogMemoryDetailLevel(cards.length),
   };
 }
 
@@ -206,7 +441,20 @@ export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemo
     loadParsedDocuments(CATALOG_DOCUMENT_LIMIT, false),
   ]);
 
-  const cards = sortDocumentCards(loadedDocuments.items.map((item) => buildDocumentCard(item, libraries)));
+  const resolvedDocuments = loadedDocuments.items.map((item) => ({
+    item,
+    libraryKeys: resolveDocumentLibraryKeys(item, libraries),
+  }));
+  const libraryDocumentCounts = new Map<string, number>();
+  for (const document of resolvedDocuments) {
+    for (const key of document.libraryKeys) {
+      libraryDocumentCounts.set(key, (libraryDocumentCounts.get(key) || 0) + 1);
+    }
+  }
+
+  const cards = sortDocumentCards(
+    resolvedDocuments.map(({ item, libraryKeys }) => buildDocumentCard(item, libraryKeys, libraryDocumentCounts)),
+  );
   const librarySnapshots = libraries.map((library) => buildLibrarySnapshot(
     library,
     cards.filter((item) => item.libraryKeys.includes(library.key)),
@@ -282,6 +530,7 @@ function renderLibraryFile(library: OpenClawMemoryLibrarySnapshot) {
     `- Structured only: ${library.structuredOnlyCount}`,
     `- Unsupported or parse error: ${library.unsupportedCount}`,
     `- Latest update: ${formatIsoDateTime(library.latestUpdateAt)}`,
+    `- Memory detail level: ${library.memoryDetailLevel}`,
     '',
     '## Representative Documents',
     ...(library.representativeDocumentTitles.length
@@ -303,9 +552,21 @@ function renderDocumentsFile(library: OpenClawMemoryLibrarySnapshot, cards: Cata
     `- Name: ${item.name}`,
     `- Availability: ${item.availability}`,
     `- Updated at: ${formatIsoDateTime(item.updatedAt)}`,
+    `- Schema: ${item.schemaType || '-'}`,
+    `- Business category: ${item.bizCategory || '-'}`,
     `- Parse status: ${item.parseStatus || '-'}`,
     `- Parse stage: ${item.parseStage || '-'}`,
+    `- Memory detail level: ${item.detailLevel}`,
     `- Summary: ${item.summary || '-'}`,
+    ...(item.topicTags.length
+      ? [`- Topic tags: ${item.topicTags.join(', ')}`]
+      : []),
+    ...(item.keyFacts.length
+      ? ['- Key facts:', ...item.keyFacts.map((fact) => `  - ${fact}`)]
+      : []),
+    ...(item.evidenceHighlights.length
+      ? ['- Evidence hints:', ...item.evidenceHighlights.map((fact) => `  - ${fact}`)]
+      : []),
     '',
   ].join('\n'));
 
