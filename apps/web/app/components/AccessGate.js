@@ -66,7 +66,6 @@ export default function AccessGate({ children }) {
   const [accessKey, setAccessKey] = useState('');
   const [codeInput, setCodeInput] = useState('');
   const [setupCodeInput, setSetupCodeInput] = useState('');
-  const [setupLabelInput, setSetupLabelInput] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -164,13 +163,11 @@ export default function AccessGate({ children }) {
     try {
       const created = await bootstrapAccessCode({
         code: normalizedCode || undefined,
-        label: String(setupLabelInput || '').trim() || undefined,
       });
       const nextCode = created?.item?.code || normalizedCode;
       persistAccessKey(nextCode);
       setAccessKey(nextCode);
       setSetupCodeInput('');
-      setSetupLabelInput('');
       setMessage(`初始化完成，当前密钥：${nextCode}`);
       setPhase('ready');
     } catch (error) {
@@ -221,17 +218,6 @@ export default function AccessGate({ children }) {
           <div className="access-gate-meta">请稍候…</div>
         ) : phase === 'setup' ? (
           <form className="access-gate-form" onSubmit={handleSetup}>
-            <label className="access-gate-field">
-              <span>名称</span>
-              <input
-                className="access-gate-input"
-                type="text"
-                value={setupLabelInput}
-                onChange={(event) => setSetupLabelInput(event.target.value)}
-                placeholder="例如：管理员"
-              />
-            </label>
-
             <label className="access-gate-field">
               <span>数字密钥</span>
               <input

@@ -4,6 +4,22 @@ $root = Split-Path -Parent $PSScriptRoot
 $runDir = Join-Path $root 'tmp\local-dev'
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 
+function Normalize-ProcessPathEnv {
+  $pathValue = [Environment]::GetEnvironmentVariable('Path', 'Process')
+  $upperPathValue = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+  $normalizedValue = if ($pathValue) { $pathValue } else { $upperPathValue }
+
+  if ($upperPathValue) {
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+  }
+
+  if ($normalizedValue) {
+    [Environment]::SetEnvironmentVariable('Path', $normalizedValue, 'Process')
+  }
+}
+
+Normalize-ProcessPathEnv
+
 function Wait-ForPort {
   param(
     [int]$Port,
@@ -46,6 +62,7 @@ function Start-NodeService {
     [string]$Workdir,
     [string[]]$Arguments,
     [string]$PidFile,
+    [string]$FilePath = 'node',
     [Nullable[int]]$Port = $null,
     [hashtable]$EnvVars = @{}
   )
@@ -77,7 +94,8 @@ function Start-NodeService {
   }
 
   try {
-    $proc = Start-Process -FilePath 'node' `
+    Normalize-ProcessPathEnv
+    $proc = Start-Process -FilePath $FilePath `
       -ArgumentList $Arguments `
       -WorkingDirectory $Workdir `
       -PassThru `
@@ -132,7 +150,8 @@ Start-Sleep -Seconds 2
 Start-NodeService `
   -Name 'api' `
   -Workdir (Join-Path $root 'apps\api') `
-  -Arguments @('--import', 'tsx', 'src/server.ts') `
+  -FilePath 'powershell' `
+  -Arguments @('-NoProfile', '-Command', 'corepack pnpm exec tsx src/server.ts') `
   -PidFile (Join-Path $runDir 'api.pid') `
   -Port 3100 `
   -EnvVars @{
@@ -153,7 +172,8 @@ Start-Sleep -Seconds 1
 Start-NodeService `
   -Name 'web' `
   -Workdir (Join-Path $root 'apps\web') `
-  -Arguments @('.\node_modules\next\dist\bin\next', 'start', '-p', '3002') `
+  -FilePath 'powershell' `
+  -Arguments @('-NoProfile', '-Command', 'corepack pnpm exec next start -p 3002') `
   -PidFile (Join-Path $runDir 'web.pid') `
   -Port 3002
 
