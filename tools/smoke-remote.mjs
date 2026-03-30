@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import {
+  assertAccessGateHtml,
   assertInvalidSharedReportHtml,
-  assertReportCenterPageHtml,
   assertValidSharedReportHtml,
   buildSharedReportPayload,
 } from './report-smoke-helpers.mjs';
@@ -233,14 +233,15 @@ async function main() {
   await writeArtifact(options.outputDir, `${timestamp}-document-libraries.json`, librariesPayload);
   log('libraries', libraries.map((item) => `${item.label || item.key}:${item.documentCount || 0}`).join(', '));
 
-  const webResponse = await fetch(`${baseWeb}/`, { cache: 'no-store' });
-  assertCondition(webResponse.ok, `web root failed with ${webResponse.status}`);
-  log('web', 'Web root ok');
+  const webPage = await fetchText(`${baseWeb}/`, undefined, 'web root');
+  await writeTextArtifact(options.outputDir, `${timestamp}-web-root.html`, webPage.text);
+  assertAccessGateHtml(webPage.text, 'web root');
+  log('web', 'Web root access gate ok');
 
   const reportsPage = await fetchText(`${baseWeb}/reports`, undefined, 'reports page');
   await writeTextArtifact(options.outputDir, `${timestamp}-reports-page.html`, reportsPage.text);
-  assertReportCenterPageHtml(reportsPage.text, 'reports page');
-  log('reports-page', 'Report center page ok');
+  assertAccessGateHtml(reportsPage.text, 'reports page');
+  log('reports-page', 'Report center access gate ok');
 
   const sharedPayload = buildSharedReportPayload({
     title: 'remote-shared-smoke-title',

@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
+import { registerAccessKeyRoutes } from './routes/access-keys.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerDatasourceRoutes } from './routes/datasources.js';
@@ -36,6 +37,7 @@ export function createApp() {
   }));
 
   app.register(registerHealthRoutes, { prefix: '/api' });
+  app.register(registerAccessKeyRoutes, { prefix: '/api' });
   app.register(registerAuditRoutes, { prefix: '/api' });
   app.register(registerChatRoutes, { prefix: '/api' });
   app.register(registerModelConfigRoutes, { prefix: '/api' });

@@ -7,6 +7,8 @@ function fail(context, message) {
   throw new Error(`${context} ${message}`);
 }
 
+export const ACCESS_GATE_SHELL_MARKERS = ['access-gate-shell', 'access-gate-card', '最小权限'];
+
 export function assertSectionsContainInOrder(actual, expected, context) {
   let cursor = 0;
   for (const section of expected) {
@@ -46,6 +48,20 @@ export function assertReportCenterPageHtml(html, context = 'reports page') {
     if (!html.includes(sectionLabel)) {
       fail(context, `is missing section label "${sectionLabel}"`);
     }
+  }
+}
+
+export function assertAccessGateHtml(html, context = 'access gate page') {
+  const text = String(html || '');
+
+  for (const marker of ACCESS_GATE_SHELL_MARKERS) {
+    if (!text.includes(marker)) {
+      fail(context, `is missing access gate marker "${marker}"`);
+    }
+  }
+
+  if (!text.includes('输入访问密钥') && !text.includes('初始化访问密钥')) {
+    fail(context, 'did not render access gate title');
   }
 }
 
