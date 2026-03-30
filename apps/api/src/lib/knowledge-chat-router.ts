@@ -23,10 +23,12 @@ export type KnowledgeRouteSignals = {
   explicitCatalogRequest: boolean;
   explicitDetailRequest: boolean;
   explicitOutputRequest: boolean;
+  explicitOutputArtifact: boolean;
   outputSuppressed: boolean;
   comparisonRequest: boolean;
   mentionsSpecificDocument: boolean;
   mentionsRecentUploads: boolean;
+  summaryRequest: boolean;
 };
 
 export type KnowledgeChatRouteDecision = {
@@ -71,10 +73,16 @@ const DETAIL_PATTERNS =
 const COMPARISON_PATTERNS =
   /\u5bf9\u6bd4|\u5bf9\u7167|\u76d8\u4e00\u4e0b|\u6bd4\u4e00\u6bd4|\u6700\u65b0\u7684?\u51e0\u4efd|\u6700\u8fd1\u7684?\u51e0\u4efd|\u6700\u65b0\u7684?\u51e0\u4e2a|\u6700\u8fd1\u7684?\u51e0\u4e2a|\u770b\u770b.*\u51e0\u4efd/;
 
-const OUTPUT_PATTERNS = [
-  /\u8f93\u51fa|\u751f\u6210|\u6574\u7406|\u6c47\u603b|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa/i,
+const OUTPUT_ACTION_PATTERNS = [
+  /\u8f93\u51fa|\u751f\u6210|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa/i,
+];
+
+const OUTPUT_ARTIFACT_PATTERNS = [
   /\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u53ef\u89c6\u5316|\u62a5\u544a|dashboard|\u9a7e\u9a76\u8231|ppt|pdf|word|docx/i,
 ];
+
+const SUMMARY_PATTERNS =
+  /\u6982\u62ec|\u603b\u7ed3|\u603b\u89c8|\u6982\u89c8|\u68b3\u7406|\u8bf4\u4e0b|\u8bb2\u4e0b|\u76d8\u4e00\u4e0b|\u76d8\u70b9|\u7b80\u5355\u8bf4|\u5148\u7ed9\u7ed3\u8bba/;
 
 const OUTPUT_SUPPRESSION_PATTERNS = [
   /\u4e0d\u7528\u51fa\u8868|\u4e0d\u7528\u8868\u683c|\u4e0d\u7528\u62a5\u8868|\u4e0d\u7528\u9759\u6001\u9875|\u4e0d\u7528\u62a5\u544a/i,
@@ -139,7 +147,10 @@ function clampConfidence(value: unknown) {
 
 function buildSignals(prompt: string, libraries: Array<{ key: string; label: string }>): KnowledgeRouteSignals {
   const text = String(prompt || '').trim();
-  const explicitOutputRequest = OUTPUT_PATTERNS.some((pattern) => pattern.test(text));
+  const explicitOutputArtifact = OUTPUT_ARTIFACT_PATTERNS.some((pattern) => pattern.test(text));
+  const explicitOutputAction = OUTPUT_ACTION_PATTERNS.some((pattern) => pattern.test(text));
+  const summaryRequest = SUMMARY_PATTERNS.test(text);
+  const explicitOutputRequest = explicitOutputArtifact || (explicitOutputAction && !summaryRequest);
   const outputSuppressed = OUTPUT_SUPPRESSION_PATTERNS.some((pattern) => pattern.test(text));
   const comparisonRequest = COMPARISON_PATTERNS.test(text);
   const mentionsSpecificDocument = SPECIFIC_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text));
@@ -149,10 +160,12 @@ function buildSignals(prompt: string, libraries: Array<{ key: string; label: str
     explicitCatalogRequest: CATALOG_REQUEST_PATTERNS.some((pattern) => pattern.test(text)),
     explicitDetailRequest: DETAIL_PATTERNS.test(text),
     explicitOutputRequest,
+    explicitOutputArtifact,
     outputSuppressed,
     comparisonRequest,
     mentionsSpecificDocument,
     mentionsRecentUploads,
+    summaryRequest,
   };
 }
 
@@ -162,12 +175,16 @@ function buildLocalIntentContract(input: {
   signals: KnowledgeRouteSignals;
 }): KnowledgeIntentContract {
   const { prompt, libraries, signals } = input;
-  const route: KnowledgeChatRouteKind = signals.explicitOutputRequest && !signals.outputSuppressed
+  const route: KnowledgeChatRouteKind = signals.explicitOutputArtifact && !signals.outputSuppressed
     ? 'output'
     : (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument)
       ? 'detail'
-      : (signals.explicitCatalogRequest || signals.mentionsRecentUploads || signals.explicitKnowledgeScope)
+      : (signals.explicitCatalogRequest || signals.mentionsRecentUploads)
         ? 'catalog'
+        : (signals.summaryRequest && signals.explicitKnowledgeScope)
+          ? 'detail'
+          : signals.explicitKnowledgeScope
+            ? 'catalog'
         : 'general';
   const targetScope: KnowledgeIntentContract['targetScope'] = signals.comparisonRequest
     ? 'comparison'
@@ -254,15 +271,16 @@ export function finalizeKnowledgeRoute(
   contract: KnowledgeIntentContract,
   signals: KnowledgeRouteSignals,
 ): KnowledgeChatRouteKind {
-  if (signals.explicitOutputRequest && !signals.outputSuppressed) return 'output';
+  if (signals.explicitOutputArtifact && !signals.outputSuppressed) return 'output';
   if (signals.outputSuppressed && contract.route === 'output') {
     if (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument) return 'detail';
     if (signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
     return 'general';
   }
   if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
-  if (signals.explicitDetailRequest && contract.route !== 'output') return 'detail';
-  if (signals.explicitCatalogRequest && !signals.explicitDetailRequest && !signals.explicitOutputRequest) return 'catalog';
+  if (signals.explicitDetailRequest && (!signals.explicitOutputArtifact || contract.route !== 'output')) return 'detail';
+  if (signals.explicitCatalogRequest && !signals.explicitDetailRequest && !signals.explicitOutputArtifact) return 'catalog';
+  if (signals.summaryRequest && !signals.explicitOutputArtifact) return 'detail';
   return contract.route;
 }
 

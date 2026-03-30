@@ -219,6 +219,21 @@ function tryParseJsonPayload(content: string) {
   return null;
 }
 
+function looksLikeStructuredReportPayload(value: unknown): value is JsonRecord {
+  if (!isObject(value)) return false;
+  return Boolean(
+    isObject(value.page)
+    || Array.isArray(value.cards)
+    || Array.isArray(value.sections)
+    || Array.isArray(value.charts)
+    || Array.isArray(value.rows)
+    || Array.isArray(value.columns)
+    || sanitizeText(value.summary)
+    || sanitizeText(value.content)
+    || sanitizeText(value.title),
+  );
+}
+
 function pickNestedObject(root: JsonRecord, paths: string[][]) {
   for (const path of paths) {
     let current: unknown = root;
@@ -232,6 +247,20 @@ function pickNestedObject(root: JsonRecord, paths: string[][]) {
     }
     if (matched && isObject(current)) {
       return current;
+    }
+  }
+  return null;
+}
+
+function extractEmbeddedStructuredPayload(...values: unknown[]) {
+  for (const value of values) {
+    const candidate = typeof value === 'string' ? tryParseJsonPayload(value) : value;
+    if (!isObject(candidate)) continue;
+    const payload =
+      pickNestedObject(candidate, [['output'], ['report'], ['result'], ['data']])
+      || candidate;
+    if (looksLikeStructuredReportPayload(payload)) {
+      return payload;
     }
   }
   return null;
@@ -2756,15 +2785,43 @@ export function normalizeReportOutput(
   const parsed = tryParseJsonPayload(rawContent);
   const root = isObject(parsed) ? parsed : {};
   const payload = pickNestedObject(root, [['output'], ['report'], ['result'], ['data']]) || root;
-  const title = pickString(envelope?.title, payload.title, root.title, buildDefaultTitle(kind));
-  const content = pickString(payload.content, root.content, rawContent);
+  const embeddedPayload = extractEmbeddedStructuredPayload(
+    payload.content,
+    payload.summary,
+    root.content,
+    root.summary,
+  );
+  const effectivePayload = embeddedPayload || payload;
+  const title = pickString(envelope?.title, effectivePayload.title, payload.title, root.title, buildDefaultTitle(kind));
+  const content = pickString(
+    effectivePayload.content,
+    effectivePayload.summary,
+    payload.content,
+    payload.summary,
+    root.content,
+    rawContent,
+  );
 
   if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
-    const pageSource = pickNestedObject(payload, [['page']]) || pickNestedObject(root, [['page']]) || payload;
+    const wrapperPageSource = pickNestedObject(payload, [['page']]) || pickNestedObject(root, [['page']]) || payload;
+    const nestedPagePayload = extractEmbeddedStructuredPayload(
+      isObject(wrapperPageSource) ? wrapperPageSource.summary : null,
+      isObject(wrapperPageSource) ? wrapperPageSource.body : null,
+      isObject(wrapperPageSource) ? wrapperPageSource.content : null,
+      payload.content,
+      payload.summary,
+      root.content,
+      root.summary,
+    );
+    const pageSource =
+      pickNestedObject(nestedPagePayload || effectivePayload, [['page']])
+      || nestedPagePayload
+      || pickNestedObject(effectivePayload, [['page']])
+      || wrapperPageSource;
     const supplyEchoSource = looksLikeKnowledgeSupplyPayload(pageSource)
       ? pageSource
-      : looksLikeKnowledgeSupplyPayload(payload)
-        ? payload
+      : looksLikeKnowledgeSupplyPayload(effectivePayload)
+        ? effectivePayload
         : looksLikeKnowledgeSupplyPayload(root)
           ? root
           : null;
@@ -2773,13 +2830,13 @@ export function normalizeReportOutput(
       return buildSupplyEchoPageOutput(kind, title, supplyEchoSource, envelope);
     }
 
-    const summary = pickString(pageSource.summary, payload.summary, root.summary, content);
-    const cards = normalizeCards(pageSource.cards || payload.cards || root.cards);
-    const rawSections = normalizeSections(pageSource.sections || payload.sections || root.sections);
+    const summary = pickString(pageSource.summary, effectivePayload.summary, payload.summary, root.summary, content);
+    const cards = normalizeCards(pageSource.cards || effectivePayload.cards || payload.cards || root.cards);
+    const rawSections = normalizeSections(pageSource.sections || effectivePayload.sections || payload.sections || root.sections);
     const alignedSections = envelope?.pageSections?.length
       ? alignSectionsToEnvelope(rawSections, envelope.pageSections, summary)
       : rawSections;
-    const charts = normalizeCharts(pageSource.charts || payload.charts || root.charts);
+    const charts = normalizeCharts(pageSource.charts || effectivePayload.charts || payload.charts || root.charts);
     const effectiveSections = alignedSections.length ? alignedSections : rawSections;
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
     const orderDocuments = documents.filter(isOrderInventoryDocument);

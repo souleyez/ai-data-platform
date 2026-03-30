@@ -21,6 +21,12 @@ const LIBRARIES: DocumentLibrary[] = [
     description: '标书库',
     createdAt: '2026-03-30T00:00:00.000Z',
   },
+  {
+    key: 'order',
+    label: '订单分析',
+    description: '订单分析知识库',
+    createdAt: '2026-03-30T00:00:00.000Z',
+  },
 ];
 
 test('extractKnowledgeIntentContract should parse strict router json', () => {
@@ -45,11 +51,13 @@ test('buildKnowledgeRouterPrompt should preserve libraries and trigger signals',
       explicitKnowledgeScope: true,
       explicitCatalogRequest: false,
       explicitDetailRequest: false,
-      explicitOutputRequest: true,
+      explicitOutputRequest: false,
+      explicitOutputArtifact: false,
       outputSuppressed: true,
       comparisonRequest: true,
       mentionsSpecificDocument: false,
       mentionsRecentUploads: false,
+      summaryRequest: true,
     },
   });
 
@@ -74,11 +82,13 @@ test('finalizeKnowledgeRoute should keep negative output constraints from being 
       explicitKnowledgeScope: true,
       explicitCatalogRequest: false,
       explicitDetailRequest: false,
-      explicitOutputRequest: true,
+      explicitOutputRequest: false,
+      explicitOutputArtifact: false,
       outputSuppressed: true,
       comparisonRequest: true,
       mentionsSpecificDocument: false,
       mentionsRecentUploads: false,
+      summaryRequest: true,
     },
   );
 
@@ -153,6 +163,29 @@ test('resolveKnowledgeChatRoute should route formal page requests to output', as
   assert.equal(decision.route, 'output');
   assert.equal(decision.evidenceMode, 'live_detail');
   assert.equal(decision.contract.requestedForm, 'page');
+});
+
+test('resolveKnowledgeChatRoute should keep order summary prompts on detail when there is no deliverable noun', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '查看订单分析知识库，概括Q1各渠道净销售额、前三品类和库存风险重点',
+    chatHistory: [],
+    libraries: LIBRARIES,
+  }, {
+    resolveCloudContract: async () => ({
+      route: 'output',
+      subject: 'Q1订单分析知识库数据概括',
+      requestedForm: 'answer',
+      targetScope: 'specific_document',
+      needsLiveDetail: true,
+      normalizedRequest: '查看订单分析知识库，概括Q1各渠道净销售额、前三品类和库存风险重点',
+      rationale: 'cloud over-classified this as a deliverable',
+      confidence: 0.85,
+    }),
+  });
+
+  assert.equal(decision.route, 'detail');
+  assert.equal(decision.evidenceMode, 'live_detail');
+  assert.equal(decision.contract.requestedForm, 'answer');
 });
 
 test('resolveKnowledgeChatRoute should keep casual chat on the general route', async () => {

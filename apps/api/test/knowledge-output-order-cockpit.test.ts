@@ -140,3 +140,84 @@ test('normalizeReportOutput should fall back to order cockpit output for prompt 
   assert.ok((output.page?.charts || []).length >= 2);
   assert.match(output.page?.summary || '', /多渠道|SKU|库存|补货/);
 });
+
+test('normalizeReportOutput should unwrap nested stringified order page payloads', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'order-summary.csv',
+      name: 'order-summary.csv',
+      ext: '.csv',
+      title: '2026 Q1 多渠道订单经营汇总',
+      category: 'general',
+      bizCategory: 'order',
+      parseStatus: 'parsed',
+      parseMethod: 'csv-utf8',
+      summary: '覆盖天猫、京东、抖音、拼多多的订单经营汇总，含净销售额、毛利率和退款信号。',
+      excerpt: 'month,platform,category,order_count,units_sold,net_sales,gross_profit,gross_margin',
+      fullText: [
+        'month,platform,category,order_count,units_sold,net_sales,gross_profit,gross_margin,refund_total',
+        '2026-01,Douyin,智能穿戴,120,148,82350,26120,31.7,4200',
+        '2026-01,Tmall,耳机,96,121,71320,24550,34.4,2600',
+      ].join('\n'),
+      extractedChars: 220,
+      schemaType: 'report',
+      topicTags: ['订单分析', '渠道经营', 'SKU结构', '经营复盘'],
+      structuredProfile: {
+        platforms: ['tmall', 'jd', 'douyin'],
+        categorySignals: ['智能穿戴', '耳机'],
+        metricSignals: ['gmv', 'inventory-index'],
+      },
+    },
+  ];
+
+  const embeddedPage = {
+    title: '订单品类/SKU经营驾驶舱',
+    summary: '2026年Q1订单与库存经营总览。',
+    page: {
+      summary: '本页面基于订单分析知识库构建，覆盖多渠道经营、品类梯队和库存动作。',
+      cards: [
+        { label: '渠道GMV', value: '抖音主导', note: '抖音、天猫、京东三大渠道' },
+        { label: '高风险SKU', value: '旗舰手表X1', note: '超库存风险，建议清仓' },
+      ],
+      sections: [
+        { title: '经营总览', body: 'Q1覆盖抖音、京东、天猫三大渠道。', bullets: ['抖音主导', '耳机和智能穿戴贡献最高'] },
+        { title: '库存与补货', body: '旗舰手表X1超库存，建议优先清理。', bullets: ['P0清理', '补货节奏收紧'] },
+      ],
+      charts: [
+        { title: '渠道贡献结构', items: [{ label: '抖音', value: 8 }, { label: '天猫', value: 3 }] },
+      ],
+    },
+  };
+
+  const output = normalizeReportOutput(
+    'page',
+    '基于订单分析知识库全部材料，生成多渠道多SKU经营驾驶舱静态页',
+    JSON.stringify({
+      output: {
+        type: 'page',
+        title: '订单品类/SKU经营驾驶舱',
+        content: JSON.stringify(embeddedPage),
+        format: 'html',
+        page: {
+          summary: JSON.stringify(embeddedPage),
+        },
+      },
+    }),
+    {
+      title: '订单多渠道经营驾驶舱',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '输出多渠道、多SKU经营驾驶舱',
+      pageSections: ['经营总览', '品类梯队', 'SKU集中度', '动销与毛利焦点', '库存与补货', '异常波动解释', 'AI综合分析'],
+    },
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '订单多渠道经营驾驶舱');
+  assert.equal(output.page?.summary, '本页面基于订单分析知识库构建，覆盖多渠道经营、品类梯队和库存动作。');
+  assert.equal(output.page?.sections?.[0]?.body, 'Q1覆盖抖音、京东、天猫三大渠道。');
+  assert.ok((output.page?.cards || []).some((item) => item.label === '渠道GMV'));
+  assert.ok((output.page?.charts || []).length >= 2);
+  assert.doesNotMatch(output.page?.summary || '', /^\s*\{/);
+});
