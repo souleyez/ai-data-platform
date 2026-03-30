@@ -420,6 +420,13 @@ That means:
 - project fetches live details for those ids
 - output skill composes the answer/page/table
 
+Phase 4 implementation note:
+
+- memory-side candidate selector lives in `apps/api/src/lib/openclaw-memory-selection.ts`
+- output execution now asks memory for likely document ids before retrieval
+- `prepareKnowledgeRetrieval(...)` accepts `preferredDocumentIds` and narrows retrieval scope when memory produced candidates
+- formal output still reuses the existing planner/composer/output-normalize chain; only the upstream candidate selection changed
+
 ### Phase 5: Cleanup
 
 After the new path is stable, delete or heavily reduce the old routing logic.

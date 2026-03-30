@@ -5,6 +5,7 @@ import {
   buildKnowledgeChatHistory,
   prepareKnowledgeRetrieval,
 } from '../src/lib/knowledge-supply.js';
+import { buildDocumentId } from '../src/lib/document-store.js';
 
 test('buildKnowledgeChatHistory should drop short operational feedback and keep relevant dialogue', () => {
   const history = buildKnowledgeChatHistory(
@@ -72,6 +73,57 @@ test('prepareKnowledgeRetrieval should produce fallback metadata and chunk ids w
   assert.equal(supply.effectiveRetrieval.meta.rerankedCount, 2);
   assert.equal(supply.effectiveRetrieval.documents.length, 2);
   assert.ok(supply.effectiveRetrieval.evidenceMatches.every((item) => item.chunkId.startsWith('fallback-')));
+});
+
+test('prepareKnowledgeRetrieval should narrow retrieval to preferred memory-selected document ids', async () => {
+  const firstItem = {
+    path: 'C:\\tmp\\resume-1.txt',
+    name: 'resume-1.txt',
+    title: 'Resume 1',
+    ext: '.txt',
+    summary: '',
+    excerpt: '',
+    category: 'general',
+    bizCategory: 'general',
+    parseStatus: 'success',
+    extractedChars: 120,
+    topicTags: [],
+    confirmedGroups: ['resume'],
+    groups: ['resume'],
+    evidenceChunks: ['Built an ERP integration project for employer A.'],
+    claims: [],
+  } as any;
+  const secondItem = {
+    path: 'C:\\tmp\\resume-2.txt',
+    name: 'resume-2.txt',
+    title: 'Resume 2',
+    ext: '.txt',
+    summary: '',
+    excerpt: '',
+    category: 'general',
+    bizCategory: 'general',
+    parseStatus: 'success',
+    extractedChars: 160,
+    topicTags: [],
+    confirmedGroups: ['resume'],
+    groups: ['resume'],
+    evidenceChunks: ['Implemented API gateway migration for employer B.'],
+    claims: [],
+  } as any;
+
+  const supply = await prepareKnowledgeRetrieval({
+    requestText: 'zzqxv unmatched prompt',
+    knowledgeChatHistory: [],
+    libraries: [{ key: 'resume', label: '简历' }],
+    scopedItems: [firstItem, secondItem],
+    docLimit: 6,
+    evidenceLimit: 8,
+    preferredDocumentIds: [buildDocumentId(secondItem.path)],
+  });
+
+  assert.equal(supply.effectiveRetrieval.meta.candidateCount, 1);
+  assert.equal(supply.effectiveRetrieval.documents.length, 1);
+  assert.equal(supply.effectiveRetrieval.documents[0]?.title, 'Resume 2');
 });
 
 test('buildConceptPageSupplyBlock should provide structure hints for resume company pages', () => {

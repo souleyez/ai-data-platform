@@ -8,6 +8,10 @@ import {
   type ChatOutput,
 } from './knowledge-output.js';
 import { runKnowledgeDetailFetch } from './knowledge-detail-fetch.js';
+import {
+  buildOpenClawMemorySelectionContextBlock,
+  selectOpenClawMemoryDocumentCandidates,
+} from './openclaw-memory-selection.js';
 import { detectOutputKind } from './knowledge-plan.js';
 import {
   buildKnowledgeConceptPagePrompt,
@@ -157,6 +161,11 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   );
   const templateTaskHint = inferTemplateTaskHint(selectedTemplates, requestedKind);
   const templateSearchHints = conceptPageMode ? [] : buildTemplateSearchHints(selectedTemplates);
+  const memorySelection = await selectOpenClawMemoryDocumentCandidates({
+    requestText,
+    libraries: scopeState.libraries,
+    limit: requestedKind === 'page' ? 10 : 8,
+  });
   const supply = await prepareKnowledgeRetrieval({
     requestText,
     timeRange: input.timeRange,
@@ -165,6 +174,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     evidenceLimit: 12,
     templateTaskHint,
     templateSearchHints,
+    preferredDocumentIds: memorySelection.documentIds,
     ...scopeState,
   });
 
@@ -279,6 +289,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       templateTaskHint,
     })
     : '';
+  const memorySelectionContext = buildOpenClawMemorySelectionContextBlock(memorySelection);
 
   let output: ChatOutput | null = null;
   let executionStage = 'composer-model';
@@ -388,6 +399,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         sessionUser: input.sessionUser,
         chatHistory: supply.knowledgeChatHistory,
         contextBlocks: [
+          memorySelectionContext,
           conceptPageContext,
           reportPlanContext,
           resumeDisplayProfileContext,

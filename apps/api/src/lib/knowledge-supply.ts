@@ -1,6 +1,6 @@
 import { retrieveKnowledgeMatches, type RetrievalResult } from './document-retrieval.js';
 import { documentMatchesLibrary, loadDocumentLibraries } from './document-libraries.js';
-import { loadParsedDocuments } from './document-store.js';
+import { buildDocumentId, loadParsedDocuments } from './document-store.js';
 import {
   buildKnowledgeRetrievalQuery,
   buildLibraryFallbackRetrieval,
@@ -418,9 +418,19 @@ export async function prepareKnowledgeRetrieval(input: KnowledgeScopeState & {
   evidenceLimit: number;
   templateTaskHint?: KnowledgeTemplateTaskHint | null;
   templateSearchHints?: string[];
+  preferredDocumentIds?: string[];
 }): Promise<KnowledgeSupply> {
+  const preferredDocumentIds = Array.isArray(input.preferredDocumentIds)
+    ? input.preferredDocumentIds.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const preferredDocumentSet = new Set(preferredDocumentIds);
+  const memoryScopedItems = preferredDocumentSet.size
+    ? input.scopedItems.filter((item) => preferredDocumentSet.has(buildDocumentId(item.path)))
+    : [];
+  const retrievalScopedItems = memoryScopedItems.length ? memoryScopedItems : input.scopedItems;
+
   const retrieval = await retrieveKnowledgeMatches(
-    input.scopedItems,
+    retrievalScopedItems,
     buildKnowledgeRetrievalQuery(input.requestText, input.libraries, {
       timeRange: input.timeRange,
       contentFocus: input.contentFocus,
@@ -438,7 +448,7 @@ export async function prepareKnowledgeRetrieval(input: KnowledgeScopeState & {
       ? retrieval
       : {
           ...(() => {
-            const fallback = buildLibraryFallbackRetrieval(input.scopedItems);
+            const fallback = buildLibraryFallbackRetrieval(retrievalScopedItems);
             return {
               ...fallback,
               evidenceMatches: fallback.evidenceMatches.map((entry, index) => ({
@@ -449,8 +459,8 @@ export async function prepareKnowledgeRetrieval(input: KnowledgeScopeState & {
           })(),
           meta: {
             ...retrieval.meta,
-            candidateCount: input.scopedItems.length,
-            rerankedCount: Math.min(input.scopedItems.length, 6),
+            candidateCount: retrievalScopedItems.length,
+            rerankedCount: Math.min(retrievalScopedItems.length, 6),
           },
         };
 
@@ -471,6 +481,7 @@ export async function prepareKnowledgeSupply(input: {
   evidenceLimit: number;
   templateTaskHint?: KnowledgeTemplateTaskHint | null;
   templateSearchHints?: string[];
+  preferredDocumentIds?: string[];
 }): Promise<KnowledgeSupply> {
   const scopeState = await prepareKnowledgeScope(input);
   return prepareKnowledgeRetrieval({
@@ -481,6 +492,7 @@ export async function prepareKnowledgeSupply(input: {
     evidenceLimit: input.evidenceLimit,
     templateTaskHint: input.templateTaskHint,
     templateSearchHints: input.templateSearchHints,
+    preferredDocumentIds: input.preferredDocumentIds,
     ...scopeState,
   });
 }
