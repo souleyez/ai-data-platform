@@ -4,6 +4,7 @@ import type { ParsedDocument } from '../src/lib/document-parser.js';
 import {
   runOrderInventoryPageComposer,
   runOrderInventoryPageComposerDetailed,
+  selectOrderInventoryEvidenceDocuments,
 } from '../src/lib/order-inventory-page-composer.js';
 
 test('runOrderInventoryPageComposer should return null and expose debug detail when gateway is not configured', async () => {
@@ -66,4 +67,85 @@ test('runOrderInventoryPageComposer should return null and expose debug detail w
     if (previousToken === undefined) delete process.env.OPENCLAW_GATEWAY_TOKEN;
     else process.env.OPENCLAW_GATEWAY_TOKEN = previousToken;
   }
+});
+
+test('selectOrderInventoryEvidenceDocuments should exclude skill guides and unrelated proposals', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'default-samples/assets/order-electronics-omni-1000-orders-q1-2026.csv',
+      name: 'order-electronics-omni-1000-orders-q1-2026.csv',
+      ext: '.csv',
+      title: 'month,platform,category,sku,net_sales',
+      category: 'order',
+      bizCategory: 'order',
+      parseStatus: 'parsed',
+      summary: 'Omni-channel order detail with Tmall, JD, Douyin, SKU and net sales signals.',
+      excerpt: 'Tmall,JD,Douyin',
+      extractedChars: 2400,
+      schemaType: 'report',
+      topicTags: ['order', 'channel'],
+      structuredProfile: {
+        platforms: ['tmall', 'jd', 'douyin'],
+        metricSignals: ['gmv'],
+      },
+    },
+    {
+      path: 'default-samples/assets/order-inventory-snapshot-q1-2026.csv',
+      name: 'order-inventory-snapshot-q1-2026.csv',
+      ext: '.csv',
+      title: 'Q1 inventory snapshot',
+      category: 'inventory',
+      bizCategory: 'inventory',
+      parseStatus: 'parsed',
+      summary: 'Inventory index, replenishment priority, risk flag, days of cover.',
+      excerpt: 'inventory_index,days_of_cover,replenishment_priority',
+      extractedChars: 1200,
+      schemaType: 'report',
+      topicTags: ['inventory', 'stock'],
+      structuredProfile: {
+        replenishmentSignals: ['replenishment'],
+        anomalySignals: ['anomaly'],
+      },
+    },
+    {
+      path: 'skills/order-inventory-page-composer/references/layout-guidance.md',
+      name: 'layout-guidance.md',
+      ext: '.md',
+      title: 'layout guidance',
+      category: 'general',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: 'Design guidance for cockpit layouts.',
+      excerpt: 'Use 4 cards and 2 charts.',
+      extractedChars: 400,
+      schemaType: 'generic',
+      topicTags: ['dashboard'],
+    },
+    {
+      path: 'docs/CUSTOMER_PROPOSAL_DIVOOM_CLIENT.md',
+      name: 'CUSTOMER_PROPOSAL_DIVOOM_CLIENT.md',
+      ext: '.md',
+      title: 'AI Data Platform proposal for Divoom',
+      category: 'general',
+      bizCategory: 'general',
+      parseStatus: 'parsed',
+      summary: 'Sales proposal deck for Divoom.',
+      excerpt: 'Proposal sections and pricing.',
+      extractedChars: 600,
+      schemaType: 'report',
+      topicTags: ['proposal'],
+    },
+  ];
+
+  const selected = selectOrderInventoryEvidenceDocuments(documents, { maxDocuments: 3 });
+
+  assert.equal(selected.length, 2);
+  assert.ok(selected.every((item) => !/layout-guidance|divoom/i.test(item.path)));
+  assert.deepEqual(
+    selected.map((item) => item.name),
+    [
+      'order-electronics-omni-1000-orders-q1-2026.csv',
+      'order-inventory-snapshot-q1-2026.csv',
+    ],
+  );
 });

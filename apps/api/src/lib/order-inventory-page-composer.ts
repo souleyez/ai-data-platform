@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import type { ReportPlan } from './report-planner.js';
@@ -14,6 +15,38 @@ export type OrderInventoryPageComposerExecution = {
   attemptMode: ComposerPromptMode | '';
   attemptedModes: ComposerPromptMode[];
 };
+
+const ORDER_EVIDENCE_EXCLUDE_SIGNALS = [
+  'layout guidance',
+  'output schema',
+  'planning contract',
+  'supply contract',
+  'prompt contract',
+  'proposal',
+  'divoom',
+];
+
+const ORDER_EVIDENCE_INCLUDE_SIGNALS = [
+  'order',
+  'inventory',
+  'sku',
+  'platform',
+  'channel',
+  'category',
+  'gmv',
+  'net sales',
+  'gross margin',
+  'inventory index',
+  'days of cover',
+  'replenishment',
+  'restock',
+  'risk flag',
+  'stock',
+  'forecast',
+  'cockpit',
+  'dashboard',
+  'snapshot',
+];
 
 const CHANNEL_SIGNAL_MAP = new Map<string, string>([
   ['tmall', 'Tmall'],
@@ -82,6 +115,10 @@ function normalizeText(value: unknown) {
 
 function isObject(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function containsSignal(text: string, signals: string[]) {
+  return signals.some((signal) => text.includes(signal));
 }
 
 function toStringArray(value: unknown) {
@@ -179,6 +216,111 @@ function detectOrderInventoryRequestView(input: {
   return 'generic';
 }
 
+function looksLikeDelimitedLine(value: string) {
+  const text = sanitizeText(value, 240);
+  if (!text) return false;
+  return ((text.match(/,/g) || []).length >= 4) || ((text.match(/\|/g) || []).length >= 4);
+}
+
+function selectOrderComposerDocumentTitle(item: ParsedDocument) {
+  const title = sanitizeText(item.title || '', 120);
+  if (title && !looksLikeDelimitedLine(title)) return title;
+  const fromName = sanitizeText(path.parse(item.name || path.basename(item.path)).name, 120);
+  if (fromName) return fromName;
+  return sanitizeText(path.basename(item.path), 120);
+}
+
+function buildOrderEvidenceText(item: ParsedDocument) {
+  return normalizeText([
+    item.path,
+    item.name,
+    item.title,
+    item.summary,
+    item.excerpt,
+    ...(item.topicTags || []),
+    ...(item.groups || []),
+  ].join(' '));
+}
+
+function hasStructuredOrderSignals(item: ParsedDocument) {
+  return Boolean(
+    collectProfileStrings(item, [
+      'platforms',
+      'platformSignals',
+      'categorySignals',
+      'metricSignals',
+      'keyMetrics',
+      'replenishmentSignals',
+      'forecastSignals',
+      'anomalySignals',
+      'operatingSignals',
+    ]).length,
+  );
+}
+
+export function isOrderInventoryEvidenceDocument(item: ParsedDocument) {
+  const evidenceText = buildOrderEvidenceText(item);
+  if (!evidenceText) return false;
+  if (containsSignal(evidenceText, ORDER_EVIDENCE_EXCLUDE_SIGNALS)) return false;
+  if (/[\\/](skills|docs)[\\/]/i.test(String(item.path || ''))) return false;
+
+  const bizCategory = String(item.bizCategory || '').toLowerCase();
+  const schemaType = String(item.schemaType || '').toLowerCase();
+  if (bizCategory === 'order' || bizCategory === 'inventory') return true;
+  if (schemaType === 'order') return true;
+  if (hasStructuredOrderSignals(item)) return true;
+  if (schemaType === 'report' && containsSignal(evidenceText, ORDER_EVIDENCE_INCLUDE_SIGNALS)) return true;
+  return false;
+}
+
+function scoreOrderInventoryEvidenceDocument(item: ParsedDocument) {
+  const bizCategory = String(item.bizCategory || '').toLowerCase();
+  const schemaType = String(item.schemaType || '').toLowerCase();
+  let score = 0;
+
+  if (bizCategory === 'order') score += 60;
+  else if (bizCategory === 'inventory') score += 56;
+
+  if (schemaType === 'order') score += 24;
+  else if (schemaType === 'report') score += 18;
+
+  if (item.ext === '.csv') score += 16;
+  else if (item.ext === '.xlsx' || item.ext === '.xls') score += 14;
+  else if (item.ext === '.md') score += 8;
+
+  score += Math.min(12, collectProfileStrings(item, [
+    'platformSignals',
+    'categorySignals',
+    'metricSignals',
+    'replenishmentSignals',
+    'anomalySignals',
+  ]).length * 2);
+  score += Math.min(6, (item.topicTags || []).length);
+
+  const evidenceText = buildOrderEvidenceText(item);
+  if (containsSignal(evidenceText, ['omni', 'multi channel', 'multi sku', 'snapshot', 'summary', 'notes'])) {
+    score += 6;
+  }
+
+  return score;
+}
+
+export function selectOrderInventoryEvidenceDocuments(
+  documents: ParsedDocument[],
+  options?: { maxDocuments?: number },
+) {
+  const maxDocuments = Math.max(1, Math.min(Number(options?.maxDocuments || 6), 12));
+  const filtered = documents.filter(isOrderInventoryEvidenceDocument);
+  const effective = filtered.length ? filtered : documents;
+
+  return [...effective]
+    .sort((left, right) => (
+      scoreOrderInventoryEvidenceDocument(right) - scoreOrderInventoryEvidenceDocument(left)
+      || sanitizeText(left.title || left.name).localeCompare(sanitizeText(right.title || right.name), 'zh-CN')
+    ))
+    .slice(0, maxDocuments);
+}
+
 function buildDocumentSnapshot(item: ParsedDocument, compact = false) {
   const profile = getStructuredProfile(item);
   const keys = [
@@ -195,10 +337,10 @@ function buildDocumentSnapshot(item: ParsedDocument, compact = false) {
 
   return {
     name: sanitizeText(item.name, 120),
-    title: sanitizeText(item.title, 120),
+    title: selectOrderComposerDocumentTitle(item),
     bizCategory: sanitizeText(item.bizCategory, 40),
     summary: sanitizeText(item.summary, compact ? 120 : 220),
-    excerpt: compact ? '' : sanitizeText(item.excerpt, 160),
+    excerpt: compact ? '' : sanitizeText(item.excerpt, 120),
     topicTags: toStringArray(item.topicTags).slice(0, compact ? 3 : 5),
     structuredSignals: keys.reduce<JsonRecord>((acc, key) => {
       const values = collectProfileStrings(item, [key]).map(formatSignalLabel).slice(0, compact ? 3 : 5);
@@ -217,11 +359,15 @@ function buildComposerContext(input: {
 }, mode: ComposerPromptMode) {
   const compact = mode === 'compact';
   const view = detectOrderInventoryRequestView(input);
-  const channels = buildRankedCountList(input.documents.flatMap(collectChannelSignals), compact ? 4 : 6);
-  const categories = buildRankedCountList(input.documents.flatMap(collectCategorySignals), compact ? 4 : 6);
-  const metrics = buildRankedCountList(input.documents.flatMap(collectMetricSignals), compact ? 4 : 6);
-  const replenishment = buildRankedCountList(input.documents.flatMap(collectReplenishmentSignals), compact ? 4 : 6);
-  const anomalies = buildRankedCountList(input.documents.flatMap(collectAnomalySignals), compact ? 4 : 6);
+  const evidenceDocuments = selectOrderInventoryEvidenceDocuments(
+    input.documents,
+    { maxDocuments: compact ? 3 : 4 },
+  );
+  const channels = buildRankedCountList(evidenceDocuments.flatMap(collectChannelSignals), compact ? 4 : 6);
+  const categories = buildRankedCountList(evidenceDocuments.flatMap(collectCategorySignals), compact ? 4 : 6);
+  const metrics = buildRankedCountList(evidenceDocuments.flatMap(collectMetricSignals), compact ? 4 : 6);
+  const replenishment = buildRankedCountList(evidenceDocuments.flatMap(collectReplenishmentSignals), compact ? 4 : 6);
+  const anomalies = buildRankedCountList(evidenceDocuments.flatMap(collectAnomalySignals), compact ? 4 : 6);
 
   return {
     requestText: sanitizeText(input.requestText, 240),
@@ -251,15 +397,14 @@ function buildComposerContext(input: {
       })),
     } : null,
     cockpit: {
-      documentCount: input.documents.length,
+      documentCount: evidenceDocuments.length,
       channels,
       categories,
       metrics,
       replenishment,
       anomalies,
     },
-    documents: input.documents
-      .slice(0, compact ? 4 : 6)
+    documents: evidenceDocuments
       .map((item) => buildDocumentSnapshot(item, compact)),
   };
 }
@@ -297,7 +442,7 @@ function buildComposerPrompt(input: {
   return [
     `Request: ${sanitizeText(input.requestText, 240)}`,
     modeInstruction,
-    JSON.stringify(buildComposerContext(input, mode), null, 2),
+    JSON.stringify(buildComposerContext(input, mode)),
   ].join('\n\n');
 }
 

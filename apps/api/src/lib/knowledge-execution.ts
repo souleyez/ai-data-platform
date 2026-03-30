@@ -1,4 +1,5 @@
 import { buildKnowledgeContext } from './knowledge-evidence.js';
+import type { RetrievalResult } from './document-retrieval.js';
 import {
   buildKnowledgeFallbackOutput,
   buildKnowledgeMissMessage,
@@ -42,9 +43,35 @@ import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
 } from './resume-display-profile-provider.js';
-import { runOrderInventoryPageComposerDetailed } from './order-inventory-page-composer.js';
+import {
+  runOrderInventoryPageComposerDetailed,
+  selectOrderInventoryEvidenceDocuments,
+} from './order-inventory-page-composer.js';
 import { runResumePageComposerDetailed } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
+
+const ORDER_OUTPUT_MEMORY_LIMIT = 6;
+const ORDER_OUTPUT_DOC_LIMIT = 6;
+const ORDER_OUTPUT_EVIDENCE_LIMIT = 8;
+
+function refineOrderOutputRetrieval(
+  retrieval: RetrievalResult,
+): RetrievalResult {
+  const documents = selectOrderInventoryEvidenceDocuments(
+    retrieval.documents,
+    { maxDocuments: ORDER_OUTPUT_DOC_LIMIT },
+  );
+  if (!documents.length) return retrieval;
+
+  const documentPaths = new Set(documents.map((item) => item.path));
+  return {
+    ...retrieval,
+    documents,
+    evidenceMatches: retrieval.evidenceMatches
+      .filter((match) => documentPaths.has(match.item.path))
+      .slice(0, ORDER_OUTPUT_EVIDENCE_LIMIT),
+  };
+}
 
 export type KnowledgeExecutionInput = {
   prompt: string;
@@ -161,25 +188,31 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   );
   const templateTaskHint = inferTemplateTaskHint(selectedTemplates, requestedKind);
   const templateSearchHints = conceptPageMode ? [] : buildTemplateSearchHints(selectedTemplates);
+  const isOrderInventoryPageRequest = requestedKind === 'page' && templateTaskHint === 'order-static-page';
   const memorySelection = await selectOpenClawMemoryDocumentCandidates({
     requestText,
     libraries: scopeState.libraries,
-    limit: requestedKind === 'page' ? 10 : 8,
+    limit: isOrderInventoryPageRequest
+      ? ORDER_OUTPUT_MEMORY_LIMIT
+      : (requestedKind === 'page' ? 10 : 8),
   });
   const supply = await prepareKnowledgeRetrieval({
     requestText,
     timeRange: input.timeRange,
     contentFocus: input.contentFocus,
-    docLimit: 10,
-    evidenceLimit: 12,
+    docLimit: isOrderInventoryPageRequest ? ORDER_OUTPUT_DOC_LIMIT : 10,
+    evidenceLimit: isOrderInventoryPageRequest ? ORDER_OUTPUT_EVIDENCE_LIMIT : 12,
     templateTaskHint,
     templateSearchHints,
     preferredDocumentIds: memorySelection.documentIds,
     ...scopeState,
   });
+  const effectiveRetrieval = isOrderInventoryPageRequest
+    ? refineOrderOutputRetrieval(supply.effectiveRetrieval)
+    : supply.effectiveRetrieval;
 
   const resolvedLibraries = supply.libraries;
-  if (!supply.effectiveRetrieval.documents.length) {
+  if (!effectiveRetrieval.documents.length) {
     const content = buildKnowledgeMissMessage(resolvedLibraries);
     return {
       libraries: resolvedLibraries,
@@ -218,7 +251,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       templateTaskHint,
       conceptPageMode,
       selectedTemplates,
-      retrieval: supply.effectiveRetrieval,
+      retrieval: effectiveRetrieval,
       libraries: resolvedLibraries,
     })
     : null;
@@ -231,7 +264,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const resumeDisplayProfileResolution = requestedKind === 'page'
     ? await runResumeDisplayProfileResolver({
       requestText,
-      documents: supply.effectiveRetrieval.documents,
+      documents: effectiveRetrieval.documents,
       sessionUser: input.sessionUser,
     })
     : null;
@@ -283,7 +316,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     ? buildConceptPageSupplyBlock({
       requestText,
       libraries: resolvedLibraries,
-      retrieval: supply.effectiveRetrieval,
+      retrieval: effectiveRetrieval,
       timeRange: input.timeRange,
       contentFocus: input.contentFocus,
       templateTaskHint,
@@ -297,7 +330,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
     const canComposeOrderInventoryPage = requestedKind === 'page'
       && templateTaskHint === 'order-static-page'
-      && supply.effectiveRetrieval.documents.some((item) => (
+      && effectiveRetrieval.documents.some((item) => (
         item.bizCategory === 'order'
         || item.bizCategory === 'inventory'
         || String(item.schemaType || '').toLowerCase() === 'report'
@@ -310,7 +343,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         requestText,
         reportPlan,
         envelope: activeEnvelope,
-        documents: supply.effectiveRetrieval.documents,
+        documents: effectiveRetrieval.documents,
         displayProfiles: resumeDisplayProfileResolution?.profiles || [],
         sessionUser: input.sessionUser,
       });
@@ -331,14 +364,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           requestText,
           composedContent,
           activeEnvelope,
-          supply.effectiveRetrieval.documents,
+          effectiveRetrieval.documents,
           resumeDisplayProfileResolution?.profiles || [],
           { allowResumeFallback: false },
         );
         const composerNeedsFallback = shouldUseResumePageFallbackOutput(
           requestText,
           composedOutput,
-          supply.effectiveRetrieval.documents,
+          effectiveRetrieval.documents,
         );
         if (resumePageDebugTrace) {
           resumePageDebugTrace.composerOutput = composedOutput;
@@ -358,7 +391,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         output = buildKnowledgeFallbackOutput(
           requestedKind,
           requestText,
-          supply.effectiveRetrieval.documents,
+          effectiveRetrieval.documents,
           activeEnvelope,
           resumeDisplayProfileResolution?.profiles || [],
         );
@@ -374,7 +407,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         requestText,
         reportPlan,
         envelope: activeEnvelope,
-        documents: supply.effectiveRetrieval.documents,
+        documents: effectiveRetrieval.documents,
         sessionUser: input.sessionUser,
       });
 
@@ -385,7 +418,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           requestText,
           composerResult.content,
           activeEnvelope,
-          supply.effectiveRetrieval.documents,
+          effectiveRetrieval.documents,
           resumeDisplayProfileResolution?.profiles || [],
           { allowResumeFallback: false },
         );
@@ -404,7 +437,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           reportPlanContext,
           resumeDisplayProfileContext,
           templateContext,
-          buildKnowledgeContext(requestText, resolvedLibraries, supply.effectiveRetrieval, {
+          buildKnowledgeContext(requestText, resolvedLibraries, effectiveRetrieval, {
             timeRange: input.timeRange,
             contentFocus: input.contentFocus,
           }),
@@ -431,13 +464,13 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         requestText,
         cloud.content,
         activeEnvelope,
-        supply.effectiveRetrieval.documents,
+        effectiveRetrieval.documents,
         resumeDisplayProfileResolution?.profiles || [],
         { allowResumeFallback: false },
       );
 
       const needsResumeRetry = requestedKind === 'page'
-        && shouldUseResumePageFallbackOutput(requestText, initialOutput, supply.effectiveRetrieval.documents);
+        && shouldUseResumePageFallbackOutput(requestText, initialOutput, effectiveRetrieval.documents);
       if (resumePageDebugTrace) {
         resumePageDebugTrace.initialOutput = initialOutput;
         resumePageDebugTrace.initialNeedsFallback = needsResumeRetry;
@@ -447,7 +480,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         ? buildKnowledgeFallbackOutput(
           requestedKind,
           requestText,
-          supply.effectiveRetrieval.documents,
+          effectiveRetrieval.documents,
           activeEnvelope,
           resumeDisplayProfileResolution?.profiles || [],
         )
@@ -460,7 +493,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     output = buildKnowledgeFallbackOutput(
       requestedKind,
       requestText,
-      supply.effectiveRetrieval.documents,
+      effectiveRetrieval.documents,
       activeEnvelope,
       resumeDisplayProfileResolution?.profiles || [],
     );
@@ -476,7 +509,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const finalOutput = output || buildKnowledgeFallbackOutput(
     requestedKind,
     requestText,
-    supply.effectiveRetrieval.documents,
+    effectiveRetrieval.documents,
     activeEnvelope,
     resumeDisplayProfileResolution?.profiles || [],
   );
