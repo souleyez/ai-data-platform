@@ -14,6 +14,9 @@ const KNOWLEDGE_SCOPE_PATTERNS = [
 const DETAIL_QUESTION_PATTERNS =
   /\u7ec6\u8282|\u8be6\u7ec6|\u5177\u4f53|\u6761\u6b3e|\u53c2\u6570|\u5185\u5bb9|\u4f9d\u636e|\u539f\u6587|\u8bc1\u636e|\u7ae0\u8282|\u63a5\u53e3|\u5b57\u6bb5|\u5b66\u5386|\u516c\u53f8|\u65e5\u671f|\u91d1\u989d|\u7ed3\u8bba/;
 
+const COMPARISON_QUESTION_PATTERNS =
+  /\u5bf9\u6bd4|\u5bf9\u7167|\u76d8\u4e00\u4e0b|\u6bd4\u4e00\u6bd4|\u6700\u65b0\u7684?\u51e0\u4efd|\u6700\u8fd1\u7684?\u51e0\u4efd|\u6700\u65b0\u7684?\u51e0\u4e2a|\u6700\u8fd1\u7684?\u51e0\u4e2a|\u5e2e\u6211\u770b\u770b.*\u51e0\u4efd/;
+
 const DENY_KNOWLEDGE_PATTERNS = [
   /\u4e0d\u8981\u6309\u5e93/i,
   /\u4e0d\u7528\u67e5\u77e5\u8bc6\u5e93/i,
@@ -79,5 +82,6 @@ export function looksLikeKnowledgeAnswerIntent(input: {
   if (input.hasDocumentDetailFollowup) return false;
 
   const asksForDetail = DETAIL_QUESTION_PATTERNS.test(text);
-  return asksForDetail && (matchesAny(text, KNOWLEDGE_SCOPE_PATTERNS) || input.libraries.length > 0);
+  const asksForComparison = COMPARISON_QUESTION_PATTERNS.test(text);
+  return (asksForDetail || asksForComparison) && (matchesAny(text, KNOWLEDGE_SCOPE_PATTERNS) || input.libraries.length > 0);
 }

@@ -31,6 +31,17 @@ function getGatewayTimeoutMs() {
   return parsed;
 }
 
+function getGatewayRetryCount() {
+  const parsed = Number(env('OPENCLAW_GATEWAY_RETRY_COUNT', '1'));
+  if (!Number.isFinite(parsed) || parsed < 0) return 1;
+  return Math.min(Math.floor(parsed), 2);
+}
+
+function getGatewayRetryDelayMs(attempt: number) {
+  const delays = [350, 900];
+  return delays[Math.max(0, Math.min(attempt - 1, delays.length - 1))] || 900;
+}
+
 function hasUsableGatewayToken(token?: string) {
   const value = String(token || '').trim();
   if (!value) return false;
@@ -131,6 +142,41 @@ async function requestChatCompletion(baseUrl: string, headers: Record<string, st
   }
 }
 
+export function isRetryableCloudGatewayError(error: unknown) {
+  const message = String(error instanceof Error ? error.message : error || '').toLowerCase();
+  if (!message) return false;
+
+  return (
+    /cloud gateway request failed \((500|502|503|504)\)/.test(message)
+    || message.includes('unknown error, 520')
+    || message.includes('"type":"server_error"')
+    || message.includes('temporarily unavailable')
+    || message.includes('upstream connect error')
+    || message.includes('timed out')
+    || message.includes('timeout')
+    || message.includes('overloaded')
+  );
+}
+
+async function requestChatCompletionWithRetry(baseUrl: string, headers: Record<string, string>, body: unknown) {
+  const maxAttempts = 1 + getGatewayRetryCount();
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await requestChatCompletion(baseUrl, headers, body);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableCloudGatewayError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, getGatewayRetryDelayMs(attempt)));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Cloud gateway request failed');
+}
+
 export function isOpenClawGatewayConfigured() {
   const baseUrl = env('OPENCLAW_GATEWAY_URL');
   const token = env('OPENCLAW_GATEWAY_TOKEN');
@@ -189,7 +235,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
 
   const baseMessages = buildMessages(input);
 
-  let result = await requestChatCompletion(baseUrl, headers, {
+  let result = await requestChatCompletionWithRetry(baseUrl, headers, {
     model,
     user: input.sessionUser,
     temperature: 0.2,
@@ -197,7 +243,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   });
 
   if (looksLikeOnboardingDrift(result.content)) {
-    result = await requestChatCompletion(baseUrl, headers, {
+    result = await requestChatCompletionWithRetry(baseUrl, headers, {
       model,
       user: input.sessionUser,
       temperature: 0.1,
@@ -212,7 +258,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   }
 
   if (looksLikeOnboardingDrift(result.content)) {
-    result = await requestChatCompletion(baseUrl, headers, {
+    result = await requestChatCompletionWithRetry(baseUrl, headers, {
       model,
       user: input.sessionUser,
       temperature: 0,
