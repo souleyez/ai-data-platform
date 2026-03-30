@@ -169,11 +169,23 @@ test('web_public datasource run should create a successful run with an ingested 
   assert.equal(runs.length, 1);
   assert.equal(runs[0]?.ingestedCount, 1);
   assert.equal(runs[0]?.documentIds.length, 1);
+  assert.equal(runs[0]?.resultSummaries?.length, 1);
+  assert.ok(runs[0]?.resultSummaries?.[0]?.label);
+  assert.match(runs[0]?.resultSummaries?.[0]?.summary || '', /医疗设备招标公告|影像设备|维保服务/i);
   assert.ok(runs[0]?.documentIds[0]);
 
   const documentPath = runs[0]?.documentIds[0] || '';
   const stat = await fs.stat(documentPath);
   assert.ok(stat.isFile());
+
+  const items = datasourceService.buildDatasourceRunReadModels({
+    runs,
+    definitions: await datasourceDefinitions.listDatasourceDefinitions(),
+    libraryLabelMap: datasourceService.buildDatasourceLibraryLabelMap([{ key: 'bids', label: '标书' }]),
+    documentSummaryMap: new Map(),
+  });
+  assert.equal(items[0]?.documentSummaries?.length, 1);
+  assert.equal(items[0]?.documentSummaries?.[0]?.label, runs[0]?.resultSummaries?.[0]?.label);
 });
 
 test('datasource run read model should expose datasourceName, libraryLabels, documentLabels and document summaries', async () => {

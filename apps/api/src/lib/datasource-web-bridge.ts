@@ -3,6 +3,7 @@ import { URL } from 'node:url';
 import type {
   DatasourceDefinition,
   DatasourceRun,
+  DatasourceRunSummaryItem,
   DatasourceTargetLibrary,
 } from './datasource-definitions.js';
 import { appendDatasourceRun, upsertDatasourceDefinition } from './datasource-definitions.js';
@@ -43,6 +44,42 @@ function buildDatasourceId(taskId: string) {
 function buildRunId(task: WebCaptureTask) {
   const seed = `${task.id}:${task.lastRunAt || ''}:${task.lastStatus || ''}:${task.documentPath || ''}`;
   return `run-${createHash('sha1').update(seed).digest('hex').slice(0, 16)}`;
+}
+
+function buildWebCaptureResultSummaries(task: WebCaptureTask): DatasourceRunSummaryItem[] {
+  const collectedItems = Array.isArray(task.lastCollectedItems) ? task.lastCollectedItems : [];
+  if (collectedItems.length) {
+    return collectedItems
+      .map((item, index) => {
+        const label = String(item.title || item.url || '').trim();
+        const summary = String(item.summary || '').trim();
+        const id = String(item.url || `${task.id}-entry-${index + 1}`).trim();
+        if (!label || !id) return null;
+        return {
+          id,
+          label,
+          summary,
+        } satisfies DatasourceRunSummaryItem;
+      })
+      .filter((item): item is DatasourceRunSummaryItem => Boolean(item))
+      .slice(0, 8);
+  }
+
+  const documentPath = String(task.documentPath || '').trim();
+  const fallbackLabel =
+    String(task.title || '').trim() ||
+    (documentPath ? documentPath.split(/[\\/]/).at(-1) || documentPath : '') ||
+    String(task.url || '').trim();
+  const fallbackSummary = String(task.lastSummary || '').trim();
+  if (!fallbackLabel) return [];
+
+  return [
+    {
+      id: documentPath || String(task.url || task.id || '').trim(),
+      label: fallbackLabel,
+      summary: fallbackSummary,
+    },
+  ].filter((item) => item.id && item.label);
 }
 
 async function inferTargetLibraries(task: WebCaptureTask) {
@@ -124,17 +161,21 @@ export async function buildDatasourceDefinitionFromWebCaptureTask(task: WebCaptu
 
 export function buildDatasourceRunFromWebCaptureTask(task: WebCaptureTask, targetLibraries: DatasourceTargetLibrary[] = []): DatasourceRun | null {
   if (!task.lastRunAt || !task.lastStatus) return null;
+  const resultSummaries = buildWebCaptureResultSummaries(task);
+  const collectedCount =
+    task.lastCollectedCount || task.lastCollectedItems?.length || resultSummaries.length || (task.documentPath ? 1 : 0);
   return {
     id: buildRunId(task),
     datasourceId: buildDatasourceId(task.id),
     startedAt: task.lastRunAt,
     finishedAt: task.lastRunAt,
     status: task.lastStatus === 'success' ? 'success' : 'failed',
-    discoveredCount: task.lastCollectedCount || task.lastCollectedItems?.length || 0,
-    capturedCount: task.lastCollectedCount || task.lastCollectedItems?.length || 0,
+    discoveredCount: collectedCount,
+    capturedCount: collectedCount,
     ingestedCount: task.documentPath ? 1 : 0,
     documentIds: task.documentPath ? [task.documentPath] : [],
     libraryKeys: targetLibraries.map((item) => item.key),
+    resultSummaries,
     summary: task.lastSummary || '',
     errorMessage: task.lastStatus === 'error' ? task.lastSummary || 'capture failed' : '',
   };

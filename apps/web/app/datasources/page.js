@@ -271,6 +271,18 @@ function RequiredLabel({ children }) {
   );
 }
 
+function buildRunResultItems(run) {
+  if (run?.documentSummaries?.length) return run.documentSummaries;
+  if (run?.documentLabels?.length) {
+    return run.documentLabels.map((label, index) => ({
+      id: `${run.id || 'run'}-label-${index}`,
+      label,
+      summary: '',
+    }));
+  }
+  return [];
+}
+
 export default function DatasourcesPage() {
   const [legacyData, setLegacyData] = useState(null);
   const [managed, setManaged] = useState([]);
@@ -1036,7 +1048,7 @@ export default function DatasourcesPage() {
                 )}
               </section>
 
-              {false ? <section className="card documents-card">
+              <section className="card documents-card">
                 <div className="panel-header">
                   <div>
                     <h3>最近运行记录</h3>
@@ -1064,9 +1076,9 @@ export default function DatasourcesPage() {
                           <span>入库 {run.ingestedCount || 0}</span>
                         </div>
                         {run.summary ? <div className="datasource-run-summary">{run.summary}</div> : null}
-                        {run.documentSummaries?.length ? (
+                        {buildRunResultItems(run).length ? (
                           <div className="capture-result-list">
-                            {run.documentSummaries.map((doc) => (
+                            {buildRunResultItems(run).map((doc) => (
                               <div key={doc.id} className="capture-result-item">
                                 <strong>{doc.label}</strong>
                                 {doc.summary ? <p>{doc.summary}</p> : null}
@@ -1081,7 +1093,7 @@ export default function DatasourcesPage() {
                 ) : (
                   <div className="report-empty-card">还没有运行记录。保存一条数据源后即可触发采集并在这里查看结果。</div>
                 )}
-              </section> : null}
+              </section>
             </section>
           </section>
         )}
