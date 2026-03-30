@@ -38,6 +38,7 @@ import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
 } from './resume-display-profile-provider.js';
+import { runOrderInventoryPageComposerDetailed } from './order-inventory-page-composer.js';
 import { runResumePageComposerDetailed } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
@@ -283,6 +284,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   let executionStage = 'composer-model';
   try {
     const canComposeResumePage = requestedKind === 'page' && (resumeDisplayProfileResolution?.profiles || []).length > 0;
+    const canComposeOrderInventoryPage = requestedKind === 'page'
+      && templateTaskHint === 'order-static-page'
+      && supply.effectiveRetrieval.documents.some((item) => (
+        item.bizCategory === 'order'
+        || item.bizCategory === 'inventory'
+        || String(item.schemaType || '').toLowerCase() === 'report'
+        || String(item.schemaType || '').toLowerCase() === 'order'
+      ));
 
     if (canComposeResumePage) {
       executionStage = 'composer-model';
@@ -345,6 +354,30 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         if (resumePageDebugTrace) {
           resumePageDebugTrace.finalStage = 'fallback-output';
         }
+      }
+    }
+
+    if (!output && canComposeOrderInventoryPage) {
+      executionStage = 'composer-model';
+      const composerResult = await runOrderInventoryPageComposerDetailed({
+        requestText,
+        reportPlan,
+        envelope: activeEnvelope,
+        documents: supply.effectiveRetrieval.documents,
+        sessionUser: input.sessionUser,
+      });
+
+      if (composerResult.content) {
+        executionStage = 'composer-normalize';
+        output = normalizeReportOutput(
+          requestedKind,
+          requestText,
+          composerResult.content,
+          activeEnvelope,
+          supply.effectiveRetrieval.documents,
+          resumeDisplayProfileResolution?.profiles || [],
+          { allowResumeFallback: false },
+        );
       }
     }
 

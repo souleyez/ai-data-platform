@@ -32,6 +32,7 @@ export type NormalizeReportOutputOptions = {
 
 type JsonRecord = Record<string, unknown>;
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill' | 'client';
+type OrderRequestView = 'generic' | 'platform' | 'category' | 'stock';
 type ResumePageEntry = {
   candidateName: string;
   education: string;
@@ -74,6 +75,15 @@ type ResumePageStats = {
   showcaseCandidateNames: string[];
   showcaseProjectLabels: string[];
   showcaseProjects: ResumeShowcaseProject[];
+};
+type OrderPageStats = {
+  documentCount: number;
+  channels: Array<{ label: string; value: number }>;
+  categories: Array<{ label: string; value: number }>;
+  metrics: Array<{ label: string; value: number }>;
+  replenishment: Array<{ label: string; value: number }>;
+  anomalies: Array<{ label: string; value: number }>;
+  supportingLines: string[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -122,6 +132,39 @@ function normalizeText(value: string) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+const ORDER_CHANNEL_LABEL_MAP = new Map<string, string>([
+  ['tmall', 'Tmall'],
+  ['jd', 'JD'],
+  ['douyin', 'Douyin'],
+  ['pinduoduo', 'Pinduoduo'],
+  ['amazon', 'Amazon'],
+  ['shopify', 'Shopify'],
+]);
+
+const ORDER_SIGNAL_LABEL_MAP = new Map<string, string>([
+  ['yoy', '同比'],
+  ['mom', '环比'],
+  ['inventory', '库存'],
+  ['inventory index', '库存指数'],
+  ['inventory-index', '库存指数'],
+  ['sell through', '动销'],
+  ['sell-through', '动销'],
+  ['gmv', 'GMV'],
+  ['forecast', '预测'],
+  ['trend', '趋势'],
+  ['planning', '规划'],
+  ['replenishment', '补货'],
+  ['restock', '补货'],
+  ['safety stock', '安全库存'],
+  ['safety-stock', '安全库存'],
+  ['anomaly', '异常'],
+  ['volatility', '波动'],
+  ['alert', '预警'],
+  ['operating review', '经营复盘'],
+  ['operating-review', '经营复盘'],
+  ['exception', '异常'],
+]);
 
 function containsAny(text: string, keywords: string[]) {
   return keywords.some((keyword) => text.includes(keyword));
@@ -1912,6 +1955,386 @@ function hydrateResumePageVisualShell(
   };
 }
 
+function isOrderInventoryDocument(item: ParsedDocument) {
+  const bizCategory = String(item.bizCategory || '').toLowerCase();
+  const schemaType = String(item.schemaType || '').toLowerCase();
+  if (bizCategory === 'order' || bizCategory === 'inventory') return true;
+  if (schemaType === 'order') return true;
+  if (schemaType === 'report' && containsAny(normalizeText([
+    item.title,
+    item.summary,
+    item.excerpt,
+    ...(item.topicTags || []),
+  ].join(' ')), ['order', 'inventory', 'replenishment', 'stock', '订单', '库存', '补货', '备货'])) {
+    return true;
+  }
+  return false;
+}
+
+function hasOrderPlatformSignal(text: string) {
+  return containsAny(text, ['platform', 'channel', 'tmall', 'jd', 'douyin', 'amazon', 'shopify', '平台', '渠道', '天猫', '京东', '抖音']);
+}
+
+function hasOrderCategorySignal(text: string) {
+  return containsAny(text, ['category', 'categories', 'sku', '品类', '类目', '商品']);
+}
+
+function hasOrderStockSignal(text: string) {
+  return containsAny(text, ['inventory', 'stock', 'forecast', 'replenishment', 'restock', '库存', '补货', '备货', '缺货', '周转']);
+}
+
+function resolveOrderRequestView(requestText: string): OrderRequestView {
+  const text = normalizeText(requestText);
+  if (hasOrderStockSignal(text)) return 'stock';
+  if (hasOrderCategorySignal(text)) return 'category';
+  if (hasOrderPlatformSignal(text)) return 'platform';
+  return 'generic';
+}
+
+function formatOrderSignalLabel(value: string) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  const normalized = normalizeText(text);
+  return ORDER_SIGNAL_LABEL_MAP.get(normalized) || ORDER_CHANNEL_LABEL_MAP.get(normalized) || text;
+}
+
+function collectOrderProfileStrings(item: ParsedDocument, keys: string[]) {
+  const profile = isObject(item.structuredProfile) ? item.structuredProfile : {};
+  return keys.flatMap((key) => {
+    if (!(key in profile)) return [];
+    return toStringArray(profile[key]);
+  });
+}
+
+function collectOrderChannelSignals(item: ParsedDocument) {
+  const text = normalizeText([item.title, item.summary, item.excerpt, item.name].join(' '));
+  const inferred = [
+    containsAny(text, ['tmall', '天猫']) ? 'Tmall' : '',
+    containsAny(text, ['jd', '京东']) ? 'JD' : '',
+    containsAny(text, ['douyin', '抖音']) ? 'Douyin' : '',
+    containsAny(text, ['pinduoduo', '拼多多']) ? 'Pinduoduo' : '',
+    containsAny(text, ['amazon']) ? 'Amazon' : '',
+    containsAny(text, ['shopify']) ? 'Shopify' : '',
+  ].filter(Boolean);
+
+  return [
+    ...collectOrderProfileStrings(item, ['platforms', 'platformSignals']).map(formatOrderSignalLabel),
+    ...inferred,
+  ];
+}
+
+function collectOrderCategorySignals(item: ParsedDocument) {
+  const ignored = new Set([
+    '订单分析',
+    '库存监控',
+    '经营复盘',
+    '销量预测',
+    '备货建议',
+    'order',
+    'inventory',
+    'report',
+    'dashboard',
+  ]);
+
+  return [
+    ...toStringArray(item.topicTags),
+    ...toStringArray(item.groups),
+    ...collectOrderProfileStrings(item, ['categorySignals']),
+  ]
+    .map((value) => sanitizeText(value).slice(0, 60).trim())
+    .filter((value) => value && !ignored.has(value.toLowerCase()));
+}
+
+function collectOrderMetricSignals(item: ParsedDocument) {
+  return collectOrderProfileStrings(item, ['metricSignals', 'keyMetrics']).map(formatOrderSignalLabel);
+}
+
+function collectOrderReplenishmentSignals(item: ParsedDocument) {
+  return collectOrderProfileStrings(item, ['replenishmentSignals', 'forecastSignals', 'operatingSignals']).map(formatOrderSignalLabel);
+}
+
+function collectOrderAnomalySignals(item: ParsedDocument) {
+  return collectOrderProfileStrings(item, ['anomalySignals']).map(formatOrderSignalLabel);
+}
+
+function buildOrderSupportingLines(documents: ParsedDocument[]) {
+  return documents
+    .slice(0, 5)
+    .map((item) => {
+      const title = sanitizeText(item.title || item.name || '订单/库存资料');
+      const summary = sanitizeText(item.summary || item.excerpt || '').slice(0, 80).trim();
+      return summary ? `${title}：${summary}` : title;
+    })
+    .filter(Boolean);
+}
+
+function buildOrderPageStats(documents: ParsedDocument[]): OrderPageStats {
+  return {
+    documentCount: documents.length,
+    channels: buildRankedLabelCounts(documents.flatMap(collectOrderChannelSignals), 8),
+    categories: buildRankedLabelCounts(documents.flatMap(collectOrderCategorySignals), 8),
+    metrics: buildRankedLabelCounts(documents.flatMap(collectOrderMetricSignals), 8),
+    replenishment: buildRankedLabelCounts(documents.flatMap(collectOrderReplenishmentSignals), 8),
+    anomalies: buildRankedLabelCounts(documents.flatMap(collectOrderAnomalySignals), 8),
+    supportingLines: buildOrderSupportingLines(documents),
+  };
+}
+
+function defaultOrderPageSections(view: OrderRequestView) {
+  if (view === 'platform') {
+    return ['经营总览', '渠道结构', '平台角色与增量来源', 'SKU动销焦点', '库存与补货', '异常波动解释', 'AI综合分析'];
+  }
+  if (view === 'category') {
+    return ['经营总览', '品类梯队', 'SKU集中度', '动销与毛利焦点', '库存与补货', '异常波动解释', 'AI综合分析'];
+  }
+  if (view === 'stock') {
+    return ['经营总览', '库存健康', '高风险SKU', '动销与周转', '补货优先级', '异常波动解释', 'AI综合分析'];
+  }
+  return ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'];
+}
+
+function buildOrderPageTitle(view: OrderRequestView, envelope?: ReportTemplateEnvelope | null) {
+  if (sanitizeText(envelope?.title)) return sanitizeText(envelope?.title);
+  if (view === 'platform') return '订单渠道经营驾驶舱';
+  if (view === 'category') return '订单品类/SKU经营驾驶舱';
+  if (view === 'stock') return '库存与补货驾驶舱';
+  return '多渠道订单经营驾驶舱';
+}
+
+function buildOrderPageSummary(view: OrderRequestView, stats: OrderPageStats) {
+  const channelText = joinRankedLabels(stats.channels, 4) || '多渠道经营';
+  const categoryText = joinRankedLabels(stats.categories, 4) || 'SKU结构与品类焦点';
+  const metricText = joinRankedLabels(stats.metrics, 4) || '库存、动销与趋势信号';
+  const actionText = joinRankedLabels(stats.replenishment, 4) || '补货与调拨动作';
+
+  if (view === 'platform') {
+    return `当前命中 ${stats.documentCount} 份订单/库存资料，渠道信号主要集中在 ${channelText}，建议按渠道角色、增量来源和补货动作组织经营驾驶舱，而不是继续做平台平均化复盘。`;
+  }
+  if (view === 'category') {
+    return `当前命中 ${stats.documentCount} 份经营资料，主题主要落在 ${categoryText}，适合按品类梯队、英雄 SKU 集中度、库存压力和动作优先级组织页面。`;
+  }
+  if (view === 'stock') {
+    return `当前命中 ${stats.documentCount} 份库存相关资料，风险与动作信号主要集中在 ${actionText}，页面应把库存健康、高风险 SKU 和 72 小时补货优先级放在前面。`;
+  }
+  return `当前命中 ${stats.documentCount} 份订单/库存资料，渠道重点在 ${channelText}，SKU/品类焦点在 ${categoryText}，经营驾驶舱应围绕 ${metricText} 与 ${actionText} 形成一屏可读的动作视图。`;
+}
+
+function buildOrderPageCards(view: OrderRequestView, stats: OrderPageStats) {
+  const channelText = joinRankedLabels(stats.channels, 2) || '多渠道';
+  const categoryText = joinRankedLabels(stats.categories, 2) || 'SKU焦点';
+  const riskText = joinRankedLabels(stats.anomalies, 2) || joinRankedLabels(stats.replenishment, 2) || '风险信号';
+  const metricText = joinRankedLabels(stats.metrics, 2) || '库存视角';
+  const actionText = joinRankedLabels(stats.replenishment, 2) || '动作优先级';
+
+  if (view === 'stock') {
+    return [
+      { label: '库存健康', value: `${Math.max(stats.metrics.length, 1)} 项`, note: metricText },
+      { label: '缺货风险SKU', value: `${Math.max(stats.anomalies.length, 1)} 类`, note: riskText },
+      { label: '滞销库存占比', value: `${Math.max(stats.categories.length, 1)} 组`, note: categoryText },
+      { label: '建议补货量', value: `${Math.max(stats.replenishment.length, 1)} 条动作`, note: actionText },
+      { label: '跨仓调拨', value: `${Math.max(stats.channels.length, 1)} 个渠道/仓别`, note: channelText },
+    ];
+  }
+
+  if (view === 'category') {
+    return [
+      { label: '核心品类GMV', value: `${Math.max(stats.categories.length, 1)} 组`, note: categoryText },
+      { label: '英雄SKU贡献', value: `${Math.max(stats.categories.length, 1)} 个焦点`, note: categoryText },
+      { label: '尾部风险SKU', value: `${Math.max(stats.anomalies.length, 1)} 类`, note: riskText },
+      { label: '库存压力', value: `${Math.max(stats.metrics.length, 1)} 项`, note: metricText },
+      { label: '动作优先级', value: `${Math.max(stats.replenishment.length, 1)} 条`, note: actionText },
+    ];
+  }
+
+  return [
+    { label: '渠道GMV', value: `${Math.max(stats.channels.length, 1)} 渠道`, note: channelText },
+    { label: '动销SKU', value: `${Math.max(stats.categories.length, 1)} 组焦点`, note: categoryText },
+    { label: '高风险SKU', value: `${Math.max(stats.anomalies.length, 1)} 类`, note: riskText },
+    { label: '库存健康', value: `${Math.max(stats.metrics.length, 1)} 项`, note: metricText },
+    { label: '补货优先级', value: `${Math.max(stats.replenishment.length, 1)} 条`, note: actionText },
+  ];
+}
+
+function buildOrderSectionBlueprints(view: OrderRequestView, summary: string, stats: OrderPageStats) {
+  const channelText = joinRankedLabels(stats.channels, 4) || '多渠道经营';
+  const categoryText = joinRankedLabels(stats.categories, 4) || 'SKU与品类焦点';
+  const metricText = joinRankedLabels(stats.metrics, 4) || '库存与动销信号';
+  const actionText = joinRankedLabels(stats.replenishment, 4) || '补货与调拨动作';
+  const anomalyText = joinRankedLabels(stats.anomalies, 4) || '异常与波动';
+
+  if (view === 'platform') {
+    return [
+      { body: summary, bullets: stats.supportingLines.slice(0, 3) },
+      { body: `渠道角色已经开始分化，当前重点主要集中在 ${channelText}。页面应突出渠道贡献结构，而不是简单平铺平台数据。`, bullets: stats.channels.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `增量来源更适合按“渠道角色 + SKU焦点”理解，当前高频主题主要落在 ${categoryText}。`, bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `库存与补货动作需要跟渠道节奏联动，当前动作信号主要集中在 ${actionText}。`, bullets: stats.replenishment.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `当前异常解释主要来自 ${anomalyText}，需要把短期波动和结构性风险拆开看。`, bullets: stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: 'AI 综合分析应保持保守：先看渠道角色是否清晰，再看 SKU 焦点和补货动作是否同步，不做无证据的硬数字延伸。', bullets: [
+        '优先围绕主渠道与主销 SKU 保证动作时效',
+        '把渠道增量和库存压力拆成两条线分别管理',
+      ] },
+    ];
+  }
+
+  if (view === 'category') {
+    return [
+      { body: summary, bullets: stats.supportingLines.slice(0, 3) },
+      { body: `当前品类与 SKU 焦点主要集中在 ${categoryText}，适合用梯队视角看增长结构。`, bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 5) },
+      { body: '当前更需要识别英雄 SKU 集中度和尾部 SKU 拖累，而不是继续做平铺排行。', bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `库存与补货要跟品类结构一起看，当前指标信号主要集中在 ${metricText}。`, bullets: stats.metrics.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `异常与波动主要来自 ${anomalyText}，需要把增长型焦点和清理型焦点拆开。`, bullets: stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: 'AI 综合分析应落到品类动作：增长品类保供给，尾部品类控库存，避免继续做没有层次的 SKU 堆砌。', bullets: [
+        '英雄 SKU 和尾部 SKU 不应使用同一套补货策略',
+        '品类页优先体现结构动作，不要退回排行表视角',
+      ] },
+    ];
+  }
+
+  if (view === 'stock') {
+    return [
+      { body: summary, bullets: stats.supportingLines.slice(0, 3) },
+      { body: `当前库存健康信号主要集中在 ${metricText}，需要把健康度、周转和安全库存放在同一页里看。`, bullets: stats.metrics.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `高风险 SKU 主要集中在 ${anomalyText}，适合形成明确的风险队列。`, bullets: stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `动销与周转不能只看总库存，当前 SKU 焦点主要落在 ${categoryText}。`, bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: `补货优先级应围绕 ${actionText} 做动作编排，越接近头部 SKU，动作时效要求越高。`, bullets: stats.replenishment.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+      { body: 'AI 综合分析应把库存页保持在供应链控制室视角，不把它写成泛化销售复盘。', bullets: [
+        '优先保障高动销 SKU 的不断货',
+        '把长尾库存消化和快反补货拆成两条动作线',
+      ] },
+    ];
+  }
+
+  return [
+    { body: summary, bullets: stats.supportingLines.slice(0, 3) },
+    { body: `渠道结构当前主要集中在 ${channelText}，应先形成角色分工，再看结构变化。`, bullets: stats.channels.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+    { body: `SKU 与品类焦点主要集中在 ${categoryText}，说明经营重心已经偏向少数主销焦点。`, bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+    { body: `库存与补货信号主要集中在 ${metricText} 与 ${actionText}，应同步看库存健康和动作优先级。`, bullets: stats.replenishment.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+    { body: `异常波动主要集中在 ${anomalyText}，需要把活动峰值和结构性压力区分处理。`, bullets: stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
+    { body: '行动建议应优先围绕“保主销、控尾部、分渠道角色”三件事展开，而不是继续做泛化经营摘要。', bullets: [
+      '主渠道与主销 SKU 优先保证动作时效',
+      '补货、调拨和去库存动作分层处理',
+    ] },
+      { body: 'AI 综合分析以知识库证据为主，用于帮助经营页形成更清晰的决策节奏，不补写无依据的硬指标。', bullets: [
+        '页面适合用于经营复盘、动作共识和客户展示',
+      ] },
+  ];
+}
+
+function buildOrderPageCharts(view: OrderRequestView, stats: OrderPageStats) {
+  if (view === 'stock') {
+    return [
+      { title: '库存健康信号', items: stats.metrics.slice(0, 6) },
+      { title: '高风险SKU队列', items: stats.anomalies.slice(0, 6) },
+      { title: 'SKU周转/库存压力', items: stats.categories.slice(0, 6) },
+      { title: '72小时补货优先级', items: stats.replenishment.slice(0, 6) },
+    ].filter((item) => item.items.length);
+  }
+
+  if (view === 'category') {
+    return [
+      { title: '品类梯队结构', items: stats.categories.slice(0, 6) },
+      { title: 'SKU集中度', items: stats.categories.slice(0, 6) },
+      { title: '库存与周转压力', items: stats.metrics.slice(0, 6) },
+      { title: '动作优先级', items: stats.replenishment.slice(0, 6) },
+    ].filter((item) => item.items.length);
+  }
+
+  if (view === 'platform') {
+    return [
+      { title: '渠道贡献结构', items: stats.channels.slice(0, 6) },
+      { title: 'SKU动销焦点', items: stats.categories.slice(0, 6) },
+      { title: '库存/趋势信号', items: stats.metrics.slice(0, 6) },
+      { title: '补货动作优先级', items: stats.replenishment.slice(0, 6) },
+    ].filter((item) => item.items.length);
+  }
+
+  return [
+    { title: '渠道贡献结构', items: stats.channels.slice(0, 6) },
+    { title: 'SKU与品类焦点', items: stats.categories.slice(0, 6) },
+    { title: '库存与趋势信号', items: stats.metrics.slice(0, 6) },
+    { title: '补货动作优先级', items: stats.replenishment.slice(0, 6) },
+  ].filter((item) => item.items.length);
+}
+
+function buildOrderPageOutput(
+  view: OrderRequestView,
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+): KnowledgePageOutput {
+  const stats = buildOrderPageStats(documents);
+  const summary = buildOrderPageSummary(view, stats);
+  const sectionTitles = envelope?.pageSections?.length ? envelope.pageSections : defaultOrderPageSections(view);
+  const blueprints = buildOrderSectionBlueprints(view, summary, stats);
+
+  return {
+    type: 'page',
+    title: buildOrderPageTitle(view, envelope),
+    content: summary,
+    format: 'html',
+    page: {
+      summary,
+      cards: buildOrderPageCards(view, stats),
+      sections: sectionTitles.map((title, index) => {
+        const section = blueprints[index] || { body: '', bullets: [] as string[] };
+        return {
+          title,
+          body: section.body || (index === 0 ? summary : ''),
+          bullets: section.bullets || [],
+        };
+      }),
+      charts: buildOrderPageCharts(view, stats),
+    },
+  };
+}
+
+function hydrateOrderPageVisualShell(
+  view: OrderRequestView,
+  documents: ParsedDocument[],
+  envelope: ReportTemplateEnvelope | null | undefined,
+  page: KnowledgePageOutput['page'],
+) {
+  const fallbackPage = buildOrderPageOutput(view, documents, envelope).page;
+  const mergeCards = (
+    primary: NonNullable<KnowledgePageOutput['page']['cards']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.label || item.value || item.note || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.label || item.value || item.note || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+  const mergeCharts = (
+    primary: NonNullable<KnowledgePageOutput['page']['charts']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['charts']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.title || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.title || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+
+  return {
+    summary: page.summary || fallbackPage.summary,
+    cards: mergeCards(page.cards || [], fallbackPage.cards || [], 4),
+    sections: page.sections?.length ? page.sections : fallbackPage.sections,
+    charts: mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
+  };
+}
+
 function countResumePipeEchoSections(sections: Array<{ title?: string; body?: string; bullets?: string[] }>) {
   return sections.filter((section) => (
     sanitizeText(section.body).includes(' | ')
@@ -2212,10 +2635,14 @@ export function normalizeReportOutput(
     }
 
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+    const orderDocuments = documents.filter(isOrderInventoryDocument);
     const resumeView = resumeDocuments.length ? resolveResumeRequestView(requestText) : 'generic';
+    const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
     const normalizedTitle = resumeDocuments.length
       ? buildResumePageTitle(resumeView, envelope)
-      : title;
+      : orderDocuments.length
+        ? buildOrderPageTitle(orderView, envelope)
+        : title;
 
     const normalizedOutput: ChatOutput = {
       type: kind === 'page' ? 'page' : kind,
@@ -2242,6 +2669,15 @@ export function normalizeReportOutput(
         resumeDocuments,
         envelope,
         displayProfiles,
+        normalizedOutput.page,
+      );
+    }
+
+    if (!resumeDocuments.length && orderDocuments.length && normalizedOutput.page) {
+      normalizedOutput.page = hydrateOrderPageVisualShell(
+        orderView,
+        orderDocuments,
+        envelope,
         normalizedOutput.page,
       );
     }
