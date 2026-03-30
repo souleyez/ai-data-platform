@@ -42,6 +42,7 @@ This bootstrap does three things:
 - `knowledge-report-supply` - created
 - `report-page-planner` - created
 - `datasource-body-extract` - created
+- `order-inventory-page-composer` - created
 - `template-learning`
 
 ## Current workspace skills
@@ -62,6 +63,10 @@ This bootstrap does three things:
   - Purpose: evidence-aware planning for client-facing visual static pages before final generation
   - Output: report objective, stable page sections, card/chart priorities, and model-completion boundaries
   - Scope: knowledge-backed page generation in chat and dynamic page refresh in report center
+- `order-inventory-page-composer`
+  - Purpose: premium final-page composition for multi-channel order and inventory static reports
+  - Output: strict JSON page content with summary, cards, sections, charts, and bounded warnings
+  - Scope: order library static pages such as operating cockpit, channel cockpit, SKU/category page, and inventory/replenishment cockpit
 
 ## Guardrails
 
