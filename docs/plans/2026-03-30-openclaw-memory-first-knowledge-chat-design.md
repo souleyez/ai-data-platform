@@ -9,6 +9,7 @@ Reduce explicit project-side orchestration in knowledge chat and make OpenClaw b
 The target interaction model is:
 
 - OpenClaw long-term memory holds the live catalog of libraries, documents, and audit exclusions
+- OpenClaw also keeps up with local document changes: add, update, delete, audit exclude, and audit restore
 - normal chat uses that memory directly for library awareness and catalog-style answers
 - only detail-demanding requests and output requests trigger a project-side skill to fetch live document detail
 - project-side code becomes thinner and more infrastructural
@@ -64,6 +65,12 @@ Store only stable, index-like facts:
   - audit-excluded
   - partially usable
 - exclusion reason and last audit time
+- recent change records such as:
+  - added
+  - updated
+  - deleted
+  - audit-excluded
+  - audit-restored
 - representative document titles for each library
 - suggested question types for each library
 
@@ -73,6 +80,38 @@ This lets OpenClaw always know:
 - what changed recently
 - what was excluded
 - which library is likely relevant
+
+The model should know changes even when the current conversation does not explicitly mention them.
+
+That does not mean it must announce changes in every answer.
+
+It means the memory layer should remain quietly up to date.
+
+## Recommended Memory File Layout
+
+Use memory as a structured directory, not as one huge summary file.
+
+Recommended layout:
+
+- `memory/catalog/index.md`
+  - global library summary
+  - total counts
+  - last sync time
+- `memory/catalog/libraries/<library-key>.md`
+  - one file per library
+  - purpose, counts, recent changes, representative documents
+- `memory/catalog/documents/<library-key>.md`
+  - compact document cards for that library
+  - one section per document id
+- `memory/catalog/changes/recent.md`
+  - rolling recent change log
+- `memory/catalog/changes/archive/YYYY-MM.md`
+  - archived change history when recent log rolls over
+
+This gives OpenClaw two useful views at all times:
+
+- current catalog state
+- recent change history
 
 ## What Must Stay Out of Long-Term Memory
 
@@ -94,6 +133,10 @@ The target runtime rule is simple:
 - catalog questions: memory only
 - document-detail questions: trigger a detail-fetch skill
 - output questions: trigger an output skill
+
+By default, the system should not proactively announce every change in normal chat.
+
+The change knowledge is for continuity and routing, not for noisy user-facing narration.
 
 Examples:
 
@@ -152,6 +195,8 @@ Without them, memory and real storage will drift, excluded documents will leak b
   - builds library and document memory snapshots
 - `apps/api/src/lib/openclaw-memory-sync.ts`
   - syncs catalog snapshots into OpenClaw long-term memory
+- `apps/api/src/lib/openclaw-memory-changes.ts`
+  - computes incremental add/update/delete/audit change sets
 - `apps/api/src/lib/knowledge-detail-fetch.ts`
   - live detail fetch for specific document ids or memory-selected candidates
 - `skills/knowledge-detail-fetch/`
@@ -185,15 +230,26 @@ Build a stable memory snapshot format for:
 - libraries
 - document cards
 - audit exclusions
+- recent change records
 
 Then add one-way sync from project storage into OpenClaw long-term memory.
 
 Deliverables:
 
 - memory snapshot schema
+- memory file layout
+- change event schema
 - sync job
 - manual refresh command
 - basic trace that shows last sync time and item counts
+
+Phase 1 sync must react to these source events:
+
+- document added
+- document deleted
+- document reparsed or updated
+- audit excluded
+- audit restored
 
 ### Phase 2: Thin Chat Router
 
@@ -287,6 +343,7 @@ Mitigation:
 - version memory snapshots
 - record last sync time
 - add forced refresh on upload/audit completion
+- store recent change logs alongside current state, not instead of current state
 
 ### Risk 2: Memory Becomes a Fake Source of Truth
 
