@@ -148,6 +148,95 @@ Examples:
 
 This keeps normal chat light and makes heavy retrieval happen only when evidence depth is actually required.
 
+## Trigger Protocol
+
+The trigger model must stay intentionally narrow.
+
+Do not reintroduce broad knowledge-chat orchestration.
+
+Only keep two execution triggers:
+
+- `detail_trigger`
+- `output_trigger`
+
+Everything else stays on the memory-only catalog path.
+
+### Catalog Path: No Trigger
+
+Use memory only for questions such as:
+
+- what libraries exist
+- what was recently uploaded
+- which documents were excluded
+- what a library broadly contains
+- what changed recently
+
+These requests do not fetch live detail.
+
+### Detail Trigger
+
+Trigger live detail fetch when the user asks for concrete document facts.
+
+Examples:
+
+- a specific document
+- the newest file
+- this file / this document / this material
+- fields, clauses, dates, amounts, companies, education, evidence, original text, sections
+- requests using words like detailed, concrete, basis, source text, or evidence
+
+The purpose of this trigger is answer quality, not formal output.
+
+### Output Trigger
+
+Trigger output execution whenever the user asks for a finished deliverable.
+
+Examples:
+
+- table
+- comparison table
+- report
+- static page
+- dashboard
+- cockpit
+- export
+- formal summary
+
+Output trigger must always fetch live detail first.
+
+Formal deliverables must not be generated from memory-only catalog cards.
+
+## Evidence State Protocol
+
+The system must explicitly track the evidence level of each answer or output.
+
+Do not rely on OpenClaw alone to infer whether the system actually fetched live detail.
+
+Recommended runtime state:
+
+- `catalog_memory`
+  - memory only
+  - no live detail fetched
+- `live_detail`
+  - live document detail fetched successfully
+- `mixed`
+  - some documents fetched live, some still answered from catalog memory
+- `degraded`
+  - live detail was required but not successfully fetched, so the answer or output is approximate
+
+This state should be passed to OpenClaw as runtime fact, not personality.
+
+OpenClaw should then follow one stable honesty rule:
+
+- never present memory-only or degraded output as if document detail was fully checked
+
+This separates:
+
+- system truth
+- model phrasing
+
+and avoids pushing runtime certainty into `soul` or personality-level behavior.
+
 ## Required Thin Infrastructure
 
 Project-side code should still keep four responsibilities:
@@ -155,7 +244,7 @@ Project-side code should still keep four responsibilities:
 1. memory synchronization
 2. audit enforcement
 3. live document-detail retrieval
-4. output normalization and safety fallback
+4. evidence-state tracking and output normalization
 
 These are not optional.
 
@@ -199,6 +288,8 @@ Without them, memory and real storage will drift, excluded documents will leak b
   - computes incremental add/update/delete/audit change sets
 - `apps/api/src/lib/knowledge-detail-fetch.ts`
   - live detail fetch for specific document ids or memory-selected candidates
+- `apps/api/src/lib/knowledge-evidence-state.ts`
+  - computes `catalog_memory | live_detail | mixed | degraded`
 - `skills/knowledge-detail-fetch/`
   - detail-answer contract
 
@@ -213,6 +304,8 @@ Target model:
 
 - OpenClaw uses memory to decide whether the request is about known libraries/documents
 - only when the request needs detail or formal output do we trigger a skill
+- the trigger decision is rule-based and narrow, not a broad orchestration tree
+- the runtime evidence state is passed in explicitly, so OpenClaw does not need to guess whether live detail was actually fetched
 
 This means the model trigger point moves later:
 
@@ -264,6 +357,8 @@ At this stage, keep existing output flow intact and only simplify the non-output
 Deliverables:
 
 - memory-first catalog answering
+- trigger protocol for catalog vs detail vs output
+- evidence-state propagation
 - reduced library-match branching
 - reduced follow-up heuristics
 
