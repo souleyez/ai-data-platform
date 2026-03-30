@@ -17,6 +17,7 @@ const MAX_FETCH_ATTEMPTS_FACTOR = 3;
 const execFileAsync = promisify(execFile);
 
 export type WebCaptureFrequency = 'manual' | 'daily' | 'weekly';
+export type WebCaptureCrawlMode = 'single-page' | 'listing-detail';
 
 type CaptureEntry = {
   title: string;
@@ -30,6 +31,10 @@ export type WebCaptureTask = {
   url: string;
   focus: string;
   frequency: WebCaptureFrequency;
+  keywords?: string[];
+  siteHints?: string[];
+  seedUrls?: string[];
+  crawlMode?: WebCaptureCrawlMode;
   maxItems?: number;
   createdAt: string;
   updatedAt: string;
@@ -90,6 +95,75 @@ type MainContentResult = {
   method: 'trafilatura' | 'fallback';
 };
 
+const DISCOVERY_SIGNAL_TERMS = [
+  '\u516c\u544a',
+  '\u62db\u6807',
+  '\u6295\u6807',
+  '\u91c7\u8d2d',
+  '\u4e2d\u6807',
+  '\u6210\u4ea4',
+  '\u7ed3\u679c',
+  '\u9879\u76ee',
+  '\u4ea4\u6613',
+  '\u8be6\u60c5',
+  '\u901a\u77e5',
+  '\u53d8\u66f4',
+  '\u8865\u5145',
+  '\u66f4\u6b63',
+  'notice',
+  'announcement',
+  'bid',
+  'bidding',
+  'tender',
+  'purchase',
+  'procurement',
+  'result',
+  'detail',
+  'project',
+];
+
+const DISCOVERY_BAD_TERMS = [
+  '\u9996\u9875',
+  '\u767b\u5f55',
+  '\u6ce8\u518c',
+  '\u9690\u79c1',
+  '\u5173\u4e8e',
+  '\u8054\u7cfb',
+  '\u5e2e\u52a9',
+  '\u670d\u52a1\u6307\u5357',
+  '\u653f\u7b56\u6cd5\u89c4',
+  '\u65b0\u95fb',
+  'index',
+  'home',
+  'login',
+  'signup',
+  'privacy',
+  'cookie',
+  'contact',
+  'help',
+  'about',
+  'terms',
+  'guide',
+];
+
+const DISCOVERY_URL_HINTS = [
+  '/detail',
+  '/notice',
+  '/content',
+  '/article',
+  '/view',
+  '/bulletin',
+  '/bid',
+  '/tender',
+  '/purchase',
+  '/project',
+  '/result',
+  'infoid=',
+  'articleid=',
+  'noticeid=',
+  'contentid=',
+];
+
 function buildTaskId(url: string) {
   return `web-${createHash('sha1').update(normalizeUrl(url)).digest('hex').slice(0, 16)}`;
 }
@@ -98,6 +172,25 @@ function normalizeMaxItems(value?: number) {
   const parsed = Number(value || DEFAULT_MAX_ITEMS);
   if (!Number.isFinite(parsed)) return DEFAULT_MAX_ITEMS;
   return Math.min(20, Math.max(1, Math.round(parsed)));
+}
+
+function normalizeStringList(value: unknown) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,\n;]/)
+      : [];
+  const dedup = new Set<string>();
+  for (const item of values) {
+    const normalized = String(item || '').trim();
+    if (!normalized) continue;
+    dedup.add(normalized);
+  }
+  return Array.from(dedup);
+}
+
+function normalizeCrawlMode(value: unknown): WebCaptureCrawlMode {
+  return String(value || '').trim().toLowerCase() === 'listing-detail' ? 'listing-detail' : 'single-page';
 }
 
 function normalizeText(value: string) {
@@ -121,9 +214,34 @@ function normalizeUrl(value: string) {
   }
 }
 
+function resolveSeedUrls(value: unknown, baseUrl: string) {
+  const resolved: string[] = [];
+  const dedup = new Set<string>();
+  for (const rawValue of [baseUrl, ...normalizeStringList(value)]) {
+    const raw = String(rawValue || '').trim();
+    if (!raw) continue;
+    try {
+      const normalized = normalizeUrl(new URL(raw, baseUrl).toString());
+      if (dedup.has(normalized)) continue;
+      dedup.add(normalized);
+      resolved.push(normalized);
+    } catch {
+      continue;
+    }
+  }
+  return resolved;
+}
+
 function getCookieScope(url: string) {
   const parsed = new URL(url);
   return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+}
+
+function resolveTaskCrawlMode(task: Pick<WebCaptureTask, 'crawlMode' | 'siteHints'>): WebCaptureCrawlMode {
+  const explicit = normalizeCrawlMode(task.crawlMode);
+  if (explicit === 'listing-detail') return explicit;
+  const hintText = normalizeStringList(task.siteHints).join(' ').toLowerCase();
+  return /(listing|detail|discover|crawl)/.test(hintText) ? 'listing-detail' : 'single-page';
 }
 
 function ensureCookieBucket(jar: CookieJar, url: string) {
@@ -351,6 +469,25 @@ function getFocusTerms(focus: string) {
     .filter(Boolean);
 }
 
+function getTaskFocusTerms(task: Pick<WebCaptureTask, 'focus' | 'keywords' | 'siteHints' | 'crawlMode'>) {
+  const dedup = new Set<string>();
+  const collect = (value: string) => {
+    for (const term of getFocusTerms(value)) {
+      if (term) dedup.add(term);
+    }
+  };
+
+  collect(task.focus || '');
+  for (const keyword of normalizeStringList(task.keywords)) collect(keyword);
+  for (const hint of normalizeStringList(task.siteHints)) collect(hint);
+
+  if (resolveTaskCrawlMode(task) === 'listing-detail') {
+    for (const term of DISCOVERY_SIGNAL_TERMS) dedup.add(term.toLowerCase());
+  }
+
+  return Array.from(dedup);
+}
+
 function summarizeText(text: string, focus: string) {
   const sentences = splitSentences(text).slice(0, 50);
   if (!sentences.length) return '已抓取页面，但正文较少，当前只保留来源和页面概览。';
@@ -431,6 +568,12 @@ function isLikelyNoiseCandidate(url: string, title: string) {
     'figure -',
     'table/',
     '/tables/',
+    '\u9996\u9875',
+    '\u5173\u4e8e',
+    '\u8054\u7cfb',
+    '\u5e2e\u52a9',
+    '\u670d\u52a1\u6307\u5357',
+    '\u653f\u7b56\u6cd5\u89c4',
   ];
   return badSignals.some((signal) => loweredUrl.includes(signal) || loweredTitle.includes(signal));
 }
@@ -515,7 +658,7 @@ function dedupeTasks(items: WebCaptureTask[]) {
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 }
 
-function scoreCandidate(url: string, title: string, focusTerms: string[]) {
+function scoreCandidate(url: string, title: string, focusTerms: string[], crawlMode: WebCaptureCrawlMode) {
   const loweredUrl = url.toLowerCase();
   const loweredTitle = title.toLowerCase();
   let score = 0;
@@ -541,13 +684,36 @@ function scoreCandidate(url: string, title: string, focusTerms: string[]) {
     if (loweredUrl.includes(signal) || loweredTitle.includes(signal)) score -= 12;
   });
 
+  if (crawlMode === 'listing-detail') {
+    DISCOVERY_SIGNAL_TERMS.forEach((signal) => {
+      const loweredSignal = signal.toLowerCase();
+      if (loweredUrl.includes(loweredSignal)) score += 5;
+      if (loweredTitle.includes(loweredSignal)) score += 7;
+    });
+
+    DISCOVERY_URL_HINTS.forEach((signal) => {
+      if (loweredUrl.includes(signal)) score += 4;
+    });
+
+    DISCOVERY_BAD_TERMS.forEach((signal) => {
+      const loweredSignal = signal.toLowerCase();
+      if (loweredUrl.includes(loweredSignal) || loweredTitle.includes(loweredSignal)) score -= 8;
+    });
+  }
+
   if (isLikelyContentUrl(url, title)) score += 6;
   if (title.length >= 20 && title.length <= 180) score += 2;
   return score;
 }
 
-function extractCandidateLinks(html: string, baseUrl: string, focus: string, maxItems: number) {
-  const focusTerms = getFocusTerms(focus);
+function extractCandidateLinks(
+  html: string,
+  baseUrl: string,
+  task: Pick<WebCaptureTask, 'focus' | 'keywords' | 'siteHints' | 'crawlMode'>,
+  maxItems: number,
+) {
+  const focusTerms = getTaskFocusTerms(task);
+  const crawlMode = resolveTaskCrawlMode(task);
   const linkRegex = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   const dedup = new Map<string, CandidateLink>();
   let match: RegExpExecArray | null = null;
@@ -564,7 +730,7 @@ function extractCandidateLinks(html: string, baseUrl: string, focus: string, max
       const candidate = {
         url,
         title,
-        score: scoreCandidate(url, title, focusTerms),
+        score: scoreCandidate(url, title, focusTerms, crawlMode),
       };
 
       const existing = dedup.get(dedupKey);
@@ -760,12 +926,41 @@ async function writeCaptureDocument(
 
 async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, auth?: RuntimeAuth, jar?: CookieJar) {
   const maxItems = normalizeMaxItems(task.maxItems);
-  const candidates = extractCandidateLinks(landing.html, task.url, task.focus, maxItems);
+  const crawlMode = resolveTaskCrawlMode(task);
+  const candidatePool = new Map<string, CandidateLink>();
+  const seedPages: PageResult[] = [landing];
+  const landingUrl = normalizeUrl(landing.url || task.url);
+
+  if (crawlMode === 'listing-detail') {
+    for (const seedUrl of resolveSeedUrls(task.seedUrls, task.url)) {
+      if (normalizeUrl(seedUrl) === landingUrl) continue;
+      try {
+        const page = await fetchWebPage(seedUrl, auth, jar);
+        if (!isSameHost(page.url, task.url)) continue;
+        seedPages.push(page);
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  for (const page of seedPages) {
+    const pageCandidates = extractCandidateLinks(page.html, page.url || task.url, task, maxItems);
+    for (const candidate of pageCandidates) {
+      const dedupKey = `${candidate.url}|${normalizeText(candidate.title)}`;
+      const existing = candidatePool.get(dedupKey);
+      if (!existing || candidate.score > existing.score) {
+        candidatePool.set(dedupKey, candidate);
+      }
+    }
+  }
+
+  const candidates = Array.from(candidatePool.values()).sort((a, b) => b.score - a.score);
   const selected: CaptureEntry[] = [];
   const seenUrls = new Set<string>();
   const seenTitles = new Set<string>();
 
-  if (isStrongContentPage(landing, task.url)) {
+  if (crawlMode !== 'listing-detail' && isStrongContentPage(landing, task.url)) {
     const title = landing.title || task.url;
     const titleKey = normalizeText(title);
     seenUrls.add(normalizeUrl(landing.url || task.url));
@@ -822,6 +1017,10 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     const normalizedTask = {
       ...task,
       maxItems: normalizeMaxItems(task.maxItems),
+      keywords: normalizeStringList(task.keywords),
+      siteHints: normalizeStringList(task.siteHints),
+      seedUrls: resolveSeedUrls(task.seedUrls, task.url),
+      crawlMode: resolveTaskCrawlMode(task),
     };
     const runtimeAuth = await resolveRuntimeAuth(normalizedTask, auth);
     const jar: CookieJar = new Map();
@@ -842,7 +1041,9 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     const entries = await collectRankedEntries(normalizedTask, landing, runtimeAuth, jar);
     const summary = entries.length
       ? `本次按“优先高评价、不求抓全”的策略筛出 ${entries.length} 篇候选内容，已去重后写入文档中心。`
-      : summarizeText(landing.text, normalizedTask.focus);
+      : normalizedTask.crawlMode === 'listing-detail'
+        ? 'Discovery mode did not find listing/detail candidates; kept the landing page overview only. Check seed URLs or use browser/API capture for shell pages.'
+        : summarizeText(landing.text, normalizedTask.focus);
     const documentPath = await writeCaptureDocument(
       normalizedTask,
       title,
@@ -886,6 +1087,10 @@ export async function listWebCaptureTasks() {
       ...item,
       captureStatus: item.captureStatus || 'active',
       maxItems: normalizeMaxItems(item.maxItems),
+      keywords: normalizeStringList(item.keywords),
+      siteHints: normalizeStringList(item.siteHints),
+      seedUrls: resolveSeedUrls(item.seedUrls, item.url),
+      crawlMode: resolveTaskCrawlMode(item),
       nextRunAt: item.captureStatus === 'paused' ? '' : (item.nextRunAt || computeNextRunAt(item)),
       lastCollectedCount: item.lastCollectedCount ?? item.lastCollectedItems?.length ?? 0,
       lastCollectedItems: Array.isArray(item.lastCollectedItems) ? item.lastCollectedItems : [],
@@ -896,6 +1101,10 @@ export async function listWebCaptureTasks() {
 export async function createAndRunWebCaptureTask(input: {
   url: string;
   focus?: string;
+  keywords?: string[];
+  siteHints?: string[];
+  seedUrls?: string[];
+  crawlMode?: WebCaptureCrawlMode;
   frequency?: WebCaptureFrequency;
   note?: string;
   maxItems?: number;
@@ -912,6 +1121,10 @@ export async function createAndRunWebCaptureTask(input: {
     url: input.url,
     focus: input.focus?.trim() || '正文、关键信息、技术要点',
     frequency: input.frequency || 'daily',
+    keywords: normalizeStringList(input.keywords ?? existing?.keywords),
+    siteHints: normalizeStringList(input.siteHints ?? existing?.siteHints),
+    seedUrls: resolveSeedUrls(input.seedUrls ?? existing?.seedUrls, input.url),
+    crawlMode: normalizeCrawlMode(input.crawlMode ?? existing?.crawlMode),
     note: input.note?.trim() || '',
     maxItems: normalizeMaxItems(input.maxItems),
     createdAt: existing?.createdAt || now,
@@ -931,6 +1144,10 @@ export async function upsertWebCaptureTask(input: {
   id?: string;
   url: string;
   focus?: string;
+  keywords?: string[];
+  siteHints?: string[];
+  seedUrls?: string[];
+  crawlMode?: WebCaptureCrawlMode;
   frequency?: WebCaptureFrequency;
   note?: string;
   maxItems?: number;
@@ -949,6 +1166,10 @@ export async function upsertWebCaptureTask(input: {
     url: input.url,
     focus: input.focus?.trim() || existing?.focus || '正文、关键信息、技术要点',
     frequency: input.frequency || existing?.frequency || 'daily',
+    keywords: normalizeStringList(input.keywords ?? existing?.keywords),
+    siteHints: normalizeStringList(input.siteHints ?? existing?.siteHints),
+    seedUrls: resolveSeedUrls(input.seedUrls ?? existing?.seedUrls, input.url),
+    crawlMode: normalizeCrawlMode(input.crawlMode ?? existing?.crawlMode),
     note: input.note?.trim() || existing?.note || '',
     maxItems: normalizeMaxItems(input.maxItems ?? existing?.maxItems),
     createdAt: existing?.createdAt || now,

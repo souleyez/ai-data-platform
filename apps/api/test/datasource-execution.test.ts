@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,40 @@ const datasourceExecution = await importFresh<typeof import('../src/lib/datasour
 const datasourceService = await importFresh<typeof import('../src/lib/datasource-service.js')>(
   '../src/lib/datasource-service.js',
 );
+
+async function startHtmlServer(routes: Record<string, string>) {
+  const server = http.createServer((request, response) => {
+    const body = routes[request.url || '/'];
+    if (!body) {
+      response.statusCode = 404;
+      response.end('not found');
+      return;
+    }
+
+    response.statusCode = 200;
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end(body);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('failed to start html server');
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    },
+  };
+}
 
 test.after(async () => {
   await fs.rm(storageRoot, { recursive: true, force: true });
@@ -186,6 +221,88 @@ test('web_public datasource run should create a successful run with an ingested 
   });
   assert.equal(items[0]?.documentSummaries?.length, 1);
   assert.equal(items[0]?.documentSummaries?.[0]?.label, runs[0]?.resultSummaries?.[0]?.label);
+});
+
+test('web_discovery datasource run should discover listing-detail entries and preserve discovery config', async () => {
+  const server = await startHtmlServer({
+    '/listing': `
+      <html><head><title>广州公共资源交易中心列表</title></head><body>
+        <a href="/detail-a">广州医疗设备采购公告（第一批）</a>
+        <a href="/detail-b">广州体外诊断项目中标结果公告</a>
+        <a href="/help">服务指南</a>
+      </body></html>
+    `,
+    '/seed-2': `
+      <html><head><title>广州公共资源交易中心结果列表</title></head><body>
+        <a href="/detail-b">广州体外诊断项目中标结果公告</a>
+        <a href="/detail-c">广州影像设备补充更正公告</a>
+      </body></html>
+    `,
+    '/detail-a': `
+      <html><head><title>广州医疗设备采购公告（第一批）</title></head><body>
+        <article>
+          <p>本次公告围绕广州医疗设备采购项目，明确采购范围、交付周期、响应要求和评审标准，适合作为招标详情页样本。</p>
+          <p>项目要求供应商提供影像设备与配套维保服务，并说明项目预算、资格条件、采购单位和开标安排。</p>
+        </article>
+      </body></html>
+    `,
+    '/detail-b': `
+      <html><head><title>广州体外诊断项目中标结果公告</title></head><body>
+        <article>
+          <p>本次结果公告汇总广州体外诊断项目的成交供应商、报价结果、评审结论和履约节点，属于典型的交易结果详情页。</p>
+          <p>公告同时列出了采购单位、项目编号、中标金额和服务范围，适合落入 bids 发现链路。</p>
+        </article>
+      </body></html>
+    `,
+    '/detail-c': `
+      <html><head><title>广州影像设备补充更正公告</title></head><body>
+        <article>
+          <p>补充更正公告说明了影像设备项目参数修订、答疑要点和时间调整，可作为关联发现的候选条目。</p>
+        </article>
+      </body></html>
+    `,
+    '/help': '<html><head><title>服务指南</title></head><body><p>帮助中心</p></body></html>',
+  });
+
+  try {
+    await datasourceDefinitions.upsertDatasourceDefinition({
+      id: 'ds-web-discovery',
+      name: 'Guangzhou bids discovery',
+      kind: 'web_discovery',
+      status: 'active',
+      targetLibraries: [{ key: 'bids', label: 'bids', mode: 'primary' }],
+      schedule: { kind: 'manual', maxItemsPerRun: 2 },
+      authMode: 'none',
+      config: {
+        url: `${server.baseUrl}/listing`,
+        focus: '广州 医疗设备 采购 公告',
+        maxItems: 2,
+        keywords: ['医疗设备', '体外诊断'],
+        siteHints: ['listing-detail', '公告列表'],
+        seedUrls: [`${server.baseUrl}/listing`, `${server.baseUrl}/seed-2`],
+        crawlMode: 'listing-detail',
+      },
+    });
+
+    const result = await datasourceExecution.runDatasourceDefinition('ds-web-discovery');
+    const runs = await datasourceDefinitions.listDatasourceRuns('ds-web-discovery');
+    const latestDefinition = await datasourceDefinitions.getDatasourceDefinition('ds-web-discovery');
+
+    assert.equal(result.run?.status, 'success');
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]?.ingestedCount, 1);
+    assert.equal(runs[0]?.resultSummaries?.length, 2);
+    assert.ok((runs[0]?.resultSummaries || []).every((item) => /公告|结果/.test(item.label)));
+    assert.ok((runs[0]?.resultSummaries || []).every((item) => !/服务指南/.test(item.label)));
+    assert.doesNotMatch(runs[0]?.summary || '', /did not find listing\/detail candidates/i);
+    assert.equal(latestDefinition?.kind, 'web_discovery');
+    assert.equal(String(latestDefinition?.config?.crawlMode || ''), 'listing-detail');
+    assert.deepEqual(latestDefinition?.config?.keywords, ['医疗设备', '体外诊断']);
+    assert.deepEqual(latestDefinition?.config?.siteHints, ['listing-detail', '公告列表']);
+    assert.deepEqual(latestDefinition?.config?.seedUrls, [`${server.baseUrl}/listing`, `${server.baseUrl}/seed-2`]);
+  } finally {
+    await server.close();
+  }
 });
 
 test('datasource run read model should expose datasourceName, libraryLabels, documentLabels and document summaries', async () => {

@@ -15,6 +15,7 @@ import {
   listWebCaptureTasks,
   updateWebCaptureTaskStatus,
   upsertWebCaptureTask,
+  type WebCaptureCrawlMode,
 } from './web-capture.js';
 import { buildDatabaseExecutionPlan, buildDatabaseRunSummaryItems } from './datasource-database-connector.js';
 import { getDatasourceCredentialSecret } from './datasource-credentials.js';
@@ -52,6 +53,12 @@ function getDefinitionUrl(definition: DatasourceDefinition) {
   return String(definition.config?.url || '').trim();
 }
 
+function getDefinitionCrawlMode(definition: DatasourceDefinition): WebCaptureCrawlMode {
+  const configured = String(definition.config?.crawlMode || '').trim().toLowerCase();
+  if (configured === 'listing-detail') return 'listing-detail';
+  return definition.kind === 'web_discovery' ? 'listing-detail' : 'single-page';
+}
+
 async function findLinkedWebTask(definition: DatasourceDefinition) {
   const url = getDefinitionUrl(definition);
   if (!url) return null;
@@ -70,6 +77,10 @@ async function ensureWebTaskFromDefinition(definition: DatasourceDefinition) {
     id: existing?.id,
     url,
     focus: String(definition.config?.focus || '').trim(),
+    keywords: Array.isArray(definition.config?.keywords) ? definition.config.keywords as string[] : [],
+    siteHints: Array.isArray(definition.config?.siteHints) ? definition.config.siteHints as string[] : [],
+    seedUrls: Array.isArray(definition.config?.seedUrls) ? definition.config.seedUrls as string[] : [url],
+    crawlMode: getDefinitionCrawlMode(definition),
     frequency: definition.schedule.kind,
     note: definition.notes || '',
     maxItems: Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 5),
@@ -189,6 +200,10 @@ export async function runDatasourceDefinition(id: string) {
   const task = await createAndRunWebCaptureTask({
     url: getDefinitionUrl(definition),
     focus: String(definition.config?.focus || '').trim(),
+    keywords: Array.isArray(definition.config?.keywords) ? definition.config.keywords as string[] : [],
+    siteHints: Array.isArray(definition.config?.siteHints) ? definition.config.siteHints as string[] : [],
+    seedUrls: Array.isArray(definition.config?.seedUrls) ? definition.config.seedUrls as string[] : [getDefinitionUrl(definition)],
+    crawlMode: getDefinitionCrawlMode(definition),
     frequency: definition.schedule.kind,
     note: definition.notes || '',
     maxItems: Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 5),

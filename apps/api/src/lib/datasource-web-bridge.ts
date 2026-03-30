@@ -10,7 +10,7 @@ import { appendDatasourceRun, upsertDatasourceDefinition } from './datasource-de
 import { loadDocumentLibraries } from './document-libraries.js';
 import { listDatasourcePresets } from './datasource-presets.js';
 import type { DatasourceProviderSummary } from './datasource-provider.js';
-import type { WebCaptureTask } from './web-capture.js';
+import type { WebCaptureCrawlMode, WebCaptureTask } from './web-capture.js';
 import { webDatasourceProvider } from './datasource-web-provider.js';
 
 const FALLBACK_TARGET_LIBRARY: DatasourceTargetLibrary = {
@@ -35,6 +35,28 @@ function getOrigin(value: string) {
   } catch {
     return '';
   }
+}
+
+function normalizeStringList(value: unknown) {
+  const values = Array.isArray(value) ? value : [];
+  const dedup = new Set<string>();
+  for (const item of values) {
+    const normalized = String(item || '').trim();
+    if (!normalized) continue;
+    dedup.add(normalized);
+  }
+  return Array.from(dedup);
+}
+
+function normalizeCrawlMode(value: unknown): WebCaptureCrawlMode {
+  return String(value || '').trim().toLowerCase() === 'listing-detail' ? 'listing-detail' : 'single-page';
+}
+
+function inferTaskCrawlMode(task: WebCaptureTask): WebCaptureCrawlMode {
+  const explicit = normalizeCrawlMode(task.crawlMode);
+  if (explicit === 'listing-detail') return explicit;
+  const hintText = normalizeStringList(task.siteHints).join(' ').toLowerCase();
+  return /(listing|detail|discover|crawl)/.test(hintText) ? 'listing-detail' : 'single-page';
 }
 
 function buildDatasourceId(taskId: string) {
@@ -107,7 +129,7 @@ async function inferTargetLibraries(task: WebCaptureTask) {
 
 function inferDatasourceKind(task: WebCaptureTask): DatasourceDefinition['kind'] {
   if (task.loginMode === 'credential' || task.credentialRef) return 'web_login';
-  if (task.maxItems && task.maxItems > 1) return 'web_discovery';
+  if (inferTaskCrawlMode(task) === 'listing-detail') return 'web_discovery';
   return 'web_public';
 }
 
@@ -143,6 +165,10 @@ export async function buildDatasourceDefinitionFromWebCaptureTask(task: WebCaptu
     config: {
       url: normalizeUrl(task.url),
       focus: task.focus || '',
+      keywords: normalizeStringList(task.keywords),
+      siteHints: normalizeStringList(task.siteHints),
+      seedUrls: normalizeStringList(task.seedUrls).length ? normalizeStringList(task.seedUrls) : [normalizeUrl(task.url)],
+      crawlMode: inferTaskCrawlMode(task),
       note: task.note || '',
       title: task.title || '',
       maxItems: task.maxItems || 5,
