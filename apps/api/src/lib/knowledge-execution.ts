@@ -7,9 +7,9 @@ import {
   shouldUseResumePageFallbackOutput,
   type ChatOutput,
 } from './knowledge-output.js';
+import { runKnowledgeDetailFetch } from './knowledge-detail-fetch.js';
 import { detectOutputKind } from './knowledge-plan.js';
 import {
-  buildKnowledgeAnswerPrompt,
   buildKnowledgeConceptPagePrompt,
   buildKnowledgeOutputPrompt,
 } from './knowledge-prompts.js';
@@ -509,20 +509,17 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
     };
   }
 
-  const cloud = await runOpenClawChat({
-    prompt: requestText,
+  const detail = await runKnowledgeDetailFetch({
+    requestText,
+    libraries,
+    retrieval: effectiveRetrieval,
+    timeRange: input.timeRange,
+    contentFocus: input.contentFocus,
     sessionUser: input.sessionUser,
     chatHistory: knowledgeChatHistory,
-    contextBlocks: [
-      buildKnowledgeContext(requestText, libraries, effectiveRetrieval, {
-        timeRange: input.timeRange,
-        contentFocus: input.contentFocus,
-      }),
-    ],
-    systemPrompt: buildKnowledgeAnswerPrompt(),
   });
 
-  const content = cloud.content;
+  const content = detail.content;
   return {
     libraries,
     output: { type: 'answer', content },

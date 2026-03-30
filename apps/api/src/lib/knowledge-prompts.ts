@@ -10,6 +10,20 @@ export function buildKnowledgeAnswerPrompt() {
   ].join('\n');
 }
 
+export function buildKnowledgeDetailFetchPrompt(skillInstruction: string) {
+  return [
+    'You are the AI smart service assistant for live document-detail answers.',
+    'The user is asking for concrete facts or comparisons from documents already selected from the knowledge libraries.',
+    'Treat the supplied live document detail and evidence as the source of truth.',
+    'Do not imply that you checked file content beyond the supplied detail context.',
+    'If the supplied detail only partially answers the question, say what is supported and what still needs more document detail.',
+    'Answer directly in natural short paragraphs instead of report shells or markdown-heavy formatting.',
+    skillInstruction,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function buildKnowledgeCatalogPrompt() {
   return [
     'You are the AI smart service assistant for catalog-level knowledge answers.',

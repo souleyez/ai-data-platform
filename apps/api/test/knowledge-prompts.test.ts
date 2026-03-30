@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildKnowledgeConceptPagePrompt,
+  buildKnowledgeDetailFetchPrompt,
   buildKnowledgeOutputPrompt,
 } from '../src/lib/knowledge-prompts.js';
 
@@ -29,4 +30,15 @@ test('buildKnowledgeOutputPrompt should keep template-first behavior for non-pag
   assert.match(prompt, /report-planning directives/i);
   assert.match(prompt, /directly derivable from the supplied evidence/i);
   assert.match(prompt, /Follow template A exactly\./i);
+});
+
+test('buildKnowledgeDetailFetchPrompt should enforce live-detail honesty', () => {
+  const prompt = buildKnowledgeDetailFetchPrompt(
+    'Workspace skill: knowledge-detail-fetch',
+  );
+
+  assert.match(prompt, /live document-detail answers/i);
+  assert.match(prompt, /supplied live document detail and evidence/i);
+  assert.match(prompt, /Do not imply that you checked file content beyond the supplied detail context/i);
+  assert.match(prompt, /Workspace skill: knowledge-detail-fetch/i);
 });

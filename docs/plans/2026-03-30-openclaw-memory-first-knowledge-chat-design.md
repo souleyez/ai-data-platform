@@ -402,6 +402,14 @@ and returns:
 
 This replaces most current detail-question orchestration.
 
+Phase 3 implementation note:
+
+- workspace skill: `skills/knowledge-detail-fetch/`
+- provider: `apps/api/src/lib/knowledge-detail-fetch.ts`
+- `executeKnowledgeAnswer` now routes through the dedicated detail provider instead of assembling a one-off answer prompt inline
+- the provider still uses live retrieval context from `buildKnowledgeContext(...)`
+- when the cloud gateway is unavailable or detail generation fails, the provider degrades to a local evidence-backed answer instead of throwing
+
 ### Phase 4: Output-Only Skill Expansion
 
 Keep formal output on the current skill path, but make it start from memory-selected documents instead of project-side library guessing.
