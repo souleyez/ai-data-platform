@@ -9,6 +9,7 @@ import { upsertDocumentVectorIndex } from './document-vector-index.js';
 import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_FILES_DIR } from './paths.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import { loadRetainedDocuments } from './retained-documents.js';
+import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 
 export const DEFAULT_SCAN_DIR = process.env.DOCUMENT_SCAN_DIR || STORAGE_FILES_DIR;
 const CACHE_DIR = STORAGE_CACHE_DIR;
@@ -274,6 +275,7 @@ function sameScanRoots(left?: string[], right?: string[]) {
 async function writeCache(payload: CachePayload) {
   await ensureCacheDir();
   await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  scheduleOpenClawMemoryCatalogSync('document-cache-write');
 }
 
 export async function removeDocumentsFromCache(filePaths: string[]) {

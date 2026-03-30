@@ -344,6 +344,17 @@ Phase 1 sync must react to these source events:
 - audit excluded
 - audit restored
 
+Phase 1 implementation note:
+
+- generated memory files live under `memory/catalog/`
+- sync state lives in `storage/config/openclaw-memory-catalog.json`
+- current sync hook points are:
+  - `document-store.ts`
+  - `document-overrides.ts`
+  - `document-libraries.ts`
+  - `retained-documents.ts`
+- manual refresh command: `corepack pnpm openclaw:memory:refresh`
+
 ### Phase 2: Thin Chat Router
 
 Change chat classification to only three buckets:

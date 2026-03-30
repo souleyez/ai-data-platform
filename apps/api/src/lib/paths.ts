@@ -11,4 +11,5 @@ export const STORAGE_ROOT = process.env.AI_DATA_PLATFORM_STORAGE_ROOT
 export const STORAGE_CONFIG_DIR = path.join(STORAGE_ROOT, 'config');
 export const STORAGE_FILES_DIR = path.join(STORAGE_ROOT, 'files');
 export const STORAGE_CACHE_DIR = path.join(STORAGE_ROOT, 'cache');
+export const MEMORY_ROOT = path.join(REPO_ROOT, 'memory');
 export const TOOLS_DIR = path.join(REPO_ROOT, 'tools');

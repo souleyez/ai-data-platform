@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ParsedDocument } from './document-parser.js';
 import type { BizCategory } from './document-config.js';
+import type { ParsedDocument } from './document-parser.js';
+import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
 
 export type DocumentOverride = {
@@ -37,6 +38,7 @@ export async function saveDocumentOverride(filePath: string, input: { bizCategor
 
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
   await fs.writeFile(OVERRIDE_FILE, JSON.stringify(current, null, 2), 'utf8');
+  scheduleOpenClawMemoryCatalogSync('document-override-write');
   return current[filePath];
 }
 
@@ -53,12 +55,14 @@ export async function saveDocumentSuggestion(filePath: string, input: { suggeste
 
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
   await fs.writeFile(OVERRIDE_FILE, JSON.stringify(current, null, 2), 'utf8');
+  scheduleOpenClawMemoryCatalogSync('document-override-suggestion');
   return current[filePath];
 }
 
 export async function saveDocumentOverrides(overrides: Record<string, DocumentOverride>) {
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
   await fs.writeFile(OVERRIDE_FILE, JSON.stringify(overrides, null, 2), 'utf8');
+  scheduleOpenClawMemoryCatalogSync('document-overrides-bulk-write');
   return overrides;
 }
 

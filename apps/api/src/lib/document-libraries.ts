@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadDocumentCategoryConfig, type BizCategory } from './document-config.js';
 import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } from './document-overrides.js';
+import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
 import type { ParsedDocument } from './document-parser.js';
 
@@ -50,6 +51,7 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
     }, null, 2),
     'utf8',
   );
+  scheduleOpenClawMemoryCatalogSync('document-libraries-write');
 }
 
 function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumentCategoryConfig>>['categories'], createdAt: string) {

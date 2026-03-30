@@ -13,6 +13,7 @@
     "openclaw:workspace:init": "powershell -ExecutionPolicy Bypass -File tools/init-openclaw-workspace.ps1",
     "openclaw:skills:list": "corepack pnpm exec clawhub list --workdir .",
     "openclaw:skills:update": "corepack pnpm exec clawhub update --all --workdir .",
+    "openclaw:memory:refresh": "corepack pnpm --filter api memory:refresh",
     "local:start": "powershell -ExecutionPolicy Bypass -File tools/start-local.ps1",
     "local:stop": "powershell -ExecutionPolicy Bypass -File tools/stop-local.ps1",
     "local:status": "powershell -ExecutionPolicy Bypass -File tools/status-local.ps1",

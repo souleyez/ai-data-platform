@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
+import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR, STORAGE_ROOT } from './paths.js';
 
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
@@ -23,6 +24,7 @@ async function ensureConfigDir() {
 async function writePayload(payload: RetainedDocumentPayload) {
   await ensureConfigDir();
   await fs.writeFile(RETAINED_DOCUMENTS_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  scheduleOpenClawMemoryCatalogSync('retained-documents-write');
 }
 
 export async function loadRetainedDocuments() {
