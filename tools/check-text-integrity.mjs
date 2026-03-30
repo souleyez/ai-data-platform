@@ -161,7 +161,15 @@ async function main() {
     const relativePath = toRepoRelative(filePath);
     if (relativePath === 'tools/check-text-integrity.mjs') continue;
 
-    const buffer = await fs.readFile(filePath);
+    let buffer;
+    try {
+      buffer = await fs.readFile(filePath);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
     const content = buffer.toString('utf8');
     const hits = collectHits(content);
     const bomHit = hasUtf8Bom(buffer)

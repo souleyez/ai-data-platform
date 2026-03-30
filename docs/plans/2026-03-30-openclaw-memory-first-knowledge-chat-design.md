@@ -439,6 +439,12 @@ Only cleanup after:
 - detail skill is live
 - output path is proven against the current smoke set
 
+Phase 5 implementation note:
+
+- `knowledge-context.ts` is removed because its upload-followup heuristics are no longer on the runtime path
+- `knowledge-intent.ts` is reduced to only the still-used cancel and explicit reject checks
+- `knowledge-plan.ts` keeps the shared library-scoring helpers and legacy plan execution helpers, but the historical mojibake patterns are normalized so text-integrity can stay green
+
 ## Cleanup Scope
 
 The goal is not "delete everything old."
