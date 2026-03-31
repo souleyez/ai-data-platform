@@ -226,7 +226,7 @@ function detectOrderInventoryRequestView(input: {
 
 export function resolveOrderInventoryComposerAttemptModes(view: OrderInventoryRequestView): ComposerPromptMode[] {
   if (view === 'stock') return ['compact'];
-  return ['rich', 'compact'];
+  return ['compact', 'rich'];
 }
 
 function looksLikeDelimitedLine(value: string) {

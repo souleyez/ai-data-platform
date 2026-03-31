@@ -10,7 +10,7 @@ import {
 
 test('resolveOrderInventoryComposerAttemptModes should keep stock requests on compact mode only', () => {
   assert.deepEqual(resolveOrderInventoryComposerAttemptModes('stock'), ['compact']);
-  assert.deepEqual(resolveOrderInventoryComposerAttemptModes('generic'), ['rich', 'compact']);
+  assert.deepEqual(resolveOrderInventoryComposerAttemptModes('generic'), ['compact', 'rich']);
 });
 
 test('runOrderInventoryPageComposer should return null and expose debug detail when gateway is not configured', async () => {
