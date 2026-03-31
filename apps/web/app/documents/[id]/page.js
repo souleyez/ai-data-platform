@@ -29,6 +29,9 @@ const PARSE_METHOD_LABELS = {
   error: '解析失败',
 };
 
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+const READER_PAGE_CHARS = 2600;
+
 function DetailCard({ title, children }) {
   return (
     <section className="card documents-card">
@@ -68,6 +71,52 @@ function getDetailStatusLabel(item) {
     default:
       return '仅完成快速解析';
   }
+}
+
+function splitDocumentPages(text, maxChars = READER_PAGE_CHARS) {
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!normalized) return [];
+
+  const blocks = normalized
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!blocks.length) return [normalized];
+
+  const pages = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    if (!current.trim()) return;
+    pages.push(current.trim());
+    current = '';
+  };
+
+  for (const block of blocks) {
+    const candidate = current ? `${current}\n\n${block}` : block;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) pushCurrent();
+
+    if (block.length <= maxChars) {
+      current = block;
+      continue;
+    }
+
+    let cursor = 0;
+    while (cursor < block.length) {
+      const piece = block.slice(cursor, cursor + maxChars).trim();
+      if (piece) pages.push(piece);
+      cursor += maxChars;
+    }
+  }
+
+  pushCurrent();
+  return pages.length ? pages : [normalized];
 }
 
 function renderStructuredProfile(item) {
@@ -160,6 +209,7 @@ export default function DocumentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [keyword, setKeyword] = useState('');
+  const [pageIndex, setPageIndex] = useState(0);
 
   useEffect(() => {
     async function loadDetail() {
@@ -198,12 +248,24 @@ export default function DocumentDetailPage() {
   }, [documentId]);
 
   const currentGroups = useMemo(() => data?.confirmedGroups || data?.groups || [], [data]);
+  const isImageDocument = useMemo(() => IMAGE_EXTENSIONS.has(String(data?.ext || '').toLowerCase()), [data]);
+  const filePreviewUrl = useMemo(
+    () => (documentId && isImageDocument ? buildApiUrl(`/api/documents/file?id=${encodeURIComponent(documentId)}`) : ''),
+    [documentId, isImageDocument],
+  );
   const fullText = useMemo(() => String(data?.fullText || data?.excerpt || '').trim(), [data]);
+  const readerPages = useMemo(() => splitDocumentPages(fullText), [fullText]);
+  const currentPageText = readerPages[pageIndex] || '';
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [documentId, fullText]);
+
   const highlightedText = useMemo(() => {
-    if (!keyword.trim() || !fullText) return fullText;
+    if (!keyword.trim() || !currentPageText) return currentPageText;
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return fullText.replace(new RegExp(escaped, 'gi'), (match) => `<<<HIT>>>${match}<<<END>>>`);
-  }, [fullText, keyword]);
+    return currentPageText.replace(new RegExp(escaped, 'gi'), (match) => `<<<HIT>>>${match}<<<END>>>`);
+  }, [currentPageText, keyword]);
 
   return (
     <div className="app-shell">
@@ -260,6 +322,36 @@ export default function DocumentDetailPage() {
                       />
                     </div>
                   </div>
+                  {isImageDocument && filePreviewUrl ? (
+                    <div className="document-preview-wrap">
+                      <img
+                        src={filePreviewUrl}
+                        alt={data.title || data.name || 'document preview'}
+                        className="document-image-preview"
+                      />
+                    </div>
+                  ) : null}
+                  {readerPages.length > 1 ? (
+                    <div className="document-reader-pagination">
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
+                        disabled={pageIndex <= 0}
+                      >
+                        上一页
+                      </button>
+                      <span className="page-note">第 {pageIndex + 1} / {readerPages.length} 页</span>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => setPageIndex((value) => Math.min(readerPages.length - 1, value + 1))}
+                        disabled={pageIndex >= readerPages.length - 1}
+                      >
+                        下一页
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="document-raw-view">
                     {highlightedText
                       ? highlightedText.split('<<<HIT>>>').map((segment, index) => {

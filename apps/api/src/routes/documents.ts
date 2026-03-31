@@ -1,4 +1,4 @@
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -122,6 +122,15 @@ function toListItem<T extends Record<string, unknown>>(item: T) {
     detailParseError: source.detailParseError,
   };
 }
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp',
+};
 
 function extractDocumentTimestamp(item: { name?: string; path?: string }) {
   const text = `${item?.name || ''} ${item?.path || ''}`;
@@ -283,6 +292,31 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         matchedFolders,
       },
     };
+  });
+
+  app.get('/documents/file', async (request, reply) => {
+    const { id } = (request.query || {}) as { id?: string };
+    if (!id) {
+      return reply.code(400).send({ error: 'id is required' });
+    }
+
+    const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const { items } = await loadParsedDocuments(200, false, documentConfig.scanRoots);
+    const found = items.find((item) => buildDocumentId(item.path) === id);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
+    }
+
+    const contentType = IMAGE_CONTENT_TYPES[String(found.ext || '').toLowerCase()];
+    if (!contentType) {
+      return reply.code(400).send({ error: 'inline preview is not supported for this document type' });
+    }
+
+    await fs.access(found.path);
+    reply.header('Cache-Control', 'private, max-age=60');
+    reply.type(contentType);
+    return reply.send(createReadStream(found.path));
   });
 
   app.get('/documents/candidate-sources', async () => {
