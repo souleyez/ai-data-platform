@@ -61,8 +61,8 @@ test('normalizeReportOutput should hydrate order cockpit pages to the minimum vi
 
   assert.equal(output.type, 'page');
   assert.equal(output.title, '多渠道订单经营驾驶舱');
-  assert.ok((output.page?.cards || []).length >= 4);
-  assert.ok((output.page?.charts || []).length >= 2);
+  assert.ok((output.page?.cards || []).length >= 5);
+  assert.ok((output.page?.charts || []).length >= 3);
   assert.equal(output.page?.sections?.[0]?.title, '经营总览');
 });
 
@@ -136,8 +136,8 @@ test('normalizeReportOutput should fall back to order cockpit output for prompt 
 
   assert.equal(output.type, 'page');
   assert.equal(output.title, '订单多渠道经营驾驶舱');
-  assert.ok((output.page?.cards || []).length >= 4);
-  assert.ok((output.page?.charts || []).length >= 2);
+  assert.ok((output.page?.cards || []).length >= 5);
+  assert.ok((output.page?.charts || []).length >= 3);
   assert.match(output.page?.summary || '', /多渠道|SKU|库存|补货/);
 });
 
@@ -218,7 +218,7 @@ test('normalizeReportOutput should unwrap nested stringified order page payloads
   assert.equal(output.page?.summary, '本页面基于订单分析知识库构建，覆盖多渠道经营、品类梯队和库存动作。');
   assert.equal(output.page?.sections?.[0]?.body, 'Q1覆盖抖音、京东、天猫三大渠道。');
   assert.ok((output.page?.cards || []).some((item) => item.label === '渠道GMV'));
-  assert.ok((output.page?.charts || []).length >= 2);
+  assert.ok((output.page?.charts || []).length >= 3);
   assert.doesNotMatch(output.page?.summary || '', /^\s*\{/);
 });
 

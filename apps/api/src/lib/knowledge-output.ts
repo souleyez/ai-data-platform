@@ -2493,6 +2493,40 @@ function normalizeStockChartShell(charts: NonNullable<KnowledgePageOutput['page'
   });
 }
 
+function looksLikeJsonEchoText(value: string) {
+  const text = sanitizeText(value);
+  if (!text) return false;
+  return text.startsWith('{')
+    || text.startsWith('[')
+    || /"(?:title|summary|page|cards|sections|charts|items)"\s*:/.test(text);
+}
+
+function normalizeGenericCardShell(cards: NonNullable<KnowledgePageOutput['page']['cards']>) {
+  return cards.map((card) => {
+    const label = normalizeText(card.label || '');
+    if (label === normalizeText('\u5e93\u5b58\u5065\u5eb7')) {
+      return { ...card, label: '\u5e93\u5b58\u5065\u5eb7\u6307\u6570' };
+    }
+    if (label === normalizeText('\u0037\u0032\u5c0f\u65f6\u8865\u8d27\u52a8\u4f5c')) {
+      return { ...card, label: '\u8865\u8d27\u4f18\u5148\u7ea7' };
+    }
+    return card;
+  });
+}
+
+function normalizeGenericChartShell(charts: NonNullable<KnowledgePageOutput['page']['charts']>) {
+  return charts.map((chart) => {
+    const title = normalizeText(chart.title || '');
+    if (title === normalizeText('\u0053\u004b\u0055\u4e0e\u54c1\u7c7b\u7126\u70b9')) {
+      return { ...chart, title: '\u54c1\u7c7b\u68af\u961f\u4e0e\u82f1\u96c4SKU' };
+    }
+    if (title === normalizeText('\u5e93\u5b58\u4e0e\u8d8b\u52bf\u4fe1\u53f7')) {
+      return { ...chart, title: '\u5e93\u5b58\u5065\u5eb7\u4e0e\u8865\u8d27\u4f18\u5148\u7ea7' };
+    }
+    return chart;
+  });
+}
+
 function dedupePageCards(cards: NonNullable<KnowledgePageOutput['page']['cards']>) {
   const seen = new Set<string>();
   return cards.filter((card) => {
@@ -2520,6 +2554,72 @@ function buildStockShellCards(
     merged.push(card);
   }
   return merged;
+}
+
+function buildGenericShellCards(
+  primary: NonNullable<KnowledgePageOutput['page']['cards']>,
+  fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
+) {
+  const preferredOrder = [
+    '\u6e20\u9053GMV',
+    '\u52a8\u9500SKU',
+    '\u9ad8\u98ce\u9669SKU',
+    '\u8865\u8d27\u4f18\u5148\u7ea7',
+    '\u5e93\u5b58\u5065\u5eb7\u6307\u6570',
+  ];
+  const byLabel = new Map<string, { label?: string; value?: string; note?: string }>();
+  for (const card of normalizeGenericCardShell(fallback)) {
+    const key = normalizeText(card.label || '');
+    if (key) byLabel.set(key, card);
+  }
+  for (const card of normalizeGenericCardShell(primary)) {
+    const key = normalizeText(card.label || '');
+    if (key) byLabel.set(key, card);
+  }
+  return preferredOrder
+    .map((label) => byLabel.get(normalizeText(label)))
+    .filter(Boolean) as NonNullable<KnowledgePageOutput['page']['cards']>;
+}
+
+function buildGenericShellCharts(
+  primary: NonNullable<KnowledgePageOutput['page']['charts']>,
+  fallback: NonNullable<KnowledgePageOutput['page']['charts']>,
+) {
+  const preferredOrder = [
+    '\u6e20\u9053\u8d21\u732e\u7ed3\u6784',
+    '\u54c1\u7c7b\u68af\u961f\u4e0e\u82f1\u96c4SKU',
+    '\u5e93\u5b58\u5065\u5eb7\u4e0e\u8865\u8d27\u4f18\u5148\u7ea7',
+  ];
+  const byTitle = new Map<string, { title?: string; items?: Array<{ label?: string; value?: number }> }>();
+  for (const chart of normalizeGenericChartShell(fallback)) {
+    const key = normalizeText(chart.title || '');
+    if (key) byTitle.set(key, chart);
+  }
+  for (const chart of normalizeGenericChartShell(primary)) {
+    const key = normalizeText(chart.title || '');
+    if (key) byTitle.set(key, chart);
+  }
+  return preferredOrder
+    .map((title) => byTitle.get(normalizeText(title)))
+    .filter(Boolean) as NonNullable<KnowledgePageOutput['page']['charts']>;
+}
+
+function mergeOrderPageSections(
+  primary: NonNullable<KnowledgePageOutput['page']['sections']>,
+  fallback: NonNullable<KnowledgePageOutput['page']['sections']>,
+) {
+  return fallback.map((fallbackSection, index) => {
+    const source = primary[index];
+    if (!source) return fallbackSection;
+    const body = sanitizeText(source.body);
+    const useFallbackBody = !body || looksLikeJsonEchoText(body);
+    const bullets = (source.bullets || []).filter((item) => sanitizeText(item));
+    return {
+      title: sanitizeText(source.title) || fallbackSection.title,
+      body: useFallbackBody ? fallbackSection.body : source.body,
+      bullets: bullets.length ? bullets : fallbackSection.bullets,
+    };
+  });
 }
 
 function buildOrderPageOutput(
@@ -2597,11 +2697,19 @@ function hydrateOrderPageVisualShell(
     summary: page.summary || fallbackPage.summary,
     cards: view === 'stock'
       ? buildStockShellCards(page.cards || [], fallbackPage.cards || [])
-      : mergeCards(page.cards || [], fallbackPage.cards || [], 4),
-    sections: page.sections?.length ? page.sections : fallbackPage.sections,
+      : buildGenericShellCards(
+          mergeCards(page.cards || [], fallbackPage.cards || [], 5),
+          fallbackPage.cards || [],
+        ),
+    sections: page.sections?.length
+      ? mergeOrderPageSections(page.sections, fallbackPage.sections || [])
+      : fallbackPage.sections,
     charts: view === 'stock'
       ? normalizeStockChartShell(mergeCharts(page.charts || [], fallbackPage.charts || [], 2))
-      : mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
+      : buildGenericShellCharts(
+          mergeCharts(page.charts || [], fallbackPage.charts || [], 3),
+          fallbackPage.charts || [],
+        ),
   };
 }
 
