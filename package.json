@@ -20,6 +20,7 @@
     "smoke:local": "node tools/smoke-local.mjs",
     "smoke:local:cloud": "node tools/smoke-local.mjs --with-cloud",
     "smoke:remote:utf8": "node tools/smoke-remote.mjs",
+    "check:remote:order": "node tools/check-remote-order.mjs",
     "sample:remote:resume": "node tools/sample-remote-resume-pages.mjs",
     "seed:default-samples": "node tools/seed-default-samples.mjs",
     "deploy:remote": "node tools/run-deploy-remote.mjs",
