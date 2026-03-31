@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import {
-  assertAccessGateHtml,
+  assertHtmlDocument,
   assertInvalidSharedReportHtml,
+  assertReportCenterPageHtml,
   assertValidSharedReportHtml,
   buildSharedReportPayload,
 } from './report-smoke-helpers.mjs';
@@ -235,13 +236,13 @@ async function main() {
 
   const webPage = await fetchText(`${baseWeb}/`, undefined, 'web root');
   await writeTextArtifact(options.outputDir, `${timestamp}-web-root.html`, webPage.text);
-  assertAccessGateHtml(webPage.text, 'web root');
-  log('web', 'Web root access gate ok');
+  assertHtmlDocument(webPage.text, 'web root');
+  log('web', 'Web root html ok');
 
   const reportsPage = await fetchText(`${baseWeb}/reports`, undefined, 'reports page');
   await writeTextArtifact(options.outputDir, `${timestamp}-reports-page.html`, reportsPage.text);
-  assertAccessGateHtml(reportsPage.text, 'reports page');
-  log('reports-page', 'Report center access gate ok');
+  assertReportCenterPageHtml(reportsPage.text, 'reports page');
+  log('reports-page', 'Report center html ok');
 
   const sharedPayload = buildSharedReportPayload({
     title: 'remote-shared-smoke-title',

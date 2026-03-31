@@ -1,5 +1,4 @@
 import './globals.css';
-import RootAccessBoundary from './RootAccessBoundary';
 
 export const metadata = {
   title: 'AI 知识数据管理',
@@ -12,9 +11,7 @@ export const revalidate = 0;
 export default function RootLayout({ children }) {
   return (
     <html lang="zh-CN">
-      <body>
-        <RootAccessBoundary>{children}</RootAccessBoundary>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

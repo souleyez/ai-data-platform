@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  assertAccessGateHtml,
+  assertHtmlDocument,
   assertInvalidSharedReportHtml,
+  assertReportCenterPageHtml,
   assertValidSharedReportHtml,
   buildSharedReportPayload,
 } from './report-smoke-helpers.mjs';
@@ -81,14 +82,14 @@ async function ensureHealthy() {
   const web = await fetch(`${baseWeb}/documents`, { cache: 'no-store' });
   if (!web.ok) throw new Error(`web documents page failed with ${web.status}`);
   const documentsHtml = await web.text();
-  assertAccessGateHtml(documentsHtml, 'web documents page');
+  assertHtmlDocument(documentsHtml, 'web documents page');
 
   const reports = await fetch(`${baseWeb}/reports`, { cache: 'no-store' });
   if (!reports.ok) throw new Error(`web reports page failed with ${reports.status}`);
   const reportsHtml = await reports.text();
-  assertAccessGateHtml(reportsHtml, 'web reports page');
+  assertReportCenterPageHtml(reportsHtml, 'web reports page');
 
-  log('health', 'API is reachable and gated web entry pages are available');
+  log('health', 'API is reachable and primary web pages are available');
 }
 
 async function createLibrary() {

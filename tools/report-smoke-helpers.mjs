@@ -1,13 +1,14 @@
-export const REPORT_CENTER_PAGE_TITLE = '报表中心';
-export const REPORT_CENTER_SECTION_LABELS = ['用户上传的模板', '已生成的报表'];
+export const REPORT_CENTER_PAGE_TITLE = '\u62a5\u8868\u4e2d\u5fc3';
+export const REPORT_CENTER_SECTION_LABELS = [
+  '\u7528\u6237\u4e0a\u4f20\u7684\u6a21\u677f',
+  '\u5df2\u751f\u6210\u7684\u62a5\u8868',
+];
 export const SHARED_REPORT_SHELL_MARKERS = ['shared-report-shell', 'shared-report-card'];
-export const INVALID_SHARED_REPORT_TITLE = '静态页链接无效';
+export const INVALID_SHARED_REPORT_TITLE = '\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548';
 
 function fail(context, message) {
   throw new Error(`${context} ${message}`);
 }
-
-export const ACCESS_GATE_SHELL_MARKERS = ['access-gate-shell', 'access-gate-card', '最小权限'];
 
 export function assertSectionsContainInOrder(actual, expected, context) {
   let cursor = 0;
@@ -32,7 +33,7 @@ export function buildSharedReportPayload(item) {
   if (!item || item.kind === 'answer') return '';
 
   return encodeBase64Url(JSON.stringify({
-    title: item?.title || '静态分析页',
+    title: item?.title || '\u9759\u6001\u5206\u6790\u9875',
     createdAt: item?.createdAt || '',
     content: item?.content || '',
     page: item?.page || null,
@@ -40,60 +41,59 @@ export function buildSharedReportPayload(item) {
 }
 
 export function assertReportCenterPageHtml(html, context = 'reports page') {
-  if (!String(html || '').includes(REPORT_CENTER_PAGE_TITLE)) {
+  const text = String(html || '');
+  if (!text.includes(REPORT_CENTER_PAGE_TITLE)) {
     fail(context, `is missing title "${REPORT_CENTER_PAGE_TITLE}"`);
   }
 
   for (const sectionLabel of REPORT_CENTER_SECTION_LABELS) {
-    if (!html.includes(sectionLabel)) {
+    if (!text.includes(sectionLabel)) {
       fail(context, `is missing section label "${sectionLabel}"`);
     }
   }
 }
 
-export function assertAccessGateHtml(html, context = 'access gate page') {
+export function assertHtmlDocument(html, context = 'html page') {
   const text = String(html || '');
-
-  for (const marker of ACCESS_GATE_SHELL_MARKERS) {
-    if (!text.includes(marker)) {
-      fail(context, `is missing access gate marker "${marker}"`);
-    }
+  if (!text.includes('<html') || !text.includes('<body')) {
+    fail(context, 'did not render an html document');
   }
-
-  if (!text.includes('输入访问密钥') && !text.includes('初始化访问密钥')) {
-    fail(context, 'did not render access gate title');
+  if (text.length < 200) {
+    fail(context, `html payload is unexpectedly small (${text.length})`);
   }
 }
 
 export function assertValidSharedReportHtml(html, item, context = 'shared report page') {
+  const text = String(html || '');
   const title = String(item?.title || '').trim();
-  if (!title || !html.includes(title)) {
+  if (!title || !text.includes(title)) {
     fail(context, 'did not render the expected report title');
   }
 
   for (const marker of SHARED_REPORT_SHELL_MARKERS) {
-    if (!html.includes(marker)) {
+    if (!text.includes(marker)) {
       fail(context, `is missing expected shell marker "${marker}"`);
     }
   }
 
-  if (item?.page?.summary && !html.includes(String(item.page.summary))) {
+  if (item?.page?.summary && !text.includes(String(item.page.summary))) {
     fail(context, 'did not render the expected page summary');
   }
 
-  if (item?.page?.cards?.length && !html.includes('generated-page-card')) {
+  if (item?.page?.cards?.length && !text.includes('generated-page-card')) {
     fail(context, 'did not render the expected page cards');
   }
 }
 
 export function assertInvalidSharedReportHtml(html, context = 'invalid shared report page') {
+  const text = String(html || '');
   for (const marker of SHARED_REPORT_SHELL_MARKERS) {
-    if (!html.includes(marker)) {
+    if (!text.includes(marker)) {
       fail(context, `is missing expected shell marker "${marker}"`);
     }
   }
 
-  if (!html.includes(INVALID_SHARED_REPORT_TITLE)) {
+  if (!text.includes(INVALID_SHARED_REPORT_TITLE)) {
     fail(context, `did not render fallback title "${INVALID_SHARED_REPORT_TITLE}"`);
   }
 }
