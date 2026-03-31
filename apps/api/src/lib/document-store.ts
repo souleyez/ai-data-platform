@@ -16,6 +16,7 @@ const CACHE_DIR = STORAGE_CACHE_DIR;
 const CACHE_FILE = path.join(CACHE_DIR, 'documents-cache.json');
 const SCANNABLE_DOCUMENT_EXTENSIONS = new Set([
   '.pdf', '.txt', '.md', '.docx', '.csv', '.json', '.html', '.htm', '.xml', '.xlsx', '.xls',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp',
 ]);
 const SKIPPED_DIRECTORY_NAMES = new Set([
   '.git',

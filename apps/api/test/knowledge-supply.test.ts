@@ -1,11 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import {
   buildConceptPageSupplyBlock,
   buildKnowledgeChatHistory,
+  prepareKnowledgeScope,
   prepareKnowledgeRetrieval,
 } from '../src/lib/knowledge-supply.js';
 import { buildDocumentId } from '../src/lib/document-store.js';
+import { STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR } from '../src/lib/paths.js';
+
+const DOCUMENT_CACHE_FILE = path.join(STORAGE_CACHE_DIR, 'documents-cache.json');
+const DOCUMENT_OVERRIDES_FILE = path.join(STORAGE_CONFIG_DIR, 'document-overrides.json');
+
+async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, fn: () => Promise<T>) {
+  let previousCache: string | null = null;
+  let previousOverrides: string | null = null;
+
+  try {
+    previousCache = await fs.readFile(DOCUMENT_CACHE_FILE, 'utf8');
+  } catch {
+    previousCache = null;
+  }
+
+  try {
+    previousOverrides = await fs.readFile(DOCUMENT_OVERRIDES_FILE, 'utf8');
+  } catch {
+    previousOverrides = null;
+  }
+
+  await fs.mkdir(STORAGE_CACHE_DIR, { recursive: true });
+  await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
+  await fs.writeFile(DOCUMENT_CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  await fs.writeFile(DOCUMENT_OVERRIDES_FILE, JSON.stringify({}, null, 2), 'utf8');
+
+  try {
+    return await fn();
+  } finally {
+    if (previousCache === null) {
+      await fs.rm(DOCUMENT_CACHE_FILE, { force: true });
+    } else {
+      await fs.writeFile(DOCUMENT_CACHE_FILE, previousCache, 'utf8');
+    }
+
+    if (previousOverrides === null) {
+      await fs.rm(DOCUMENT_OVERRIDES_FILE, { force: true });
+    } else {
+      await fs.writeFile(DOCUMENT_OVERRIDES_FILE, previousOverrides, 'utf8');
+    }
+  }
+}
 
 test('buildKnowledgeChatHistory should drop short operational feedback and keep relevant dialogue', () => {
   const history = buildKnowledgeChatHistory(
@@ -124,6 +169,47 @@ test('prepareKnowledgeRetrieval should narrow retrieval to preferred memory-sele
   assert.equal(supply.effectiveRetrieval.meta.candidateCount, 1);
   assert.equal(supply.effectiveRetrieval.documents.length, 1);
   assert.equal(supply.effectiveRetrieval.documents[0]?.title, 'Resume 2');
+});
+
+test('prepareKnowledgeScope should route recent uploaded image questions to ungrouped fallback documents', async () => {
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-03-31T10:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 1,
+    scanSignature: 'image-cache',
+    items: [
+      {
+        path: 'C:\\uploads\\1743390000000-uploaded-shot.png',
+        name: '1743390000000-uploaded-shot.png',
+        ext: '.png',
+        title: 'uploaded-shot',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseMethod: 'image-metadata',
+        summary: 'Image file: uploaded-shot.png',
+        excerpt: 'Image file: uploaded-shot.png',
+        fullText: 'Image file: uploaded-shot.png\n\nOCR text was not extracted from this image.',
+        extractedChars: 72,
+        topicTags: ['图片上传'],
+        groups: ['ungrouped'],
+        confirmedGroups: ['ungrouped'],
+        parseStage: 'quick',
+        detailParseStatus: 'queued',
+      },
+    ],
+  }, async () => {
+    const scope = await prepareKnowledgeScope({
+      requestText: '描述下我刚上传的图片内容',
+      chatHistory: [],
+    });
+
+    assert.deepEqual(scope.libraries, [{ key: 'ungrouped', label: '未分组' }]);
+    assert.equal(scope.scopedItems.length, 1);
+    assert.equal(scope.scopedItems[0]?.ext, '.png');
+    assert.equal(scope.scopedItems[0]?.confirmedGroups?.[0], 'ungrouped');
+  });
 });
 
 test('buildConceptPageSupplyBlock should provide structure hints for resume company pages', () => {

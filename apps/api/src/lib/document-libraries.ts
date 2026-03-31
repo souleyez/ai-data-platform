@@ -15,6 +15,9 @@ export type DocumentLibrary = {
   sourceCategoryKey?: BizCategory;
 };
 
+export const UNGROUPED_LIBRARY_KEY = 'ungrouped';
+export const UNGROUPED_LIBRARY_LABEL = '未分组';
+
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const LIBRARIES_FILE = path.join(CONFIG_DIR, 'document-libraries.json');
 
@@ -55,13 +58,21 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
 }
 
 function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumentCategoryConfig>>['categories'], createdAt: string) {
-  return (Object.entries(categories) as Array<[BizCategory, { label: string }]>).map(([key, value]) => ({
-    key,
-    label: value.label || key,
-    createdAt,
-    isDefault: true,
-    sourceCategoryKey: key,
-  } satisfies DocumentLibrary));
+  return [
+    {
+      key: UNGROUPED_LIBRARY_KEY,
+      label: UNGROUPED_LIBRARY_LABEL,
+      createdAt,
+      isDefault: true,
+    } satisfies DocumentLibrary,
+    ...(Object.entries(categories) as Array<[BizCategory, { label: string }]>).map(([key, value]) => ({
+      key,
+      label: value.label || key,
+      createdAt,
+      isDefault: true,
+      sourceCategoryKey: key,
+    } satisfies DocumentLibrary)),
+  ];
 }
 
 function mergeLibraries(...groups: DocumentLibrary[][]) {
@@ -78,6 +89,10 @@ function mergeLibraries(...groups: DocumentLibrary[][]) {
 export function documentMatchesLibrary(item: ParsedDocument, library: DocumentLibrary) {
   const groups = item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [];
   if (groups.includes(library.key)) return true;
+
+  if (library.key === UNGROUPED_LIBRARY_KEY) {
+    return groups.length === 0;
+  }
 
   if (library.isDefault && library.sourceCategoryKey) {
     return (item.confirmedBizCategory || item.bizCategory) === library.sourceCategoryKey;

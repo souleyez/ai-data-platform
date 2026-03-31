@@ -9,6 +9,7 @@ import type { ParsedDocument } from './document-parser.js';
 import { parseDocument } from './document-parser.js';
 import { upsertDocumentsInCache } from './document-store.js';
 import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys, type IngestPreviewItem } from './ingest-feedback.js';
+import { UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
 
 export type UploadedFileRecord = {
   name: string;
@@ -107,7 +108,9 @@ export async function ingestUploadedFiles(input: {
     }
 
     const suggestedGroups = resolveSuggestedLibraryKeys(parsed, preferredLibraries);
-    const fallbackGroups = suggestedGroups.length ? [] : preferredLibraryKeys.slice(0, 1);
+    const fallbackGroups = suggestedGroups.length
+      ? []
+      : (preferredLibraryKeys.length ? preferredLibraryKeys.slice(0, 1) : [UNGROUPED_LIBRARY_KEY]);
     const confirmedGroups = uniq([
       ...(suggestedGroups.length ? suggestedGroups : []),
       ...fallbackGroups,

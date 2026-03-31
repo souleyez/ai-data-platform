@@ -1,5 +1,10 @@
 import { retrieveKnowledgeMatches, type RetrievalResult } from './document-retrieval.js';
-import { documentMatchesLibrary, loadDocumentLibraries } from './document-libraries.js';
+import {
+  documentMatchesLibrary,
+  loadDocumentLibraries,
+  UNGROUPED_LIBRARY_KEY,
+  UNGROUPED_LIBRARY_LABEL,
+} from './document-libraries.js';
 import { buildDocumentId, loadParsedDocuments } from './document-store.js';
 import {
   buildKnowledgeRetrievalQuery,
@@ -25,6 +30,10 @@ export type KnowledgeSupply = {
   libraries: KnowledgeLibraryRef[];
   effectiveRetrieval: RetrievalResult;
 };
+
+const IMAGE_DOCUMENT_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+const RECENT_UPLOAD_SCOPE_PATTERNS = /最近上传|刚上传|新上传|这批文档|这批材料|latest upload|recent upload/i;
+const IMAGE_DETAIL_SCOPE_PATTERNS = /图片|图像|照片|截图|image|photo|picture|screenshot|png|jpg|jpeg|webp|gif|bmp/i;
 
 function countTopValues(values: string[], limit = 6) {
   const counter = new Map<string, number>();
@@ -272,6 +281,42 @@ function prioritizeScopedItems(items: Awaited<ReturnType<typeof loadParsedDocume
   });
 }
 
+function isRecentUploadScopedQuery(text: string) {
+  return RECENT_UPLOAD_SCOPE_PATTERNS.test(String(text || ''));
+}
+
+function isImageScopedQuery(text: string) {
+  return IMAGE_DETAIL_SCOPE_PATTERNS.test(String(text || ''));
+}
+
+function isImageDocumentItem(item: Awaited<ReturnType<typeof loadParsedDocuments>>['items'][number]) {
+  return IMAGE_DOCUMENT_EXTENSIONS.has(String(item.ext || '').toLowerCase());
+}
+
+function buildFallbackScopedItems(input: {
+  requestText: string;
+  items: Awaited<ReturnType<typeof loadParsedDocuments>>['items'];
+  timeRange?: string;
+  contentFocus?: string;
+}) {
+  const recentUploadQuery = isRecentUploadScopedQuery(input.requestText);
+  const imageQuery = isImageScopedQuery(input.requestText);
+  if (!recentUploadQuery && !imageQuery) return [];
+
+  let fallbackItems = filterDocumentsByTimeRange(
+    input.items,
+    input.timeRange || (recentUploadQuery ? 'recent-upload' : undefined),
+  );
+
+  if (imageQuery) {
+    const imageItems = fallbackItems.filter(isImageDocumentItem);
+    fallbackItems = imageItems.length ? imageItems : input.items.filter(isImageDocumentItem);
+  }
+
+  fallbackItems = filterDocumentsByContentFocus(fallbackItems, input.contentFocus);
+  return prioritizeScopedItems(fallbackItems);
+}
+
 function looksLikeOperationalFeedback(text: string) {
   const source = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!source) return true;
@@ -375,13 +420,27 @@ async function resolveKnowledgeScope(
     : [];
   const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), documentLibraries);
   const candidates = explicitCandidates.length ? explicitCandidates : scoredCandidates;
-  const libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
+  let libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
 
   const libraryScopedItems = candidates.length
     ? documentState.items.filter((item) => candidates.some((candidate) => documentMatchesLibrary(item, candidate.library)))
     : [];
-  const timeScopedItems = filterDocumentsByTimeRange(libraryScopedItems, timeRange);
-  const scopedItems = prioritizeScopedItems(filterDocumentsByContentFocus(timeScopedItems, contentFocus));
+  const baseScopedItems = candidates.length
+    ? prioritizeScopedItems(filterDocumentsByContentFocus(filterDocumentsByTimeRange(libraryScopedItems, timeRange), contentFocus))
+    : buildFallbackScopedItems({
+      requestText,
+      items: documentState.items,
+      timeRange,
+      contentFocus,
+    });
+
+  const scopedItems = baseScopedItems;
+  if (!libraries.length && scopedItems.length) {
+    const ungroupedLibrary = documentLibraries.find((item) => item.key === UNGROUPED_LIBRARY_KEY);
+    if (ungroupedLibrary && scopedItems.some((item) => documentMatchesLibrary(item, ungroupedLibrary))) {
+      libraries = [{ key: UNGROUPED_LIBRARY_KEY, label: ungroupedLibrary.label || UNGROUPED_LIBRARY_LABEL }];
+    }
+  }
 
   return { libraries, scopedItems };
 }
