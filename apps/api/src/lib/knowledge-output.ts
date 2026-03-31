@@ -2293,7 +2293,16 @@ function hasExpectedOrderTitle(view: OrderRequestView, title: string) {
   if (view === 'stock') {
     return containsAny(normalized, ['inventory', 'stock', 'replenishment', 'restock', '库存', '补货', '周转']);
   }
-  return containsAny(normalized, ['order', 'cockpit', 'dashboard', '经营', '驾驶舱', '渠道']);
+  const hasGenericSignal = containsAny(normalized, ['order', 'cockpit', 'dashboard', '经营', '驾驶舱', '多渠道']);
+  const hasMultiChannelSignal = containsAny(normalized, ['multi channel', 'multi-channel', 'omni', '多渠道']);
+  const hasSpecializedSignal = containsAny(normalized, [
+    'inventory', 'stock', 'replenishment', 'restock', '库存', '补货', '周转',
+    'category', 'sku', '品类', '类目', '商品',
+    'platform', 'channel', '平台', '渠道',
+  ]);
+  if (!hasGenericSignal) return false;
+  if (hasSpecializedSignal && !hasMultiChannelSignal) return false;
+  return true;
 }
 
 function buildOrderPageTitle(view: OrderRequestView, envelope?: ReportTemplateEnvelope | null) {
@@ -2464,8 +2473,10 @@ function normalizeStockCardShell(cards: NonNullable<KnowledgePageOutput['page'][
   return cards.map((card) => {
     const label = sanitizeText(card.label);
     if (label === '库存健康') return { ...card, label: '库存健康指数' };
+    if (label === '高风险SKU') return { ...card, label: '断货风险SKU' };
     if (label === '缺货风险SKU') return { ...card, label: '断货风险SKU' };
     if (label === '滞销库存占比') return { ...card, label: '滞销库存池' };
+    if (label === '补货优先级') return { ...card, label: '72小时补货动作' };
     if (label === '建议补货量') return { ...card, label: '72小时补货动作' };
     if (label === '跨仓调拨') return { ...card, label: '跨仓调拨队列' };
     return card;
@@ -2480,6 +2491,35 @@ function normalizeStockChartShell(charts: NonNullable<KnowledgePageOutput['page'
     if (title === 'SKU周转/库存压力') return { ...chart, title: 'SKU周转压力' };
     return chart;
   });
+}
+
+function dedupePageCards(cards: NonNullable<KnowledgePageOutput['page']['cards']>) {
+  const seen = new Set<string>();
+  return cards.filter((card) => {
+    const key = normalizeText(card.label || card.value || card.note || '');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildStockShellCards(
+  primary: NonNullable<KnowledgePageOutput['page']['cards']>,
+  fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
+) {
+  const fallbackNormalized = normalizeStockCardShell(fallback);
+  const merged = dedupePageCards(normalizeStockCardShell([...primary, ...fallbackNormalized]));
+  if (merged.length >= 5) return merged.slice(0, 5);
+
+  const seen = new Set(merged.map((card) => normalizeText(card.label || card.value || card.note || '')));
+  for (const card of fallbackNormalized) {
+    if (merged.length >= 5) break;
+    const key = normalizeText(card.label || card.value || card.note || '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(card);
+  }
+  return merged;
 }
 
 function buildOrderPageOutput(
@@ -2556,7 +2596,7 @@ function hydrateOrderPageVisualShell(
   return {
     summary: page.summary || fallbackPage.summary,
     cards: view === 'stock'
-      ? normalizeStockCardShell(mergeCards(page.cards || [], fallbackPage.cards || [], 5))
+      ? buildStockShellCards(page.cards || [], fallbackPage.cards || [])
       : mergeCards(page.cards || [], fallbackPage.cards || [], 4),
     sections: page.sections?.length ? page.sections : fallbackPage.sections,
     charts: view === 'stock'

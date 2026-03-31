@@ -60,7 +60,7 @@ test('normalizeReportOutput should hydrate order cockpit pages to the minimum vi
   );
 
   assert.equal(output.type, 'page');
-  assert.equal(output.title, '订单渠道经营驾驶舱');
+  assert.equal(output.title, '多渠道订单经营驾驶舱');
   assert.ok((output.page?.cards || []).length >= 4);
   assert.ok((output.page?.charts || []).length >= 2);
   assert.equal(output.page?.sections?.[0]?.title, '经营总览');
@@ -281,4 +281,61 @@ test('normalizeReportOutput should keep stock requests on inventory cockpit titl
   assert.equal(output.title, '库存与补货驾驶舱');
   assert.ok((output.page?.cards || []).some((item) => item.label === '库存健康指数'));
   assert.ok((output.page?.cards || []).some((item) => item.label === '72小时补货动作'));
+});
+
+test('normalizeReportOutput should keep mixed channel and sku prompts on the generic cockpit shell', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'order-generic.csv',
+      name: 'order-generic.csv',
+      ext: '.csv',
+      title: 'Q1 多渠道经营汇总',
+      category: 'general',
+      bizCategory: 'order',
+      parseStatus: 'parsed',
+      parseMethod: 'csv-utf8',
+      summary: '覆盖渠道贡献、SKU结构、库存健康和补货动作。',
+      excerpt: 'platform,category,sku,inventory_index,replenishment_priority',
+      fullText: [
+        'platform,category,sku,inventory_index,replenishment_priority',
+        'Douyin,智能穿戴,旗舰手表X1,128,P0',
+        'Tmall,耳机,降噪耳机Pro,86,P1',
+      ].join('\n'),
+      extractedChars: 240,
+      schemaType: 'report',
+      topicTags: ['订单分析', '渠道经营', 'SKU结构'],
+      structuredProfile: {
+        platformSignals: ['tmall', 'douyin'],
+        categorySignals: ['智能穿戴', '耳机'],
+        metricSignals: ['inventory-index'],
+        replenishmentSignals: ['replenishment'],
+      },
+    },
+  ];
+
+  const output = normalizeReportOutput(
+    'page',
+    '请基于订单分析知识库生成一页多渠道多SKU经营驾驶舱静态页，重点看渠道贡献、核心品类、库存健康和补货优先级。',
+    JSON.stringify({
+      title: '订单品类/SKU经营驾驶舱',
+      summary: '综合经营页需要同时看渠道和SKU结构。',
+      page: {
+        summary: '综合经营页需要同时看渠道和SKU结构。',
+        cards: [{ label: '渠道GMV', value: '2 渠道', note: 'Douyin / Tmall' }],
+        sections: [{ title: '经营总览', body: '同时关注渠道、SKU 和库存动作。', bullets: [] }],
+        charts: [{ title: '渠道贡献结构', items: [{ label: 'Douyin', value: 2 }] }],
+      },
+    }),
+    {
+      title: '订单多渠道经营驾驶舱',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '输出多渠道、多SKU经营驾驶舱。',
+      pageSections: ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'],
+    },
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '订单多渠道经营驾驶舱');
 });
