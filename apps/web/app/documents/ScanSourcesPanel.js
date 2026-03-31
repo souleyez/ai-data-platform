@@ -54,7 +54,7 @@ export default function ScanSourcesPanel({
             <div>
               <strong>本机候选目录发现</strong>
               <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
-                自动发现 Desktop、Documents、Downloads 等目录，并额外展示文档更集中的热点子目录。
+                优先通过 OpenClaw 发现本机更可能有资料的目录，再补上项目侧的真实文件统计和热点子目录。
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

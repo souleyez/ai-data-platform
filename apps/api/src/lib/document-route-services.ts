@@ -6,6 +6,11 @@ import { removeDocumentOverrides, saveDocumentOverride, saveDocumentSuggestion }
 import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments, mergeParsedDocumentsForPaths, removeDocumentsFromCache } from './document-store.js';
 import { enqueueDetailedParse, runDetailedParseBatch } from './document-deep-parse-queue.js';
 import { buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from './ingest-feedback.js';
+import {
+  discoverCandidateDirectoriesWithOpenClaw,
+  mergeDiscoveryCandidates,
+  type OpenClawDiscoverySeed,
+} from './openclaw-file-discovery.js';
 import { removeRetainedDocument } from './retained-documents.js';
 import { STORAGE_FILES_DIR } from './paths.js';
 
@@ -164,7 +169,7 @@ async function summarizeCandidateDirectory(
           key: `${source.key}-hotspot-${firstSegment.toLowerCase()}`,
           path: hotspotPath,
           label: firstSegment,
-          reason: `${source.label} 下文档更集中的子目录`,
+          reason: `${source.label} hotspot child directory`,
           exists: true,
           fileCount: 0,
           latestModifiedAt: 0,
@@ -212,6 +217,32 @@ async function summarizeCandidateDirectory(
   };
 }
 
+function buildSeedCandidateDirectories(input: {
+  documents: string;
+  desktop: string;
+  downloads: string;
+  oneDriveDocuments: string;
+  oneDriveDesktop: string;
+  appData: string;
+  localAppData: string;
+}) {
+  return [
+    { key: 'documents', label: 'Documents', reason: 'Default user documents folder.', path: input.documents },
+    { key: 'desktop', label: 'Desktop', reason: 'Desktop often contains active working files.', path: input.desktop },
+    { key: 'downloads', label: 'Downloads', reason: 'Downloads often contains newly received source files.', path: input.downloads },
+    { key: 'onedrive-documents', label: 'OneDrive Documents', reason: 'OneDrive-synced documents folder.', path: input.oneDriveDocuments },
+    { key: 'onedrive-desktop', label: 'OneDrive Desktop', reason: 'OneDrive-synced desktop folder.', path: input.oneDriveDesktop },
+    { key: 'wechat-files', label: 'WeChat Files', reason: 'Common location for files received through WeChat.', path: input.documents ? path.join(input.documents, 'WeChat Files') : '' },
+    { key: 'wecom-cache', label: 'WXWork', reason: 'Common location for enterprise WeChat exports.', path: input.documents ? path.join(input.documents, 'WXWork') : '' },
+    { key: 'feishu-downloads', label: 'Lark Downloads', reason: 'Common location for Lark downloads.', path: input.downloads ? path.join(input.downloads, 'Lark') : '' },
+    { key: 'qq-files', label: 'Tencent Files', reason: 'Common location for QQ received files.', path: input.documents ? path.join(input.documents, 'Tencent Files') : '' },
+    { key: '360-downloads', label: '360 Downloads', reason: 'Common location for 360 browser downloads.', path: input.downloads ? path.join(input.downloads, '360Downloads') : '' },
+    { key: 'baidu-downloads', label: 'BaiduNetdisk Download', reason: 'Common location for Baidu Netdisk downloads.', path: input.downloads ? path.join(input.downloads, 'BaiduNetdiskDownload') : '' },
+    { key: 'feishu-appdata', label: 'Lark Cache', reason: 'Possible local cache/export location for Lark.', path: input.appData ? path.join(input.appData, 'LarkShell') : '' },
+    { key: 'wechat-appdata', label: 'WeChat Cache', reason: 'Possible local cache/export location for WeChat.', path: input.localAppData ? path.join(input.localAppData, 'Tencent', 'WeChat') : '' },
+  ].filter((item) => item.path) satisfies OpenClawDiscoverySeed[];
+}
+
 export async function discoverCandidateDirectories() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const appData = process.env.APPDATA || '';
@@ -223,22 +254,28 @@ export async function discoverCandidateDirectories() {
   const oneDriveDocuments = oneDrive ? path.join(oneDrive, 'Documents') : '';
   const oneDriveDesktop = oneDrive ? path.join(oneDrive, 'Desktop') : '';
 
-  const candidates = [
-    { key: 'documents', label: 'Documents', reason: '系统默认文档目录，通常包含项目资料、合同、报表等文件。', path: documents },
-    { key: 'desktop', label: 'Desktop', reason: '桌面常有临时接收或待处理文件。', path: desktop },
-    { key: 'downloads', label: 'Downloads', reason: '浏览器和应用默认下载目录，常见外部资料入口。', path: downloads },
-    { key: 'onedrive-documents', label: 'OneDrive Documents', reason: 'OneDrive 同步的文档目录，常见企业资料同步位置。', path: oneDriveDocuments },
-    { key: 'onedrive-desktop', label: 'OneDrive Desktop', reason: 'OneDrive 同步的桌面目录，常见团队共享文件入口。', path: oneDriveDesktop },
-    { key: 'wechat-files', label: 'WeChat Files', reason: '微信接收文件常见目录。', path: documents ? path.join(documents, 'WeChat Files') : '' },
-    { key: 'wecom-cache', label: 'WXWork', reason: '企业微信缓存和下载文件常见目录。', path: documents ? path.join(documents, 'WXWork') : '' },
-    { key: 'feishu-downloads', label: 'Lark Downloads', reason: '飞书/Lark 下载资料常见目录。', path: downloads ? path.join(downloads, 'Lark') : '' },
-    { key: 'qq-files', label: 'Tencent Files', reason: 'QQ 接收文件常见目录。', path: documents ? path.join(documents, 'Tencent Files') : '' },
-    { key: '360-downloads', label: '360 Downloads', reason: '360 浏览器下载目录。', path: downloads ? path.join(downloads, '360Downloads') : '' },
-    { key: 'baidu-downloads', label: 'BaiduNetdisk Download', reason: '百度网盘常见下载目录。', path: downloads ? path.join(downloads, 'BaiduNetdiskDownload') : '' },
-    { key: 'feishu-appdata', label: 'Lark Cache', reason: '飞书本地缓存目录，可能包含导出的文件。', path: appData ? path.join(appData, 'LarkShell') : '' },
-    { key: 'wechat-appdata', label: 'WeChat Cache', reason: '微信本地缓存目录，可能包含导出的文件。', path: localAppData ? path.join(localAppData, 'Tencent', 'WeChat') : '' },
-  ].filter((item) => item.path);
+  const seedCandidates = buildSeedCandidateDirectories({
+    documents,
+    desktop,
+    downloads,
+    oneDriveDocuments,
+    oneDriveDesktop,
+    appData,
+    localAppData,
+  });
 
+  const openClawSuggestions = await discoverCandidateDirectoriesWithOpenClaw({
+    home,
+    documents,
+    desktop,
+    downloads,
+    oneDrive,
+    appData,
+    localAppData,
+    seeds: seedCandidates,
+  });
+
+  const candidates = mergeDiscoveryCandidates(seedCandidates, openClawSuggestions);
   const summarized = [] as Array<{
     key: string;
     label: string;
@@ -251,6 +288,7 @@ export async function discoverCandidateDirectories() {
     pendingScan?: boolean;
     sampleExtensions: string[];
     hotspots: CandidateHotspot[];
+    discoverySource?: string;
   }>;
   const seen = new Set<string>();
 
@@ -265,6 +303,7 @@ export async function discoverCandidateDirectories() {
       key: candidate.key,
       label: candidate.label,
       reason: candidate.reason,
+      discoverySource: 'discoverySource' in candidate ? candidate.discoverySource : 'seed',
       ...summary,
     });
   }
