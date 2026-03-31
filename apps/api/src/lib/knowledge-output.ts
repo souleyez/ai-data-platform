@@ -2017,7 +2017,17 @@ function resolveOrderRequestView(requestText: string): OrderRequestView {
   const hasStock = hasOrderStockSignal(text);
   const hasCategory = hasOrderCategorySignal(text);
   const hasPlatform = hasOrderPlatformSignal(text);
-  if (hasStock) return 'stock';
+  const hasExplicitStockView = containsAny(text, [
+    'inventory cockpit',
+    'stock cockpit',
+    '库存驾驶舱',
+    '库存与补货驾驶舱',
+    '补货驾驶舱',
+  ]);
+  const hasStockRiskFocus = containsAny(text, ['断货', '滞销', '高风险sku', '高风险 sku', '72小时', '72 小时', '周转']);
+  if (hasExplicitStockView || (hasStock && !hasCategory && !hasPlatform) || (hasStock && hasStockRiskFocus && !hasPlatform)) {
+    return 'stock';
+  }
   if (hasCategory && hasPlatform) return 'generic';
   if (hasCategory) return 'category';
   if (hasPlatform) return 'platform';

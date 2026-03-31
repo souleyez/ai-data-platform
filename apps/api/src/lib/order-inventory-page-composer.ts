@@ -213,7 +213,11 @@ function detectOrderInventoryRequestView(input: {
   const hasStock = /inventory|stock|replenishment|restock|库存|补货|缺货|周转/.test(text);
   const hasCategory = /category|sku|品类|类目|商品/.test(text);
   const hasPlatform = /platform|channel|tmall|jd|douyin|amazon|shopify|平台|渠道|天猫|京东|抖音/.test(text);
-  if (hasStock) return 'stock';
+  const hasExplicitStockView = /inventory cockpit|stock cockpit|库存驾驶舱|库存与补货驾驶舱|补货驾驶舱/.test(text);
+  const hasStockRiskFocus = /断货|滞销|高风险sku|高风险 sku|72小时|72 小时|周转/.test(text);
+  if (hasExplicitStockView || (hasStock && !hasCategory && !hasPlatform) || (hasStock && hasStockRiskFocus && !hasPlatform)) {
+    return 'stock';
+  }
   if (hasCategory && hasPlatform) return 'generic';
   if (hasCategory) return 'category';
   if (hasPlatform) return 'platform';

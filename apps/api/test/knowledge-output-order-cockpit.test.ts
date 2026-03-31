@@ -60,7 +60,7 @@ test('normalizeReportOutput should hydrate order cockpit pages to the minimum vi
   );
 
   assert.equal(output.type, 'page');
-  assert.equal(output.title, '库存与补货驾驶舱');
+  assert.equal(output.title, '订单渠道经营驾驶舱');
   assert.ok((output.page?.cards || []).length >= 4);
   assert.ok((output.page?.charts || []).length >= 2);
   assert.equal(output.page?.sections?.[0]?.title, '经营总览');
