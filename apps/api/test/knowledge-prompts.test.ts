@@ -40,5 +40,7 @@ test('buildKnowledgeDetailFetchPrompt should enforce live-detail honesty', () =>
   assert.match(prompt, /live document-detail answers/i);
   assert.match(prompt, /supplied live document detail and evidence/i);
   assert.match(prompt, /Do not imply that you checked file content beyond the supplied detail context/i);
+  assert.match(prompt, /do not extrapolate quarter totals, full rankings, or exact cross-channel conclusions/i);
+  assert.match(prompt, /Prefer representative examples and explicit uncertainty/i);
   assert.match(prompt, /Workspace skill: knowledge-detail-fetch/i);
 });

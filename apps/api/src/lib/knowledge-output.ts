@@ -84,6 +84,10 @@ type OrderPageStats = {
   replenishment: Array<{ label: string; value: number }>;
   anomalies: Array<{ label: string; value: number }>;
   supportingLines: string[];
+  platformAmounts: Array<{ label: string; value: number }>;
+  categoryAmounts: Array<{ label: string; value: number }>;
+  riskHighlights: string[];
+  actionHighlights: string[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -1038,6 +1042,21 @@ function joinRankedLabels(items: Array<{ label: string; value: number }>, limit 
   return items
     .slice(0, limit)
     .map((item) => `${item.label}${item.value > 1 ? `(${item.value})` : ''}`)
+    .join('、');
+}
+
+function formatOrderAmount(value: number) {
+  if (!Number.isFinite(value)) return '';
+  const absolute = Math.abs(value);
+  if (absolute >= 100000) return `${(value / 10000).toFixed(0)}万元`;
+  if (absolute >= 10000) return `${(value / 10000).toFixed(1)}万元`;
+  return `${Math.round(value)}元`;
+}
+
+function joinOrderAmountLabels(items: Array<{ label: string; value: number }>, limit = 4) {
+  return items
+    .slice(0, limit)
+    .map((item) => `${item.label}(${formatOrderAmount(item.value)})`)
     .join('、');
 }
 
@@ -2076,6 +2095,115 @@ function extractOrderCsvTable(item: ParsedDocument, limit = 80) {
   return { headers, rows };
 }
 
+function findOrderHeaderIndex(headers: string[], aliases: string[]) {
+  const aliasSet = new Set(aliases.map((alias) => normalizeText(alias)));
+  for (let index = 0; index < headers.length; index += 1) {
+    if (aliasSet.has(headers[index])) return index;
+  }
+  return -1;
+}
+
+function parseOrderNumericValue(value: unknown) {
+  const text = sanitizeText(value).replace(/,/g, '');
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function addOrderAmount(target: Map<string, { label: string; value: number }>, label: string, value: number) {
+  const normalized = normalizeText(label);
+  if (!normalized || !Number.isFinite(value)) return;
+  const existing = target.get(normalized);
+  if (existing) {
+    existing.value += value;
+    return;
+  }
+  target.set(normalized, { label, value });
+}
+
+function rankOrderAmounts(target: Map<string, { label: string; value: number }>, limit = 8) {
+  return [...target.values()]
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, 'zh-CN'))
+    .slice(0, limit);
+}
+
+function normalizeOrderPriority(value: unknown) {
+  const text = sanitizeText(value).slice(0, 16).toUpperCase();
+  const match = text.match(/P\d/);
+  return match?.[0] || text;
+}
+
+function isHealthyOrderRisk(value: string) {
+  return containsAny(normalizeText(value), ['healthy', 'normal', 'stable', 'ok', '正常', '健康']);
+}
+
+function scoreOrderRiskHighlight(
+  risk: string,
+  priority: string,
+  inventoryIndex: number | null,
+  daysOfCover: number | null,
+) {
+  let score = 0;
+  const normalizedRisk = normalizeText(risk);
+  if (containsAny(normalizedRisk, ['stockout', 'shortage', 'low stock', '缺货'])) score += 8;
+  if (containsAny(normalizedRisk, ['overstock', 'slow moving', '滞销', '积压'])) score += 6;
+  if (containsAny(normalizedRisk, ['risk', 'anomaly', '异常', '波动'])) score += 4;
+  if (priority === 'P0') score += 7;
+  else if (priority === 'P1') score += 5;
+  else if (priority === 'P2') score += 3;
+  if (inventoryIndex !== null) {
+    if (inventoryIndex >= 1.4 || inventoryIndex <= 0.75) score += 4;
+    else if (inventoryIndex >= 1.2 || inventoryIndex <= 0.9) score += 2;
+  }
+  if (daysOfCover !== null) {
+    if (daysOfCover >= 120 || daysOfCover <= 15) score += 3;
+    else if (daysOfCover >= 90 || daysOfCover <= 21) score += 1;
+  }
+  return score;
+}
+
+function shouldTreatOrderRiskAsMaterial(
+  risk: string,
+  priority: string,
+  inventoryIndex: number | null,
+  daysOfCover: number | null,
+) {
+  if (risk && !isHealthyOrderRisk(risk)) return true;
+  if (priority === 'P0' || priority === 'P1') return true;
+  if (inventoryIndex !== null && (inventoryIndex >= 1.2 || inventoryIndex <= 0.9)) return true;
+  if (daysOfCover !== null && (daysOfCover >= 90 || daysOfCover <= 21)) return true;
+  return false;
+}
+
+function pickTopOrderHighlights(items: Array<{ text: string; score: number }>, limit = 4) {
+  const seen = new Set<string>();
+  const results: string[] = [];
+  for (const item of items
+    .filter((entry) => entry.text)
+    .sort((left, right) => right.score - left.score || left.text.localeCompare(right.text, 'zh-CN'))) {
+    const normalized = normalizeText(item.text);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    results.push(item.text);
+    if (results.length >= limit) break;
+  }
+  return results;
+}
+
+function mergeOrderHighlightBullets(primary: string[], secondary: string[], limit = 4) {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [...primary, ...secondary]) {
+    const text = sanitizeText(value).slice(0, 120).trim();
+    const normalized = normalizeText(text);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push(text);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
 function collectOrderCsvValues(
   item: ParsedDocument,
   headerAliases: string[],
@@ -2183,6 +2311,79 @@ function collectOrderCsvSupportingLines(item: ParsedDocument, limit = 3) {
     .filter(Boolean);
 }
 
+function buildOrderCsvDerivedFacts(documents: ParsedDocument[]) {
+  const platformAmounts = new Map<string, { label: string; value: number }>();
+  const categoryAmounts = new Map<string, { label: string; value: number }>();
+  const riskEntries: Array<{ text: string; score: number }> = [];
+  const actionEntries: Array<{ text: string; score: number }> = [];
+
+  for (const item of documents) {
+    const table = extractOrderCsvTable(item, 240);
+    if (!table) continue;
+
+    const platformIndex = findOrderHeaderIndex(table.headers, ['platform', 'platform_focus']);
+    const categoryIndex = findOrderHeaderIndex(table.headers, ['category']);
+    const skuIndex = findOrderHeaderIndex(table.headers, ['sku']);
+    const netSalesIndex = findOrderHeaderIndex(table.headers, ['net_sales', 'net_amount']);
+    const inventoryIndexIndex = findOrderHeaderIndex(table.headers, ['inventory_index']);
+    const daysOfCoverIndex = findOrderHeaderIndex(table.headers, ['days_of_cover']);
+    const riskIndex = findOrderHeaderIndex(table.headers, ['risk_flag', 'risk', 'inventory_risk']);
+    const priorityIndex = findOrderHeaderIndex(table.headers, ['replenishment_priority']);
+    const recommendationIndex = findOrderHeaderIndex(table.headers, ['recommendation']);
+
+    for (const row of table.rows) {
+      const platform = platformIndex >= 0 ? formatOrderSignalLabel(row[platformIndex] || '') : '';
+      const category = categoryIndex >= 0 ? formatOrderSignalLabel(row[categoryIndex] || '') : '';
+      const sku = skuIndex >= 0 ? sanitizeText(row[skuIndex]).slice(0, 60).trim() : '';
+      const netSales = netSalesIndex >= 0 ? parseOrderNumericValue(row[netSalesIndex]) : null;
+      const inventoryIndex = inventoryIndexIndex >= 0 ? parseOrderNumericValue(row[inventoryIndexIndex]) : null;
+      const daysOfCover = daysOfCoverIndex >= 0 ? parseOrderNumericValue(row[daysOfCoverIndex]) : null;
+      const risk = riskIndex >= 0 ? formatOrderSignalLabel(row[riskIndex] || '') : '';
+      const priority = priorityIndex >= 0 ? normalizeOrderPriority(row[priorityIndex]) : '';
+      const recommendation = recommendationIndex >= 0 ? sanitizeText(row[recommendationIndex]).slice(0, 80).trim() : '';
+
+      if (platform && netSales !== null) addOrderAmount(platformAmounts, platform, netSales);
+      if (category && netSales !== null) addOrderAmount(categoryAmounts, category, netSales);
+
+      const subject = sanitizeText(sku || category || platform).slice(0, 60).trim();
+      if (!subject) continue;
+
+      const score = scoreOrderRiskHighlight(risk, priority, inventoryIndex, daysOfCover);
+      if (shouldTreatOrderRiskAsMaterial(risk, priority, inventoryIndex, daysOfCover)) {
+        const text = [
+          subject,
+          platform && subject !== platform ? platform : '',
+          risk ? `风险 ${risk}` : '',
+          inventoryIndex !== null ? `库存指数 ${inventoryIndex.toFixed(2).replace(/\.00$/, '')}` : '',
+          daysOfCover !== null ? `覆盖 ${Math.round(daysOfCover)} 天` : '',
+        ]
+          .filter(Boolean)
+          .join(' / ');
+        riskEntries.push({ text, score });
+      }
+
+      if (priority || recommendation) {
+        const text = [
+          subject,
+          platform && subject !== platform ? platform : '',
+          priority ? `优先级 ${priority}` : '',
+          recommendation ? `建议 ${recommendation}` : '',
+        ]
+          .filter(Boolean)
+          .join(' / ');
+        actionEntries.push({ text, score: score + (recommendation ? 1 : 0) });
+      }
+    }
+  }
+
+  return {
+    platformAmounts: rankOrderAmounts(platformAmounts, 8),
+    categoryAmounts: rankOrderAmounts(categoryAmounts, 8),
+    riskHighlights: pickTopOrderHighlights(riskEntries, 4),
+    actionHighlights: pickTopOrderHighlights(actionEntries, 4),
+  };
+}
+
 function collectOrderChannelSignals(item: ParsedDocument) {
   const text = normalizeText([item.title, item.summary, item.excerpt, item.name].join(' '));
   const inferred = [
@@ -2257,6 +2458,7 @@ function buildOrderSupportingLines(documents: ParsedDocument[]) {
 }
 
 function buildOrderPageStats(documents: ParsedDocument[]): OrderPageStats {
+  const derived = buildOrderCsvDerivedFacts(documents);
   return {
     documentCount: documents.length,
     channels: buildRankedLabelCounts(documents.flatMap(collectOrderChannelSignals), 8),
@@ -2265,6 +2467,10 @@ function buildOrderPageStats(documents: ParsedDocument[]): OrderPageStats {
     replenishment: buildRankedLabelCounts(documents.flatMap(collectOrderReplenishmentSignals), 8),
     anomalies: buildRankedLabelCounts(documents.flatMap(collectOrderAnomalySignals), 8),
     supportingLines: buildOrderSupportingLines(documents),
+    platformAmounts: derived.platformAmounts,
+    categoryAmounts: derived.categoryAmounts,
+    riskHighlights: derived.riskHighlights,
+    actionHighlights: derived.actionHighlights,
   };
 }
 
@@ -2319,25 +2525,29 @@ function buildOrderPageSummary(view: OrderRequestView, stats: OrderPageStats) {
   const categoryText = joinRankedLabels(stats.categories, 4) || 'SKU结构与品类焦点';
   const metricText = joinRankedLabels(stats.metrics, 4) || '库存、动销与趋势信号';
   const actionText = joinRankedLabels(stats.replenishment, 4) || '补货与调拨动作';
+  const channelAmountText = joinOrderAmountLabels(stats.platformAmounts, 3);
+  const categoryAmountText = joinOrderAmountLabels(stats.categoryAmounts, 3);
+  const riskLead = stats.riskHighlights[0] || '';
+  const actionLead = stats.actionHighlights[0] || '';
 
   if (view === 'platform') {
-    return `当前命中 ${stats.documentCount} 份订单/库存资料，渠道信号主要集中在 ${channelText}，建议按渠道角色、增量来源和补货动作组织经营驾驶舱，而不是继续做平台平均化复盘。`;
+    return `当前命中 ${stats.documentCount} 份订单/库存资料，${channelAmountText ? `渠道净销售额重心落在 ${channelAmountText}` : `渠道信号主要集中在 ${channelText}`}，建议按渠道角色、增量来源和补货动作组织经营驾驶舱，而不是继续做平台平均化复盘。`;
   }
   if (view === 'category') {
-    return `当前命中 ${stats.documentCount} 份经营资料，主题主要落在 ${categoryText}，适合按品类梯队、英雄 SKU 集中度、库存压力和动作优先级组织页面。`;
+    return `当前命中 ${stats.documentCount} 份经营资料，${categoryAmountText ? `品类销售额重心落在 ${categoryAmountText}` : `主题主要落在 ${categoryText}`}，适合按品类梯队、英雄 SKU 集中度、库存压力和动作优先级组织页面。`;
   }
   if (view === 'stock') {
-    return `当前命中 ${stats.documentCount} 份库存相关资料，风险与动作信号主要集中在 ${actionText}，页面应把库存健康、高风险 SKU 和 72 小时补货优先级放在前面。`;
+    return `当前命中 ${stats.documentCount} 份库存相关资料，${actionLead ? `最需要前置处理的动作集中在 ${actionLead}` : `风险与动作信号主要集中在 ${actionText}`}，页面应把库存健康、高风险 SKU 和 72 小时补货优先级放在前面。`;
   }
-  return `当前命中 ${stats.documentCount} 份订单/库存资料，渠道重点在 ${channelText}，SKU/品类焦点在 ${categoryText}，经营驾驶舱应围绕 ${metricText} 与 ${actionText} 形成一屏可读的动作视图。`;
+  return `当前命中 ${stats.documentCount} 份订单/库存资料，${channelAmountText ? `渠道净销售额重心落在 ${channelAmountText}` : `渠道重点在 ${channelText}`}，${categoryAmountText ? `品类销售额重心落在 ${categoryAmountText}` : `SKU/品类焦点在 ${categoryText}`}，${riskLead ? `当前最需要前置处理的是 ${riskLead}` : `经营驾驶舱应围绕 ${metricText} 与 ${actionText} 形成一屏可读的动作视图`}。`;
 }
 
 function buildOrderPageCards(view: OrderRequestView, stats: OrderPageStats) {
-  const channelText = joinRankedLabels(stats.channels, 2) || '多渠道';
-  const categoryText = joinRankedLabels(stats.categories, 2) || 'SKU焦点';
-  const riskText = joinRankedLabels(stats.anomalies, 2) || joinRankedLabels(stats.replenishment, 2) || '风险信号';
-  const metricText = joinRankedLabels(stats.metrics, 2) || '库存视角';
-  const actionText = joinRankedLabels(stats.replenishment, 2) || '动作优先级';
+  const channelText = joinOrderAmountLabels(stats.platformAmounts, 2) || joinRankedLabels(stats.channels, 2) || '多渠道';
+  const categoryText = joinOrderAmountLabels(stats.categoryAmounts, 2) || joinRankedLabels(stats.categories, 2) || 'SKU焦点';
+  const riskText = stats.riskHighlights[0] || joinRankedLabels(stats.anomalies, 2) || joinRankedLabels(stats.replenishment, 2) || '风险信号';
+  const metricText = stats.actionHighlights[0] || joinRankedLabels(stats.metrics, 2) || '库存视角';
+  const actionText = stats.actionHighlights[0] || joinRankedLabels(stats.replenishment, 2) || '动作优先级';
 
   if (view === 'stock') {
     return [
@@ -2374,6 +2584,10 @@ function buildOrderSectionBlueprints(view: OrderRequestView, summary: string, st
   const metricText = joinRankedLabels(stats.metrics, 4) || '库存与动销信号';
   const actionText = joinRankedLabels(stats.replenishment, 4) || '补货与调拨动作';
   const anomalyText = joinRankedLabels(stats.anomalies, 4) || '异常与波动';
+  const channelAmountText = joinOrderAmountLabels(stats.platformAmounts, 4);
+  const categoryAmountText = joinOrderAmountLabels(stats.categoryAmounts, 4);
+  const riskHighlights = stats.riskHighlights.slice(0, 4);
+  const actionHighlights = stats.actionHighlights.slice(0, 4);
 
   if (view === 'platform') {
     return [
@@ -2419,14 +2633,49 @@ function buildOrderSectionBlueprints(view: OrderRequestView, summary: string, st
 
   return [
     { body: summary, bullets: stats.supportingLines.slice(0, 3) },
-    { body: `渠道结构当前主要集中在 ${channelText}，应先形成角色分工，再看结构变化。`, bullets: stats.channels.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
-    { body: `SKU 与品类焦点主要集中在 ${categoryText}，说明经营重心已经偏向少数主销焦点。`, bullets: stats.categories.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
-    { body: `库存与补货信号主要集中在 ${metricText} 与 ${actionText}，应同步看库存健康和动作优先级。`, bullets: stats.replenishment.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
-    { body: `异常波动主要集中在 ${anomalyText}，需要把活动峰值和结构性压力区分处理。`, bullets: stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4) },
-    { body: '行动建议应优先围绕“保主销、控尾部、分渠道角色”三件事展开，而不是继续做泛化经营摘要。', bullets: [
-      '主渠道与主销 SKU 优先保证动作时效',
-      '补货、调拨和去库存动作分层处理',
-    ] },
+    {
+      body: channelAmountText
+        ? `渠道销售额重心已经拉开，当前主要集中在 ${channelAmountText}，页面应先呈现成交重心，再解释渠道角色分工。`
+        : `渠道结构当前主要集中在 ${channelText}，应先形成角色分工，再看结构变化。`,
+      bullets: (stats.platformAmounts.length
+        ? stats.platformAmounts.map((item) => `${item.label}：${formatOrderAmount(item.value)}`)
+        : stats.channels.map((item) => `${item.label}：${item.value}`)).slice(0, 4),
+    },
+    {
+      body: categoryAmountText
+        ? `品类销售额已经出现明显分层，当前重点主要落在 ${categoryAmountText}，说明经营资源已经向少数主销焦点集中。`
+        : `SKU 与品类焦点主要集中在 ${categoryText}，说明经营重心已经偏向少数主销焦点。`,
+      bullets: (stats.categoryAmounts.length
+        ? stats.categoryAmounts.map((item) => `${item.label}：${formatOrderAmount(item.value)}`)
+        : stats.categories.map((item) => `${item.label}：${item.value}`)).slice(0, 4),
+    },
+    {
+      body: actionHighlights[0]
+        ? `库存与补货不应只看总库存，当前最需要前置编排的动作集中在 ${actionHighlights[0]}，应同步跟踪库存健康和动作优先级。`
+        : `库存与补货信号主要集中在 ${metricText} 与 ${actionText}，应同步看库存健康和动作优先级。`,
+      bullets: mergeOrderHighlightBullets(actionHighlights, riskHighlights, 4).length
+        ? mergeOrderHighlightBullets(actionHighlights, riskHighlights, 4)
+        : stats.replenishment.map((item) => `${item.label}：${item.value}`).slice(0, 4),
+    },
+    {
+      body: riskHighlights[0]
+        ? `当前异常波动更像结构性风险而不是单点噪声，最突出的风险集中在 ${riskHighlights[0]}${riskHighlights[1] ? `，以及 ${riskHighlights[1]}` : ''}。`
+        : `异常波动主要集中在 ${anomalyText}，需要把活动峰值和结构性压力区分处理。`,
+      bullets: riskHighlights.length
+        ? riskHighlights
+        : stats.anomalies.map((item) => `${item.label}：${item.value}`).slice(0, 4),
+    },
+    {
+      body: actionHighlights[0]
+        ? `行动建议应优先把 ${actionHighlights[0]} 放进 72 小时动作清单，再根据渠道角色和主销品类分层安排补货、调拨和去库存。`
+        : '行动建议应优先围绕“保主销、控尾部、分渠道角色”三件事展开，而不是继续做泛化经营摘要。',
+      bullets: actionHighlights.length
+        ? actionHighlights
+        : [
+            '主渠道与主销 SKU 优先保证动作时效',
+            '补货、调拨和去库存动作分层处理',
+          ],
+    },
       { body: 'AI 综合分析以知识库证据为主，用于帮助经营页形成更清晰的决策节奏，不补写无依据的硬指标。', bullets: [
         '页面适合用于经营复盘、动作共识和客户展示',
       ] },
@@ -2445,8 +2694,8 @@ function buildOrderPageCharts(view: OrderRequestView, stats: OrderPageStats) {
 
   if (view === 'category') {
     return [
-      { title: '品类梯队结构', items: stats.categories.slice(0, 6) },
-      { title: 'SKU集中度', items: stats.categories.slice(0, 6) },
+      { title: '品类梯队结构', items: (stats.categoryAmounts.length ? stats.categoryAmounts : stats.categories).slice(0, 6) },
+      { title: 'SKU集中度', items: (stats.categoryAmounts.length ? stats.categoryAmounts : stats.categories).slice(0, 6) },
       { title: '库存与周转压力', items: stats.metrics.slice(0, 6) },
       { title: '动作优先级', items: stats.replenishment.slice(0, 6) },
     ].filter((item) => item.items.length);
@@ -2454,16 +2703,16 @@ function buildOrderPageCharts(view: OrderRequestView, stats: OrderPageStats) {
 
   if (view === 'platform') {
     return [
-      { title: '渠道贡献结构', items: stats.channels.slice(0, 6) },
-      { title: 'SKU动销焦点', items: stats.categories.slice(0, 6) },
+      { title: '渠道贡献结构', items: (stats.platformAmounts.length ? stats.platformAmounts : stats.channels).slice(0, 6) },
+      { title: 'SKU动销焦点', items: (stats.categoryAmounts.length ? stats.categoryAmounts : stats.categories).slice(0, 6) },
       { title: '库存/趋势信号', items: stats.metrics.slice(0, 6) },
       { title: '补货动作优先级', items: stats.replenishment.slice(0, 6) },
     ].filter((item) => item.items.length);
   }
 
   return [
-    { title: '渠道贡献结构', items: stats.channels.slice(0, 6) },
-    { title: 'SKU与品类焦点', items: stats.categories.slice(0, 6) },
+    { title: '渠道贡献结构', items: (stats.platformAmounts.length ? stats.platformAmounts : stats.channels).slice(0, 6) },
+    { title: 'SKU与品类焦点', items: (stats.categoryAmounts.length ? stats.categoryAmounts : stats.categories).slice(0, 6) },
     { title: '库存与趋势信号', items: stats.metrics.slice(0, 6) },
     { title: '补货动作优先级', items: stats.replenishment.slice(0, 6) },
   ].filter((item) => item.items.length);

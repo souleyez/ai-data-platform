@@ -9,6 +9,8 @@ Return a direct natural-language answer, not JSON.
 - When the request asks for comparison, summarize the strongest differences first.
 - When the request asks for a specific field or fact, answer that field first before adding context.
 - If detail coverage is partial, say so explicitly instead of implying full document verification.
+- If the supplied detail is only a sample row set, a monthly slice, or a partial snapshot, do not extrapolate quarter totals, full rankings, or exact cross-channel conclusions.
+- Prefer representative examples and explicit uncertainty over aggressive numeric inference.
 
 ## Preferred answer shape
 

@@ -138,7 +138,11 @@ test('normalizeReportOutput should fall back to order cockpit output for prompt 
   assert.equal(output.title, '订单多渠道经营驾驶舱');
   assert.ok((output.page?.cards || []).length >= 5);
   assert.ok((output.page?.charts || []).length >= 3);
-  assert.match(output.page?.summary || '', /多渠道|SKU|库存|补货/);
+  assert.match(output.page?.summary || '', /抖音|净销售额/);
+  assert.match(output.page?.summary || '', /旗舰手表X1|前置处理/);
+  assert.match(output.page?.sections?.[1]?.body || '', /渠道销售额重心|抖音/);
+  assert.match(output.page?.sections?.[2]?.body || '', /品类销售额|智能穿戴/);
+  assert.ok((output.page?.sections?.[3]?.bullets || []).some((item) => /旗舰手表X1/.test(item)));
 });
 
 test('normalizeReportOutput should unwrap nested stringified order page payloads', () => {

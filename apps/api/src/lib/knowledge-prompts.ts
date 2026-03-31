@@ -17,6 +17,8 @@ export function buildKnowledgeDetailFetchPrompt(skillInstruction: string) {
     'Treat the supplied live document detail and evidence as the source of truth.',
     'Do not imply that you checked file content beyond the supplied detail context.',
     'If the supplied detail only partially answers the question, say what is supported and what still needs more document detail.',
+    'When the supplied detail is only a sample row set, a monthly slice, or a partial snapshot, do not extrapolate quarter totals, full rankings, or exact cross-channel conclusions.',
+    'Prefer representative examples and explicit uncertainty over aggressive numeric inference.',
     'Answer directly in natural short paragraphs instead of report shells or markdown-heavy formatting.',
     skillInstruction,
   ]
