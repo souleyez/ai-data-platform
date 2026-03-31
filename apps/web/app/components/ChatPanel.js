@@ -133,12 +133,25 @@ export default function ChatPanel({
   onSubmitCredential,
 }) {
   const messagesRef = useRef(null);
+  const composerRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     const node = messagesRef.current;
     if (!node) return;
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = String(window.location.hash || '').replace(/^#/, '');
+    if (!hash || (hash !== 'chat-composer' && hash !== 'upload-document')) return;
+
+    window.requestAnimationFrame(() => {
+      composerRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      textareaRef.current?.focus();
+    });
+  }, []);
 
   return (
     <div className="chat-panel card">
@@ -221,7 +234,7 @@ export default function ChatPanel({
         ) : null}
       </div>
 
-      <div className="chat-composer-wrap">
+      <div id="chat-composer" className="chat-composer-wrap" ref={composerRef}>
         <div className="chat-composer-actions">
           <input
             ref={uploadInputRef}
@@ -247,6 +260,7 @@ export default function ChatPanel({
 
         <div className="chat-input-row">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {

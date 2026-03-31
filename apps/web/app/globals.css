@@ -80,6 +80,17 @@ button, textarea { font: inherit; }
 .dot.idle { background: #64748b; }
 
 .main-panel { padding: 24px; }
+.main-panel-home {
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.main-panel-home .topbar {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+}
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -110,6 +121,18 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .workspace-grid-compact { grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.7fr); }
 .workspace-grid-expanded { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
 .homepage-grid { display: grid; gap: 20px; }
+.homepage-grid-tight {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.homepage-workspace {
+  min-height: 0;
+  height: 100%;
+  align-items: stretch;
+}
+.homepage-workspace > * {
+  min-height: 0;
+}
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
 .workbench-toolbar {
   position: sticky;
@@ -156,7 +179,7 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   font-size: 11px;
   font-weight: 700;
 }
-.chat-panel { padding: 20px; display: flex; flex-direction: column; min-height: 980px; position: relative; }
+.chat-panel { padding: 20px; display: flex; flex-direction: column; min-height: 0; height: 100%; overflow: hidden; position: relative; gap: 12px; }
 .insight-panel { display: grid; gap: 18px; align-content: start; min-width: 0; }
 .insight-panel-compact .report-results-card {
   max-height: calc(100vh - 180px);
@@ -241,6 +264,29 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .report-results-home {
   position: sticky;
   top: 18px;
+}
+.homepage-workspace .insight-panel {
+  min-height: 0;
+  height: 100%;
+}
+.homepage-workspace .report-results-home,
+.homepage-workspace .report-results-card,
+.homepage-workspace .insight-panel-expanded .report-results-card,
+.homepage-workspace .insight-panel-compact .report-results-card {
+  position: static;
+  top: auto;
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+}
+.homepage-workspace .report-results-card {
+  display: flex;
+  flex-direction: column;
+}
+.homepage-workspace .reports-scroll-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .report-results-header {
   align-items: center;
@@ -538,8 +584,9 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   flex-direction: column;
   gap: 16px;
   padding: 8px 4px 20px;
-  min-height: 620px;
-  max-height: 880px;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -641,13 +688,10 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 }
 
 .chat-composer-wrap {
-  position: sticky;
-  bottom: 0;
-  z-index: 9;
-  margin-top: auto;
-  padding-top: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.96) 18%, rgba(255, 255, 255, 1) 100%);
-  backdrop-filter: blur(8px);
+  margin-top: 0;
+  padding-top: 14px;
+  border-top: 1px solid #e6ebf2;
+  background: #fff;
 }
 .chat-composer-actions {
   display: flex;

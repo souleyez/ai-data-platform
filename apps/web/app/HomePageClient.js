@@ -57,7 +57,7 @@ export default function HomePageClient({ initialModelState }) {
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/" initialModelState={initialModelState} />
 
-      <main className="main-panel">
+      <main className="main-panel main-panel-home">
         <header className="topbar">
           <div className="topbar-title-row">
             <h2>智能助手</h2>
@@ -65,8 +65,8 @@ export default function HomePageClient({ initialModelState }) {
           </div>
         </header>
 
-        <section className="homepage-grid">
-          <section className={`workspace-grid ${reportCollapsed ? 'workspace-grid-compact' : 'workspace-grid-expanded'}`}>
+        <section className="homepage-grid homepage-grid-tight">
+          <section className={`workspace-grid homepage-workspace ${reportCollapsed ? 'workspace-grid-compact' : 'workspace-grid-expanded'}`}>
             <ChatPanel
               messages={messages}
               input={input}

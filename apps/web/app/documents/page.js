@@ -404,6 +404,7 @@ export default function DocumentsPage() {
             <p>首次无法判断的文档会保留在未分组，右上角按钮只重扫未分组文档并尝试重新归组。</p>
           </div>
           <div className="topbar-actions">
+            <a className="ghost-btn" href="/#upload-document">上传文档</a>
             <button className="ghost-btn" onClick={loadDocuments}>刷新</button>
             <button className="primary-btn" onClick={handlePrimaryScan} disabled={scanLoading}>
               {scanLoading ? '处理中...' : '立即扫描未分组文档'}
