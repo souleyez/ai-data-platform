@@ -1,5 +1,21 @@
 'use client';
 
+function renderExtensions(sampleExtensions) {
+  if (!Array.isArray(sampleExtensions) || !sampleExtensions.length) return null;
+  return (
+    <span>文档类型 {sampleExtensions.join(' / ')}</span>
+  );
+}
+
+function renderHotspotHint(candidate) {
+  if (candidate.hotspot || !Array.isArray(candidate.hotspots) || !candidate.hotspots.length) return null;
+  const names = candidate.hotspots.slice(0, 3).map((item) => item.label).filter(Boolean);
+  if (!names.length) return null;
+  return (
+    <span>热点目录 {names.join(' / ')}{candidate.hotspots.length > names.length ? ' +' : ''}</span>
+  );
+}
+
 export default function ScanSourcesPanel({
   expanded,
   onToggleExpanded,
@@ -38,7 +54,7 @@ export default function ScanSourcesPanel({
             <div>
               <strong>本机候选目录发现</strong>
               <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
-                自动发现 Desktop、Documents、Downloads 等目录。可能过程较慢，请谨慎选择。
+                自动发现 Desktop、Documents、Downloads 等目录，并额外展示文档更集中的热点子目录。
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -46,7 +62,7 @@ export default function ScanSourcesPanel({
                 {candidateSourceLoading ? '发现中...' : '发现本机候选目录'}
               </button>
               <button className="primary-btn" onClick={onImportCandidateSources} disabled={candidateSourceSubmitting || !selectedCandidatePaths.length}>
-                {candidateSourceSubmitting ? '入库中...' : `加入扫描源并扫描 (${selectedCandidatePaths.length})`}
+                {candidateSourceSubmitting ? '导入中...' : `加入扫描源并扫描 (${selectedCandidatePaths.length})`}
               </button>
             </div>
           </div>
@@ -97,6 +113,7 @@ export default function ScanSourcesPanel({
                     <input type="checkbox" checked={selectedCandidatePaths.includes(candidate.path)} onChange={() => onToggleCandidatePath(candidate.path)} />
                     <strong>{candidate.label}</strong>
                     <span style={{ color: '#475569', fontSize: 13 }}>{candidate.reason}</span>
+                    {candidate.hotspot ? <span className="source-chip" style={{ background: '#fff7ed', color: '#c2410c' }}>热点子目录</span> : null}
                     {candidate.alreadyAdded ? <span className="source-chip" style={{ background: '#ecfeff', color: '#0f766e' }}>已加入</span> : null}
                     {candidate.path === data?.scanRoot ? <span className="source-chip" style={{ background: '#eff6ff', color: '#1d4ed8' }}>主目录</span> : null}
                   </div>
@@ -104,6 +121,8 @@ export default function ScanSourcesPanel({
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#64748b', fontSize: 12 }}>
                     <span>预计文件 {candidate.pendingScan ? '待扫描' : `${candidate.fileCount}${candidate.truncated ? '+' : ''}`}</span>
                     <span>最近更新 {formatLocalTime(candidate.latestModifiedAt)}</span>
+                    {renderExtensions(candidate.sampleExtensions)}
+                    {renderHotspotHint(candidate)}
                     {candidate.path !== data?.scanRoot && candidate.alreadyAdded ? (
                       <button
                         type="button"

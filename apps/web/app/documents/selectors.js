@@ -54,22 +54,49 @@ export function buildDirectoryOptions({ candidateSources, scanSources, scanRoot 
     byPath.set(source, {
       key: `source-${source}`,
       label: source === scanRoot ? '当前主扫描目录' : '已加入扫描源',
-      reason: '当前已纳入文档中心扫描范围',
+      reason: '当前已经纳入文档中心扫描范围。',
       path: source,
       exists: true,
       fileCount: 0,
       latestModifiedAt: 0,
       truncated: false,
       pendingScan: true,
+      sampleExtensions: [],
+      hotspots: [],
       alreadyAdded: true,
     });
   }
 
   for (const candidate of candidateSources) {
-    byPath.set(candidate.path, { ...candidate, alreadyAdded: byPath.has(candidate.path) });
+    byPath.set(candidate.path, {
+      ...candidate,
+      sampleExtensions: Array.isArray(candidate.sampleExtensions) ? candidate.sampleExtensions : [],
+      hotspots: Array.isArray(candidate.hotspots) ? candidate.hotspots : [],
+      alreadyAdded: byPath.has(candidate.path),
+    });
+
+    for (const hotspot of candidate.hotspots || []) {
+      byPath.set(hotspot.path, {
+        ...hotspot,
+        label: hotspot.label ? `${candidate.label} / ${hotspot.label}` : `${candidate.label} / 热点子目录`,
+        reason: hotspot.reason || `${candidate.label} 下文档更集中的子目录`,
+        sampleExtensions: Array.isArray(hotspot.sampleExtensions) ? hotspot.sampleExtensions : [],
+        hotspots: [],
+        alreadyAdded: byPath.has(hotspot.path),
+        hotspot: true,
+      });
+    }
   }
 
-  return Array.from(byPath.values());
+  return Array.from(byPath.values()).sort((a, b) => {
+    const addedDiff = Number(Boolean(b.alreadyAdded)) - Number(Boolean(a.alreadyAdded));
+    if (addedDiff !== 0) return addedDiff;
+
+    const hotspotDiff = Number(Boolean(a.hotspot)) - Number(Boolean(b.hotspot));
+    if (hotspotDiff !== 0) return hotspotDiff;
+
+    return (b.fileCount || 0) - (a.fileCount || 0) || (b.latestModifiedAt || 0) - (a.latestModifiedAt || 0);
+  });
 }
 
 export function paginateItems(items, currentPage, pageSize) {

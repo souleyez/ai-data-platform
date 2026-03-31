@@ -14,6 +14,64 @@ type LoadedLibraries = Awaited<ReturnType<typeof loadDocumentLibraries>>;
 type ParsedDocumentItem = LoadedDocuments['items'][number];
 type DocumentConfig = Awaited<ReturnType<typeof loadDocumentCategoryConfig>>;
 
+const DISCOVERY_SCANNABLE_EXTENSIONS = new Set([
+  '.pdf',
+  '.txt',
+  '.md',
+  '.docx',
+  '.csv',
+  '.json',
+  '.html',
+  '.htm',
+  '.xml',
+  '.xlsx',
+  '.xls',
+]);
+
+const DISCOVERY_SKIPPED_DIRECTORY_NAMES = new Set([
+  '.git',
+  '.next',
+  'node_modules',
+  'dist',
+  'build',
+  'bin',
+  'obj',
+  '__pycache__',
+  '.venv',
+  'venv',
+]);
+
+const DISCOVERY_MAX_SCANNED_FILES = 1500;
+const DISCOVERY_MAX_DEPTH = 5;
+const DISCOVERY_MAX_HOTSPOTS = 6;
+const DISCOVERY_MAX_SAMPLE_EXTENSIONS = 4;
+
+type CandidateHotspot = {
+  key: string;
+  path: string;
+  label: string;
+  reason: string;
+  exists: boolean;
+  fileCount: number;
+  latestModifiedAt: number;
+  truncated: boolean;
+  pendingScan: boolean;
+  sampleExtensions: string[];
+  sourceKey: string;
+  sourceLabel: string;
+};
+
+type CandidateSummary = {
+  path: string;
+  exists: boolean;
+  fileCount: number;
+  latestModifiedAt: number;
+  truncated: boolean;
+  pendingScan: boolean;
+  sampleExtensions: string[];
+  hotspots: CandidateHotspot[];
+};
+
 export function buildNextScanRoots(currentScanRoots: string[], nextPrimary: string) {
   return [nextPrimary, ...currentScanRoots.filter((item) => item !== nextPrimary)];
 }
@@ -26,17 +84,131 @@ async function safeStat(targetPath: string) {
   }
 }
 
-async function summarizeCandidateDirectory(targetPath: string) {
+function isDiscoveryDirectoryVisible(entryName: string) {
+  if (!entryName) return false;
+  if (entryName.startsWith('.')) return false;
+  return !DISCOVERY_SKIPPED_DIRECTORY_NAMES.has(entryName);
+}
+
+function isDiscoveryScannableFile(entryName: string) {
+  return DISCOVERY_SCANNABLE_EXTENSIONS.has(path.extname(entryName).toLowerCase());
+}
+
+function normalizeCandidatePath(targetPath: string) {
+  return path.resolve(targetPath);
+}
+
+function buildCandidatePathKey(targetPath: string) {
+  return normalizeCandidatePath(targetPath).toLowerCase();
+}
+
+function sortExtensions(extensionCounts: Map<string, number>) {
+  return [...extensionCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, DISCOVERY_MAX_SAMPLE_EXTENSIONS)
+    .map(([extension]) => extension);
+}
+
+async function summarizeCandidateDirectory(
+  targetPath: string,
+  source: { key: string; label: string },
+): Promise<CandidateSummary | null> {
   const stat = await safeStat(targetPath);
   if (!stat?.isDirectory()) return null;
+
+  const extensionCounts = new Map<string, number>();
+  const hotspotMap = new Map<string, CandidateHotspot>();
+  const stack = [{ dir: targetPath, depth: 0 }];
+  let fileCount = 0;
+  let latestModifiedAt = Math.floor(stat.mtimeMs);
+  let truncated = false;
+
+  while (stack.length && fileCount < DISCOVERY_MAX_SCANNED_FILES) {
+    const current = stack.pop() as { dir: string; depth: number };
+    let entries: Awaited<ReturnType<typeof fs.readdir>> = [];
+
+    try {
+      entries = await fs.readdir(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(current.dir, entry.name);
+
+      if (entry.isDirectory()) {
+        if (current.depth < DISCOVERY_MAX_DEPTH && isDiscoveryDirectoryVisible(entry.name)) {
+          stack.push({ dir: fullPath, depth: current.depth + 1 });
+        }
+        continue;
+      }
+
+      if (!entry.isFile() || !isDiscoveryScannableFile(entry.name)) continue;
+
+      fileCount += 1;
+      const fullStat = await safeStat(fullPath);
+      if (fullStat) {
+        latestModifiedAt = Math.max(latestModifiedAt, Math.floor(fullStat.mtimeMs));
+      }
+
+      const extension = path.extname(entry.name).toLowerCase();
+      extensionCounts.set(extension, (extensionCounts.get(extension) || 0) + 1);
+
+      const relativePath = path.relative(targetPath, fullPath);
+      const pathSegments = relativePath.split(path.sep).filter(Boolean);
+      if (pathSegments.length >= 2) {
+        const firstSegment = pathSegments[0];
+        const hotspotPath = path.join(targetPath, firstSegment);
+        const hotspotKey = buildCandidatePathKey(hotspotPath);
+        const hotspot = hotspotMap.get(hotspotKey) || {
+          key: `${source.key}-hotspot-${firstSegment.toLowerCase()}`,
+          path: hotspotPath,
+          label: firstSegment,
+          reason: `${source.label} 下文档更集中的子目录`,
+          exists: true,
+          fileCount: 0,
+          latestModifiedAt: 0,
+          truncated: false,
+          pendingScan: false,
+          sampleExtensions: [],
+          sourceKey: source.key,
+          sourceLabel: source.label,
+        };
+
+        hotspot.fileCount += 1;
+        hotspot.latestModifiedAt = Math.max(
+          hotspot.latestModifiedAt,
+          fullStat ? Math.floor(fullStat.mtimeMs) : 0,
+        );
+        if (!hotspot.sampleExtensions.includes(extension) && hotspot.sampleExtensions.length < DISCOVERY_MAX_SAMPLE_EXTENSIONS) {
+          hotspot.sampleExtensions.push(extension);
+        }
+        hotspotMap.set(hotspotKey, hotspot);
+      }
+
+      if (fileCount >= DISCOVERY_MAX_SCANNED_FILES) {
+        truncated = true;
+        break;
+      }
+    }
+  }
 
   return {
     path: targetPath,
     exists: true,
-    fileCount: 0,
-    latestModifiedAt: Math.floor(stat.mtimeMs),
-    truncated: false,
-    pendingScan: true,
+    fileCount,
+    latestModifiedAt,
+    truncated,
+    pendingScan: false,
+    sampleExtensions: sortExtensions(extensionCounts),
+    hotspots: [...hotspotMap.values()]
+      .sort((a, b) => b.fileCount - a.fileCount || b.latestModifiedAt - a.latestModifiedAt || a.path.localeCompare(b.path))
+      .slice(0, DISCOVERY_MAX_HOTSPOTS)
+      .map((item) => ({
+        ...item,
+        truncated: item.truncated || truncated,
+        sampleExtensions: [...item.sampleExtensions].sort((a, b) => a.localeCompare(b)),
+      })),
   };
 }
 
@@ -44,22 +216,27 @@ export async function discoverCandidateDirectories() {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const appData = process.env.APPDATA || '';
   const localAppData = process.env.LOCALAPPDATA || '';
+  const oneDrive = process.env.OneDrive || '';
   const documents = home ? path.join(home, 'Documents') : '';
   const desktop = home ? path.join(home, 'Desktop') : '';
   const downloads = home ? path.join(home, 'Downloads') : '';
+  const oneDriveDocuments = oneDrive ? path.join(oneDrive, 'Documents') : '';
+  const oneDriveDesktop = oneDrive ? path.join(oneDrive, 'Desktop') : '';
 
   const candidates = [
-    { key: 'downloads', label: 'Downloads', reason: '常见浏览器与应用默认下载目录', path: downloads },
-    { key: 'documents', label: 'Documents', reason: '系统默认文档目录', path: documents },
-    { key: 'desktop', label: 'Desktop', reason: '桌面常见临时文档区', path: desktop },
-    { key: 'wechat-files', label: '微信文件', reason: '微信接收文件常见目录', path: documents ? path.join(documents, 'WeChat Files') : '' },
-    { key: 'wecom-cache', label: '企业微信文件', reason: '企业微信缓存与下载常见目录', path: documents ? path.join(documents, 'WXWork') : '' },
-    { key: 'feishu-downloads', label: '飞书下载', reason: '飞书常见下载目录', path: downloads ? path.join(downloads, 'Lark') : '' },
-    { key: 'qq-files', label: 'QQ文件', reason: 'QQ接收文件常见目录', path: documents ? path.join(documents, 'Tencent Files') : '' },
-    { key: '360-downloads', label: '360下载', reason: '360浏览器常见下载目录', path: downloads ? path.join(downloads, '360Downloads') : '' },
-    { key: 'baidu-downloads', label: '百度下载', reason: '百度网盘或浏览器常见下载目录', path: downloads ? path.join(downloads, 'BaiduNetdiskDownload') : '' },
-    { key: 'feishu-appdata', label: '飞书缓存导出', reason: '飞书本地缓存常见目录', path: appData ? path.join(appData, 'LarkShell') : '' },
-    { key: 'wechat-appdata', label: '微信缓存导出', reason: '微信本地缓存常见目录', path: localAppData ? path.join(localAppData, 'Tencent', 'WeChat') : '' },
+    { key: 'documents', label: 'Documents', reason: '系统默认文档目录，通常包含项目资料、合同、报表等文件。', path: documents },
+    { key: 'desktop', label: 'Desktop', reason: '桌面常有临时接收或待处理文件。', path: desktop },
+    { key: 'downloads', label: 'Downloads', reason: '浏览器和应用默认下载目录，常见外部资料入口。', path: downloads },
+    { key: 'onedrive-documents', label: 'OneDrive Documents', reason: 'OneDrive 同步的文档目录，常见企业资料同步位置。', path: oneDriveDocuments },
+    { key: 'onedrive-desktop', label: 'OneDrive Desktop', reason: 'OneDrive 同步的桌面目录，常见团队共享文件入口。', path: oneDriveDesktop },
+    { key: 'wechat-files', label: 'WeChat Files', reason: '微信接收文件常见目录。', path: documents ? path.join(documents, 'WeChat Files') : '' },
+    { key: 'wecom-cache', label: 'WXWork', reason: '企业微信缓存和下载文件常见目录。', path: documents ? path.join(documents, 'WXWork') : '' },
+    { key: 'feishu-downloads', label: 'Lark Downloads', reason: '飞书/Lark 下载资料常见目录。', path: downloads ? path.join(downloads, 'Lark') : '' },
+    { key: 'qq-files', label: 'Tencent Files', reason: 'QQ 接收文件常见目录。', path: documents ? path.join(documents, 'Tencent Files') : '' },
+    { key: '360-downloads', label: '360 Downloads', reason: '360 浏览器下载目录。', path: downloads ? path.join(downloads, '360Downloads') : '' },
+    { key: 'baidu-downloads', label: 'BaiduNetdisk Download', reason: '百度网盘常见下载目录。', path: downloads ? path.join(downloads, 'BaiduNetdiskDownload') : '' },
+    { key: 'feishu-appdata', label: 'Lark Cache', reason: '飞书本地缓存目录，可能包含导出的文件。', path: appData ? path.join(appData, 'LarkShell') : '' },
+    { key: 'wechat-appdata', label: 'WeChat Cache', reason: '微信本地缓存目录，可能包含导出的文件。', path: localAppData ? path.join(localAppData, 'Tencent', 'WeChat') : '' },
   ].filter((item) => item.path);
 
   const summarized = [] as Array<{
@@ -72,10 +249,17 @@ export async function discoverCandidateDirectories() {
     latestModifiedAt: number;
     truncated: boolean;
     pendingScan?: boolean;
+    sampleExtensions: string[];
+    hotspots: CandidateHotspot[];
   }>;
+  const seen = new Set<string>();
 
   for (const candidate of candidates) {
-    const summary = await summarizeCandidateDirectory(candidate.path);
+    const candidateKey = buildCandidatePathKey(candidate.path);
+    if (seen.has(candidateKey)) continue;
+    seen.add(candidateKey);
+
+    const summary = await summarizeCandidateDirectory(candidate.path, candidate);
     if (!summary) continue;
     summarized.push({
       key: candidate.key,
@@ -85,7 +269,7 @@ export async function discoverCandidateDirectories() {
     });
   }
 
-  return summarized.sort((a, b) => b.fileCount - a.fileCount || b.latestModifiedAt - a.latestModifiedAt);
+  return summarized.sort((a, b) => b.fileCount - a.fileCount || b.latestModifiedAt - a.latestModifiedAt || a.label.localeCompare(b.label));
 }
 
 function normalizeClusterLabel(value: string) {
@@ -115,7 +299,7 @@ function collectClusterSeeds(item: ParsedDocumentItem) {
   for (const token of profileTokens) seeds.add(token);
 
   const titleTokens = String(item.title || item.name || '')
-    .split(/[\s/\\|,，。；：（）【】\]-]+/)
+    .split(/[\s/\\|,，。；：（）【】_-]+/)
     .map((token) => normalizeClusterLabel(token))
     .filter((token) => token.length >= 4);
 
@@ -356,7 +540,7 @@ export async function reclusterUngroupedDocuments() {
   const assignedClusterDocPaths = new Set<string>();
   for (const [seed, bucket] of [...clusterBuckets.entries()].sort((a, b) => b[1].length - a[1].length)) {
     if (bucket.length < 10) continue;
-    const created = await createDocumentLibrary({ name: seed, description: '按未分组文档内容自动聚合生成' });
+    const created = await createDocumentLibrary({ name: seed, description: 'Auto-created from clustered ungrouped documents.' });
     if (!libraries.some((library) => library.key === created.key)) {
       createdLibraryCount += 1;
       libraries.push(created);

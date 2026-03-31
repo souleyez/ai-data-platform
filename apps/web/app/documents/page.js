@@ -224,6 +224,8 @@ export default function DocumentsPage() {
         latestModifiedAt: Date.now(),
         truncated: false,
         pendingScan: true,
+        sampleExtensions: [],
+        hotspots: [],
         manual: true,
       }, ...current];
     });
