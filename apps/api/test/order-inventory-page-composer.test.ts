@@ -2,10 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
 import {
+  resolveOrderInventoryComposerAttemptModes,
   runOrderInventoryPageComposer,
   runOrderInventoryPageComposerDetailed,
   selectOrderInventoryEvidenceDocuments,
 } from '../src/lib/order-inventory-page-composer.js';
+
+test('resolveOrderInventoryComposerAttemptModes should keep stock requests on compact mode only', () => {
+  assert.deepEqual(resolveOrderInventoryComposerAttemptModes('stock'), ['compact']);
+  assert.deepEqual(resolveOrderInventoryComposerAttemptModes('generic'), ['rich', 'compact']);
+});
 
 test('runOrderInventoryPageComposer should return null and expose debug detail when gateway is not configured', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;

@@ -2541,19 +2541,47 @@ function buildStockShellCards(
   primary: NonNullable<KnowledgePageOutput['page']['cards']>,
   fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
 ) {
-  const fallbackNormalized = normalizeStockCardShell(fallback);
-  const merged = dedupePageCards(normalizeStockCardShell([...primary, ...fallbackNormalized]));
-  if (merged.length >= 5) return merged.slice(0, 5);
-
-  const seen = new Set(merged.map((card) => normalizeText(card.label || card.value || card.note || '')));
-  for (const card of fallbackNormalized) {
-    if (merged.length >= 5) break;
-    const key = normalizeText(card.label || card.value || card.note || '');
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    merged.push(card);
+  const preferredOrder = [
+    '库存健康指数',
+    '断货风险SKU',
+    '滞销库存池',
+    '72小时补货动作',
+    '跨仓调拨队列',
+  ];
+  const byLabel = new Map<string, { label?: string; value?: string; note?: string }>();
+  for (const card of normalizeStockCardShell(fallback)) {
+    const key = normalizeText(card.label || '');
+    if (key) byLabel.set(key, card);
   }
-  return merged;
+  for (const card of normalizeStockCardShell(primary)) {
+    const key = normalizeText(card.label || '');
+    if (key) byLabel.set(key, card);
+  }
+  return preferredOrder
+    .map((label) => byLabel.get(normalizeText(label)))
+    .filter(Boolean) as NonNullable<KnowledgePageOutput['page']['cards']>;
+}
+
+function buildStockShellCharts(
+  primary: NonNullable<KnowledgePageOutput['page']['charts']>,
+  fallback: NonNullable<KnowledgePageOutput['page']['charts']>,
+) {
+  const preferredOrder = [
+    '库存健康指数',
+    '断货/超库存风险队列',
+  ];
+  const byTitle = new Map<string, { title?: string; items?: Array<{ label?: string; value?: number }> }>();
+  for (const chart of normalizeStockChartShell(fallback)) {
+    const key = normalizeText(chart.title || '');
+    if (key) byTitle.set(key, chart);
+  }
+  for (const chart of normalizeStockChartShell(primary)) {
+    const key = normalizeText(chart.title || '');
+    if (key) byTitle.set(key, chart);
+  }
+  return preferredOrder
+    .map((title) => byTitle.get(normalizeText(title)))
+    .filter(Boolean) as NonNullable<KnowledgePageOutput['page']['charts']>;
 }
 
 function buildGenericShellCards(
@@ -2705,7 +2733,10 @@ function hydrateOrderPageVisualShell(
       ? mergeOrderPageSections(page.sections, fallbackPage.sections || [])
       : fallbackPage.sections,
     charts: view === 'stock'
-      ? normalizeStockChartShell(mergeCharts(page.charts || [], fallbackPage.charts || [], 2))
+      ? buildStockShellCharts(
+          mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
+          fallbackPage.charts || [],
+        )
       : buildGenericShellCharts(
           mergeCharts(page.charts || [], fallbackPage.charts || [], 3),
           fallbackPage.charts || [],

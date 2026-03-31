@@ -50,17 +50,17 @@ import {
 import { runResumePageComposerDetailed } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
-const ORDER_OUTPUT_MEMORY_LIMIT = 5;
-const ORDER_OUTPUT_DOC_LIMIT = 5;
-const ORDER_OUTPUT_EVIDENCE_LIMIT = 6;
+const ORDER_OUTPUT_MEMORY_LIMIT = 4;
+const ORDER_OUTPUT_DOC_LIMIT = 4;
+const ORDER_OUTPUT_EVIDENCE_LIMIT = 4;
 const ORDER_OUTPUT_CONTEXT_OPTIONS = {
-  maxDocuments: 3,
-  maxEvidence: 4,
-  summaryLength: 140,
+  maxDocuments: 2,
+  maxEvidence: 3,
+  summaryLength: 120,
   includeExcerpt: false,
   maxClaimsPerDocument: 1,
   maxEvidenceChunksPerDocument: 1,
-  maxStructuredProfileEntries: 5,
+  maxStructuredProfileEntries: 4,
   maxStructuredArrayValues: 3,
   maxStructuredObjectEntries: 3,
 } as const;

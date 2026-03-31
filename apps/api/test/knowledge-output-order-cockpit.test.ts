@@ -279,8 +279,14 @@ test('normalizeReportOutput should keep stock requests on inventory cockpit titl
 
   assert.equal(output.type, 'page');
   assert.equal(output.title, '库存与补货驾驶舱');
-  assert.ok((output.page?.cards || []).some((item) => item.label === '库存健康指数'));
-  assert.ok((output.page?.cards || []).some((item) => item.label === '72小时补货动作'));
+  assert.deepEqual(
+    (output.page?.cards || []).map((item) => item.label),
+    ['库存健康指数', '断货风险SKU', '滞销库存池', '72小时补货动作', '跨仓调拨队列'],
+  );
+  assert.deepEqual(
+    (output.page?.charts || []).map((item) => item.title),
+    ['库存健康指数', '断货/超库存风险队列'],
+  );
 });
 
 test('normalizeReportOutput should keep mixed channel and sku prompts on the generic cockpit shell', () => {

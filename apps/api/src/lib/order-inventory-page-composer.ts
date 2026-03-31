@@ -224,6 +224,11 @@ function detectOrderInventoryRequestView(input: {
   return 'generic';
 }
 
+export function resolveOrderInventoryComposerAttemptModes(view: OrderInventoryRequestView): ComposerPromptMode[] {
+  if (view === 'stock') return ['compact'];
+  return ['rich', 'compact'];
+}
+
 function looksLikeDelimitedLine(value: string) {
   const text = sanitizeText(value, 240);
   if (!text) return false;
@@ -366,41 +371,43 @@ function buildComposerContext(input: {
 }, mode: ComposerPromptMode) {
   const compact = mode === 'compact';
   const view = detectOrderInventoryRequestView(input);
+  const stockView = view === 'stock';
   const evidenceDocuments = selectOrderInventoryEvidenceDocuments(
     input.documents,
-    { maxDocuments: compact ? 2 : 3 },
+    { maxDocuments: stockView ? 1 : (compact ? 2 : 3) },
   );
-  const channels = buildRankedCountList(evidenceDocuments.flatMap(collectChannelSignals), compact ? 3 : 4);
-  const categories = buildRankedCountList(evidenceDocuments.flatMap(collectCategorySignals), compact ? 3 : 4);
-  const metrics = buildRankedCountList(evidenceDocuments.flatMap(collectMetricSignals), compact ? 3 : 4);
-  const replenishment = buildRankedCountList(evidenceDocuments.flatMap(collectReplenishmentSignals), compact ? 3 : 4);
-  const anomalies = buildRankedCountList(evidenceDocuments.flatMap(collectAnomalySignals), compact ? 3 : 4);
+  const rankedLimit = stockView ? 2 : (compact ? 3 : 4);
+  const channels = buildRankedCountList(evidenceDocuments.flatMap(collectChannelSignals), rankedLimit);
+  const categories = buildRankedCountList(evidenceDocuments.flatMap(collectCategorySignals), rankedLimit);
+  const metrics = buildRankedCountList(evidenceDocuments.flatMap(collectMetricSignals), rankedLimit);
+  const replenishment = buildRankedCountList(evidenceDocuments.flatMap(collectReplenishmentSignals), rankedLimit);
+  const anomalies = buildRankedCountList(evidenceDocuments.flatMap(collectAnomalySignals), rankedLimit);
 
   return {
     requestText: sanitizeText(input.requestText, 240),
     view,
     envelope: input.envelope ? {
       title: sanitizeText(input.envelope.title, 120),
-      outputHint: sanitizeText(input.envelope.outputHint, compact ? 100 : 160),
-      pageSections: (input.envelope.pageSections || []).slice(0, compact ? 5 : 6),
+      outputHint: sanitizeText(input.envelope.outputHint, stockView ? 84 : (compact ? 100 : 160)),
+      pageSections: (input.envelope.pageSections || []).slice(0, stockView ? 4 : (compact ? 5 : 6)),
     } : null,
     reportPlan: input.reportPlan ? {
-      objective: sanitizeText(input.reportPlan.objective, compact ? 120 : 180),
-      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, compact ? 2 : 3),
-      evidenceRules: (input.reportPlan.evidenceRules || []).slice(0, compact ? 2 : 3),
-      completionRules: (input.reportPlan.completionRules || []).slice(0, compact ? 2 : 3),
-      cards: (input.reportPlan.cards || []).slice(0, compact ? 3 : 4).map((item) => ({
+      objective: sanitizeText(input.reportPlan.objective, stockView ? 96 : (compact ? 120 : 180)),
+      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, stockView ? 1 : (compact ? 2 : 3)),
+      evidenceRules: (input.reportPlan.evidenceRules || []).slice(0, stockView ? 1 : (compact ? 2 : 3)),
+      completionRules: (input.reportPlan.completionRules || []).slice(0, stockView ? 1 : (compact ? 2 : 3)),
+      cards: (input.reportPlan.cards || []).slice(0, stockView ? 2 : (compact ? 3 : 4)).map((item) => ({
         label: sanitizeText(item.label, 80),
-        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
+        purpose: sanitizeText(item.purpose, stockView ? 60 : (compact ? 80 : 120)),
       })),
-      charts: (input.reportPlan.charts || []).slice(0, compact ? 2 : 3).map((item) => ({
+      charts: (input.reportPlan.charts || []).slice(0, stockView ? 1 : (compact ? 2 : 3)).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
+        purpose: sanitizeText(item.purpose, stockView ? 60 : (compact ? 80 : 120)),
       })),
-      sections: (input.reportPlan.sections || []).slice(0, compact ? 4 : 5).map((item) => ({
+      sections: (input.reportPlan.sections || []).slice(0, stockView ? 3 : (compact ? 4 : 5)).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
-        evidenceFocus: sanitizeText(item.evidenceFocus, compact ? 80 : 120),
+        purpose: sanitizeText(item.purpose, stockView ? 60 : (compact ? 80 : 120)),
+        evidenceFocus: sanitizeText(item.evidenceFocus, stockView ? 60 : (compact ? 80 : 120)),
       })),
     } : null,
     cockpit: {
@@ -481,8 +488,9 @@ export async function runOrderInventoryPageComposerDetailed(input: {
   const systemPrompt = await buildSystemPrompt();
   const attemptedModes: ComposerPromptMode[] = [];
   let lastError = '';
+  const attemptModes = resolveOrderInventoryComposerAttemptModes(detectOrderInventoryRequestView(input));
 
-  for (const mode of ['rich', 'compact'] as const) {
+  for (const mode of attemptModes) {
     attemptedModes.push(mode);
     try {
       const result = await runOpenClawChat({
