@@ -226,6 +226,8 @@ export default function DocumentsPage() {
         pendingScan: true,
         sampleExtensions: [],
         hotspots: [],
+        discoverySource: 'manual',
+        discoveryExplanation: '手动指定：由用户直接输入本地目录，加入后会在扫描阶段读取真实文件信息。',
         manual: true,
       }, ...current];
     });

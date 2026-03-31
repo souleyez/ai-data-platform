@@ -63,6 +63,8 @@ export function buildDirectoryOptions({ candidateSources, scanSources, scanRoot 
       pendingScan: true,
       sampleExtensions: [],
       hotspots: [],
+      discoverySource: 'existing',
+      discoveryExplanation: '已加入扫描源：当前目录已经纳入文档中心扫描范围，等待下一次扫描或刷新统计。',
       alreadyAdded: true,
     });
   }
@@ -72,6 +74,7 @@ export function buildDirectoryOptions({ candidateSources, scanSources, scanRoot 
       ...candidate,
       sampleExtensions: Array.isArray(candidate.sampleExtensions) ? candidate.sampleExtensions : [],
       hotspots: Array.isArray(candidate.hotspots) ? candidate.hotspots : [],
+      discoveryExplanation: candidate.discoveryExplanation || candidate.reason || '',
       alreadyAdded: byPath.has(candidate.path),
     });
 
@@ -82,6 +85,8 @@ export function buildDirectoryOptions({ candidateSources, scanSources, scanRoot 
         reason: hotspot.reason || `${candidate.label} 下文档更集中的子目录`,
         sampleExtensions: Array.isArray(hotspot.sampleExtensions) ? hotspot.sampleExtensions : [],
         hotspots: [],
+        discoverySource: hotspot.discoverySource || 'hotspot',
+        discoveryExplanation: hotspot.discoveryExplanation || hotspot.reason || '',
         alreadyAdded: byPath.has(hotspot.path),
         hotspot: true,
       });

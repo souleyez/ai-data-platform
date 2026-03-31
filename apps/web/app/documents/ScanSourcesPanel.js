@@ -2,9 +2,7 @@
 
 function renderExtensions(sampleExtensions) {
   if (!Array.isArray(sampleExtensions) || !sampleExtensions.length) return null;
-  return (
-    <span>文档类型 {sampleExtensions.join(' / ')}</span>
-  );
+  return <span>文档类型 {sampleExtensions.join(' / ')}</span>;
 }
 
 function renderHotspotHint(candidate) {
@@ -13,6 +11,32 @@ function renderHotspotHint(candidate) {
   if (!names.length) return null;
   return (
     <span>热点目录 {names.join(' / ')}{candidate.hotspots.length > names.length ? ' +' : ''}</span>
+  );
+}
+
+function renderDiscoverySourceChip(candidate) {
+  if (candidate.hotspot) {
+    return <span className="source-chip" style={{ background: '#fff7ed', color: '#c2410c' }}>热点子目录</span>;
+  }
+  if (candidate.discoverySource === 'openclaw') {
+    return <span className="source-chip" style={{ background: '#eef2ff', color: '#4338ca' }}>OpenClaw 推荐</span>;
+  }
+  if (candidate.discoverySource === 'manual') {
+    return <span className="source-chip" style={{ background: '#f1f5f9', color: '#475569' }}>手动指定</span>;
+  }
+  if (candidate.discoverySource === 'existing') {
+    return <span className="source-chip" style={{ background: '#ecfeff', color: '#0f766e' }}>已加入</span>;
+  }
+  return <span className="source-chip" style={{ background: '#f8fafc', color: '#475569' }}>系统兜底</span>;
+}
+
+function renderDiscoveryExplanation(candidate) {
+  const explanation = String(candidate.discoveryExplanation || '').trim();
+  if (!explanation) return null;
+  return (
+    <div style={{ color: '#475569', fontSize: 12, lineHeight: 1.55 }}>
+      {explanation}
+    </div>
   );
 }
 
@@ -54,7 +78,7 @@ export default function ScanSourcesPanel({
             <div>
               <strong>本机候选目录发现</strong>
               <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
-                优先通过 OpenClaw 发现本机更可能有资料的目录，再补上项目侧的真实文件统计和热点子目录。
+                优先通过 OpenClaw 给出候选目录建议，再由项目侧补上真实文件统计、文档类型和热点子目录。
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -113,11 +137,12 @@ export default function ScanSourcesPanel({
                     <input type="checkbox" checked={selectedCandidatePaths.includes(candidate.path)} onChange={() => onToggleCandidatePath(candidate.path)} />
                     <strong>{candidate.label}</strong>
                     <span style={{ color: '#475569', fontSize: 13 }}>{candidate.reason}</span>
-                    {candidate.hotspot ? <span className="source-chip" style={{ background: '#fff7ed', color: '#c2410c' }}>热点子目录</span> : null}
-                    {candidate.alreadyAdded ? <span className="source-chip" style={{ background: '#ecfeff', color: '#0f766e' }}>已加入</span> : null}
+                    {renderDiscoverySourceChip(candidate)}
+                    {candidate.alreadyAdded && !candidate.hotspot ? <span className="source-chip" style={{ background: '#ecfeff', color: '#0f766e' }}>已加入</span> : null}
                     {candidate.path === data?.scanRoot ? <span className="source-chip" style={{ background: '#eff6ff', color: '#1d4ed8' }}>主目录</span> : null}
                   </div>
                   <div style={{ color: '#0f172a', fontSize: 13, wordBreak: 'break-all' }}>{candidate.path}</div>
+                  {renderDiscoveryExplanation(candidate)}
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#64748b', fontSize: 12 }}>
                     <span>预计文件 {candidate.pendingScan ? '待扫描' : `${candidate.fileCount}${candidate.truncated ? '+' : ''}`}</span>
                     <span>最近更新 {formatLocalTime(candidate.latestModifiedAt)}</span>

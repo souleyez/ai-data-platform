@@ -47,6 +47,8 @@ test('discoverCandidateDirectories should summarize files and hotspots under com
     assert.equal(documentsCandidate?.fileCount, 3);
     assert.equal(documentsCandidate?.pendingScan, false);
     assert.deepEqual(documentsCandidate?.sampleExtensions, ['.docx', '.md', '.pdf']);
+    assert.match(documentsCandidate?.discoveryExplanation || '', /系统兜底目录/);
+    assert.match(documentsCandidate?.discoveryExplanation || '', /3 个可扫描文件/);
     assert.ok(documentsCandidate?.latestModifiedAt);
     assert.equal(documentsCandidate?.hotspots.length, 2);
     assert.deepEqual(
@@ -55,6 +57,7 @@ test('discoverCandidateDirectories should summarize files and hotspots under com
     );
     assert.equal(documentsCandidate?.hotspots[0]?.fileCount, 2);
     assert.deepEqual(documentsCandidate?.hotspots[0]?.sampleExtensions, ['.docx', '.pdf']);
+    assert.match(documentsCandidate?.hotspots[0]?.discoveryExplanation || '', /热点子目录/);
 
     assert.ok(desktopCandidate);
     assert.equal(desktopCandidate?.fileCount, 1);

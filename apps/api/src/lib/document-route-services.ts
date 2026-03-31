@@ -56,6 +56,7 @@ type CandidateHotspot = {
   path: string;
   label: string;
   reason: string;
+  discoveryExplanation?: string;
   exists: boolean;
   fileCount: number;
   latestModifiedAt: number;
@@ -76,6 +77,38 @@ type CandidateSummary = {
   sampleExtensions: string[];
   hotspots: CandidateHotspot[];
 };
+
+function buildDiscoveryExplanation(input: {
+  label: string;
+  reason: string;
+  discoverySource?: string;
+  fileCount: number;
+  truncated: boolean;
+  sampleExtensions: string[];
+  hotspots?: Array<{ label: string }>;
+}) {
+  const sourceLabel = input.discoverySource === 'openclaw'
+    ? 'OpenClaw 推荐'
+    : input.discoverySource === 'hotspot'
+      ? '热点子目录'
+    : input.discoverySource === 'manual'
+      ? '手动指定'
+      : input.discoverySource === 'existing'
+        ? '已加入扫描源'
+        : '系统兜底目录';
+  const fileCountText = input.fileCount > 0
+    ? `${input.fileCount}${input.truncated ? '+' : ''} 个可扫描文件`
+    : '暂未检测到可扫描文件';
+  const extensionText = input.sampleExtensions.length
+    ? `主要类型 ${input.sampleExtensions.join(' / ')}`
+    : '当前还没有明显的文档类型特征';
+  const hotspotNames = (input.hotspots || []).map((item) => item.label).filter(Boolean).slice(0, 3);
+  const hotspotText = hotspotNames.length
+    ? `热点子目录 ${hotspotNames.join(' / ')}${(input.hotspots || []).length > hotspotNames.length ? ' +' : ''}`
+    : '暂未识别出更集中的热点子目录';
+
+  return `${sourceLabel}：${input.reason} 已检测到 ${fileCountText}，${extensionText}；${hotspotText}。`;
+}
 
 export function buildNextScanRoots(currentScanRoots: string[], nextPrimary: string) {
   return [nextPrimary, ...currentScanRoots.filter((item) => item !== nextPrimary)];
@@ -213,6 +246,14 @@ async function summarizeCandidateDirectory(
         ...item,
         truncated: item.truncated || truncated,
         sampleExtensions: [...item.sampleExtensions].sort((a, b) => a.localeCompare(b)),
+        discoveryExplanation: buildDiscoveryExplanation({
+          label: item.label,
+          reason: item.reason,
+          discoverySource: 'hotspot',
+          fileCount: item.fileCount,
+          truncated: item.truncated || truncated,
+          sampleExtensions: [...item.sampleExtensions].sort((a, b) => a.localeCompare(b)),
+        }),
       })),
   };
 }
@@ -289,6 +330,7 @@ export async function discoverCandidateDirectories() {
     sampleExtensions: string[];
     hotspots: CandidateHotspot[];
     discoverySource?: string;
+    discoveryExplanation: string;
   }>;
   const seen = new Set<string>();
 
@@ -304,6 +346,15 @@ export async function discoverCandidateDirectories() {
       label: candidate.label,
       reason: candidate.reason,
       discoverySource: 'discoverySource' in candidate ? candidate.discoverySource : 'seed',
+      discoveryExplanation: buildDiscoveryExplanation({
+        label: candidate.label,
+        reason: candidate.reason,
+        discoverySource: 'discoverySource' in candidate ? candidate.discoverySource : 'seed',
+        fileCount: summary.fileCount,
+        truncated: summary.truncated,
+        sampleExtensions: summary.sampleExtensions,
+        hotspots: summary.hotspots,
+      }),
       ...summary,
     });
   }
