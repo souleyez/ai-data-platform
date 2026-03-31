@@ -78,7 +78,7 @@ export default function ScanSourcesPanel({
             <div>
               <strong>本机候选目录发现</strong>
               <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
-                优先通过 OpenClaw 给出候选目录建议，再由项目侧补上真实文件统计、文档类型和热点子目录。
+                优先通过 OpenClaw 发现更像文档仓库的本机目录，尤其是微信、企业微信、QQ、飞书、钉钉等常见 IM 存储位置，再由项目侧补上真实文件统计、文档类型和热点子目录。
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

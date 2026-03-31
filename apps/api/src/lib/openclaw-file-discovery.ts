@@ -103,6 +103,7 @@ function buildSystemPrompt() {
     'Return only a JSON array.',
     'Each item must be an object with: path, label, reason.',
     'Pick directories likely to contain business documents, contracts, reports, resumes, spreadsheets, exports, or working files.',
+    'Pay special attention to common IM and collaboration app storage roots such as WeChat, WeCom/WXWork, QQ/Tencent Files, TIM, Lark/Feishu, DingTalk, and similar received-file directories.',
     'Prefer broad parent directories or clearly useful hotspot subdirectories, not individual files.',
     'Do not include system folders with no likely user documents.',
     'Keep the list under 12 items.',

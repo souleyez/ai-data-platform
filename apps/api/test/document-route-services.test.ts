@@ -73,3 +73,63 @@ test('discoverCandidateDirectories should summarize files and hotspots under com
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('discoverCandidateDirectories should include common IM storage directories when they exist', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'candidate-discovery-im-'));
+  const userProfile = path.join(tempRoot, 'UserProfile');
+  const appData = path.join(userProfile, 'AppData', 'Roaming');
+  const localAppData = path.join(userProfile, 'AppData', 'Local');
+  const oneDrive = path.join(userProfile, 'OneDrive');
+  const documents = path.join(userProfile, 'Documents');
+
+  const previousEnv = {
+    USERPROFILE: process.env.USERPROFILE,
+    HOME: process.env.HOME,
+    APPDATA: process.env.APPDATA,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    OneDrive: process.env.OneDrive,
+  };
+
+  process.env.USERPROFILE = userProfile;
+  process.env.HOME = userProfile;
+  process.env.APPDATA = appData;
+  process.env.LOCALAPPDATA = localAppData;
+  process.env.OneDrive = oneDrive;
+
+  try {
+    await writeFixtureFile(path.join(documents, 'WeChat Files', 'wxid_demo', 'proposal.pdf'));
+    await writeFixtureFile(path.join(userProfile, 'xwechat_files', 'soulzyn_demo', 'quote.xlsx'));
+    await writeFixtureFile(path.join(documents, 'Tencent Files', '12345', 'chat.docx'));
+    await writeFixtureFile(path.join(appData, 'LarkShell', 'sdk_storage', 'meta.json'));
+    await writeFixtureFile(path.join(appData, 'DingTalk', 'meeting', 'agenda.docx'));
+
+    const items = await discoverCandidateDirectories();
+
+    const wechatCandidate = items.find((item) => item.label === 'WeChat Files');
+    const altWechatCandidate = items.find((item) => item.label === 'WeChat Files (Alt)');
+    const qqCandidate = items.find((item) => item.label === 'Tencent Files');
+    const larkCandidate = items.find((item) => item.label === 'Lark Cache');
+    const dingTalkCandidate = items.find((item) => item.label === 'DingTalk Cache');
+
+    assert.ok(wechatCandidate);
+    assert.ok(altWechatCandidate);
+    assert.ok(qqCandidate);
+    assert.ok(larkCandidate);
+    assert.ok(dingTalkCandidate);
+
+    assert.equal(wechatCandidate?.fileCount, 1);
+    assert.equal(altWechatCandidate?.fileCount, 1);
+    assert.equal(qqCandidate?.fileCount, 1);
+    assert.equal(larkCandidate?.fileCount, 1);
+    assert.equal(dingTalkCandidate?.fileCount, 1);
+  } finally {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (typeof value === 'undefined') {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

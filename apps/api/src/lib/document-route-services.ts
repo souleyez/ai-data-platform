@@ -259,6 +259,7 @@ async function summarizeCandidateDirectory(
 }
 
 function buildSeedCandidateDirectories(input: {
+  home: string;
   documents: string;
   desktop: string;
   downloads: string;
@@ -267,21 +268,35 @@ function buildSeedCandidateDirectories(input: {
   appData: string;
   localAppData: string;
 }) {
-  return [
+  const items = [
     { key: 'documents', label: 'Documents', reason: 'Default user documents folder.', path: input.documents },
     { key: 'desktop', label: 'Desktop', reason: 'Desktop often contains active working files.', path: input.desktop },
     { key: 'downloads', label: 'Downloads', reason: 'Downloads often contains newly received source files.', path: input.downloads },
     { key: 'onedrive-documents', label: 'OneDrive Documents', reason: 'OneDrive-synced documents folder.', path: input.oneDriveDocuments },
     { key: 'onedrive-desktop', label: 'OneDrive Desktop', reason: 'OneDrive-synced desktop folder.', path: input.oneDriveDesktop },
     { key: 'wechat-files', label: 'WeChat Files', reason: 'Common location for files received through WeChat.', path: input.documents ? path.join(input.documents, 'WeChat Files') : '' },
+    { key: 'wechat-files-alt', label: 'WeChat Files (Alt)', reason: 'Alternative local WeChat file root used by some desktop installs.', path: input.home ? path.join(input.home, 'xwechat_files') : '' },
     { key: 'wecom-cache', label: 'WXWork', reason: 'Common location for enterprise WeChat exports.', path: input.documents ? path.join(input.documents, 'WXWork') : '' },
-    { key: 'feishu-downloads', label: 'Lark Downloads', reason: 'Common location for Lark downloads.', path: input.downloads ? path.join(input.downloads, 'Lark') : '' },
     { key: 'qq-files', label: 'Tencent Files', reason: 'Common location for QQ received files.', path: input.documents ? path.join(input.documents, 'Tencent Files') : '' },
+    { key: 'tencent-appdata', label: 'Tencent AppData', reason: 'Roaming storage for WeChat, QQ, WeCom and related Tencent desktop apps.', path: input.appData ? path.join(input.appData, 'Tencent') : '' },
+    { key: 'wechat-appdata', label: 'WeChat Cache', reason: 'Local cache and export storage for desktop WeChat.', path: input.localAppData ? path.join(input.localAppData, 'Tencent', 'WeChat') : '' },
+    { key: 'wecom-appdata', label: 'WXWork Cache', reason: 'Local cache and export storage for enterprise WeChat / WeCom.', path: input.appData ? path.join(input.appData, 'Tencent', 'WXWork') : '' },
+    { key: 'tim-appdata', label: 'TIM Cache', reason: 'Roaming storage for TIM desktop files and cache.', path: input.appData ? path.join(input.appData, 'Tencent', 'TIM') : '' },
+    { key: 'feishu-downloads', label: 'Lark Downloads', reason: 'Common location for Lark downloads.', path: input.downloads ? path.join(input.downloads, 'Lark') : '' },
     { key: '360-downloads', label: '360 Downloads', reason: 'Common location for 360 browser downloads.', path: input.downloads ? path.join(input.downloads, '360Downloads') : '' },
     { key: 'baidu-downloads', label: 'BaiduNetdisk Download', reason: 'Common location for Baidu Netdisk downloads.', path: input.downloads ? path.join(input.downloads, 'BaiduNetdiskDownload') : '' },
     { key: 'feishu-appdata', label: 'Lark Cache', reason: 'Possible local cache/export location for Lark.', path: input.appData ? path.join(input.appData, 'LarkShell') : '' },
-    { key: 'wechat-appdata', label: 'WeChat Cache', reason: 'Possible local cache/export location for WeChat.', path: input.localAppData ? path.join(input.localAppData, 'Tencent', 'WeChat') : '' },
+    { key: 'dingtalk-appdata', label: 'DingTalk Cache', reason: 'Common roaming storage for DingTalk desktop files and cache.', path: input.appData ? path.join(input.appData, 'DingTalk') : '' },
   ].filter((item) => item.path) satisfies OpenClawDiscoverySeed[];
+
+  const deduped = new Map<string, OpenClawDiscoverySeed>();
+  for (const item of items) {
+    const normalizedPath = path.resolve(item.path).toLowerCase();
+    if (!normalizedPath || deduped.has(normalizedPath)) continue;
+    deduped.set(normalizedPath, item);
+  }
+
+  return [...deduped.values()];
 }
 
 export async function discoverCandidateDirectories() {
@@ -296,6 +311,7 @@ export async function discoverCandidateDirectories() {
   const oneDriveDesktop = oneDrive ? path.join(oneDrive, 'Desktop') : '';
 
   const seedCandidates = buildSeedCandidateDirectories({
+    home,
     documents,
     desktop,
     downloads,
