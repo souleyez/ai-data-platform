@@ -272,6 +272,12 @@ export function finalizeKnowledgeRoute(
   signals: KnowledgeRouteSignals,
 ): KnowledgeChatRouteKind {
   if (signals.explicitOutputArtifact && !signals.outputSuppressed) return 'output';
+  if (!signals.explicitOutputArtifact && contract.route === 'output') {
+    if (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument) return 'detail';
+    if (signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
+    if (signals.summaryRequest || signals.explicitKnowledgeScope) return 'detail';
+    return 'general';
+  }
   if (signals.outputSuppressed && contract.route === 'output') {
     if (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument) return 'detail';
     if (signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';

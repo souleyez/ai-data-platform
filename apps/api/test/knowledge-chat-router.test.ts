@@ -188,6 +188,29 @@ test('resolveKnowledgeChatRoute should keep order summary prompts on detail when
   assert.equal(decision.contract.requestedForm, 'answer');
 });
 
+test('resolveKnowledgeChatRoute should not allow cloud output routing without an explicit deliverable artifact', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '帮我整理一下简历库最近几份候选人的情况',
+    chatHistory: [],
+    libraries: LIBRARIES,
+  }, {
+    resolveCloudContract: async () => ({
+      route: 'output',
+      subject: '简历',
+      requestedForm: 'page',
+      targetScope: 'comparison',
+      needsLiveDetail: true,
+      normalizedRequest: '帮我整理一下简历库最近几份候选人的情况',
+      rationale: 'cloud over-classified this as a deliverable',
+      confidence: 0.83,
+    }),
+  });
+
+  assert.equal(decision.route, 'detail');
+  assert.equal(decision.evidenceMode, 'live_detail');
+  assert.equal(decision.contract.requestedForm, 'answer');
+});
+
 test('resolveKnowledgeChatRoute should keep casual chat on the general route', async () => {
   const decision = await resolveKnowledgeChatRoute({
     prompt: '今天帮我想个产品名字',

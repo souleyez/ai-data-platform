@@ -14,9 +14,6 @@ import {
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
-import {
-  buildKnowledgeCatalogPrompt,
-} from './knowledge-prompts.js';
 import { runOpenClawChat } from './openclaw-adapter.js';
 import type { ChatOutput } from './knowledge-output.js';
 
@@ -34,23 +31,6 @@ export type GeneralKnowledgeDispatchResult = {
   evidenceMode?: KnowledgeEvidenceMode | null;
   intentContract?: KnowledgeIntentContract | null;
 };
-
-function buildCatalogContextBlock(
-  libraries: Array<{ key: string; label: string }>,
-  contract: KnowledgeIntentContract,
-) {
-  const libraryText = libraries.length
-    ? libraries.map((item) => item.label || item.key).join('、')
-    : '当前知识目录';
-
-  return [
-    `Current route: catalog`,
-    `Evidence state: catalog_memory`,
-    `Preferred libraries: ${libraryText}`,
-    `Target scope: ${contract.targetScope}`,
-    `Normalized request: ${contract.normalizedRequest}`,
-  ].join('\n');
-}
 
 export async function runGeneralKnowledgeAwareChat(input: {
   prompt: string;
@@ -130,12 +110,15 @@ export async function runGeneralKnowledgeAwareChat(input: {
     };
   }
 
-  if (routeDecision.route === 'detail') {
+  if (routeDecision.route === 'catalog' || routeDecision.route === 'detail') {
     const result = await executeKnowledgeAnswer({
       prompt: routeDecision.contract.normalizedRequest || prompt,
       preferredLibraries: routeDecision.libraries,
       sessionUser,
       chatHistory,
+      answerMode: routeDecision.evidenceMode === 'catalog_memory'
+        ? 'catalog_memory'
+        : 'live_detail',
     });
 
     return {
@@ -146,32 +129,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: result.mode,
       debug: null,
       conversationState: null,
-      routeKind: 'detail',
-      evidenceMode: routeDecision.evidenceMode,
-      intentContract: routeDecision.contract,
-    };
-  }
-
-  if (routeDecision.route === 'catalog') {
-    const cloud = await runOpenClawChat({
-      prompt: routeDecision.contract.normalizedRequest || prompt,
-      sessionUser,
-      chatHistory,
-      systemPrompt: buildKnowledgeCatalogPrompt(),
-      contextBlocks: [
-        buildCatalogContextBlock(routeDecision.libraries, routeDecision.contract),
-      ],
-    });
-
-    return {
-      libraries: routeDecision.libraries,
-      content: cloud.content,
-      output: { type: 'answer', content: cloud.content },
-      intent: routeDecision.libraries.length ? 'report' : 'general',
-      mode: 'openclaw',
-      debug: null,
-      conversationState: null,
-      routeKind: 'catalog',
+      routeKind: routeDecision.route,
       evidenceMode: routeDecision.evidenceMode,
       intentContract: routeDecision.contract,
     };
