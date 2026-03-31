@@ -8,32 +8,57 @@ type KnowledgeScope = {
   contentFocus?: string;
 };
 
+type KnowledgeContextOptions = {
+  maxDocuments?: number;
+  maxEvidence?: number;
+  summaryLength?: number;
+  includeExcerpt?: boolean;
+  maxClaimsPerDocument?: number;
+  maxEvidenceChunksPerDocument?: number;
+  maxStructuredProfileEntries?: number;
+  maxStructuredArrayValues?: number;
+  maxStructuredObjectEntries?: number;
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function toText(value: unknown) {
   return String(value || '').trim();
 }
 
-function formatStructuredProfile(profile: ParsedDocument['structuredProfile']) {
+function clampPositiveInt(value: number | undefined, fallback: number, max: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return Math.max(1, Math.min(Math.floor(numeric), max));
+}
+
+function formatStructuredProfile(
+  profile: ParsedDocument['structuredProfile'],
+  options?: KnowledgeContextOptions,
+) {
   if (!profile || typeof profile !== 'object') return '';
+
+  const maxEntries = clampPositiveInt(options?.maxStructuredProfileEntries, 8, 16);
+  const maxArrayValues = clampPositiveInt(options?.maxStructuredArrayValues, 5, 8);
+  const maxObjectEntries = clampPositiveInt(options?.maxStructuredObjectEntries, 4, 8);
 
   return Object.entries(profile)
     .flatMap(([key, value]) => {
       if (Array.isArray(value)) {
-        const compact = value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 5);
+        const compact = value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, maxArrayValues);
         return compact.length ? [`${key}: ${compact.join('、')}`] : [];
       }
       if (value && typeof value === 'object') {
         const compact = Object.entries(value as Record<string, unknown>)
           .map(([entryKey, entryValue]) => `${entryKey}:${String(entryValue || '').trim()}`)
           .filter((entry) => !entry.endsWith(':'))
-          .slice(0, 4);
+          .slice(0, maxObjectEntries);
         return compact.length ? [`${key}: ${compact.join('；')}`] : [];
       }
       const text = String(value || '').trim();
       return text ? [`${key}: ${text}`] : [];
     })
-    .slice(0, 8)
+    .slice(0, maxEntries)
     .join('\n');
 }
 
@@ -228,24 +253,35 @@ export function buildKnowledgeContext(
   libraries: KnowledgeLibrary[],
   retrieval: RetrievalResult | { documents: any[]; evidenceMatches: any[] },
   scope?: KnowledgeScope,
+  options?: KnowledgeContextOptions,
 ) {
-  const documents = sortDocumentsForKnowledgeContext(retrieval.documents).slice(0, 6);
-  const evidence = retrieval.evidenceMatches.slice(0, 8);
+  const maxDocuments = clampPositiveInt(options?.maxDocuments, 6, 12);
+  const maxEvidence = clampPositiveInt(options?.maxEvidence, 8, 16);
+  const maxClaimsPerDocument = clampPositiveInt(options?.maxClaimsPerDocument, 2, 4);
+  const maxEvidenceChunksPerDocument = clampPositiveInt(options?.maxEvidenceChunksPerDocument, 2, 4);
+  const summaryLength = clampPositiveInt(options?.summaryLength, 220, 400);
+  const includeExcerpt = options?.includeExcerpt !== false;
+
+  const documents = sortDocumentsForKnowledgeContext(retrieval.documents).slice(0, maxDocuments);
+  const evidence = retrieval.evidenceMatches.slice(0, maxEvidence);
   const documentBlocks = documents.map((item: ParsedDocument, index: number) => {
     const evidenceChunks = (item.evidenceChunks || [])
-      .slice(0, 2)
+      .slice(0, maxEvidenceChunksPerDocument)
       .map((chunk) => String(chunk?.text || '').trim())
       .filter(Boolean);
     const claims = (item.claims || [])
-      .slice(0, 2)
+      .slice(0, maxClaimsPerDocument)
       .map((claim) => [claim.subject, claim.predicate, claim.object].filter(Boolean).join(' '))
       .filter(Boolean);
-    const profile = formatStructuredProfile(item.structuredProfile);
+    const profile = formatStructuredProfile(item.structuredProfile, options);
+    const summary = toText(item.summary).slice(0, summaryLength)
+      || (includeExcerpt ? toText(item.excerpt).slice(0, summaryLength) : '')
+      || '无摘要';
 
     return [
       `文档 ${index + 1}: ${item.title || item.name}`,
       `类型：${item.schemaType || item.category || 'generic'}`,
-      `摘要：${item.summary || item.excerpt || '无摘要'}`,
+      `摘要：${summary}`,
       profile ? `结构化重点：\n${profile}` : '',
       claims.length ? `关键结论：\n${claims.map((text, claimIndex) => `${claimIndex + 1}. ${text}`).join('\n')}` : '',
       evidenceChunks.length

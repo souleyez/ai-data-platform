@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
 import {
+  buildKnowledgeContext,
   buildKnowledgeRetrievalQuery,
   filterDocumentsByContentFocus,
   filterDocumentsByTimeRange,
@@ -88,4 +89,69 @@ test('buildKnowledgeRetrievalQuery should retain time, content and library hints
   assert.match(query, /全部时间/);
   assert.match(query, /人才简历知识库/);
   assert.doesNotMatch(query, /输出/);
+});
+
+test('buildKnowledgeContext should honor compact limits for lighter output prompts', () => {
+  const documents = [
+    makeDocument({
+      path: 'C:/tmp/1700000000100-order-1.csv',
+      name: 'order-1.csv',
+      title: '订单汇总 A',
+      summary: '覆盖多渠道经营和库存健康。',
+      excerpt: 'excerpt-a',
+      structuredProfile: {
+        platformSignals: ['tmall', 'jd', 'douyin'],
+        metricSignals: ['gmv', 'inventory-index'],
+      },
+      claims: [
+        { subject: 'A', predicate: 'focus', object: 'GMV' },
+        { subject: 'A', predicate: 'risk', object: 'inventory' },
+      ],
+      evidenceChunks: [
+        { text: 'evidence-a-1' },
+        { text: 'evidence-a-2' },
+      ],
+    }),
+    makeDocument({
+      path: 'C:/tmp/1700000000200-order-2.csv',
+      name: 'order-2.csv',
+      title: '订单汇总 B',
+      summary: '覆盖补货优先级和断货预警。',
+      structuredProfile: {
+        replenishmentSignals: ['replenishment', 'restock'],
+        anomalySignals: ['anomaly'],
+      },
+      claims: [{ subject: 'B', predicate: 'focus', object: 'restock' }],
+      evidenceChunks: [{ text: 'evidence-b-1' }],
+    }),
+  ] as ParsedDocument[];
+
+  const context = buildKnowledgeContext(
+    '基于订单分析知识库生成库存与补货驾驶舱',
+    [{ key: 'orders', label: '订单分析' }],
+    {
+      documents,
+      evidenceMatches: documents.flatMap((item) => (item.evidenceChunks || []).map((chunk) => ({
+        item,
+        chunkText: typeof chunk === 'string' ? chunk : chunk.text || '',
+      }))),
+    },
+    undefined,
+    {
+      maxDocuments: 1,
+      maxEvidence: 2,
+      summaryLength: 10,
+      includeExcerpt: false,
+      maxClaimsPerDocument: 1,
+      maxEvidenceChunksPerDocument: 1,
+      maxStructuredProfileEntries: 1,
+      maxStructuredArrayValues: 2,
+    },
+  );
+
+  assert.match(context, /文档 1: 订单汇总 B|文档 1: 订单汇总 A/);
+  assert.doesNotMatch(context, /文档 2:/);
+  assert.doesNotMatch(context, /excerpt-a/);
+  assert.doesNotMatch(context, /2\. A risk inventory/);
+  assert.doesNotMatch(context, /2\. evidence-a-2/);
 });

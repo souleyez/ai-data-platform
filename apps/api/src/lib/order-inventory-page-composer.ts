@@ -210,9 +210,13 @@ function detectOrderInventoryRequestView(input: {
   ].join(' '));
 
   if (!text) return 'generic';
-  if (/inventory|stock|replenishment|restock|库存|补货|缺货|周转/.test(text)) return 'stock';
-  if (/category|sku|品类|类目|商品/.test(text)) return 'category';
-  if (/platform|channel|tmall|jd|douyin|amazon|shopify|平台|渠道|天猫|京东|抖音/.test(text)) return 'platform';
+  const hasStock = /inventory|stock|replenishment|restock|库存|补货|缺货|周转/.test(text);
+  const hasCategory = /category|sku|品类|类目|商品/.test(text);
+  const hasPlatform = /platform|channel|tmall|jd|douyin|amazon|shopify|平台|渠道|天猫|京东|抖音/.test(text);
+  if (hasStock) return 'stock';
+  if (hasCategory && hasPlatform) return 'generic';
+  if (hasCategory) return 'category';
+  if (hasPlatform) return 'platform';
   return 'generic';
 }
 
@@ -339,11 +343,10 @@ function buildDocumentSnapshot(item: ParsedDocument, compact = false) {
     name: sanitizeText(item.name, 120),
     title: selectOrderComposerDocumentTitle(item),
     bizCategory: sanitizeText(item.bizCategory, 40),
-    summary: sanitizeText(item.summary, compact ? 120 : 220),
-    excerpt: compact ? '' : sanitizeText(item.excerpt, 120),
-    topicTags: toStringArray(item.topicTags).slice(0, compact ? 3 : 5),
+    summary: sanitizeText(item.summary || item.excerpt, compact ? 100 : 160),
+    topicTags: toStringArray(item.topicTags).slice(0, compact ? 2 : 4),
     structuredSignals: keys.reduce<JsonRecord>((acc, key) => {
-      const values = collectProfileStrings(item, [key]).map(formatSignalLabel).slice(0, compact ? 3 : 5);
+      const values = collectProfileStrings(item, [key]).map(formatSignalLabel).slice(0, compact ? 2 : 3);
       if (values.length) acc[key] = values;
       return acc;
     }, {}),
@@ -361,39 +364,39 @@ function buildComposerContext(input: {
   const view = detectOrderInventoryRequestView(input);
   const evidenceDocuments = selectOrderInventoryEvidenceDocuments(
     input.documents,
-    { maxDocuments: compact ? 3 : 4 },
+    { maxDocuments: compact ? 2 : 3 },
   );
-  const channels = buildRankedCountList(evidenceDocuments.flatMap(collectChannelSignals), compact ? 4 : 6);
-  const categories = buildRankedCountList(evidenceDocuments.flatMap(collectCategorySignals), compact ? 4 : 6);
-  const metrics = buildRankedCountList(evidenceDocuments.flatMap(collectMetricSignals), compact ? 4 : 6);
-  const replenishment = buildRankedCountList(evidenceDocuments.flatMap(collectReplenishmentSignals), compact ? 4 : 6);
-  const anomalies = buildRankedCountList(evidenceDocuments.flatMap(collectAnomalySignals), compact ? 4 : 6);
+  const channels = buildRankedCountList(evidenceDocuments.flatMap(collectChannelSignals), compact ? 3 : 4);
+  const categories = buildRankedCountList(evidenceDocuments.flatMap(collectCategorySignals), compact ? 3 : 4);
+  const metrics = buildRankedCountList(evidenceDocuments.flatMap(collectMetricSignals), compact ? 3 : 4);
+  const replenishment = buildRankedCountList(evidenceDocuments.flatMap(collectReplenishmentSignals), compact ? 3 : 4);
+  const anomalies = buildRankedCountList(evidenceDocuments.flatMap(collectAnomalySignals), compact ? 3 : 4);
 
   return {
     requestText: sanitizeText(input.requestText, 240),
     view,
     envelope: input.envelope ? {
       title: sanitizeText(input.envelope.title, 120),
-      outputHint: sanitizeText(input.envelope.outputHint, compact ? 120 : 220),
-      pageSections: input.envelope.pageSections || [],
+      outputHint: sanitizeText(input.envelope.outputHint, compact ? 100 : 160),
+      pageSections: (input.envelope.pageSections || []).slice(0, compact ? 5 : 6),
     } : null,
     reportPlan: input.reportPlan ? {
-      objective: sanitizeText(input.reportPlan.objective, compact ? 160 : 240),
-      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, compact ? 3 : 5),
-      evidenceRules: (input.reportPlan.evidenceRules || []).slice(0, compact ? 3 : 5),
-      completionRules: (input.reportPlan.completionRules || []).slice(0, compact ? 3 : 5),
-      cards: (input.reportPlan.cards || []).slice(0, compact ? 4 : 5).map((item) => ({
+      objective: sanitizeText(input.reportPlan.objective, compact ? 120 : 180),
+      stylePriorities: (input.reportPlan.stylePriorities || []).slice(0, compact ? 2 : 3),
+      evidenceRules: (input.reportPlan.evidenceRules || []).slice(0, compact ? 2 : 3),
+      completionRules: (input.reportPlan.completionRules || []).slice(0, compact ? 2 : 3),
+      cards: (input.reportPlan.cards || []).slice(0, compact ? 3 : 4).map((item) => ({
         label: sanitizeText(item.label, 80),
-        purpose: sanitizeText(item.purpose, compact ? 100 : 160),
+        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
       })),
-      charts: (input.reportPlan.charts || []).slice(0, compact ? 2 : 4).map((item) => ({
+      charts: (input.reportPlan.charts || []).slice(0, compact ? 2 : 3).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, compact ? 100 : 160),
+        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
       })),
-      sections: (input.reportPlan.sections || []).slice(0, compact ? 5 : 7).map((item) => ({
+      sections: (input.reportPlan.sections || []).slice(0, compact ? 4 : 5).map((item) => ({
         title: sanitizeText(item.title, 80),
-        purpose: sanitizeText(item.purpose, compact ? 100 : 160),
-        evidenceFocus: sanitizeText(item.evidenceFocus, compact ? 100 : 160),
+        purpose: sanitizeText(item.purpose, compact ? 80 : 120),
+        evidenceFocus: sanitizeText(item.evidenceFocus, compact ? 80 : 120),
       })),
     } : null,
     cockpit: {

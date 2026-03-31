@@ -60,7 +60,7 @@ test('normalizeReportOutput should hydrate order cockpit pages to the minimum vi
   );
 
   assert.equal(output.type, 'page');
-  assert.equal(output.title, '订单渠道经营驾驶舱');
+  assert.equal(output.title, '库存与补货驾驶舱');
   assert.ok((output.page?.cards || []).length >= 4);
   assert.ok((output.page?.charts || []).length >= 2);
   assert.equal(output.page?.sections?.[0]?.title, '经营总览');
@@ -220,4 +220,65 @@ test('normalizeReportOutput should unwrap nested stringified order page payloads
   assert.ok((output.page?.cards || []).some((item) => item.label === '渠道GMV'));
   assert.ok((output.page?.charts || []).length >= 2);
   assert.doesNotMatch(output.page?.summary || '', /^\s*\{/);
+});
+
+test('normalizeReportOutput should keep stock requests on inventory cockpit titles and labels', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'inventory-stock.csv',
+      name: 'inventory-stock.csv',
+      ext: '.csv',
+      title: 'Q1 库存与补货快照',
+      category: 'general',
+      bizCategory: 'inventory',
+      parseStatus: 'parsed',
+      parseMethod: 'csv-utf8',
+      summary: '含库存指数、断货风险、补货优先级和跨仓调拨信号。',
+      excerpt: 'platform_focus,inventory_index,days_of_cover,replenishment_priority,risk_flag',
+      fullText: [
+        'platform_focus,category,sku,inventory_index,days_of_cover,replenishment_priority,risk_flag',
+        'Douyin,智能穿戴,旗舰手表X1,128,18,P0,high',
+        'Tmall,耳机,降噪耳机Pro,86,26,P1,medium',
+      ].join('\n'),
+      extractedChars: 260,
+      schemaType: 'report',
+      topicTags: ['库存监控', '库存管理', '备货建议'],
+      structuredProfile: {
+        metricSignals: ['inventory-index'],
+        replenishmentSignals: ['replenishment'],
+        anomalySignals: ['anomaly'],
+      },
+    },
+  ];
+
+  const output = normalizeReportOutput(
+    'page',
+    '基于订单分析知识库生成库存与补货驾驶舱静态页，重点看断货风险、滞销库存和72小时补货优先级',
+    JSON.stringify({
+      title: '订单多渠道经营驾驶舱',
+      summary: '库存风险与补货动作需要优先前置。',
+      cards: [
+        { label: '库存健康', value: '3 项', note: 'inventory-index / stock' },
+      ],
+      sections: [
+        { title: '经营总览', body: '先看库存风险，再看补货动作。' },
+      ],
+      charts: [
+        { title: '库存健康信号', items: [{ label: 'inventory-index', value: 3 }] },
+      ],
+    }),
+    {
+      title: '订单多渠道经营驾驶舱',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '输出库存与补货驾驶舱，突出库存健康、高风险SKU和72小时补货优先级。',
+      pageSections: ['经营总览', '库存健康', '高风险SKU', '动销与周转', '补货优先级', '异常波动解释', 'AI综合分析'],
+    },
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '库存与补货驾驶舱');
+  assert.ok((output.page?.cards || []).some((item) => item.label === '库存健康指数'));
+  assert.ok((output.page?.cards || []).some((item) => item.label === '72小时补货动作'));
 });

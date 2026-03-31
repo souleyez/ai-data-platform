@@ -2014,9 +2014,13 @@ function hasOrderStockSignal(text: string) {
 
 function resolveOrderRequestView(requestText: string): OrderRequestView {
   const text = normalizeText(requestText);
-  if (hasOrderStockSignal(text)) return 'stock';
-  if (hasOrderCategorySignal(text)) return 'category';
-  if (hasOrderPlatformSignal(text)) return 'platform';
+  const hasStock = hasOrderStockSignal(text);
+  const hasCategory = hasOrderCategorySignal(text);
+  const hasPlatform = hasOrderPlatformSignal(text);
+  if (hasStock) return 'stock';
+  if (hasCategory && hasPlatform) return 'generic';
+  if (hasCategory) return 'category';
+  if (hasPlatform) return 'platform';
   return 'generic';
 }
 
@@ -2267,8 +2271,24 @@ function defaultOrderPageSections(view: OrderRequestView) {
   return ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'];
 }
 
+function hasExpectedOrderTitle(view: OrderRequestView, title: string) {
+  const normalized = normalizeText(title);
+  if (!normalized) return false;
+  if (view === 'platform') {
+    return containsAny(normalized, ['platform', 'channel', '渠道', '平台']);
+  }
+  if (view === 'category') {
+    return containsAny(normalized, ['category', 'sku', '品类', '类目', '商品']);
+  }
+  if (view === 'stock') {
+    return containsAny(normalized, ['inventory', 'stock', 'replenishment', 'restock', '库存', '补货', '周转']);
+  }
+  return containsAny(normalized, ['order', 'cockpit', 'dashboard', '经营', '驾驶舱', '渠道']);
+}
+
 function buildOrderPageTitle(view: OrderRequestView, envelope?: ReportTemplateEnvelope | null) {
-  if (sanitizeText(envelope?.title)) return sanitizeText(envelope?.title);
+  const envelopeTitle = sanitizeText(envelope?.title);
+  if (envelopeTitle && hasExpectedOrderTitle(view, envelopeTitle)) return envelopeTitle;
   if (view === 'platform') return '订单渠道经营驾驶舱';
   if (view === 'category') return '订单品类/SKU经营驾驶舱';
   if (view === 'stock') return '库存与补货驾驶舱';
@@ -2302,11 +2322,11 @@ function buildOrderPageCards(view: OrderRequestView, stats: OrderPageStats) {
 
   if (view === 'stock') {
     return [
-      { label: '库存健康', value: `${Math.max(stats.metrics.length, 1)} 项`, note: metricText },
-      { label: '缺货风险SKU', value: `${Math.max(stats.anomalies.length, 1)} 类`, note: riskText },
-      { label: '滞销库存占比', value: `${Math.max(stats.categories.length, 1)} 组`, note: categoryText },
-      { label: '建议补货量', value: `${Math.max(stats.replenishment.length, 1)} 条动作`, note: actionText },
-      { label: '跨仓调拨', value: `${Math.max(stats.channels.length, 1)} 个渠道/仓别`, note: channelText },
+      { label: '库存健康指数', value: `${Math.max(stats.metrics.length, 1)} 项`, note: metricText },
+      { label: '断货风险SKU', value: `${Math.max(stats.anomalies.length, 1)} 类`, note: riskText },
+      { label: '滞销库存池', value: `${Math.max(stats.categories.length, 1)} 组`, note: categoryText },
+      { label: '72小时补货动作', value: `${Math.max(stats.replenishment.length, 1)} 条`, note: actionText },
+      { label: '跨仓调拨队列', value: `${Math.max(stats.channels.length, 1)} 个渠道/仓别`, note: channelText },
     ];
   }
 
@@ -2397,9 +2417,9 @@ function buildOrderSectionBlueprints(view: OrderRequestView, summary: string, st
 function buildOrderPageCharts(view: OrderRequestView, stats: OrderPageStats) {
   if (view === 'stock') {
     return [
-      { title: '库存健康信号', items: stats.metrics.slice(0, 6) },
-      { title: '高风险SKU队列', items: stats.anomalies.slice(0, 6) },
-      { title: 'SKU周转/库存压力', items: stats.categories.slice(0, 6) },
+      { title: '库存健康指数', items: stats.metrics.slice(0, 6) },
+      { title: '断货/超库存风险队列', items: stats.anomalies.slice(0, 6) },
+      { title: 'SKU周转压力', items: stats.categories.slice(0, 6) },
       { title: '72小时补货优先级', items: stats.replenishment.slice(0, 6) },
     ].filter((item) => item.items.length);
   }
@@ -2428,6 +2448,28 @@ function buildOrderPageCharts(view: OrderRequestView, stats: OrderPageStats) {
     { title: '库存与趋势信号', items: stats.metrics.slice(0, 6) },
     { title: '补货动作优先级', items: stats.replenishment.slice(0, 6) },
   ].filter((item) => item.items.length);
+}
+
+function normalizeStockCardShell(cards: NonNullable<KnowledgePageOutput['page']['cards']>) {
+  return cards.map((card) => {
+    const label = sanitizeText(card.label);
+    if (label === '库存健康') return { ...card, label: '库存健康指数' };
+    if (label === '缺货风险SKU') return { ...card, label: '断货风险SKU' };
+    if (label === '滞销库存占比') return { ...card, label: '滞销库存池' };
+    if (label === '建议补货量') return { ...card, label: '72小时补货动作' };
+    if (label === '跨仓调拨') return { ...card, label: '跨仓调拨队列' };
+    return card;
+  });
+}
+
+function normalizeStockChartShell(charts: NonNullable<KnowledgePageOutput['page']['charts']>) {
+  return charts.map((chart) => {
+    const title = sanitizeText(chart.title);
+    if (title === '库存健康信号') return { ...chart, title: '库存健康指数' };
+    if (title === '高风险SKU队列') return { ...chart, title: '断货/超库存风险队列' };
+    if (title === 'SKU周转/库存压力') return { ...chart, title: 'SKU周转压力' };
+    return chart;
+  });
 }
 
 function buildOrderPageOutput(
@@ -2503,9 +2545,13 @@ function hydrateOrderPageVisualShell(
 
   return {
     summary: page.summary || fallbackPage.summary,
-    cards: mergeCards(page.cards || [], fallbackPage.cards || [], 4),
+    cards: view === 'stock'
+      ? normalizeStockCardShell(mergeCards(page.cards || [], fallbackPage.cards || [], 5))
+      : mergeCards(page.cards || [], fallbackPage.cards || [], 4),
     sections: page.sections?.length ? page.sections : fallbackPage.sections,
-    charts: mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
+    charts: view === 'stock'
+      ? normalizeStockChartShell(mergeCharts(page.charts || [], fallbackPage.charts || [], 2))
+      : mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
   };
 }
 

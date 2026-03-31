@@ -50,9 +50,20 @@ import {
 import { runResumePageComposerDetailed } from './resume-page-composer.js';
 import { loadWorkspaceSkillBundle } from './workspace-skills.js';
 
-const ORDER_OUTPUT_MEMORY_LIMIT = 6;
-const ORDER_OUTPUT_DOC_LIMIT = 6;
-const ORDER_OUTPUT_EVIDENCE_LIMIT = 8;
+const ORDER_OUTPUT_MEMORY_LIMIT = 5;
+const ORDER_OUTPUT_DOC_LIMIT = 5;
+const ORDER_OUTPUT_EVIDENCE_LIMIT = 6;
+const ORDER_OUTPUT_CONTEXT_OPTIONS = {
+  maxDocuments: 3,
+  maxEvidence: 4,
+  summaryLength: 140,
+  includeExcerpt: false,
+  maxClaimsPerDocument: 1,
+  maxEvidenceChunksPerDocument: 1,
+  maxStructuredProfileEntries: 5,
+  maxStructuredArrayValues: 3,
+  maxStructuredObjectEntries: 3,
+} as const;
 
 function refineOrderOutputRetrieval(
   retrieval: RetrievalResult,
@@ -440,7 +451,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           buildKnowledgeContext(requestText, resolvedLibraries, effectiveRetrieval, {
             timeRange: input.timeRange,
             contentFocus: input.contentFocus,
-          }),
+          }, isOrderInventoryPageRequest ? ORDER_OUTPUT_CONTEXT_OPTIONS : undefined),
         ].filter(Boolean),
         systemPrompt: conceptPageMode
           ? buildKnowledgeConceptPagePrompt(
