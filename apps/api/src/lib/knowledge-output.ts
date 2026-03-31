@@ -2972,7 +2972,7 @@ function hydrateOrderPageVisualShell(
   };
 
   return {
-    summary: page.summary || fallbackPage.summary,
+    summary: looksLikeJsonEchoText(page.summary || '') ? fallbackPage.summary : (page.summary || fallbackPage.summary),
     cards: view === 'stock'
       ? buildStockShellCards(page.cards || [], fallbackPage.cards || [])
       : buildGenericShellCards(
@@ -3379,6 +3379,10 @@ export function normalizeReportOutput(
         envelope,
         normalizedOutput.page,
       );
+    }
+
+    if (normalizedOutput.page && (!normalizedOutput.content || looksLikeJsonEchoText(normalizedOutput.content))) {
+      normalizedOutput.content = normalizedOutput.page.summary || normalizedOutput.content;
     }
 
     if (resumeDocuments.length && normalizedOutput.page && options.allowResumeFallback !== false) {

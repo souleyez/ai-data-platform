@@ -349,3 +349,67 @@ test('normalizeReportOutput should keep mixed channel and sku prompts on the gen
   assert.equal(output.type, 'page');
   assert.equal(output.title, '订单多渠道经营驾驶舱');
 });
+
+test('normalizeReportOutput should replace malformed json-echo order summaries with fallback order text', () => {
+  const documents: ParsedDocument[] = [
+    {
+      path: 'order-generic.csv',
+      name: 'order-generic.csv',
+      ext: '.csv',
+      title: 'Q1 多渠道经营汇总',
+      category: 'general',
+      bizCategory: 'order',
+      parseStatus: 'parsed',
+      parseMethod: 'csv-utf8',
+      summary: '覆盖渠道贡献、SKU结构、库存健康和补货动作。',
+      excerpt: 'platform,category,sku,inventory_index,replenishment_priority,net_sales',
+      fullText: [
+        'platform,category,sku,inventory_index,replenishment_priority,net_sales',
+        'Douyin,智能穿戴,旗舰手表X1,1.55,P2,18843.87',
+        'Tmall,耳机,降噪耳机Pro,0.86,P1,9659.54',
+      ].join('\n'),
+      extractedChars: 260,
+      schemaType: 'report',
+      topicTags: ['订单分析', '渠道经营', 'SKU结构'],
+      structuredProfile: {
+        platformSignals: ['douyin', 'tmall'],
+        categorySignals: ['智能穿戴', '耳机'],
+        replenishmentSignals: ['replenishment'],
+        anomalySignals: ['anomaly'],
+      },
+    },
+  ];
+
+  const rawEcho = '{"title":"订单品类/SKU经营驾驶舱","summary":"基于样本快照生成","page":{"summary":"抖音渠道主导","cards":[{"label":"渠道GMV","value":"样本快照"}]';
+  const output = normalizeReportOutput(
+    'page',
+    '基于订单分析知识库生成多渠道多SKU经营驾驶舱静态页',
+    JSON.stringify({
+      output: {
+        type: 'page',
+        title: '订单品类/SKU经营驾驶舱',
+        content: rawEcho,
+        page: {
+          summary: rawEcho,
+          cards: [{ label: '渠道GMV', value: '样本快照', note: '待校验' }],
+          sections: [{ title: '经营总览', body: rawEcho, bullets: [] }],
+          charts: [{ title: '渠道贡献结构', items: [{ label: 'Douyin', value: 1 }] }],
+        },
+      },
+    }),
+    {
+      title: '订单多渠道经营驾驶舱',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '输出多渠道、多SKU经营驾驶舱。',
+      pageSections: ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'],
+    },
+    documents,
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '订单多渠道经营驾驶舱');
+  assert.doesNotMatch(output.page?.summary || '', /^\s*\{/);
+  assert.equal(output.content, output.page?.summary);
+  assert.match(output.page?.summary || '', /净销售额重心|前置处理/);
+});
