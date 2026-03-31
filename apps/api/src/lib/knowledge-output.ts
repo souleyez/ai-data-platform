@@ -2175,13 +2175,13 @@ function shouldTreatOrderRiskAsMaterial(
   return false;
 }
 
-function pickTopOrderHighlights(items: Array<{ text: string; score: number }>, limit = 4) {
+function pickTopOrderHighlights(items: Array<{ key?: string; text: string; score: number }>, limit = 4) {
   const seen = new Set<string>();
   const results: string[] = [];
   for (const item of items
     .filter((entry) => entry.text)
     .sort((left, right) => right.score - left.score || left.text.localeCompare(right.text, 'zh-CN'))) {
-    const normalized = normalizeText(item.text);
+    const normalized = normalizeText(item.key || item.text);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     results.push(item.text);
@@ -2314,8 +2314,8 @@ function collectOrderCsvSupportingLines(item: ParsedDocument, limit = 3) {
 function buildOrderCsvDerivedFacts(documents: ParsedDocument[]) {
   const platformAmounts = new Map<string, { label: string; value: number }>();
   const categoryAmounts = new Map<string, { label: string; value: number }>();
-  const riskEntries: Array<{ text: string; score: number }> = [];
-  const actionEntries: Array<{ text: string; score: number }> = [];
+  const riskEntries: Array<{ key?: string; text: string; score: number }> = [];
+  const actionEntries: Array<{ key?: string; text: string; score: number }> = [];
 
   for (const item of documents) {
     const table = extractOrderCsvTable(item, 240);
@@ -2349,6 +2349,7 @@ function buildOrderCsvDerivedFacts(documents: ParsedDocument[]) {
       if (!subject) continue;
 
       const score = scoreOrderRiskHighlight(risk, priority, inventoryIndex, daysOfCover);
+      const highlightKey = [normalizeText(subject), normalizeText(platform)].filter(Boolean).join('::');
       if (shouldTreatOrderRiskAsMaterial(risk, priority, inventoryIndex, daysOfCover)) {
         const text = [
           subject,
@@ -2359,7 +2360,7 @@ function buildOrderCsvDerivedFacts(documents: ParsedDocument[]) {
         ]
           .filter(Boolean)
           .join(' / ');
-        riskEntries.push({ text, score });
+        riskEntries.push({ key: highlightKey, text, score });
       }
 
       if (priority || recommendation) {
@@ -2371,7 +2372,7 @@ function buildOrderCsvDerivedFacts(documents: ParsedDocument[]) {
         ]
           .filter(Boolean)
           .join(' / ');
-        actionEntries.push({ text, score: score + (recommendation ? 1 : 0) });
+        actionEntries.push({ key: highlightKey, text, score: score + (recommendation ? 1 : 0) });
       }
     }
   }
