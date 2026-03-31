@@ -11,28 +11,28 @@ import type { DocumentLibrary } from '../src/lib/document-libraries.js';
 const LIBRARIES: DocumentLibrary[] = [
   {
     key: 'resume',
-    label: '简历',
-    description: '人才简历库',
+    label: 'Resume',
+    description: 'Candidate resumes',
     createdAt: '2026-03-30T00:00:00.000Z',
   },
   {
     key: 'bids',
-    label: 'bids',
-    description: '标书库',
+    label: 'Bids',
+    description: 'Tender and bid documents',
     createdAt: '2026-03-30T00:00:00.000Z',
   },
   {
     key: 'order',
-    label: '订单分析',
-    description: '订单分析知识库',
+    label: 'Order Analytics',
+    description: 'Order and inventory knowledge library',
     createdAt: '2026-03-30T00:00:00.000Z',
   },
 ];
 
 test('extractKnowledgeIntentContract should parse strict router json', () => {
   const contract = extractKnowledgeIntentContract(
-    '{"route":"detail","subject":"简历","requestedForm":"answer","targetScope":"comparison","needsLiveDetail":true,"normalizedRequest":"对比简历库最新几份简历","rationale":"Need live detail for comparison.","confidence":0.88}',
-    '对比简历库最新几份简历',
+    '{"route":"detail","subject":"Resume","requestedForm":"answer","targetScope":"comparison","needsLiveDetail":true,"normalizedRequest":"Compare the latest resumes.","rationale":"Need live detail for comparison.","confidence":0.88}',
+    'Compare the latest resumes.',
   );
 
   assert.ok(contract);
@@ -44,9 +44,9 @@ test('extractKnowledgeIntentContract should parse strict router json', () => {
 
 test('buildKnowledgeRouterPrompt should preserve libraries and trigger signals', () => {
   const prompt = buildKnowledgeRouterPrompt({
-    prompt: '看看简历库最近几份简历，先简单说下，不用出表',
-    chatHistory: [{ role: 'user', content: '我想先筛一批候选人' }],
-    libraries: [{ key: 'resume', label: '简历' }],
+    prompt: 'Review the latest resume files first, but do not generate a table yet.',
+    chatHistory: [{ role: 'user', content: 'I want to shortlist a few candidates.' }],
+    libraries: [{ key: 'resume', label: 'Resume' }],
     signals: {
       explicitKnowledgeScope: true,
       explicitCatalogRequest: false,
@@ -61,7 +61,7 @@ test('buildKnowledgeRouterPrompt should preserve libraries and trigger signals',
     },
   });
 
-  assert.match(prompt, /Matched libraries: 简历/);
+  assert.match(prompt, /Matched libraries: Resume/);
   assert.match(prompt, /"outputSuppressed":true/);
   assert.match(prompt, /Current user request:/);
 });
@@ -70,11 +70,11 @@ test('finalizeKnowledgeRoute should keep negative output constraints from being 
   const route = finalizeKnowledgeRoute(
     {
       route: 'output',
-      subject: '简历',
+      subject: 'Resume',
       requestedForm: 'table',
       targetScope: 'comparison',
       needsLiveDetail: true,
-      normalizedRequest: '看看简历库最近几份简历，先简单说下，不用出表',
+      normalizedRequest: 'Review the latest resume files first, but do not generate a table yet.',
       rationale: 'cloud preferred output',
       confidence: 0.77,
     },
@@ -95,19 +95,19 @@ test('finalizeKnowledgeRoute should keep negative output constraints from being 
   assert.equal(route, 'detail');
 });
 
-test('resolveKnowledgeChatRoute should route inventory questions to catalog when only asking what exists', async () => {
+test('resolveKnowledgeChatRoute should route recent library inventory questions to catalog', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '简历库最近上传了什么，有哪些最新文档？',
+    prompt: 'What was uploaded recently in the resume library?',
     chatHistory: [],
     libraries: LIBRARIES,
   }, {
     resolveCloudContract: async () => ({
       route: 'catalog',
-      subject: '简历',
+      subject: 'Resume',
       requestedForm: 'answer',
       targetScope: 'latest_documents',
       needsLiveDetail: false,
-      normalizedRequest: '简历库最近上传了什么，有哪些最新文档？',
+      normalizedRequest: 'What was uploaded recently in the resume library?',
       rationale: 'catalog inventory request',
       confidence: 0.91,
     }),
@@ -121,17 +121,17 @@ test('resolveKnowledgeChatRoute should route inventory questions to catalog when
 
 test('resolveKnowledgeChatRoute should route latest resume comparison to detail', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '看看简历知识库内的简历，最新的几份对比下',
+    prompt: 'Compare the latest resumes in the resume library.',
     chatHistory: [],
     libraries: LIBRARIES,
   }, {
     resolveCloudContract: async () => ({
       route: 'detail',
-      subject: '简历',
+      subject: 'Resume',
       requestedForm: 'answer',
       targetScope: 'comparison',
       needsLiveDetail: true,
-      normalizedRequest: '对比简历库最新几份简历',
+      normalizedRequest: 'Compare the latest resumes in the resume library.',
       rationale: 'document comparison request',
       confidence: 0.86,
     }),
@@ -139,22 +139,22 @@ test('resolveKnowledgeChatRoute should route latest resume comparison to detail'
 
   assert.equal(decision.route, 'detail');
   assert.equal(decision.evidenceMode, 'live_detail');
-  assert.equal(decision.contract.normalizedRequest, '对比简历库最新几份简历');
+  assert.equal(decision.contract.normalizedRequest, 'Compare the latest resumes in the resume library.');
 });
 
 test('resolveKnowledgeChatRoute should route formal page requests to output', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '请基于简历库生成客户汇报静态页',
+    prompt: 'Generate a client-facing static page from the resume library.',
     chatHistory: [],
     libraries: LIBRARIES,
   }, {
     resolveCloudContract: async () => ({
       route: 'output',
-      subject: '简历',
+      subject: 'Resume',
       requestedForm: 'page',
       targetScope: 'comparison',
       needsLiveDetail: true,
-      normalizedRequest: '请基于简历库生成客户汇报静态页',
+      normalizedRequest: 'Generate a client-facing static page from the resume library.',
       rationale: 'formal deliverable request',
       confidence: 0.93,
     }),
@@ -167,17 +167,17 @@ test('resolveKnowledgeChatRoute should route formal page requests to output', as
 
 test('resolveKnowledgeChatRoute should keep order summary prompts on detail when there is no deliverable noun', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '查看订单分析知识库，概括Q1各渠道净销售额、前三品类和库存风险重点',
+    prompt: 'Summarize Q1 channel sales, top categories, and inventory risks from the order library.',
     chatHistory: [],
     libraries: LIBRARIES,
   }, {
     resolveCloudContract: async () => ({
       route: 'output',
-      subject: 'Q1订单分析知识库数据概括',
+      subject: 'Order Analytics',
       requestedForm: 'answer',
       targetScope: 'specific_document',
       needsLiveDetail: true,
-      normalizedRequest: '查看订单分析知识库，概括Q1各渠道净销售额、前三品类和库存风险重点',
+      normalizedRequest: 'Summarize Q1 channel sales, top categories, and inventory risks from the order library.',
       rationale: 'cloud over-classified this as a deliverable',
       confidence: 0.85,
     }),
@@ -190,17 +190,17 @@ test('resolveKnowledgeChatRoute should keep order summary prompts on detail when
 
 test('resolveKnowledgeChatRoute should not allow cloud output routing without an explicit deliverable artifact', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '帮我整理一下简历库最近几份候选人的情况',
+    prompt: 'Organize the latest candidates in the resume library.',
     chatHistory: [],
     libraries: LIBRARIES,
   }, {
     resolveCloudContract: async () => ({
       route: 'output',
-      subject: '简历',
+      subject: 'Resume',
       requestedForm: 'page',
       targetScope: 'comparison',
       needsLiveDetail: true,
-      normalizedRequest: '帮我整理一下简历库最近几份候选人的情况',
+      normalizedRequest: 'Organize the latest candidates in the resume library.',
       rationale: 'cloud over-classified this as a deliverable',
       confidence: 0.83,
     }),
@@ -213,11 +213,41 @@ test('resolveKnowledgeChatRoute should not allow cloud output routing without an
 
 test('resolveKnowledgeChatRoute should keep casual chat on the general route', async () => {
   const decision = await resolveKnowledgeChatRoute({
-    prompt: '今天帮我想个产品名字',
+    prompt: 'Help me think of a product name today.',
     chatHistory: [],
     libraries: LIBRARIES,
   });
 
   assert.equal(decision.route, 'general');
   assert.equal(decision.evidenceMode, null);
+});
+
+test('resolveKnowledgeChatRoute should keep broad local document discovery on catalog without locking to a prior library', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '\u80fd\u4e0d\u80fd\u627e\u627e\u4f60\u672c\u5730\u6240\u6709\u7684\u4e2d\u6587\u6587\u6863',
+    chatHistory: [
+      { role: 'user', content: '\u770b\u770b\u7b80\u5386\u77e5\u8bc6\u5e93\u5185\u7684\u7b80\u5386\uff0c\u6700\u65b0\u7684\u51e0\u4efd\u5bf9\u6bd4\u4e0b' },
+      { role: 'assistant', content: '...' },
+    ],
+    libraries: LIBRARIES,
+  });
+
+  assert.equal(decision.route, 'catalog');
+  assert.equal(decision.evidenceMode, 'catalog_memory');
+  assert.deepEqual(decision.libraries, []);
+});
+
+test('resolveKnowledgeChatRoute should clear library stickiness when the user says not only resume documents', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '\u662f\u627e\u4e2d\u6587\u6587\u6863\u5440\uff0c\u4e0d\u6b62\u662f\u7b80\u5386',
+    chatHistory: [
+      { role: 'user', content: '\u770b\u770b\u7b80\u5386\u77e5\u8bc6\u5e93\u5185\u7684\u7b80\u5386\uff0c\u6700\u65b0\u7684\u51e0\u4efd\u5bf9\u6bd4\u4e0b' },
+      { role: 'assistant', content: '...' },
+    ],
+    libraries: LIBRARIES,
+  });
+
+  assert.equal(decision.route, 'catalog');
+  assert.equal(decision.evidenceMode, 'catalog_memory');
+  assert.deepEqual(decision.libraries, []);
 });

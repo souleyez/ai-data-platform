@@ -61,12 +61,26 @@ export function buildPromptForScoring(
   prompt: string,
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>,
 ) {
+  if (isBroadCatalogDocumentQuery(prompt)) {
+    return String(prompt || '').trim();
+  }
   const recent = chatHistory
     .filter((item) => item.role === 'user')
     .map((item) => item.content)
     .slice(-3)
     .join(' ');
   return `${recent} ${prompt}`.trim();
+}
+
+export function isBroadCatalogDocumentQuery(prompt: string) {
+  const text = normalizeText(prompt);
+  if (!text) return false;
+
+  const mentionsDocuments = /(?:documents|document|docs|files|file|\u6587\u6863|\u6587\u4ef6)/.test(text);
+  const broadScope = /(?:all|every|local|native|disk|computer|\u6240\u6709|\u5168\u90e8|\u672c\u5730|\u78c1\u76d8|\u7535\u8111|\u4e2d\u6587)/.test(text);
+  const notOnlySpecificLibrary = /(?:\u4e0d\u6b62\u662f|\u4e0d\u53ea\u662f|\u4e0d\u53ea\u770b|\u4e0d\u662f\u53ea\u6709).*(?:resume|cv|\u7b80\u5386|\u5408\u540c|\u8ba2\u5355|\u6807\u4e66|bids|iot)/.test(text);
+
+  return mentionsDocuments && (broadScope || notOnlySpecificLibrary);
 }
 
 function collectLibraryTerms(library: DocumentLibrary) {

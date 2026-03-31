@@ -1,5 +1,10 @@
 import type { DocumentLibrary } from './document-libraries.js';
-import { buildPromptForScoring, collectLibraryMatches, detectOutputKind } from './knowledge-plan.js';
+import {
+  buildPromptForScoring,
+  collectLibraryMatches,
+  detectOutputKind,
+  isBroadCatalogDocumentQuery,
+} from './knowledge-plan.js';
 import { runOpenClawChat } from './openclaw-adapter.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
@@ -74,11 +79,11 @@ const COMPARISON_PATTERNS =
   /\u5bf9\u6bd4|\u5bf9\u7167|\u76d8\u4e00\u4e0b|\u6bd4\u4e00\u6bd4|\u6700\u65b0\u7684?\u51e0\u4efd|\u6700\u8fd1\u7684?\u51e0\u4efd|\u6700\u65b0\u7684?\u51e0\u4e2a|\u6700\u8fd1\u7684?\u51e0\u4e2a|\u770b\u770b.*\u51e0\u4efd/;
 
 const OUTPUT_ACTION_PATTERNS = [
-  /\u8f93\u51fa|\u751f\u6210|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa/i,
+  /\u8f93\u51fa|\u751f\u6210|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa|generate|create|build|export|produce/i,
 ];
 
 const OUTPUT_ARTIFACT_PATTERNS = [
-  /\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u53ef\u89c6\u5316|\u62a5\u544a|dashboard|\u9a7e\u9a76\u8231|ppt|pdf|word|docx/i,
+  /\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u53ef\u89c6\u5316|\u62a5\u544a|dashboard|\u9a7e\u9a76\u8231|ppt|pdf|word|docx|table|report|static page|page|visualization|cockpit/i,
 ];
 
 const SUMMARY_PATTERNS =
@@ -145,7 +150,11 @@ function clampConfidence(value: unknown) {
   return Math.min(1, Math.max(0, parsed));
 }
 
-function buildSignals(prompt: string, libraries: Array<{ key: string; label: string }>): KnowledgeRouteSignals {
+function buildSignals(
+  prompt: string,
+  libraries: Array<{ key: string; label: string }>,
+  broadCatalogRequest = false,
+): KnowledgeRouteSignals {
   const text = String(prompt || '').trim();
   const explicitOutputArtifact = OUTPUT_ARTIFACT_PATTERNS.some((pattern) => pattern.test(text));
   const explicitOutputAction = OUTPUT_ACTION_PATTERNS.some((pattern) => pattern.test(text));
@@ -156,8 +165,8 @@ function buildSignals(prompt: string, libraries: Array<{ key: string; label: str
   const mentionsSpecificDocument = SPECIFIC_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text));
   const mentionsRecentUploads = RECENT_UPLOAD_PATTERNS.test(text);
   return {
-    explicitKnowledgeScope: KNOWLEDGE_SCOPE_PATTERNS.some((pattern) => pattern.test(text)) || libraries.length > 0,
-    explicitCatalogRequest: CATALOG_REQUEST_PATTERNS.some((pattern) => pattern.test(text)),
+    explicitKnowledgeScope: broadCatalogRequest || KNOWLEDGE_SCOPE_PATTERNS.some((pattern) => pattern.test(text)) || libraries.length > 0,
+    explicitCatalogRequest: broadCatalogRequest || CATALOG_REQUEST_PATTERNS.some((pattern) => pattern.test(text)),
     explicitDetailRequest: DETAIL_PATTERNS.test(text),
     explicitOutputRequest,
     explicitOutputArtifact,
@@ -315,14 +324,16 @@ export async function resolveKnowledgeChatRoute(
   input: ResolveKnowledgeChatRouteInput,
   options?: ResolveKnowledgeChatRouteOptions,
 ): Promise<KnowledgeChatRouteDecision> {
+  const broadCatalogRequest = isBroadCatalogDocumentQuery(input.prompt);
   const scoredLibraries = collectLibraryMatches(
-    buildPromptForScoring(input.prompt, input.chatHistory),
+    buildPromptForScoring(input.prompt, broadCatalogRequest ? [] : input.chatHistory),
     input.libraries,
   ).map((item) => ({ key: item.library.key, label: item.library.label }));
-  const signals = buildSignals(input.prompt, scoredLibraries);
+  const effectiveLibraries = broadCatalogRequest ? [] : scoredLibraries;
+  const signals = buildSignals(input.prompt, effectiveLibraries, broadCatalogRequest);
   const localContract = buildLocalIntentContract({
     prompt: input.prompt,
-    libraries: scoredLibraries,
+    libraries: effectiveLibraries,
     signals,
   });
 
@@ -344,14 +355,14 @@ export async function resolveKnowledgeChatRoute(
         ? await options.resolveCloudContract({
           prompt: input.prompt,
           chatHistory: input.chatHistory,
-          libraries: scoredLibraries,
+          libraries: effectiveLibraries,
           signals,
           sessionUser: input.sessionUser,
         })
         : await resolveCloudIntentContract({
           prompt: input.prompt,
           chatHistory: input.chatHistory,
-          libraries: scoredLibraries,
+          libraries: effectiveLibraries,
           signals,
           sessionUser: input.sessionUser,
         });
@@ -382,7 +393,7 @@ export async function resolveKnowledgeChatRoute(
   return {
     route,
     evidenceMode: resolveEvidenceMode(route),
-    libraries: scoredLibraries,
+    libraries: effectiveLibraries,
     contract: effectiveContract,
     signals,
   };
