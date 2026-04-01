@@ -151,6 +151,19 @@ function buildAttachmentDisposition(fileName: string) {
   return `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
+function resolveDocumentReadablePath(rawPath: string) {
+  const original = String(rawPath || '').trim();
+  if (!original) return original;
+
+  const normalized = original.replace(/\\/g, '/');
+  const marker = '/storage/files/';
+  const markerIndex = normalized.toLowerCase().lastIndexOf(marker);
+  if (markerIndex < 0) return original;
+
+  const relative = normalized.slice(markerIndex + marker.length);
+  return path.join(DEFAULT_SCAN_DIR, relative);
+}
+
 function resolveLibraryScenarioKey(
   library: { isDefault?: boolean; sourceCategoryKey?: string; key: string },
   items: Array<{ bizCategory?: string; confirmedBizCategory?: string }>,
@@ -326,10 +339,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'inline preview is not supported for this document type' });
     }
 
-    await fs.access(found.path);
+    const readablePath = resolveDocumentReadablePath(found.path);
+    await fs.access(readablePath);
     reply.header('Cache-Control', 'private, max-age=60');
     reply.type(contentType);
-    return reply.send(createReadStream(found.path));
+    return reply.send(createReadStream(readablePath));
   });
 
   app.get('/documents/preview', async (request, reply) => {
@@ -351,13 +365,14 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'inline preview is not supported for this document type' });
     }
 
-    await fs.access(found.path);
+    const readablePath = resolveDocumentReadablePath(found.path);
+    await fs.access(readablePath);
     const fileName = sanitizeFileName(found.name || path.basename(found.path));
     reply.header('Cache-Control', 'private, max-age=60');
     reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.type(contentType);
-    return reply.send(createReadStream(found.path));
+    return reply.send(createReadStream(readablePath));
   });
 
   app.get('/documents/download', async (request, reply) => {
@@ -374,7 +389,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'document not found' });
     }
 
-    await fs.access(found.path);
+    const readablePath = resolveDocumentReadablePath(found.path);
+    await fs.access(readablePath);
     const fileName = sanitizeFileName(found.name || path.basename(found.path));
     const contentType = IMAGE_CONTENT_TYPES[String(found.ext || '').toLowerCase()] || 'application/octet-stream';
 
@@ -382,7 +398,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     reply.header('Content-Disposition', buildAttachmentDisposition(fileName));
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.type(contentType);
-    return reply.send(createReadStream(found.path));
+    return reply.send(createReadStream(readablePath));
   });
 
   app.get('/documents/candidate-sources', async () => {
