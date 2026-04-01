@@ -50,6 +50,7 @@ test('buildKnowledgeRouterPrompt should preserve libraries and trigger signals',
     signals: {
       explicitKnowledgeScope: true,
       explicitCatalogRequest: false,
+      explicitLibraryStatsRequest: false,
       explicitDetailRequest: false,
       explicitOutputRequest: false,
       explicitOutputArtifact: false,
@@ -81,6 +82,7 @@ test('finalizeKnowledgeRoute should keep negative output constraints from being 
     {
       explicitKnowledgeScope: true,
       explicitCatalogRequest: false,
+      explicitLibraryStatsRequest: false,
       explicitDetailRequest: false,
       explicitOutputRequest: false,
       explicitOutputArtifact: false,
@@ -116,6 +118,30 @@ test('resolveKnowledgeChatRoute should route recent library inventory questions 
   assert.equal(decision.route, 'catalog');
   assert.equal(decision.evidenceMode, 'catalog_memory');
   assert.equal(decision.contract.targetScope, 'latest_documents');
+  assert.equal(decision.libraries[0]?.key, 'resume');
+});
+
+test('resolveKnowledgeChatRoute should keep library-wide count and dedupe questions on catalog even when they mention companies', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '简历库里一共有多少份简历，涉及多少家独立公司？',
+    chatHistory: [],
+    libraries: LIBRARIES,
+  }, {
+    resolveCloudContract: async () => ({
+      route: 'detail',
+      subject: 'Resume',
+      requestedForm: 'answer',
+      targetScope: 'document_facts',
+      needsLiveDetail: true,
+      normalizedRequest: '简历库里一共有多少份简历，涉及多少家独立公司？',
+      rationale: 'cloud over-classified company statistics as detail facts',
+      confidence: 0.82,
+    }),
+  });
+
+  assert.equal(decision.route, 'catalog');
+  assert.equal(decision.evidenceMode, 'catalog_memory');
+  assert.equal(decision.contract.targetScope, 'library_overview');
   assert.equal(decision.libraries[0]?.key, 'resume');
 });
 

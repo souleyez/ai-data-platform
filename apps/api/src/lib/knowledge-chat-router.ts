@@ -26,6 +26,7 @@ export type KnowledgeIntentContract = {
 export type KnowledgeRouteSignals = {
   explicitKnowledgeScope: boolean;
   explicitCatalogRequest: boolean;
+  explicitLibraryStatsRequest: boolean;
   explicitDetailRequest: boolean;
   explicitOutputRequest: boolean;
   explicitOutputArtifact: boolean;
@@ -70,6 +71,7 @@ const CATALOG_REQUEST_PATTERNS = [
   /\u6709\u54ea\u4e9b|\u6709\u591a\u5c11|\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|\u65b0\u4e0a\u4f20|\u6700\u65b0\u6709\u54ea\u4e9b|\u6700\u8fd1\u6709\u54ea\u4e9b/i,
   /\u65b0\u589e|\u5220\u9664|\u4fee\u6539|\u53d8\u66f4|\u6392\u9664|\u6062\u590d|\u5ba1\u8ba1/i,
   /\u4ec0\u4e48\u5e93|\u54ea\u4e9b\u5e93|\u5e93\u91cc\u6709\u4ec0\u4e48|\u5e93\u5185\u6709\u4ec0\u4e48/i,
+  /\u603b\u5171|\u603b\u6570|\u6570\u91cf|\u7edf\u8ba1|\u6d89\u53ca\u591a\u5c11|\u72ec\u7acb\u516c\u53f8|\u53bb\u91cd|\u8986\u76d6\u591a\u5c11/i,
 ];
 
 const DETAIL_PATTERNS =
@@ -164,9 +166,18 @@ function buildSignals(
   const comparisonRequest = COMPARISON_PATTERNS.test(text);
   const mentionsSpecificDocument = SPECIFIC_DOCUMENT_PATTERNS.some((pattern) => pattern.test(text));
   const mentionsRecentUploads = RECENT_UPLOAD_PATTERNS.test(text);
+  const explicitKnowledgeScope = broadCatalogRequest
+    || KNOWLEDGE_SCOPE_PATTERNS.some((pattern) => pattern.test(text))
+    || libraries.length > 0;
+  const explicitCatalogRequest = broadCatalogRequest || CATALOG_REQUEST_PATTERNS.some((pattern) => pattern.test(text));
+  const explicitLibraryStatsRequest = explicitKnowledgeScope
+    && !mentionsSpecificDocument
+    && !comparisonRequest
+    && /(?:\u603b\u5171|\u603b\u6570|\u6570\u91cf|\u7edf\u8ba1|\u591a\u5c11\u4efd|\u591a\u5c11\u4e2a|\u591a\u5c11\u5bb6|\u72ec\u7acb\u516c\u53f8|\u53bb\u91cd|\u8986\u76d6\u516c\u53f8|\u5206\u5e03)/i.test(text);
   return {
-    explicitKnowledgeScope: broadCatalogRequest || KNOWLEDGE_SCOPE_PATTERNS.some((pattern) => pattern.test(text)) || libraries.length > 0,
-    explicitCatalogRequest: broadCatalogRequest || CATALOG_REQUEST_PATTERNS.some((pattern) => pattern.test(text)),
+    explicitKnowledgeScope,
+    explicitCatalogRequest,
+    explicitLibraryStatsRequest,
     explicitDetailRequest: DETAIL_PATTERNS.test(text),
     explicitOutputRequest,
     explicitOutputArtifact,
@@ -186,10 +197,12 @@ function buildLocalIntentContract(input: {
   const { prompt, libraries, signals } = input;
   const route: KnowledgeChatRouteKind = signals.explicitOutputArtifact && !signals.outputSuppressed
     ? 'output'
-    : (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument)
+    : (signals.comparisonRequest || signals.mentionsSpecificDocument)
       ? 'detail'
-      : (signals.explicitCatalogRequest || signals.mentionsRecentUploads)
+      : (signals.explicitCatalogRequest || signals.explicitLibraryStatsRequest || signals.mentionsRecentUploads)
         ? 'catalog'
+        : signals.explicitDetailRequest
+          ? 'detail'
         : (signals.summaryRequest && signals.explicitKnowledgeScope)
           ? 'detail'
           : signals.explicitKnowledgeScope
@@ -199,6 +212,8 @@ function buildLocalIntentContract(input: {
     ? 'comparison'
     : signals.mentionsSpecificDocument
       ? 'specific_document'
+      : signals.explicitLibraryStatsRequest
+        ? 'library_overview'
       : signals.explicitDetailRequest
         ? 'document_facts'
         : signals.explicitCatalogRequest
@@ -282,19 +297,21 @@ export function finalizeKnowledgeRoute(
 ): KnowledgeChatRouteKind {
   if (signals.explicitOutputArtifact && !signals.outputSuppressed) return 'output';
   if (!signals.explicitOutputArtifact && contract.route === 'output') {
-    if (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument) return 'detail';
-    if (signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
+    if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
+    if (signals.explicitLibraryStatsRequest || signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
+    if (signals.explicitDetailRequest) return 'detail';
     if (signals.summaryRequest || signals.explicitKnowledgeScope) return 'detail';
     return 'general';
   }
   if (signals.outputSuppressed && contract.route === 'output') {
-    if (signals.explicitDetailRequest || signals.comparisonRequest || signals.mentionsSpecificDocument) return 'detail';
-    if (signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
+    if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
+    if (signals.explicitLibraryStatsRequest || signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
+    if (signals.explicitDetailRequest) return 'detail';
     return 'general';
   }
   if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
+  if ((signals.explicitLibraryStatsRequest || signals.explicitCatalogRequest || signals.mentionsRecentUploads) && !signals.explicitOutputArtifact) return 'catalog';
   if (signals.explicitDetailRequest && (!signals.explicitOutputArtifact || contract.route !== 'output')) return 'detail';
-  if (signals.explicitCatalogRequest && !signals.explicitDetailRequest && !signals.explicitOutputArtifact) return 'catalog';
   if (signals.summaryRequest && !signals.explicitOutputArtifact) return 'detail';
   return contract.route;
 }
@@ -320,6 +337,24 @@ function resolveEvidenceMode(route: KnowledgeChatRouteKind): KnowledgeEvidenceMo
   return null;
 }
 
+function resolveEffectiveTargetScope(
+  route: KnowledgeChatRouteKind,
+  contract: KnowledgeIntentContract,
+  signals: KnowledgeRouteSignals,
+): KnowledgeIntentContract['targetScope'] {
+  if (route === 'general') return 'general';
+  if (route === 'catalog') {
+    if (signals.mentionsRecentUploads || contract.targetScope === 'latest_documents') return 'latest_documents';
+    return contract.targetScope === 'recent_changes' ? 'recent_changes' : 'library_overview';
+  }
+  if (route === 'detail') {
+    if (signals.comparisonRequest) return 'comparison';
+    if (signals.mentionsSpecificDocument) return 'specific_document';
+    return 'document_facts';
+  }
+  return contract.targetScope;
+}
+
 export async function resolveKnowledgeChatRoute(
   input: ResolveKnowledgeChatRouteInput,
   options?: ResolveKnowledgeChatRouteOptions,
@@ -340,6 +375,7 @@ export async function resolveKnowledgeChatRoute(
   const shouldConsultCloud = (
     signals.explicitKnowledgeScope
     || signals.explicitCatalogRequest
+    || signals.explicitLibraryStatsRequest
     || signals.explicitDetailRequest
     || signals.explicitOutputRequest
     || signals.comparisonRequest
@@ -384,6 +420,7 @@ export async function resolveKnowledgeChatRoute(
   const effectiveContract: KnowledgeIntentContract = {
     ...contract,
     route,
+    targetScope: resolveEffectiveTargetScope(route, contract, signals),
     needsLiveDetail: route === 'detail' || route === 'output',
     requestedForm: route === 'output'
       ? (contract.requestedForm === 'answer' ? normalizeRequestedForm('unknown', input.prompt) : contract.requestedForm)
