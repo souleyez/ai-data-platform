@@ -29,7 +29,11 @@ import {
   resolveSuggestedLibraryKeys,
 } from '../lib/ingest-feedback.js';
 import { saveDocumentOverride } from '../lib/document-overrides.js';
-import { ingestUploadedFiles, saveMultipartFiles } from '../lib/document-upload-ingest.js';
+import {
+  ingestLocalFilesIntoLibrary,
+  ingestUploadedFiles,
+  saveMultipartFiles,
+} from '../lib/document-upload-ingest.js';
 import {
   acceptDocumentSuggestions,
   addDocumentScanSource,
@@ -875,6 +879,49 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       updatedCount: results.length,
       items: results,
       message: `已删除 ${results.length} 条文档索引。`,
+    };
+  });
+
+  app.post('/documents/local-files/import', async (request, reply) => {
+    const body = (request.body || {}) as {
+      paths?: string[];
+      preferredLibraryKeys?: string[];
+      note?: string;
+    };
+    const requestedPaths = Array.isArray(body.paths)
+      ? body.paths.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const preferredLibraryKeys = Array.isArray(body.preferredLibraryKeys)
+      ? body.preferredLibraryKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const note = String(body.note || '').trim();
+
+    if (!requestedPaths.length) {
+      return reply.code(400).send({ error: 'paths are required' });
+    }
+
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const libraries = await loadDocumentLibraries();
+    const ingestResult = await ingestLocalFilesIntoLibrary({
+      filePaths: requestedPaths,
+      documentConfig: config,
+      libraries,
+      preferredLibraryKeys,
+    });
+
+    return {
+      status: 'imported',
+      mode: 'read-only',
+      scanRoot: config.scanRoot,
+      scanRoots: config.scanRoots,
+      note,
+      requestedCount: requestedPaths.length,
+      importedCount: ingestResult.summary.successCount,
+      uploadedFiles: ingestResult.uploadedFiles,
+      confirmedLibraryKeys: ingestResult.confirmedLibraryKeys,
+      summary: ingestResult.summary,
+      ingestItems: ingestResult.ingestItems,
+      message: `Imported ${ingestResult.summary.successCount} local file(s) into the document library.`,
     };
   });
 
