@@ -145,6 +145,30 @@ test('resolveKnowledgeChatRoute should keep library-wide count and dedupe questi
   assert.equal(decision.libraries[0]?.key, 'resume');
 });
 
+test('resolveKnowledgeChatRoute should respect cloud library-overview contracts even when the cloud route is mislabeled as detail', async () => {
+  const decision = await resolveKnowledgeChatRoute({
+    prompt: '简历库里一共有多少份简历，涉及多少家独立公司？',
+    chatHistory: [],
+    libraries: LIBRARIES,
+  }, {
+    resolveCloudContract: async () => ({
+      route: 'detail',
+      subject: '简历库统计概览',
+      requestedForm: 'answer',
+      targetScope: 'library_overview',
+      needsLiveDetail: true,
+      normalizedRequest: '简历库中简历总数及独立公司数量',
+      rationale: 'library overview stats were mislabeled as detail by the cloud contract',
+      confidence: 0.92,
+    }),
+  });
+
+  assert.equal(decision.route, 'catalog');
+  assert.equal(decision.evidenceMode, 'catalog_memory');
+  assert.equal(decision.contract.targetScope, 'library_overview');
+  assert.equal(decision.libraries[0]?.key, 'resume');
+});
+
 test('resolveKnowledgeChatRoute should route latest resume comparison to detail', async () => {
   const decision = await resolveKnowledgeChatRoute({
     prompt: 'Compare the latest resumes in the resume library.',

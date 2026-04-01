@@ -295,6 +295,9 @@ export function finalizeKnowledgeRoute(
   contract: KnowledgeIntentContract,
   signals: KnowledgeRouteSignals,
 ): KnowledgeChatRouteKind {
+  const contractLooksCatalog = contract.targetScope === 'library_overview'
+    || contract.targetScope === 'recent_changes'
+    || contract.targetScope === 'latest_documents';
   if (signals.explicitOutputArtifact && !signals.outputSuppressed) return 'output';
   if (!signals.explicitOutputArtifact && contract.route === 'output') {
     if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
@@ -308,6 +311,9 @@ export function finalizeKnowledgeRoute(
     if (signals.explicitLibraryStatsRequest || signals.explicitCatalogRequest || signals.mentionsRecentUploads) return 'catalog';
     if (signals.explicitDetailRequest) return 'detail';
     return 'general';
+  }
+  if (contractLooksCatalog && !signals.mentionsSpecificDocument && !signals.comparisonRequest && !signals.explicitOutputArtifact) {
+    return 'catalog';
   }
   if (signals.mentionsSpecificDocument || signals.comparisonRequest) return 'detail';
   if ((signals.explicitLibraryStatsRequest || signals.explicitCatalogRequest || signals.mentionsRecentUploads) && !signals.explicitOutputArtifact) return 'catalog';
