@@ -797,6 +797,35 @@ th { color: var(--subtle); font-weight: 600; }
   border-radius: 12px;
   background: #fff;
 }
+.document-image-preview-large {
+  max-height: calc(100vh - 280px);
+}
+.document-file-frame-wrap {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+}
+.document-file-frame {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 280px);
+  border: 0;
+  background: #fff;
+}
+.document-preview-empty {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 18px 0 4px;
+}
+.preview-meta-line {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #64748b;
+  word-break: break-all;
+}
 .document-reader-pagination {
   display: flex;
   align-items: center;

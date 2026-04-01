@@ -1,20 +1,30 @@
-import { redirect } from 'next/navigation';
-import { buildBackendApiUrl } from '../../lib/config';
+import Sidebar from '../../components/Sidebar';
+import { buildBackendApiUrl, buildApiUrl } from '../../lib/config';
+import { sourceItems } from '../../lib/mock-data';
+import { getDocumentGroupLabel, getPrimaryCategoryLabel } from '../../lib/document-taxonomy';
 
 export const dynamic = 'force-dynamic';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+const TEXT_PREVIEW_EXTENSIONS = new Set(['.txt', '.md', '.csv', '.json']);
 
 function resolveDocumentId(params) {
   const raw = params?.id;
   return Array.isArray(raw) ? raw[0] : raw || '';
 }
 
-export default async function DocumentDetailRedirectPage({ params }) {
+function joinGroups(groups) {
+  return Array.isArray(groups) && groups.length ? groups.map(getDocumentGroupLabel).join('、') : '未分组';
+}
+
+export default async function DocumentPreviewPage({ params }) {
   const documentId = resolveDocumentId(params);
   if (!documentId) {
-    redirect('/documents');
+    return null;
   }
+
+  let item = null;
+  let meta = null;
 
   try {
     const response = await fetch(
@@ -22,17 +32,94 @@ export default async function DocumentDetailRedirectPage({ params }) {
       { cache: 'no-store' },
     );
 
-    if (!response.ok) {
-      redirect('/documents');
+    if (response.ok) {
+      const json = await response.json();
+      item = json?.item || null;
+      meta = json?.meta || null;
     }
-
-    const json = await response.json();
-    const item = json?.item || null;
-    const isImage = IMAGE_EXTENSIONS.has(String(item?.ext || '').toLowerCase());
-    const endpoint = isImage ? 'file' : 'download';
-
-    redirect(`/api/documents/${endpoint}?id=${encodeURIComponent(documentId)}`);
   } catch {
-    redirect('/documents');
+    item = null;
   }
+
+  if (!item) {
+    return (
+      <div className="app-shell">
+        <Sidebar sourceItems={sourceItems} currentPath="/documents" />
+        <main className="main-panel">
+          <header className="topbar">
+            <div>
+              <h2>文件预览</h2>
+              <p>未找到对应文档，请返回文档中心重试。</p>
+            </div>
+            <div className="topbar-actions">
+              <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
+            </div>
+          </header>
+        </main>
+      </div>
+    );
+  }
+
+  const ext = String(item.ext || '').toLowerCase();
+  const isImage = IMAGE_EXTENSIONS.has(ext);
+  const isTextPreview = TEXT_PREVIEW_EXTENSIONS.has(ext);
+  const isPdf = ext === '.pdf';
+  const canPreview = isImage || isTextPreview || isPdf;
+  const previewUrl = canPreview ? buildApiUrl(`/api/documents/preview?id=${encodeURIComponent(documentId)}`) : '';
+  const downloadUrl = buildApiUrl(`/api/documents/download?id=${encodeURIComponent(documentId)}`);
+
+  return (
+    <div className="app-shell">
+      <Sidebar sourceItems={sourceItems} currentPath="/documents" />
+      <main className="main-panel">
+        <header className="topbar">
+          <div>
+            <h2>文件预览</h2>
+            <p>{item.name}</p>
+          </div>
+          <div className="topbar-actions">
+            <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+            <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
+          </div>
+        </header>
+
+        <section className="card table-card">
+          <div className="message-refs">
+            <span className="source-chip">业务分类：{getPrimaryCategoryLabel(meta?.bizCategory || item?.bizCategory)}</span>
+            <span className="source-chip">知识库：{joinGroups(item.confirmedGroups || item.groups || [])}</span>
+            <span className="source-chip">文件类型：{item.ext || '-'}</span>
+          </div>
+          <div className="preview-meta-line">{item.path}</div>
+        </section>
+
+        <section className="card documents-card">
+          <div className="panel-header">
+            <div>
+              <h3>原文件预览</h3>
+              <p>{canPreview ? '当前直接预览原件，右上角可下载。' : '当前文件类型不支持浏览器内原件预览，请直接下载查看。'}</p>
+            </div>
+          </div>
+
+          {isImage && previewUrl ? (
+            <div className="document-preview-wrap">
+              <img src={previewUrl} alt={item.title || item.name || 'document preview'} className="document-image-preview document-image-preview-large" />
+            </div>
+          ) : null}
+
+          {!isImage && canPreview && previewUrl ? (
+            <div className="document-file-frame-wrap">
+              <iframe src={previewUrl} title={item.name || 'document preview'} className="document-file-frame" />
+            </div>
+          ) : null}
+
+          {!canPreview ? (
+            <div className="document-preview-empty">
+              <p>当前文件类型暂不支持浏览器内原件预览。</p>
+              <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+            </div>
+          ) : null}
+        </section>
+      </main>
+    </div>
+  );
 }

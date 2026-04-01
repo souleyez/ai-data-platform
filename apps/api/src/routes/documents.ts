@@ -132,6 +132,15 @@ const IMAGE_CONTENT_TYPES: Record<string, string> = {
   '.bmp': 'image/bmp',
 };
 
+const PREVIEW_CONTENT_TYPES: Record<string, string> = {
+  ...IMAGE_CONTENT_TYPES,
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
+  '.csv': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+};
+
 function extractDocumentTimestamp(item: { name?: string; path?: string }) {
   const text = `${item?.name || ''} ${item?.path || ''}`;
   const match = text.match(/(\d{13})/);
@@ -319,6 +328,34 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
     await fs.access(found.path);
     reply.header('Cache-Control', 'private, max-age=60');
+    reply.type(contentType);
+    return reply.send(createReadStream(found.path));
+  });
+
+  app.get('/documents/preview', async (request, reply) => {
+    const { id } = (request.query || {}) as { id?: string };
+    if (!id) {
+      return reply.code(400).send({ error: 'id is required' });
+    }
+
+    const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const { items } = await loadParsedDocuments(200, false, documentConfig.scanRoots);
+    const found = items.find((item) => buildDocumentId(item.path) === id);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
+    }
+
+    const contentType = PREVIEW_CONTENT_TYPES[String(found.ext || '').toLowerCase()];
+    if (!contentType) {
+      return reply.code(400).send({ error: 'inline preview is not supported for this document type' });
+    }
+
+    await fs.access(found.path);
+    const fileName = sanitizeFileName(found.name || path.basename(found.path));
+    reply.header('Cache-Control', 'private, max-age=60');
+    reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    reply.header('X-Content-Type-Options', 'nosniff');
     reply.type(contentType);
     return reply.send(createReadStream(found.path));
   });
