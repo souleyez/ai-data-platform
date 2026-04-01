@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
+import { REPO_ROOT, STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
 
 export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
@@ -23,19 +23,38 @@ export type DocumentCategoryConfig = {
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const CONFIG_FILE = path.join(CONFIG_DIR, 'document-categories.json');
 
-function normalizeScanRoot(scanRoot: string) {
+function looksLikeWindowsAbsolutePath(value: string) {
+  return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]/.test(value);
+}
+
+function containsWindowsAbsolutePathSegment(value: string) {
+  return /(^|[\\/])[A-Za-z]:[\\/]/.test(value);
+}
+
+function looksLikeForeignAbsolutePath(value: string, platform = process.platform) {
+  if (!value) return false;
+
+  if (platform === 'win32') {
+    return value.startsWith('/') && !looksLikeWindowsAbsolutePath(value);
+  }
+
+  return looksLikeWindowsAbsolutePath(value) || containsWindowsAbsolutePathSegment(value);
+}
+
+export function normalizeConfiguredScanRoot(scanRoot: string, platform = process.platform) {
   const value = String(scanRoot || '').trim();
   if (!value) return value;
+  if (looksLikeForeignAbsolutePath(value, platform)) return '';
   return path.isAbsolute(value) ? value : path.resolve(REPO_ROOT, value);
 }
 
 function normalizeScanRoots(scanRoots: string[], fallbackScanRoot: string) {
   const normalized = Array.from(new Set(
-    (scanRoots || []).map((item) => normalizeScanRoot(item)).filter(Boolean),
+    (scanRoots || []).map((item) => normalizeConfiguredScanRoot(item)).filter(Boolean),
   ));
 
   if (!normalized.length) {
-    const fallback = normalizeScanRoot(fallbackScanRoot);
+    const fallback = normalizeConfiguredScanRoot(fallbackScanRoot);
     return fallback ? [fallback] : [];
   }
 
@@ -104,10 +123,12 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
 }
 
 export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
+  const defaultScanRoot = normalizeConfiguredScanRoot(fallbackScanRoot) || normalizeConfiguredScanRoot(STORAGE_FILES_DIR) || STORAGE_FILES_DIR;
+
   try {
     const raw = await fs.readFile(CONFIG_FILE, 'utf8');
     const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
-    const effectiveScanRoot = normalizeScanRoot(parsed.scanRoot || fallbackScanRoot || '') || normalizeScanRoot(fallbackScanRoot);
+    const effectiveScanRoot = normalizeConfiguredScanRoot(parsed.scanRoot || fallbackScanRoot || '') || defaultScanRoot;
     const effectiveScanRoots = normalizeScanRoots(
       Array.isArray(parsed.scanRoots) ? parsed.scanRoots : (parsed.scanRoot ? [parsed.scanRoot] : []),
       effectiveScanRoot,
@@ -143,13 +164,13 @@ export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
       customCategories: mergedCustomCategories,
     } satisfies DocumentCategoryConfig;
   } catch {
-    return buildDefault(normalizeScanRoot(fallbackScanRoot));
+    return buildDefault(defaultScanRoot);
   }
 }
 
 export async function saveDocumentCategoryConfig(scanRoot: string, input: Partial<DocumentCategoryConfig>) {
-  const normalizedScanRoot = normalizeScanRoot(scanRoot);
-  const current = await loadDocumentCategoryConfig(normalizedScanRoot);
+  const current = await loadDocumentCategoryConfig(scanRoot);
+  const normalizedScanRoot = normalizeConfiguredScanRoot(scanRoot) || current.scanRoot || normalizeConfiguredScanRoot(STORAGE_FILES_DIR) || STORAGE_FILES_DIR;
   const normalizedScanRoots = normalizeScanRoots(
     Array.isArray(input.scanRoots) ? input.scanRoots : current.scanRoots,
     normalizedScanRoot,
