@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>向量化与检索策略</title>
+  <link rel="stylesheet" href="./assets/theme.css" />
+</head>
+<body>
+  <main class="slide">
+    <div class="eyebrow">Retrieval Strategy</div>
+    <h1 class="title">向量化与检索策略</h1>
+    <p class="subtitle">平台把文档拆成多种可检索记录，并通过规则匹配、向量召回和重排组合出更稳定的回答基础。</p>
+
+    <section class="split-note">
+      <div class="panel pad">
+        <h3>向量化记录层</h3>
+        <ul class="list">
+          <li>摘要记录：面向目录级理解和快速召回。</li>
+          <li>画像记录：保留文档角色、分组、主题标签和业务属性。</li>
+          <li>字段记录：把关键字段拆成可精确命中的小单元。</li>
+          <li>证据记录与结论记录：面向问答、对比和静态页输出。</li>
+        </ul>
+        <div class="tag-cloud">
+          <span class="tag">summary</span>
+          <span class="tag">profile</span>
+          <span class="tag">profile-field</span>
+          <span class="tag">evidence</span>
+          <span class="tag">claim</span>
+        </div>
+      </div>
+      <div class="panel pad">
+        <h3>检索策略</h3>
+        <div class="flow" style="grid-template-columns: repeat(3, 1fr); margin-top: 10px;">
+          <article class="flow-step" style="min-height: 148px;">
+            <div class="num">RULE</div>
+            <h3>规则命中</h3>
+            <p>先按库名、模板任务、关键词和字段别名做快速命中。</p>
+          </article>
+          <article class="flow-step" style="min-height: 148px;">
+            <div class="num">VECTOR</div>
+            <h3>向量召回</h3>
+            <p>再通过摘要、字段和证据记录做语义召回，扩大候选集。</p>
+          </article>
+          <article class="flow-step" style="min-height: 148px;">
+            <div class="num">RERANK</div>
+            <h3>重排筛选</h3>
+            <p>最后按场景和模板任务重排，得到更合适的文档与证据组合。</p>
+          </article>
+        </div>
+        <ul class="list" style="margin-top: 16px;">
+          <li>普通问答尽量先用记忆和库内卡片。</li>
+          <li>需要精确事实或正式输出时，再补充更详细的文档资料。</li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="footer">
+      <span>AI 知识数据平台综合介绍</span>
+      <span>08</span>
+    </div>
+  </main>
+</body>
+</html>

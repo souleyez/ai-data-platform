@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>解析链路与支持格式</title>
+  <link rel="stylesheet" href="./assets/theme.css" />
+</head>
+<body>
+  <main class="slide">
+    <div class="eyebrow">Parsing Pipeline</div>
+    <h1 class="title">解析链路与支持格式</h1>
+    <p class="subtitle">平台将不同来源文件统一接入同一条解析链，形成摘要、结构化信息、证据块和可索引文本。</p>
+
+    <section class="grid-2" style="margin-top: 24px;">
+      <div class="panel pad">
+        <h3>支持的主流格式</h3>
+        <div class="tag-cloud" style="margin-top: 14px;">
+          <span class="tag">PDF</span>
+          <span class="tag">TXT / MD</span>
+          <span class="tag">DOCX</span>
+          <span class="tag">CSV / JSON</span>
+          <span class="tag">HTML / XML</span>
+          <span class="tag">XLSX / XLS</span>
+          <span class="tag">PNG / JPG / JPEG</span>
+          <span class="tag">WEBP / GIF / BMP</span>
+        </div>
+        <ul class="list" style="margin-top: 18px;">
+          <li>文本类文件优先走原生 UTF-8 与结构化解析。</li>
+          <li>Office 与表格类文件抽取正文、表头、字段和关键信号。</li>
+          <li>图片与扫描类文件支持 OCR 或图片元数据保留。</li>
+        </ul>
+      </div>
+      <div class="panel pad">
+        <h3>统一解析步骤</h3>
+        <div class="flow" style="grid-template-columns: repeat(4, 1fr); margin-top: 12px;">
+          <article class="flow-step" style="min-height: 138px;">
+            <div class="num">01</div>
+            <h3>快速解析</h3>
+            <p>识别格式、抽取正文、生成摘要与初始分类建议。</p>
+          </article>
+          <article class="flow-step" style="min-height: 138px;">
+            <div class="num">02</div>
+            <h3>结构化</h3>
+            <p>提取字段、标签、实体、证据块和文档画像。</p>
+          </article>
+          <article class="flow-step" style="min-height: 138px;">
+            <div class="num">03</div>
+            <h3>详细解析</h3>
+            <p>对高价值文档继续做深解析与补充识别。</p>
+          </article>
+          <article class="flow-step" style="min-height: 138px;">
+            <div class="num">04</div>
+            <h3>索引就绪</h3>
+            <p>进入文档库、向量索引、长期记忆和后续输出链。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">
+      <span>AI 知识数据平台综合介绍</span>
+      <span>07</span>
+    </div>
+  </main>
+</body>
+</html>

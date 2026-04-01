@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 知识数据平台综合介绍 - Viewer</title>
+  <style>
+    :root {
+      --bg: #09131d;
+      --panel: #101d2a;
+      --line: rgba(255,255,255,0.08);
+      --text: #f2f7fd;
+      --muted: #9fb0c2;
+      --accent: #79d4ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: linear-gradient(180deg, #07111b, #0a1621 60%, #0d1d2b); color: var(--text); font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif; }
+    .shell { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+    .sidebar { border-right: 1px solid var(--line); padding: 24px 18px; background: rgba(255,255,255,0.03); }
+    .sidebar h1 { margin: 0 0 10px; font-size: 24px; }
+    .sidebar p { margin: 0 0 24px; color: var(--muted); line-height: 1.6; }
+    .slide-list { display: flex; flex-direction: column; gap: 10px; }
+    .slide-link {
+      display: block;
+      padding: 14px 16px;
+      text-decoration: none;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.04);
+    }
+    .slide-link small { display: block; color: var(--accent); margin-bottom: 4px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .slide-link.active { border-color: rgba(121,212,255,0.4); background: rgba(121,212,255,0.12); }
+    .stage { padding: 26px; display: flex; align-items: center; justify-content: center; }
+    iframe {
+      width: 1280px;
+      height: 720px;
+      border: 0;
+      border-radius: 20px;
+      box-shadow: 0 30px 90px rgba(0,0,0,0.4);
+      background: #06131f;
+      transform: scale(calc((100vw - 420px) / 1280));
+      transform-origin: center center;
+    }
+    @media (max-width: 1500px) {
+      .shell { grid-template-columns: 280px 1fr; }
+      iframe { transform: scale(calc((100vw - 360px) / 1280)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <h1>项目综合介绍</h1>
+      <p>本地 HTML 演示稿。左侧切换页面，右侧预览当前幻灯片。</p>
+      <nav class="slide-list">
+        <a class="slide-link active" href="./slide-01.html" target="stage"><small>01</small>封面</a>
+        <a class="slide-link" href="./slide-02.html" target="stage"><small>02</small>一句话看系统价值</a>
+        <a class="slide-link" href="./slide-03.html" target="stage"><small>03</small>要解决的核心问题</a>
+        <a class="slide-link" href="./slide-04.html" target="stage"><small>04</small>系统能力范围</a>
+        <a class="slide-link" href="./slide-05.html" target="stage"><small>05</small>主流程</a>
+        <a class="slide-link" href="./slide-06.html" target="stage"><small>06</small>文档理解与自动分组</a>
+        <a class="slide-link" href="./slide-07.html" target="stage"><small>07</small>解析链路与支持格式</a>
+        <a class="slide-link" href="./slide-08.html" target="stage"><small>08</small>向量化与检索策略</a>
+        <a class="slide-link" href="./slide-09.html" target="stage"><small>09</small>知识库与长期记忆</a>
+        <a class="slide-link" href="./slide-10.html" target="stage"><small>10</small>输出体系与报表中心</a>
+        <a class="slide-link" href="./slide-11.html" target="stage"><small>11</small>安全边界与运行模式</a>
+        <a class="slide-link" href="./slide-12.html" target="stage"><small>12</small>总结</a>
+      </nav>
+    </aside>
+    <section class="stage">
+      <iframe src="./slide-01.html" name="stage" title="slide viewer"></iframe>
+    </section>
+  </div>
+  <script>
+    const links = Array.from(document.querySelectorAll(".slide-link"));
+    links.forEach((link) => {
+      link.addEventListener("click", () => {
+        links.forEach((item) => item.classList.remove("active"));
+        link.classList.add("active");
+      });
+    });
+  </script>
+</body>
+</html>
