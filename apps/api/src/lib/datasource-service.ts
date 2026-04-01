@@ -9,11 +9,18 @@ import { databaseDatasourceProvider } from './datasource-database-provider.js';
 import { erpDatasourceProvider } from './datasource-erp-provider.js';
 import type { DatasourceProviderSummary } from './datasource-provider.js';
 import { uploadDatasourceProvider } from './datasource-upload-provider.js';
+import { localDirectoryDatasourceProvider } from './datasource-local-provider.js';
 import { buildDatasourceSummaryFromWebCaptureTask } from './datasource-web-bridge.js';
 import { webDatasourceProvider } from './datasource-web-provider.js';
 import { listWebCaptureTasks } from './web-capture.js';
 
-const PROVIDERS = [webDatasourceProvider, uploadDatasourceProvider, databaseDatasourceProvider, erpDatasourceProvider];
+const PROVIDERS = [
+  webDatasourceProvider,
+  uploadDatasourceProvider,
+  localDirectoryDatasourceProvider,
+  databaseDatasourceProvider,
+  erpDatasourceProvider,
+];
 
 export type DatasourceDocumentSummary = {
   id: string;

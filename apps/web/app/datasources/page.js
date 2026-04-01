@@ -13,6 +13,7 @@ const EMPTY_FORM = {
   authMode: 'none',
   scheduleKind: 'manual',
   maxItemsPerRun: '20',
+  runAfterSave: false,
   targetKeys: [],
   url: '',
   focus: '',
@@ -38,6 +39,7 @@ const KIND_LABELS = {
   database: '数据库',
   erp: 'ERP后台',
   upload_public: '外部资料上传',
+  local_directory: '本机目录',
 };
 
 const AUTH_LABELS = {
@@ -133,16 +135,17 @@ function buildSidebarSources(managedItems, legacyItems) {
 }
 
 function buildFormFromDefinition(item) {
+  const kind = item.kind || 'web_public';
   return {
     ...EMPTY_FORM,
     id: item.id || '',
     name: item.name || '',
-    kind: item.kind || 'web_public',
-    authMode: item.authMode || 'none',
+    kind,
+    authMode: kind === 'local_directory' ? 'none' : (item.authMode || 'none'),
     scheduleKind: item.schedule?.kind || 'manual',
     maxItemsPerRun: String(item.schedule?.maxItemsPerRun || 20),
     targetKeys: toTargetKeyString(item.targetLibraries),
-    url: String(item.config?.url || item.config?.baseUrl || ''),
+    url: String(kind === 'local_directory' ? (item.config?.path || item.config?.url || '') : (item.config?.url || item.config?.baseUrl || '')),
     focus: String(item.config?.focus || ''),
     notes: String(item.notes || item.config?.notes || ''),
     keywords: Array.isArray(item.config?.keywords) ? item.config.keywords.join('，') : '',
@@ -154,15 +157,16 @@ function buildFormFromDefinition(item) {
 }
 
 function buildFormFromDraft(draft) {
+  const kind = draft.kind || 'web_public';
   return {
     ...EMPTY_FORM,
     name: draft.name || '',
-    kind: draft.kind || 'web_public',
-    authMode: draft.authMode || 'none',
+    kind,
+    authMode: kind === 'local_directory' ? 'none' : (draft.authMode || 'none'),
     scheduleKind: draft.schedule?.kind || 'manual',
     maxItemsPerRun: String(draft.schedule?.maxItemsPerRun || 20),
     targetKeys: toTargetKeyString(draft.targetLibraries),
-    url: String(draft.config?.url || ''),
+    url: String(kind === 'local_directory' ? (draft.config?.path || draft.config?.url || '') : (draft.config?.url || '')),
     focus: String(draft.config?.focus || ''),
     notes: String(draft.notes || draft.config?.notes || ''),
     keywords: Array.isArray(draft.config?.keywords) ? draft.config.keywords.join('，') : '',
@@ -377,6 +381,7 @@ export default function DatasourcesPage() {
   const presetCatalog = legacyData?.presetCatalog || [];
   const sidebarSources = useMemo(() => buildSidebarSources(managed, legacyData?.items || []), [legacyData, managed]);
   const recentRuns = useMemo(() => runs.slice(0, 10), [runs]);
+  const isLocalDirectory = form.kind === 'local_directory';
 
   function updateForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
@@ -485,12 +490,25 @@ export default function DatasourcesPage() {
       })
       .filter(Boolean);
 
+    const baseConfig = currentForm.kind === 'local_directory'
+      ? {
+          path: currentForm.url.trim(),
+          notes: currentForm.notes.trim(),
+        }
+      : {
+          url: currentForm.url.trim(),
+          focus: currentForm.focus.trim(),
+          notes: currentForm.notes.trim(),
+          keywords: splitValues(currentForm.keywords),
+          siteHints: splitValues(currentForm.siteHints),
+        };
+
     return {
       id: currentForm.id || undefined,
       name: currentForm.name.trim(),
       kind: currentForm.kind,
       status: currentForm.id ? definitionMap.get(currentForm.id)?.status || 'draft' : 'draft',
-      authMode: currentForm.authMode,
+      authMode: currentForm.kind === 'local_directory' ? 'none' : currentForm.authMode,
       targetLibraries,
       schedule: {
         kind: currentForm.scheduleKind,
@@ -498,13 +516,7 @@ export default function DatasourcesPage() {
         maxItemsPerRun: Number(currentForm.maxItemsPerRun || 20) || 20,
       },
       credentialRef,
-      config: {
-        url: currentForm.url.trim(),
-        focus: currentForm.focus.trim(),
-        notes: currentForm.notes.trim(),
-        keywords: splitValues(currentForm.keywords),
-        siteHints: splitValues(currentForm.siteHints),
-      },
+      config: baseConfig,
       notes: currentForm.notes.trim(),
     };
   }
@@ -546,6 +558,9 @@ export default function DatasourcesPage() {
         `${json.item?.name || form.name} 已保存，目标知识库：${(json.item?.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}`,
         json.item?.kind || form.kind,
       );
+      if (form.kind === 'local_directory' && form.runAfterSave && json?.item?.id) {
+        await handleManagedAction(json.item, 'run');
+      }
     } catch (saveError) {
       const nextError = saveError instanceof Error ? saveError.message : '保存数据源失败';
       setError(nextError);
@@ -770,20 +785,31 @@ export default function DatasourcesPage() {
                   </label>
                   <label className="datasource-field">
                     <RequiredLabel>数据源类型</RequiredLabel>
-                    <select value={form.kind} onChange={(event) => updateForm({ kind: event.target.value })}>
+                    <select
+                      value={form.kind}
+                      onChange={(event) => {
+                        const nextKind = event.target.value;
+                        updateForm({
+                          kind: nextKind,
+                          authMode: nextKind === 'local_directory' ? 'none' : form.authMode,
+                        });
+                      }}
+                    >
                       {Object.entries(KIND_LABELS).map(([value, label]) => (
                         <option key={value} value={value}>{label}</option>
                       ))}
                     </select>
                   </label>
-                  <label className="datasource-field">
-                    <span>认证方式</span>
-                    <select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value })}>
-                      {Object.entries(AUTH_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </label>
+                  {!isLocalDirectory ? (
+                    <label className="datasource-field">
+                      <span>认证方式</span>
+                      <select value={form.authMode} onChange={(event) => updateForm({ authMode: event.target.value })}>
+                        {Object.entries(AUTH_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="datasource-field">
                     <span>采集频率</span>
                     <select value={form.scheduleKind} onChange={(event) => updateForm({ scheduleKind: event.target.value })}>
@@ -793,25 +819,48 @@ export default function DatasourcesPage() {
                     </select>
                   </label>
                   <label className="datasource-field datasource-field-span">
-                    <span>入口地址 / 连接地址</span>
-                    <input value={form.url} onChange={(event) => updateForm({ url: event.target.value })} placeholder="https://example.com 或 postgres://..." />
+                    <span>{isLocalDirectory ? '目录路径' : '入口地址 / 连接地址'}</span>
+                    <input
+                      value={form.url}
+                      onChange={(event) => updateForm({ url: event.target.value })}
+                      placeholder={isLocalDirectory ? '例如：C:\\data\\knowledge' : 'https://example.com 或 postgres://...'}
+                    />
                   </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>采集重点</span>
-                    <input value={form.focus} onChange={(event) => updateForm({ focus: event.target.value })} placeholder="例如：招标公告、订单、客诉、IOT 方案、论文全文" />
-                  </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>关键词</span>
-                    <input value={form.keywords} onChange={(event) => updateForm({ keywords: event.target.value })} placeholder="用逗号分隔，例如：医疗设备，体外诊断" />
-                  </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>站点提示 / 表名 / 模块提示</span>
-                    <input value={form.siteHints} onChange={(event) => updateForm({ siteHints: event.target.value })} placeholder="例如：listing-detail，orders，complaints，inventory" />
-                  </label>
+                  {!isLocalDirectory ? (
+                    <label className="datasource-field datasource-field-span">
+                      <span>采集重点</span>
+                      <input value={form.focus} onChange={(event) => updateForm({ focus: event.target.value })} placeholder="例如：招标公告、订单、客诉、IOT 方案、论文全文" />
+                    </label>
+                  ) : null}
+                  {!isLocalDirectory ? (
+                    <label className="datasource-field datasource-field-span">
+                      <span>关键词</span>
+                      <input value={form.keywords} onChange={(event) => updateForm({ keywords: event.target.value })} placeholder="用逗号分隔，例如：医疗设备，体外诊断" />
+                    </label>
+                  ) : null}
+                  {!isLocalDirectory ? (
+                    <label className="datasource-field datasource-field-span">
+                      <span>站点提示 / 表名 / 模块提示</span>
+                      <input value={form.siteHints} onChange={(event) => updateForm({ siteHints: event.target.value })} placeholder="例如：listing-detail，orders，complaints，inventory" />
+                    </label>
+                  ) : null}
                   <label className="datasource-field">
                     <span>每次最大条数</span>
                     <input value={form.maxItemsPerRun} onChange={(event) => updateForm({ maxItemsPerRun: event.target.value })} />
                   </label>
+                  {isLocalDirectory ? (
+                    <label className="datasource-field">
+                      <span>保存后立即运行</span>
+                      <div className="datasource-inline-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(form.runAfterSave)}
+                          onChange={(event) => updateForm({ runAfterSave: event.target.checked })}
+                        />
+                        <span>保存后立即执行一次扫描</span>
+                      </div>
+                    </label>
+                  ) : null}
                   <label className="datasource-field datasource-field-span">
                     <span>备注</span>
                     <textarea rows={3} value={form.notes} onChange={(event) => updateForm({ notes: event.target.value })} placeholder="补充抓取范围、排除规则、更新时间要求等。" />
@@ -841,59 +890,63 @@ export default function DatasourcesPage() {
                   })}
                 </div>
 
-                <div className="panel-header" style={{ marginTop: 20 }}>
-                  <div>
-                    <h3>认证与凭据</h3>
-                    <p>可直接引用已保存凭据，也可以在这里录入新凭据。页面只显示元信息，不回显敏感内容。</p>
-                  </div>
-                </div>
-                <div className="datasource-form-grid">
-                  <label className="datasource-field">
-                    <span>已保存凭据</span>
-                    <select value={form.credentialId} onChange={(event) => updateForm({ credentialId: event.target.value })}>
-                      <option value="">不使用已保存凭据</option>
-                      {credentials.map((credential) => (
-                        <option key={credential.id} value={credential.id}>{credential.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="datasource-field">
-                    <span>新凭据名称</span>
-                    <input value={form.credentialLabel} onChange={(event) => updateForm({ credentialLabel: event.target.value })} placeholder="例如：政府采购登录账号" />
-                  </label>
-                  <label className="datasource-field">
-                    <span>凭据来源</span>
-                    <input value={form.credentialOrigin} onChange={(event) => updateForm({ credentialOrigin: event.target.value })} placeholder="例如：manual / browser / db" />
-                  </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>凭据备注</span>
-                    <input value={form.credentialNotes} onChange={(event) => updateForm({ credentialNotes: event.target.value })} placeholder="例如：只读账号，仅用于订单与客诉采集" />
-                  </label>
-                  <label className="datasource-field">
-                    <span>用户名</span>
-                    <input value={form.credentialUsername} onChange={(event) => updateForm({ credentialUsername: event.target.value })} />
-                  </label>
-                  <label className="datasource-field">
-                    <span>密码</span>
-                    <input type="password" value={form.credentialPassword} onChange={(event) => updateForm({ credentialPassword: event.target.value })} />
-                  </label>
-                  <label className="datasource-field">
-                    <span>API Token</span>
-                    <input value={form.credentialToken} onChange={(event) => updateForm({ credentialToken: event.target.value })} />
-                  </label>
-                  <label className="datasource-field">
-                    <span>数据库连接串</span>
-                    <input value={form.credentialConnectionString} onChange={(event) => updateForm({ credentialConnectionString: event.target.value })} />
-                  </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>Cookies</span>
-                    <textarea rows={3} value={form.credentialCookies} onChange={(event) => updateForm({ credentialCookies: event.target.value })} />
-                  </label>
-                  <label className="datasource-field datasource-field-span">
-                    <span>Headers</span>
-                    <textarea rows={3} value={form.credentialHeaders} onChange={(event) => updateForm({ credentialHeaders: event.target.value })} placeholder="一行一个 Header，例如：Authorization: Bearer xxx" />
-                  </label>
-                </div>
+                {!isLocalDirectory ? (
+                  <>
+                    <div className="panel-header" style={{ marginTop: 20 }}>
+                      <div>
+                        <h3>认证与凭据</h3>
+                        <p>可直接引用已保存凭据，也可以在这里录入新凭据。页面只显示元信息，不回显敏感内容。</p>
+                      </div>
+                    </div>
+                    <div className="datasource-form-grid">
+                      <label className="datasource-field">
+                        <span>已保存凭据</span>
+                        <select value={form.credentialId} onChange={(event) => updateForm({ credentialId: event.target.value })}>
+                          <option value="">不使用已保存凭据</option>
+                          {credentials.map((credential) => (
+                            <option key={credential.id} value={credential.id}>{credential.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="datasource-field">
+                        <span>新凭据名称</span>
+                        <input value={form.credentialLabel} onChange={(event) => updateForm({ credentialLabel: event.target.value })} placeholder="例如：政府采购登录账号" />
+                      </label>
+                      <label className="datasource-field">
+                        <span>凭据来源</span>
+                        <input value={form.credentialOrigin} onChange={(event) => updateForm({ credentialOrigin: event.target.value })} placeholder="例如：manual / browser / db" />
+                      </label>
+                      <label className="datasource-field datasource-field-span">
+                        <span>凭据备注</span>
+                        <input value={form.credentialNotes} onChange={(event) => updateForm({ credentialNotes: event.target.value })} placeholder="例如：只读账号，仅用于订单与客诉采集" />
+                      </label>
+                      <label className="datasource-field">
+                        <span>用户名</span>
+                        <input value={form.credentialUsername} onChange={(event) => updateForm({ credentialUsername: event.target.value })} />
+                      </label>
+                      <label className="datasource-field">
+                        <span>密码</span>
+                        <input type="password" value={form.credentialPassword} onChange={(event) => updateForm({ credentialPassword: event.target.value })} />
+                      </label>
+                      <label className="datasource-field">
+                        <span>API Token</span>
+                        <input value={form.credentialToken} onChange={(event) => updateForm({ credentialToken: event.target.value })} />
+                      </label>
+                      <label className="datasource-field">
+                        <span>数据库连接串</span>
+                        <input value={form.credentialConnectionString} onChange={(event) => updateForm({ credentialConnectionString: event.target.value })} />
+                      </label>
+                      <label className="datasource-field datasource-field-span">
+                        <span>Cookies</span>
+                        <textarea rows={3} value={form.credentialCookies} onChange={(event) => updateForm({ credentialCookies: event.target.value })} />
+                      </label>
+                      <label className="datasource-field datasource-field-span">
+                        <span>Headers</span>
+                        <textarea rows={3} value={form.credentialHeaders} onChange={(event) => updateForm({ credentialHeaders: event.target.value })} placeholder="一行一个 Header，例如：Authorization: Bearer xxx" />
+                      </label>
+                    </div>
+                  </>
+                ) : null}
 
                 <div className="datasource-inline-actions" style={{ marginTop: 20 }}>
                   <button className="primary-btn" type="button" disabled={saving} onClick={handleSave}>

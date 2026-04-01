@@ -21,6 +21,7 @@ import {
   deleteDatasourceExecutionArtifacts,
   pauseDatasourceDefinition,
   runDatasourceDefinition,
+  runDueDatasourceDefinitions,
 } from '../lib/datasource-execution.js';
 import { buildErpExecutionPlan } from '../lib/datasource-erp-connector.js';
 import { runErpOrderCapturePlanner } from '../lib/datasource-erp-order-capture.js';
@@ -325,6 +326,14 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
         libraryLabelMap,
         documentSummaryMap,
       }),
+    };
+  });
+
+  app.post('/datasources/run-due', async () => {
+    const result = await runDueDatasourceDefinitions();
+    return {
+      status: result.executedCount ? 'processed' : 'idle',
+      ...result,
     };
   });
 

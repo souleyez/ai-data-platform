@@ -492,6 +492,17 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   font-size: 13px;
   line-height: 1.7;
 }
+.datasource-inline-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #dbe7f5;
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #334155;
+  font-size: 13px;
+}
 .datasource-workbench-grid {
   align-items: start;
 }

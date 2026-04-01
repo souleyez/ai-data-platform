@@ -3,7 +3,7 @@ import path from 'node:path';
 import { STORAGE_CONFIG_DIR } from './paths.js';
 import { computeNextRunAt } from './datasource-schedule.js';
 
-export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp' | 'upload_public';
+export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp' | 'upload_public' | 'local_directory';
 export type DatasourceStatus = 'draft' | 'active' | 'paused' | 'error';
 export type DatasourceScheduleKind = 'manual' | 'daily' | 'weekly';
 export type DatasourceAuthMode = 'none' | 'credential' | 'manual_session' | 'database_password' | 'api_token';
@@ -110,7 +110,7 @@ function normalizeDefinition(item: Partial<DatasourceDefinition>): DatasourceDef
   const now = new Date().toISOString();
   const kind = item.kind || 'web_public';
   const status = item.status || 'draft';
-  const authMode = item.authMode || 'none';
+  const authMode = kind === 'local_directory' ? 'none' : (item.authMode || 'none');
   const targetLibraries = normalizeTargetLibraries(item.targetLibraries || []);
 
   return {
@@ -125,7 +125,9 @@ function normalizeDefinition(item: Partial<DatasourceDefinition>): DatasourceDef
       maxItemsPerRun: Number(item.schedule?.maxItemsPerRun || 0) || undefined,
     },
     authMode,
-    credentialRef: item.credentialRef ? {
+    credentialRef: kind === 'local_directory'
+      ? null
+      : item.credentialRef ? {
       id: String(item.credentialRef.id || '').trim(),
       kind: item.credentialRef.kind || authMode,
       label: String(item.credentialRef.label || '').trim(),

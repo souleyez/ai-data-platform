@@ -50,6 +50,28 @@ function uniq(items: string[]) {
   return [...new Set((items || []).map((item) => String(item || '').trim()).filter(Boolean))];
 }
 
+function resolveConfirmedGroups(
+  parsed: ParsedDocument,
+  libraries: DocumentLibrary[],
+  preferredLibraryKeys: string[],
+) {
+  const preferredLibraries = preferredLibraryKeys.length
+    ? libraries.filter((library) => preferredLibraryKeys.includes(library.key))
+    : libraries;
+  const suggestedGroups = resolveSuggestedLibraryKeys(parsed, preferredLibraries);
+  const fallbackGroups = suggestedGroups.length ? [] : [UNGROUPED_LIBRARY_KEY];
+  const confirmedGroups = uniq([
+    ...suggestedGroups,
+    ...fallbackGroups,
+    ...(parsed.confirmedGroups || []),
+  ]);
+
+  return {
+    suggestedGroups,
+    confirmedGroups,
+  };
+}
+
 function buildFailedFilePreviewItem(
   file: UploadedFileRecord,
   sourceNameResolver: ((file: UploadedFileRecord) => string) | undefined,
@@ -150,9 +172,6 @@ export async function ingestUploadedFiles(input: {
   preferredLibraryKeys?: string[];
 }) {
   const preferredLibraryKeys = uniq(input.preferredLibraryKeys || []);
-  const preferredLibraries = preferredLibraryKeys.length
-    ? input.libraries.filter((library) => preferredLibraryKeys.includes(library.key))
-    : input.libraries;
 
   const ingestItems: IngestPreviewItem[] = [];
   const parsedItems: ParsedDocument[] = [];
@@ -184,15 +203,11 @@ export async function ingestUploadedFiles(input: {
       continue;
     }
 
-    const suggestedGroups = resolveSuggestedLibraryKeys(parsed, preferredLibraries);
-    const fallbackGroups = suggestedGroups.length
-      ? []
-      : (preferredLibraryKeys.length ? preferredLibraryKeys.slice(0, 1) : [UNGROUPED_LIBRARY_KEY]);
-    const confirmedGroups = uniq([
-      ...(suggestedGroups.length ? suggestedGroups : []),
-      ...fallbackGroups,
-      ...(parsed.confirmedGroups || []),
-    ]);
+    const { suggestedGroups, confirmedGroups } = resolveConfirmedGroups(
+      parsed,
+      input.libraries,
+      preferredLibraryKeys,
+    );
 
     parsedItems.push({
       ...parsed,
@@ -236,6 +251,82 @@ export async function ingestUploadedFiles(input: {
     parsedItems,
     uploadedFiles: input.files,
     confirmedLibraryKeys: [...confirmedLibraryKeys],
+    summary: {
+      total: ingestItems.length,
+      successCount: ingestItems.filter((item) => item.status === 'success').length,
+      failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+    },
+  } satisfies UploadIngestResult;
+}
+
+export async function ingestExistingLocalFiles(input: {
+  filePaths: string[];
+  documentConfig: DocumentCategoryConfig;
+  libraries: DocumentLibrary[];
+  preferredLibraryKeys?: string[];
+}) {
+  const files: UploadedFileRecord[] = [];
+  const failedItems: IngestPreviewItem[] = [];
+  const seen = new Set<string>();
+
+  for (const rawPath of input.filePaths) {
+    const sourcePath = path.resolve(String(rawPath || '').trim());
+    if (!sourcePath) continue;
+
+    const dedupeKey = sourcePath.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    let stat: Awaited<ReturnType<typeof fs.stat>> | null = null;
+    try {
+      stat = await fs.stat(sourcePath);
+    } catch {
+      stat = null;
+    }
+
+    if (!stat?.isFile()) {
+      failedItems.push(buildFailedPreviewItem({
+        id: Buffer.from(sourcePath).toString('base64url'),
+        sourceType: 'file',
+        sourceName: path.basename(sourcePath) || sourcePath,
+        errorMessage: 'Local file was not found or is not a regular file.',
+      }));
+      continue;
+    }
+
+    files.push({
+      name: path.basename(sourcePath),
+      path: sourcePath,
+      bytes: stat.size,
+      originalPath: sourcePath,
+    });
+  }
+
+  const ingestResult = files.length
+    ? await ingestUploadedFiles({
+      files,
+      documentConfig: input.documentConfig,
+      libraries: input.libraries,
+      preferredLibraryKeys: input.preferredLibraryKeys,
+      sourceNameResolver: (file) => file.originalPath || file.name,
+    })
+    : {
+      ingestItems: [],
+      parsedItems: [],
+      uploadedFiles: [],
+      confirmedLibraryKeys: [],
+      summary: {
+        total: 0,
+        successCount: 0,
+        failedCount: 0,
+      },
+    } satisfies UploadIngestResult;
+
+  const ingestItems = [...failedItems, ...ingestResult.ingestItems];
+
+  return {
+    ...ingestResult,
+    ingestItems,
     summary: {
       total: ingestItems.length,
       successCount: ingestItems.filter((item) => item.status === 'success').length,

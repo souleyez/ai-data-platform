@@ -1,6 +1,7 @@
 import {
   appendDatasourceRun,
   getDatasourceDefinition,
+  listDatasourceDefinitions,
   upsertDatasourceDefinition,
   type DatasourceDefinition,
   type DatasourceRun,
@@ -25,6 +26,7 @@ import {
   runErpOrderCapturePlanner,
 } from './datasource-erp-order-capture.js';
 import { computeNextRunAt } from './datasource-schedule.js';
+import { runLocalDirectoryDatasource } from './datasource-local-directory.js';
 
 function buildSyntheticRun(
   definition: DatasourceDefinition,
@@ -134,6 +136,54 @@ export async function runDatasourceDefinition(id: string) {
     throw new Error('paused datasource definition cannot be run until activated');
   }
 
+  if (definition.kind === 'local_directory') {
+    const directory = String(definition.config?.path || definition.config?.url || '').trim();
+    if (!directory) {
+      const summary = 'local directory path is required';
+      const run = await appendDatasourceRun({
+        ...buildSyntheticRun(definition, 'failed', summary, summary),
+        summary,
+        errorMessage: summary,
+      });
+      const nextDefinition = await getDatasourceDefinition(definition.id);
+      return { definition: nextDefinition, task: null, run };
+    }
+
+    try {
+      const configuredMaxItems = Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 0) || undefined;
+      const result = await runLocalDirectoryDatasource({
+        directory,
+        targetLibraryKeys: definition.targetLibraries.map((item) => item.key),
+        maxItems: configuredMaxItems,
+      });
+      const status = result.failedCount ? (result.ingestedCount ? 'partial' : 'failed') : 'success';
+      const summary = `local scan ${result.ingestedCount}/${result.plannedCount} | discovered ${result.discoveredCount}`;
+      const run = await appendDatasourceRun({
+        ...buildSyntheticRun(definition, status, summary),
+        discoveredCount: result.discoveredCount,
+        capturedCount: result.plannedCount,
+        ingestedCount: result.ingestedCount,
+        documentIds: result.ingestedPaths,
+        libraryKeys: result.confirmedLibraryKeys?.length
+          ? result.confirmedLibraryKeys
+          : definition.targetLibraries.map((item) => item.key),
+        summary,
+        errorMessage: result.failedCount ? 'some files failed parsing or were unsupported' : '',
+      });
+      const nextDefinition = await getDatasourceDefinition(definition.id);
+      return { definition: nextDefinition, task: null, run };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'local directory scan failed';
+      const run = await appendDatasourceRun({
+        ...buildSyntheticRun(definition, 'failed', message, message),
+        summary: message,
+        errorMessage: message,
+      });
+      const nextDefinition = await getDatasourceDefinition(definition.id);
+      return { definition: nextDefinition, task: null, run };
+    }
+  }
+
   if (definition.kind === 'upload_public') {
     const summary = `外部资料上传入口已就绪，可通过固定链接向 ${(definition.targetLibraries || []).map((item) => item.label).join('、') || '目标知识库'} 提交材料。`;
     const run = await appendDatasourceRun({
@@ -236,4 +286,37 @@ export async function deleteDatasourceExecutionArtifacts(definition: DatasourceD
   if (task) {
     await deleteWebCaptureTask(task.id);
   }
+}
+
+export async function runDueDatasourceDefinitions() {
+  const definitions = await listDatasourceDefinitions();
+  const now = Date.now();
+  const due = definitions.filter((definition) => {
+    if (definition.status !== 'active') return false;
+    if (definition.schedule.kind === 'manual') return false;
+    if (definition.kind !== 'local_directory') return false;
+    const nextRunAt = definition.nextRunAt || '';
+    if (!nextRunAt) return false;
+    return Date.parse(nextRunAt) <= now;
+  });
+
+  const results = [];
+  for (const definition of due) {
+    try {
+      results.push(await runDatasourceDefinition(definition.id));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'run due datasource failed';
+      const run = await appendDatasourceRun({
+        ...buildSyntheticRun(definition, 'failed', message, message),
+        summary: message,
+        errorMessage: message,
+      });
+      results.push({ definition, task: null, run });
+    }
+  }
+
+  return {
+    executedCount: results.length,
+    items: results,
+  };
 }

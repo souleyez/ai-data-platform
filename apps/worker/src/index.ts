@@ -6,6 +6,7 @@ const apiBaseUrl = (process.env.API_BASE_URL || 'http://127.0.0.1:3100').replace
 const scanPath = process.env.WORKER_SCAN_PATH || '/api/documents/scan';
 const deepParsePath = process.env.WORKER_DEEP_PARSE_PATH || '/api/documents/deep-parse/run';
 const webCapturePath = process.env.WORKER_WEB_CAPTURE_PATH || '/api/web-captures/run-due';
+const datasourcePath = process.env.WORKER_DATASOURCE_PATH || '/api/datasources/run-due';
 const auditPolicyPath = process.env.WORKER_AUDIT_POLICY_PATH || '/api/audit/run-policy';
 const enableAutoScan = /^(1|true|yes)$/i.test(String(process.env.WORKER_ENABLE_SCAN || 'false'));
 const enableDeepParse = !/^(0|false|no)$/i.test(String(process.env.WORKER_ENABLE_DEEP_PARSE || 'true'));
@@ -31,6 +32,11 @@ type WebCaptureTickResponse = {
   executedCount?: number;
   successCount?: number;
   errorCount?: number;
+};
+
+type DatasourceTickResponse = {
+  status?: string;
+  executedCount?: number;
 };
 
 type AuditPolicyResponse = {
@@ -182,6 +188,27 @@ async function runTick() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[worker:${workerName}] web capture tick failed | api=${apiBaseUrl}${webCapturePath} | reason=${message}`);
+  }
+
+  try {
+    const response = await fetch(`${apiBaseUrl}${datasourcePath}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`datasource run-due request failed with status ${response.status}`);
+    }
+
+    const result = await response.json() as DatasourceTickResponse;
+    console.log(
+      `[worker:${workerName}] datasources=${result.status || 'unknown'} | executed=${result.executedCount ?? 0}`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[worker:${workerName}] datasource run-due tick failed | api=${apiBaseUrl}${datasourcePath} | reason=${message}`);
   }
 
   await runAuditPolicyTick();

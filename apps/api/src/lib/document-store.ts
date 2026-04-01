@@ -269,6 +269,12 @@ async function readCache(): Promise<CachePayload | null> {
   }
 }
 
+export async function listCachedDocumentPaths() {
+  const cache = await readCache();
+  if (!cache?.items?.length) return new Set<string>();
+  return new Set(cache.items.map((item) => item.path).filter(Boolean));
+}
+
 function sameScanRoots(left?: string[], right?: string[]) {
   return JSON.stringify(left || []) === JSON.stringify(right || []);
 }
@@ -302,6 +308,17 @@ export async function upsertDocumentsInCache(items: ParsedDocument[], scanRoot?:
 
   const cache = await readCache();
   if (!cache) {
+    const scanRoots = await resolveScanRoots(scanRoot);
+    const activeScanRoot = scanRoots[0] || await resolveScanRoot();
+    const nextItems = dedupeDocuments(sortDocumentsByRecency(items));
+    await writeCache({
+      generatedAt: new Date().toISOString(),
+      scanRoot: activeScanRoot,
+      scanRoots,
+      totalFiles: nextItems.length,
+      scanSignature: '',
+      items: nextItems,
+    });
     return;
   }
 
