@@ -911,6 +911,7 @@ export function buildTemplateCatalogContextBlock(
     explicitTemplateKey
       ? `The user explicitly mentioned template key: ${explicitTemplateKey}. Use it only if it still fits the evidence and output type.`
       : 'No template is forced. Choose one only when it clearly improves the output; otherwise answer directly from library evidence.',
+    'Reusable page, table, and document outputs may also be published into the local report center for preview, revision, and reopening.',
     ...options.map((option, index) => {
       const sections = option.pageSections.length ? `Page sections: ${option.pageSections.join(' | ')}` : '';
       const columns = option.tableColumns.length ? `Table columns: ${option.tableColumns.join(' | ')}` : '';

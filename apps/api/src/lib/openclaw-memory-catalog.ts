@@ -672,6 +672,9 @@ function renderTemplatesFile(templates: OpenClawMemoryTemplateSnapshot[]) {
   return [
     '# Shared Template Catalog',
     '',
+    'Reusable page, table, and document results can be published into the local report center for preview, revision, and reopening.',
+    'The templates below are optional publishing skeletons and reference layouts, not mandatory routing rules.',
+    '',
     ...(templates.length
       ? templates.map((template) => [
         `## ${template.label}`,
