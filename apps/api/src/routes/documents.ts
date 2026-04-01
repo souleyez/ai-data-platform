@@ -138,6 +138,10 @@ function extractDocumentTimestamp(item: { name?: string; path?: string }) {
   return match ? Number(match[1]) : 0;
 }
 
+function buildAttachmentDisposition(fileName: string) {
+  return `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
 function resolveLibraryScenarioKey(
   library: { isDefault?: boolean; sourceCategoryKey?: string; key: string },
   items: Array<{ bizCategory?: string; confirmedBizCategory?: string }>,
@@ -315,6 +319,31 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
     await fs.access(found.path);
     reply.header('Cache-Control', 'private, max-age=60');
+    reply.type(contentType);
+    return reply.send(createReadStream(found.path));
+  });
+
+  app.get('/documents/download', async (request, reply) => {
+    const { id } = (request.query || {}) as { id?: string };
+    if (!id) {
+      return reply.code(400).send({ error: 'id is required' });
+    }
+
+    const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const { items } = await loadParsedDocuments(200, false, documentConfig.scanRoots);
+    const found = items.find((item) => buildDocumentId(item.path) === id);
+
+    if (!found) {
+      return reply.code(404).send({ error: 'document not found' });
+    }
+
+    await fs.access(found.path);
+    const fileName = sanitizeFileName(found.name || path.basename(found.path));
+    const contentType = IMAGE_CONTENT_TYPES[String(found.ext || '').toLowerCase()] || 'application/octet-stream';
+
+    reply.header('Cache-Control', 'private, max-age=60');
+    reply.header('Content-Disposition', buildAttachmentDisposition(fileName));
+    reply.header('X-Content-Type-Options', 'nosniff');
     reply.type(contentType);
     return reply.send(createReadStream(found.path));
   });

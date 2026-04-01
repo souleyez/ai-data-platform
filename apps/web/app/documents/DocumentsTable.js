@@ -1,5 +1,7 @@
 'use client';
 
+import { buildApiUrl } from '../lib/config';
+
 function renderParseStage(item, parseMethodLabels) {
   const methodLabel = parseMethodLabels[item.parseMethod] || item.parseMethod || '-';
   const stageLabel = item.parseStage === 'detailed' ? '进阶解析' : '快速解析';
@@ -30,6 +32,15 @@ function renderParseStage(item, parseMethodLabels) {
       ) : null}
     </div>
   );
+}
+
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']);
+
+function buildDocumentOpenUrl(item) {
+  if (!item?.id) return '#';
+  const isImage = IMAGE_EXTENSIONS.has(String(item.ext || '').toLowerCase());
+  const endpoint = isImage ? 'file' : 'download';
+  return buildApiUrl(`/api/documents/${endpoint}?id=${encodeURIComponent(item.id)}`);
 }
 
 export default function DocumentsTable({
@@ -102,7 +113,7 @@ export default function DocumentsTable({
                 <td className="document-name-cell">
                   <div style={{ display: 'grid', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <a href={`/documents/${item.id}`}>{item.name}</a>
+                      <a href={buildDocumentOpenUrl(item)} target="_blank" rel="noreferrer">{item.name}</a>
                       {recentNewIds.includes(item.id) ? (
                         <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span>
                       ) : null}
