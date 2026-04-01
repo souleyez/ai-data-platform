@@ -1,6 +1,7 @@
 'use client';
 
 import ChatPanel from './components/ChatPanel';
+import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
 import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
 import { useHomePageController } from './use-home-page-controller';
@@ -62,6 +63,9 @@ export default function HomePageClient({ initialModelState }) {
           <div className="topbar-title-row">
             <h2>智能助手</h2>
             <span className="topbar-inline-note">{buildTopSummary(documentTotal, documentLibraries)}</span>
+          </div>
+          <div className="topbar-actions">
+            <FullIntelligenceModeButton />
           </div>
         </header>
 

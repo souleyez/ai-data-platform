@@ -112,6 +112,27 @@ button, textarea { font: inherit; }
 }
 .topbar p { margin: 8px 0 0; color: var(--subtle); max-width: 780px; }
 .topbar-actions { display: flex; gap: 12px; }
+.mode-entry-wrap {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  min-width: 220px;
+}
+.mode-entry-btn {
+  min-width: 180px;
+  white-space: nowrap;
+}
+.mode-entry-btn-active {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+.mode-entry-status {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
 button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
 .primary-btn { background: var(--primary); color: white; }
 .primary-btn:hover { background: var(--primary-deep); }
