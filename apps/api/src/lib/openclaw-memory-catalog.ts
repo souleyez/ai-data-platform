@@ -4,6 +4,11 @@ import { buildDocumentId, loadParsedDocuments } from './document-store.js';
 import { loadDocumentLibraries, documentMatchesLibrary, type DocumentLibrary } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
 import {
+  buildSharedTemplateEnvelope,
+  loadReportCenterState,
+  type SharedReportTemplate,
+} from './report-center.js';
+import {
   MEMORY_ROOT,
   STORAGE_CONFIG_DIR,
 } from './paths.js';
@@ -18,6 +23,7 @@ import {
 const CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
 const LIBRARIES_DIR = path.join(CATALOG_ROOT, 'libraries');
 const DOCUMENTS_DIR = path.join(CATALOG_ROOT, 'documents');
+const TEMPLATES_DIR = path.join(CATALOG_ROOT, 'templates');
 const CHANGES_DIR = path.join(CATALOG_ROOT, 'changes');
 const ARCHIVE_DIR = path.join(CHANGES_DIR, 'archive');
 const STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
@@ -47,8 +53,10 @@ export type OpenClawMemoryCatalogSnapshot = {
   generatedAt: string;
   libraryCount: number;
   documentCount: number;
+  templateCount: number;
   libraries: OpenClawMemoryLibrarySnapshot[];
   documents: CatalogDocumentCard[];
+  templates: OpenClawMemoryTemplateSnapshot[];
 };
 
 type CatalogDocumentCard = OpenClawMemoryDocumentState & {
@@ -63,6 +71,24 @@ type CatalogDocumentCard = OpenClawMemoryDocumentState & {
   detailLevel: CatalogMemoryDetailLevel;
   keyFacts: string[];
   evidenceHighlights: string[];
+};
+
+export type OpenClawMemoryTemplateSnapshot = {
+  key: string;
+  label: string;
+  type: SharedReportTemplate['type'];
+  description: string;
+  origin: string;
+  isDefault: boolean;
+  supported: boolean;
+  groupKeys: string[];
+  groupLabels: string[];
+  outputHint: string;
+  fixedStructure: string[];
+  variableZones: string[];
+  pageSections: string[];
+  tableColumns: string[];
+  referenceNames: string[];
 };
 
 function sanitizeText(value: unknown, maxLength = 240) {
@@ -435,10 +461,55 @@ function buildLibrarySnapshot(library: DocumentLibrary, cards: CatalogDocumentCa
   };
 }
 
+function buildTemplateSnapshots(input: Awaited<ReturnType<typeof loadReportCenterState>>) {
+  const groupMap = new Map<string, { keys: Set<string>; labels: Set<string> }>();
+  for (const group of input.groups) {
+    for (const template of group.templates) {
+      const entry = groupMap.get(template.key) || { keys: new Set<string>(), labels: new Set<string>() };
+      entry.keys.add(group.key);
+      entry.labels.add(group.label);
+      groupMap.set(template.key, entry);
+    }
+  }
+
+  return input.templates
+    .filter((template) => template.supported)
+    .map((template) => {
+      const envelope = buildSharedTemplateEnvelope(template);
+      const groups = groupMap.get(template.key);
+      return {
+        key: template.key,
+        label: sanitizeText(template.label, 120),
+        type: template.type,
+        description: sanitizeText(template.description, 200),
+        origin: sanitizeText(template.origin, 32) || 'system',
+        isDefault: Boolean(template.isDefault),
+        supported: Boolean(template.supported),
+        groupKeys: groups ? [...groups.keys] : [],
+        groupLabels: groups ? [...groups.labels] : [],
+        outputHint: sanitizeText(envelope.outputHint, 180),
+        fixedStructure: sanitizeList(envelope.fixedStructure || [], 90, 8),
+        variableZones: sanitizeList(envelope.variableZones || [], 90, 8),
+        pageSections: sanitizeList(envelope.pageSections || [], 80, 8),
+        tableColumns: sanitizeList(envelope.tableColumns || [], 60, 8),
+        referenceNames: sanitizeList(
+          (template.referenceImages || []).map((item) => item.originalName),
+          80,
+          6,
+        ),
+      } satisfies OpenClawMemoryTemplateSnapshot;
+    })
+    .sort((left, right) => (
+      Number(right.isDefault) - Number(left.isDefault)
+      || left.label.localeCompare(right.label, 'zh-CN')
+    ));
+}
+
 export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemoryCatalogSnapshot> {
-  const [libraries, loadedDocuments] = await Promise.all([
+  const [libraries, loadedDocuments, reportCenterState] = await Promise.all([
     loadDocumentLibraries(),
     loadParsedDocuments(CATALOG_DOCUMENT_LIMIT, false),
+    loadReportCenterState(),
   ]);
 
   const resolvedDocuments = loadedDocuments.items.map((item) => ({
@@ -459,22 +530,26 @@ export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemo
     library,
     cards.filter((item) => item.libraryKeys.includes(library.key)),
   ));
+  const templateSnapshots = buildTemplateSnapshots(reportCenterState);
 
   return {
     version: OPENCLAW_MEMORY_STATE_VERSION,
     generatedAt: new Date().toISOString(),
     libraryCount: librarySnapshots.length,
     documentCount: cards.length,
+    templateCount: templateSnapshots.length,
     libraries: librarySnapshots.sort((left, right) => (
       right.documentCount - left.documentCount || left.label.localeCompare(right.label, 'zh-CN')
     )),
     documents: cards,
+    templates: templateSnapshots,
   };
 }
 
 async function ensureCatalogDirs() {
   await fs.mkdir(LIBRARIES_DIR, { recursive: true });
   await fs.mkdir(DOCUMENTS_DIR, { recursive: true });
+  await fs.mkdir(TEMPLATES_DIR, { recursive: true });
   await fs.mkdir(ARCHIVE_DIR, { recursive: true });
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
 }
@@ -508,6 +583,7 @@ function renderIndex(snapshot: OpenClawMemoryCatalogSnapshot, recentChanges: Ope
     `- Last sync: ${formatIsoDateTime(snapshot.generatedAt)}`,
     `- Libraries: ${snapshot.libraryCount}`,
     `- Documents: ${snapshot.documentCount}`,
+    `- Templates: ${snapshot.templateCount}`,
     '',
     '## Libraries',
     topLibraries || '- None',
@@ -592,6 +668,30 @@ function renderRecentChanges(changes: OpenClawMemoryChange[]) {
   ].join('\n');
 }
 
+function renderTemplatesFile(templates: OpenClawMemoryTemplateSnapshot[]) {
+  return [
+    '# Shared Template Catalog',
+    '',
+    ...(templates.length
+      ? templates.map((template) => [
+        `## ${template.label}`,
+        `- Template key: ${template.key}`,
+        `- Type: ${template.type}`,
+        `- Origin: ${template.origin}${template.isDefault ? ' | default' : ''}`,
+        `- Description: ${template.description || '-'}`,
+        `- Matched libraries: ${template.groupLabels.join(' | ') || '-'}`,
+        `- Output hint: ${template.outputHint || '-'}`,
+        ...(template.pageSections.length ? [`- Page sections: ${template.pageSections.join(' | ')}`] : []),
+        ...(template.tableColumns.length ? [`- Table columns: ${template.tableColumns.join(' | ')}`] : []),
+        ...(template.fixedStructure.length ? [`- Fixed structure: ${template.fixedStructure.join(' | ')}`] : []),
+        ...(template.variableZones.length ? [`- Variable zones: ${template.variableZones.join(' | ')}`] : []),
+        ...(template.referenceNames.length ? [`- Reference files: ${template.referenceNames.join(' | ')}`] : []),
+        '',
+      ].join('\n'))
+      : ['- None', '']),
+  ].join('\n');
+}
+
 async function writeCatalogFiles(
   snapshot: OpenClawMemoryCatalogSnapshot,
   state: OpenClawMemoryState,
@@ -602,6 +702,7 @@ async function writeCatalogFiles(
 
   await fs.writeFile(path.join(CATALOG_ROOT, 'index.md'), renderIndex(snapshot, state.recentChanges), 'utf8');
   await fs.writeFile(path.join(CHANGES_DIR, 'recent.md'), renderRecentChanges(state.recentChanges), 'utf8');
+  await fs.writeFile(path.join(TEMPLATES_DIR, 'index.md'), renderTemplatesFile(snapshot.templates), 'utf8');
 
   for (const library of snapshot.libraries) {
     const fileKey = slugifyKey(library.key);
@@ -638,6 +739,7 @@ export async function refreshOpenClawMemoryCatalog() {
     generatedAt: snapshot.generatedAt,
     libraryCount: snapshot.libraryCount,
     documentCount: snapshot.documentCount,
+    templateCount: snapshot.templateCount,
     changeCount: nextState.recentChanges.length,
     changedThisRun: nextState.recentChanges.filter((item) => item.happenedAt === snapshot.generatedAt).length,
     memoryRoot: CATALOG_ROOT,

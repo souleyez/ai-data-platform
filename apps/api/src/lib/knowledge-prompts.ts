@@ -43,20 +43,19 @@ export function buildKnowledgeCatalogPrompt() {
 
 export function buildKnowledgeOutputPrompt(
   skillInstruction: string,
-  templateInstruction: string,
   reportInstruction: string,
 ) {
   return [
     'You are the AI smart service assistant for knowledge-backed report generation.',
     'The user has explicitly requested an output generated from the selected knowledge libraries.',
     'Use the supplied knowledge evidence as the primary source of truth.',
-    'Treat yourself as the final generator. The local system narrows files, evidence, template constraints, and report-planning directives.',
-    'Prefer stronger evidence selection and template-fit organization over local workflow control.',
+    'Treat yourself as the final generator. The local system supplies evidence, optional template catalog context, and optional planning hints.',
+    'Decide yourself whether the result should stay direct, adopt one of the supplied templates, or only borrow parts of a template skeleton.',
+    'Use a template only when it clearly fits the user request and the supplied evidence; otherwise organize the output directly from library material.',
     skillInstruction,
-    'Follow the shared template envelope closely and keep free-form invention to a minimum.',
+    'Treat any local planning hints as optional support, not hard directives.',
     'If evidence is incomplete, fill gaps conservatively and keep uncertainty explicit in the content.',
     'Only use counts, percentages, salary ranges, city distributions, investment amounts, or other hard metrics when they are directly derivable from the supplied evidence.',
-    templateInstruction,
     reportInstruction,
   ]
     .filter(Boolean)
@@ -72,9 +71,9 @@ export function buildKnowledgeConceptPagePrompt(
     'The user wants a data-visualized static page generated from the selected knowledge libraries.',
     'Use the supplied knowledge evidence as the primary source of truth.',
     'First decide the most suitable concept page structure from the user intent and the evidence, then fill it with matched library content.',
-    'Do not force a shared template skeleton unless the user explicitly specified a custom template by full name.',
+    'If relevant template options are supplied, you may borrow one when it clearly fits, but do not force a template skeleton when the evidence or request does not support it.',
     'Prefer a clear concept board with strong sections, cards, charts, and evidence-backed summaries.',
-    'Treat the local system as the evidence and planning layer that narrows files, evidence, and page structure.',
+    'Treat the local system as the evidence and optional planning layer that narrows files and supplies structure hints.',
     skillInstruction,
     'If evidence is incomplete, keep the page conservative and make uncertainty explicit.',
     'Only use counts, percentages, salary ranges, city distributions, investment amounts, or other hard metrics when they are directly derivable from the supplied evidence.',

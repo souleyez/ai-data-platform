@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import type { ReportGroup, SharedReportTemplate } from '../src/lib/report-center.js';
 import {
   adaptSelectedTemplatesForRequest,
+  buildTemplateCatalogContextBlock,
+  buildTemplateCatalogSearchHints,
   buildTemplateContextBlock,
   buildTemplateSearchHints,
+  inferKnowledgeTemplateTaskHintFromLibraries,
   inferTemplateTaskHint,
   selectSharedTemplateForGroup,
+  type KnowledgeTemplateCatalogOption,
   type SelectedKnowledgeTemplate,
 } from '../src/lib/knowledge-template.js';
 
@@ -258,6 +262,53 @@ test('buildTemplateSearchHints and context block should include envelope structu
   assert.ok(hints.includes('resume-template.docx'));
   assert.ok(hints.includes('列A'));
   assert.ok(hints.includes('固定结构A'));
+});
+
+test('inferKnowledgeTemplateTaskHintFromLibraries should derive task hints without preselected templates', () => {
+  assert.equal(
+    inferKnowledgeTemplateTaskHintFromLibraries([{ key: 'resume', label: '人才简历库' }], 'page'),
+    'resume-comparison',
+  );
+  assert.equal(
+    inferKnowledgeTemplateTaskHintFromLibraries([{ key: 'order', label: '订单分析' }], 'page'),
+    'order-static-page',
+  );
+  assert.equal(
+    inferKnowledgeTemplateTaskHintFromLibraries([{ key: 'bids', label: '招投标项目' }], 'table'),
+    'bids-table',
+  );
+});
+
+test('buildTemplateCatalogContextBlock should expose optional template choices', () => {
+  const options: KnowledgeTemplateCatalogOption[] = [
+    {
+      groupKey: 'resume',
+      groupLabel: '人才简历库',
+      templateKey: 'resume-page-template',
+      templateLabel: '简历客户汇报页',
+      templateType: 'static-page',
+      description: '用于简历对比和 shortlist 展示',
+      origin: 'system',
+      isDefault: true,
+      outputHint: '适合客户汇报型静态页',
+      fixedStructure: ['固定结构A'],
+      variableZones: ['变量区域A'],
+      pageSections: ['客户概览', '代表候选人'],
+      tableColumns: [],
+      referenceNames: ['resume-template.docx'],
+      score: 120,
+    },
+  ];
+
+  const context = buildTemplateCatalogContextBlock(options);
+  const hints = buildTemplateCatalogSearchHints(options);
+
+  assert.match(context, /Optional template catalog/i);
+  assert.match(context, /No template is forced/i);
+  assert.match(context, /Template key: resume-page-template/);
+  assert.ok(hints.includes('resume-page-template'));
+  assert.ok(hints.includes('客户概览'));
+  assert.ok(hints.includes('resume-template.docx'));
 });
 
 test('selectSharedTemplateForGroup should prefer semantic matches over generic defaults', () => {

@@ -58,6 +58,7 @@ Store only stable, index-like facts:
 
 - library count
 - each library key, label, purpose, and approximate document count
+- shared template catalog entries, including which libraries they fit and what output shape they support
 - each library's recent update time
 - each document's id, library key, title, short abstract, and update time
 - document usability state such as:
@@ -103,6 +104,9 @@ Recommended layout:
 - `memory/catalog/documents/<library-key>.md`
   - compact document cards for that library
   - one section per document id
+- `memory/catalog/templates/index.md`
+  - optional template catalog for static pages, tables, reports, and other library-backed deliverables
+  - template key, type, matched libraries, output hint, and stable section or column skeleton
 - `memory/catalog/changes/recent.md`
   - rolling recent change log
 - `memory/catalog/changes/archive/YYYY-MM.md`
@@ -258,6 +262,8 @@ Without them, memory and real storage will drift, excluded documents will leak b
   - stays as the source for live library metadata
 - `apps/api/src/lib/document-store.ts`
   - stays as the source for live document facts and detail retrieval
+- `apps/api/src/lib/report-center.ts`
+  - stays as the source for shared template metadata, but template choice should become model-led instead of project-led
 - `apps/api/src/lib/knowledge-execution.ts`
   - stays, but only for detail/output execution
 - `apps/api/src/lib/knowledge-output.ts`

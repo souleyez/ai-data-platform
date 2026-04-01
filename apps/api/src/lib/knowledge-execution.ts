@@ -28,10 +28,10 @@ import {
 } from './knowledge-prompts.js';
 import {
   adaptSelectedTemplatesForRequest,
-  buildKnowledgeTemplateInstruction,
-  buildTemplateContextBlock,
-  buildTemplateSearchHints,
-  inferTemplateTaskHint,
+  buildTemplateCatalogContextBlock,
+  buildTemplateCatalogSearchHints,
+  inferKnowledgeTemplateTaskHintFromLibraries,
+  listKnowledgeTemplateCatalogOptions,
   resolveRequestedSharedTemplate,
   selectKnowledgeTemplates,
   shouldUseConceptPageMode,
@@ -477,16 +477,23 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     contentFocus: input.contentFocus,
   });
 
-  const selectedTemplates = adaptSelectedTemplatesForRequest(
-    await selectKnowledgeTemplates(
-      scopeState.libraries,
-      requestedKind,
-      requestedTemplateKey,
-    ),
-    requestText,
+  const selectedTemplates = requestedTemplateKey
+    ? adaptSelectedTemplatesForRequest(
+      await selectKnowledgeTemplates(
+        scopeState.libraries,
+        requestedKind,
+        requestedTemplateKey,
+      ),
+      requestText,
+    )
+    : [];
+  const templateCatalogOptions = await listKnowledgeTemplateCatalogOptions(
+    scopeState.libraries,
+    requestedKind,
+    requestedTemplateKey,
   );
-  const templateTaskHint = inferTemplateTaskHint(selectedTemplates, requestedKind);
-  const templateSearchHints = conceptPageMode ? [] : buildTemplateSearchHints(selectedTemplates);
+  const templateTaskHint = inferKnowledgeTemplateTaskHintFromLibraries(scopeState.libraries, requestedKind);
+  const templateSearchHints = buildTemplateCatalogSearchHints(templateCatalogOptions);
   const isOrderInventoryPageRequest = requestedKind === 'page' && templateTaskHint === 'order-static-page';
   const memorySelection = await selectOpenClawMemoryDocumentCandidates({
     requestText,
@@ -519,7 +526,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       content,
       intent: 'report',
       mode: 'openclaw',
-      reportTemplate: !conceptPageMode && selectedTemplates[0]
+      reportTemplate: selectedTemplates[0]
         ? {
             key: selectedTemplates[0].template.key,
             label: selectedTemplates[0].template.label,
@@ -529,13 +536,6 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     };
   }
 
-  const templateInstruction = conceptPageMode
-    ? ''
-    : await buildKnowledgeTemplateInstruction(
-      resolvedLibraries,
-      requestedKind,
-      requestedTemplateKey,
-    );
   const supplySkillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
     'references/supply-contract.md',
   ]);
@@ -558,7 +558,10 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const skillInstruction = [supplySkillInstruction, plannerSkillInstruction]
     .filter(Boolean)
     .join('\n\n');
-  const templateContext = conceptPageMode ? '' : buildTemplateContextBlock(selectedTemplates);
+  const templateCatalogContext = buildTemplateCatalogContextBlock(
+    templateCatalogOptions,
+    requestedTemplateKey,
+  );
   const activeEnvelope = reportPlan?.envelope || (conceptPageMode ? null : (selectedTemplates[0]?.envelope || null));
   const resumeDisplayProfileResolution = requestedKind === 'page'
     ? await runResumeDisplayProfileResolver({
@@ -735,7 +738,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           conceptPageContext,
           reportPlanContext,
           resumeDisplayProfileContext,
-          templateContext,
+          templateCatalogContext,
           buildKnowledgeContext(requestText, resolvedLibraries, effectiveRetrieval, {
             timeRange: input.timeRange,
             contentFocus: input.contentFocus,
@@ -748,7 +751,6 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           )
           : buildKnowledgeOutputPrompt(
             skillInstruction,
-            templateInstruction,
             buildReportInstruction(requestedKind),
           ),
       });
@@ -819,7 +821,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     content: finalOutput.content,
     intent: 'report',
     mode: 'openclaw',
-    reportTemplate: !conceptPageMode && selectedTemplates[0]
+    reportTemplate: selectedTemplates[0]
       ? {
           key: selectedTemplates[0].template.key,
           label: selectedTemplates[0].template.label,

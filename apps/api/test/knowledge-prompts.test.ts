@@ -20,30 +20,31 @@ test('buildKnowledgeAnswerPrompt should support direct answers from catalog and 
   assert.match(prompt, /Workspace skill: knowledge-detail-fetch/i);
 });
 
-test('buildKnowledgeConceptPagePrompt should emphasize concept-page generation without shared template lock-in', () => {
+test('buildKnowledgeConceptPagePrompt should treat template options as optional for concept pages', () => {
   const prompt = buildKnowledgeConceptPagePrompt(
     'Workspace skill: knowledge-report-supply',
     'Output a static page.',
   );
 
   assert.match(prompt, /concept page structure/i);
-  assert.match(prompt, /Do not force a shared template skeleton/i);
-  assert.match(prompt, /evidence and planning layer/i);
+  assert.match(prompt, /If relevant template options are supplied/i);
+  assert.match(prompt, /optional planning layer/i);
   assert.match(prompt, /directly derivable from the supplied evidence/i);
-  assert.doesNotMatch(prompt, /Follow the shared template envelope closely/i);
+  assert.doesNotMatch(prompt, /Do not force a shared template skeleton unless/i);
 });
 
-test('buildKnowledgeOutputPrompt should keep template-first behavior for non-page outputs', () => {
+test('buildKnowledgeOutputPrompt should make template use optional instead of pre-committed', () => {
   const prompt = buildKnowledgeOutputPrompt(
     'Workspace skill: knowledge-report-supply',
-    'Follow template A exactly.',
     'Output a table.',
   );
 
-  assert.match(prompt, /Follow the shared template envelope closely/i);
-  assert.match(prompt, /report-planning directives/i);
+  assert.match(prompt, /optional template catalog context/i);
+  assert.match(prompt, /Decide yourself whether the result should stay direct/i);
+  assert.match(prompt, /Use a template only when it clearly fits/i);
+  assert.match(prompt, /planning hints as optional support/i);
   assert.match(prompt, /directly derivable from the supplied evidence/i);
-  assert.match(prompt, /Follow template A exactly\./i);
+  assert.doesNotMatch(prompt, /Follow the shared template envelope closely/i);
 });
 
 test('buildKnowledgeDetailFetchPrompt should enforce live-detail honesty', () => {
