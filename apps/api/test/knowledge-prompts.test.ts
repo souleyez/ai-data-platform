@@ -1,10 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildKnowledgeAnswerPrompt,
   buildKnowledgeConceptPagePrompt,
   buildKnowledgeDetailFetchPrompt,
   buildKnowledgeOutputPrompt,
 } from '../src/lib/knowledge-prompts.js';
+
+test('buildKnowledgeAnswerPrompt should support direct answers from catalog and optional live detail', () => {
+  const prompt = buildKnowledgeAnswerPrompt(
+    'Workspace skill: knowledge-detail-fetch',
+  );
+
+  assert.match(prompt, /knowledge-backed answers/i);
+  assert.match(prompt, /catalog snapshot, memory-selected document cards, and optional live document detail/i);
+  assert.match(prompt, /Answer directly instead of discussing routing/i);
+  assert.match(prompt, /When live detail is supplied, treat it as the strongest evidence/i);
+  assert.match(prompt, /When only catalog snapshot or document cards are supplied/i);
+  assert.match(prompt, /Workspace skill: knowledge-detail-fetch/i);
+});
 
 test('buildKnowledgeConceptPagePrompt should emphasize concept-page generation without shared template lock-in', () => {
   const prompt = buildKnowledgeConceptPagePrompt(

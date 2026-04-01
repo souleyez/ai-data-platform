@@ -8,7 +8,7 @@ import {
   shouldUseResumePageFallbackOutput,
   type ChatOutput,
 } from './knowledge-output.js';
-import { runKnowledgeDetailFetch } from './knowledge-detail-fetch.js';
+import { buildKnowledgeDetailFallbackAnswer } from './knowledge-detail-fetch.js';
 import {
   buildOpenClawMemorySelectionContextBlock,
   loadOpenClawMemorySelectionState,
@@ -22,7 +22,7 @@ import type {
 } from './openclaw-memory-changes.js';
 import { detectOutputKind } from './knowledge-plan.js';
 import {
-  buildKnowledgeCatalogPrompt,
+  buildKnowledgeAnswerPrompt,
   buildKnowledgeConceptPagePrompt,
   buildKnowledgeOutputPrompt,
 } from './knowledge-prompts.js';
@@ -36,7 +36,7 @@ import {
   selectKnowledgeTemplates,
   shouldUseConceptPageMode,
 } from './knowledge-template.js';
-import { runOpenClawChat } from './openclaw-adapter.js';
+import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import {
   buildConceptPageSupplyBlock,
   prepareKnowledgeRetrieval,
@@ -175,15 +175,20 @@ export type KnowledgeAnswerResult = {
 function buildKnowledgeCatalogAnswerContextBlock(input: {
   requestText: string;
   libraries: Array<{ key: string; label: string }>;
+  detailDocuments?: number;
+  detailEvidence?: number;
 }) {
   const libraryText = input.libraries.length
     ? input.libraries.map((item) => item.label || item.key).join(' | ')
     : 'current knowledge catalog';
   return [
-    'Current route: catalog',
-    'Evidence state: catalog_memory',
+    'Current answer mode: direct knowledge answer',
+    `Evidence state: ${input.detailDocuments ? 'catalog_memory + live_detail' : 'catalog_memory'}`,
     `Preferred libraries: ${libraryText}`,
     `Normalized request: ${input.requestText}`,
+    input.detailDocuments
+      ? `Supplied live detail: documents=${input.detailDocuments} evidence=${input.detailEvidence || 0}`
+      : '',
   ].join('\n');
 }
 
@@ -400,6 +405,44 @@ function buildKnowledgeCatalogFallbackAnswer(input: {
     '如果你接下来要问某份文档的具体字段、金额、日期、公司或原文依据，我再去调取文档详情。',
   ].filter(Boolean);
   return summaryParts.join('');
+}
+
+function buildUnifiedKnowledgeAnswerFallback(input: {
+  requestText: string;
+  libraries: Array<{ key: string; label: string }>;
+  state: OpenClawMemoryState | null;
+  selection: OpenClawMemorySelection;
+  retrieval: RetrievalResult | null;
+  timeRange?: string;
+  contentFocus?: string;
+  preferLiveDetail: boolean;
+}) {
+  const catalogFallback = buildKnowledgeCatalogFallbackAnswer({
+    requestText: input.requestText,
+    libraries: input.libraries,
+    state: input.state,
+    selection: input.selection,
+  });
+
+  if (!input.preferLiveDetail || !input.retrieval?.documents.length) {
+    return catalogFallback;
+  }
+
+  const detailFallback = buildKnowledgeDetailFallbackAnswer({
+    requestText: input.requestText,
+    libraries: input.libraries,
+    retrieval: input.retrieval,
+    timeRange: input.timeRange,
+    contentFocus: input.contentFocus,
+  });
+
+  return [
+    '我先基于当前知识库目录和已命中的文档详情整理这次回答。',
+    catalogFallback,
+    detailFallback,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function looksLikeCatalogAccessMiss(content: string) {
@@ -789,77 +832,95 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
 
 export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promise<KnowledgeAnswerResult> {
   const requestText = String(input.prompt || '').trim();
-  const answerMode = input.answerMode || 'live_detail';
-
-  if (answerMode === 'catalog_memory') {
-    const memoryState = await loadOpenClawMemorySelectionState();
-    const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
-      state: memoryState,
-      requestText,
-      libraries: input.preferredLibraries,
-      limit: 6,
-    });
-    const fallbackContent = buildKnowledgeCatalogFallbackAnswer({
-      requestText,
-      libraries: input.preferredLibraries || [],
-      state: memoryState,
-      selection: memorySelection,
-    });
-
-    try {
-      const cloud = await runOpenClawChat({
-        prompt: requestText,
-        sessionUser: input.sessionUser,
-        chatHistory: input.chatHistory,
-        contextBlocks: [
-          buildKnowledgeCatalogAnswerContextBlock({
-            requestText,
-            libraries: input.preferredLibraries || [],
-          }),
-          buildKnowledgeCatalogStateContextBlock({
-            state: memoryState,
-            libraries: input.preferredLibraries || [],
-            selection: memorySelection,
-          }),
-          buildOpenClawMemorySelectionContextBlock(memorySelection),
-          buildKnowledgeCatalogSelectionDetailBlock(memorySelection),
-        ].filter(Boolean),
-        systemPrompt: buildKnowledgeCatalogPrompt(),
-      });
-      const content = looksLikeCatalogAccessMiss(cloud.content)
-        ? fallbackContent
-        : cloud.content;
-
-      return {
-        libraries: input.preferredLibraries || [],
-        output: { type: 'answer', content },
-        content,
-        intent: 'general',
-        mode: 'openclaw',
-      };
-    } catch {
-      return {
-        libraries: input.preferredLibraries || [],
-        output: { type: 'answer', content: fallbackContent },
-        content: fallbackContent,
-        intent: 'general',
-        mode: 'openclaw',
-      };
-    }
-  }
-
-  const { libraries, knowledgeChatHistory, effectiveRetrieval } = await prepareKnowledgeSupply({
+  const preferLiveDetail = (input.answerMode || 'live_detail') === 'live_detail';
+  const memoryState = await loadOpenClawMemorySelectionState();
+  const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
+    state: memoryState,
     requestText,
-    chatHistory: input.chatHistory,
-    preferredLibraries: input.preferredLibraries,
-    timeRange: input.timeRange,
-    contentFocus: input.contentFocus,
-    docLimit: 8,
-    evidenceLimit: 10,
+    libraries: input.preferredLibraries,
+    limit: preferLiveDetail ? 4 : 6,
   });
 
-  if (!effectiveRetrieval.documents.length) {
-    const content = buildKnowledgeMissMessage(libraries);
+  let libraries = input.preferredLibraries || [];
+  let knowledgeChatHistory = input.chatHistory;
+  let effectiveRetrieval: RetrievalResult | null = null;
+
+  if (preferLiveDetail && (libraries.length || memorySelection.documentIds.length)) {
+    const supply = await prepareKnowledgeSupply({
+      requestText,
+      chatHistory: input.chatHistory,
+      preferredLibraries: input.preferredLibraries,
+      timeRange: input.timeRange,
+      contentFocus: input.contentFocus,
+      docLimit: 5,
+      evidenceLimit: 6,
+      preferredDocumentIds: memorySelection.documentIds,
+    });
+    libraries = supply.libraries;
+    knowledgeChatHistory = supply.knowledgeChatHistory;
+    effectiveRetrieval = supply.effectiveRetrieval.documents.length
+      ? supply.effectiveRetrieval
+      : null;
+  }
+
+  const fallbackContent = buildUnifiedKnowledgeAnswerFallback({
+    requestText,
+    libraries,
+    state: memoryState,
+    selection: memorySelection,
+    retrieval: effectiveRetrieval,
+    timeRange: input.timeRange,
+    contentFocus: input.contentFocus,
+    preferLiveDetail,
+  });
+
+  if (!isOpenClawGatewayConfigured()) {
+    return {
+      libraries,
+      output: { type: 'answer', content: fallbackContent },
+      content: fallbackContent,
+      intent: 'general',
+      mode: 'openclaw',
+    };
+  }
+
+  try {
+    const skillInstruction = preferLiveDetail && effectiveRetrieval?.documents.length
+      ? await loadWorkspaceSkillBundle('knowledge-detail-fetch', [
+        'references/output-contract.md',
+      ])
+      : '';
+    const cloud = await runOpenClawChat({
+      prompt: requestText,
+      sessionUser: input.sessionUser,
+      chatHistory: knowledgeChatHistory,
+      contextBlocks: [
+        buildKnowledgeCatalogAnswerContextBlock({
+          requestText,
+          libraries,
+          detailDocuments: effectiveRetrieval?.documents.length || 0,
+          detailEvidence: effectiveRetrieval?.evidenceMatches.length || 0,
+        }),
+        buildKnowledgeCatalogStateContextBlock({
+          state: memoryState,
+          libraries,
+          selection: memorySelection,
+        }),
+        buildOpenClawMemorySelectionContextBlock(memorySelection),
+        buildKnowledgeCatalogSelectionDetailBlock(memorySelection),
+        effectiveRetrieval?.documents.length
+          ? buildKnowledgeContext(requestText, libraries, effectiveRetrieval, {
+            timeRange: input.timeRange,
+            contentFocus: input.contentFocus,
+          })
+          : '',
+      ].filter(Boolean),
+      systemPrompt: buildKnowledgeAnswerPrompt(skillInstruction),
+    });
+    const content = looksLikeCatalogAccessMiss(cloud.content)
+      ? fallbackContent
+      : cloud.content;
+
     return {
       libraries,
       output: { type: 'answer', content },
@@ -867,24 +928,13 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
       intent: 'general',
       mode: 'openclaw',
     };
+  } catch {
+    return {
+      libraries,
+      output: { type: 'answer', content: fallbackContent },
+      content: fallbackContent,
+      intent: 'general',
+      mode: 'openclaw',
+    };
   }
-
-  const detail = await runKnowledgeDetailFetch({
-    requestText,
-    libraries,
-    retrieval: effectiveRetrieval,
-    timeRange: input.timeRange,
-    contentFocus: input.contentFocus,
-    sessionUser: input.sessionUser,
-    chatHistory: knowledgeChatHistory,
-  });
-
-  const content = detail.content;
-  return {
-    libraries,
-    output: { type: 'answer', content },
-    content,
-    intent: 'general',
-    mode: 'openclaw',
-  };
 }

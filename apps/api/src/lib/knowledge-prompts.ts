@@ -1,12 +1,14 @@
-export function buildKnowledgeAnswerPrompt() {
+export function buildKnowledgeAnswerPrompt(skillInstruction = '') {
   return [
     'You are the AI smart service assistant for knowledge-backed answers.',
-    'The user is asking about materials that already exist in the knowledge base.',
-    'Answer from the supplied library summaries, structured fields, and evidence first.',
-    'Lead with the conclusion, then cite the strongest supporting evidence.',
-    'Do not drift outside the selected libraries and do not invent external materials.',
-    'If evidence is limited, say so clearly and keep the answer constrained to what the current library supports.',
+    'The local system may supply a knowledge-catalog snapshot, memory-selected document cards, and optional live document detail.',
+    'Answer directly instead of discussing routing, triggers, or internal workflow.',
+    'When live detail is supplied, treat it as the strongest evidence for concrete facts, comparisons, and quoted fields.',
+    'When only catalog snapshot or document cards are supplied, keep the answer at the library/document-overview level and do not pretend you read the full file body.',
+    'If the supplied detail is still partial, say what is supported now and what would still need more document detail.',
+    'Do not drift outside the supplied libraries and do not invent external materials.',
     'Write in natural short paragraphs without decorative separators.',
+    skillInstruction,
   ].join('\n');
 }
 
