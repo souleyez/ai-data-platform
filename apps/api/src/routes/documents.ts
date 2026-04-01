@@ -1,7 +1,6 @@
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import {
   loadDocumentCategoryConfig,
@@ -30,6 +29,7 @@ import {
   resolveSuggestedLibraryKeys,
 } from '../lib/ingest-feedback.js';
 import { saveDocumentOverride } from '../lib/document-overrides.js';
+import { ingestUploadedFiles, saveMultipartFiles } from '../lib/document-upload-ingest.js';
 import {
   acceptDocumentSuggestions,
   addDocumentScanSource,
@@ -550,7 +550,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   app.post('/documents/scan', async (request, reply) => {
     const body = (request.body || {}) as { scanRoot?: string; autoGroup?: boolean };
     const requestedScanRoot = String(body.scanRoot || '').trim();
-    const autoGroup = Boolean(body.autoGroup);
+    const autoGroup = body.autoGroup !== false;
 
     let config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
     if (requestedScanRoot && requestedScanRoot !== config.scanRoot) {
@@ -579,9 +579,12 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     let autoGroupedCount = 0;
+    let ungroupedCount = 0;
     if (autoGroup) {
       const libraries = await loadDocumentLibraries();
-      autoGroupedCount = await autoAssignSuggestedLibraries(items, libraries);
+      const result = await autoAssignSuggestedLibraries(items, libraries);
+      autoGroupedCount = result.updatedCount;
+      ungroupedCount = result.ungroupedCount;
     }
 
     return {
@@ -593,6 +596,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       startedAt,
       finishedAt: new Date().toISOString(),
       autoGroupedCount,
+      ungroupedCount,
       message: autoGroup
         ? `文档扫描已完成，并自动确认了 ${autoGroupedCount} 条智能分组结果。`
         : '文档扫描任务已完成，并已进行第一版文本提取（txt / md / pdf）。',
@@ -617,17 +621,18 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/candidate-sources/import', async (request, reply) => {
-    const body = (request.body || {}) as { scanRoots?: string[]; scanNow?: boolean };
+    const body = (request.body || {}) as { scanRoots?: string[]; scanNow?: boolean; autoGroup?: boolean };
     const requestedScanRoots = Array.isArray(body.scanRoots)
       ? body.scanRoots.map((item) => String(item || '').trim()).filter(Boolean)
       : [];
     const scanNow = body.scanNow !== false;
+    const autoGroup = body.autoGroup !== false;
 
     if (!requestedScanRoots.length) {
       return reply.code(400).send({ error: 'scanRoots are required' });
     }
 
-    const { config, savedConfig, exists, totalFiles, importedCount } = await importCandidateScanSources(requestedScanRoots, scanNow);
+    const { config, savedConfig, exists, totalFiles, importedCount, autoGroupedCount, ungroupedCount } = await importCandidateScanSources(requestedScanRoots, scanNow, autoGroup);
 
     return {
       status: 'imported',
@@ -636,9 +641,12 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       scanRoots: savedConfig.scanRoots,
       addedCount: requestedScanRoots.filter((item) => !(config.scanRoots || [config.scanRoot]).includes(item)).length,
       scanned: scanNow,
+      autoGrouped: autoGroup && scanNow,
       exists,
       totalFiles,
       importedCount,
+      autoGroupedCount,
+      ungroupedCount,
       message: scanNow
         ? `已加入 ${requestedScanRoots.length} 个候选目录并完成索引入库，当前共发现 ${totalFiles} 个文件。`
         : `已加入 ${requestedScanRoots.length} 个候选目录到扫描源列表。`,
@@ -691,12 +699,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
     const { items } = await loadParsedDocuments(200, false, config.scanRoots);
     const libraries = await loadDocumentLibraries();
-    const organizedCount = await autoAssignSuggestedLibraries(items, libraries);
+    const { updatedCount: organizedCount, ungroupedCount } = await autoAssignSuggestedLibraries(items, libraries);
 
     return {
       status: 'completed',
       mode: 'read-only',
       organizedCount,
+      ungroupedCount,
       scanRoot: config.scanRoot,
       scanRoots: config.scanRoots,
       message: `已按知识库分组规则完成自动整理，共更新 ${organizedCount} 条文档归类。`,
@@ -873,38 +882,23 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     const parts = request.parts();
     const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
     const uploadDir = path.join(config.scanRoot, 'uploads');
-    await fs.mkdir(uploadDir, { recursive: true });
-
-    const savedFiles: Array<{ name: string; path: string; bytes: number; mimeType?: string }> = [];
-    let note = '';
-
-    for await (const part of parts) {
-      if (part.type === 'field') {
-        if (part.fieldname === 'note') note = String(part.value || '').trim();
-        continue;
-      }
-
-      const fileName = sanitizeFileName(part.filename || 'upload.bin');
-      const targetPath = path.join(uploadDir, `${Date.now()}-${fileName}`);
-      await pipeline(part.file, createWriteStream(targetPath));
-      const stat = await fs.stat(targetPath);
-      savedFiles.push({
-        name: fileName,
-        path: targetPath,
-        bytes: stat.size,
-        mimeType: part.mimetype,
-      });
-    }
+    const { files: savedFiles, fields } = await saveMultipartFiles(parts, uploadDir);
+    const note = String(fields.note || '').trim();
 
     if (!savedFiles.length) {
       return reply.code(400).send({ error: 'no files uploaded' });
     }
 
     const libraries = await loadDocumentLibraries();
-    const ingestItems = [];
-    const quickParsedItems = [];
+    const ingestResult = await ingestUploadedFiles({
+      files: savedFiles,
+      documentConfig: config,
+      libraries,
+    });
+    const ingestItems = ingestResult.ingestItems;
+    const quickParsedItems: typeof ingestResult.parsedItems = [];
 
-    for (const file of savedFiles) {
+    for (const file of [] as typeof savedFiles) {
       let parsed = null;
       try {
         parsed = await parseDocument(file.path, config, { stage: 'quick' });
@@ -955,12 +949,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       uploadedCount: savedFiles.length,
       uploadedFiles: savedFiles,
       totalFiles: savedFiles.length,
+      confirmedLibraryKeys: ingestResult.confirmedLibraryKeys,
       message: `已成功接收 ${savedFiles.length} 个文件，并完成快速解析与索引更新；未分组文档可在后续详细解析后再次归组。`,
-      summary: {
-        total: ingestItems.length,
-        successCount: ingestItems.filter((item) => item.status === 'success').length,
-        failedCount: ingestItems.filter((item) => item.status === 'failed').length,
-      },
+      summary: ingestResult.summary,
       ingestItems,
     };
   });

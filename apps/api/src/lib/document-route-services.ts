@@ -13,6 +13,7 @@ import {
 } from './openclaw-file-discovery.js';
 import { removeRetainedDocument } from './retained-documents.js';
 import { STORAGE_FILES_DIR } from './paths.js';
+import { UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
 
 type LoadedDocuments = Awaited<ReturnType<typeof loadParsedDocuments>>;
 type LoadedLibraries = Awaited<ReturnType<typeof loadDocumentLibraries>>;
@@ -415,22 +416,25 @@ function collectClusterSeeds(item: ParsedDocumentItem) {
 
 export async function autoAssignSuggestedLibraries(items: ParsedDocumentItem[], libraries: LoadedLibraries) {
   let updatedCount = 0;
+  let ungroupedCount = 0;
 
   for (const item of items) {
     if (item.confirmedGroups?.length) continue;
 
-    const suggestedGroups = resolveSuggestedLibraryKeys(item, libraries).filter((key) => {
-      const matched = libraries.find((library) => library.key === key);
-      return matched && !matched.isDefault;
-    });
+    const nextGroups = resolveAutomaticLibraryGroups(item, libraries);
+    if (!nextGroups?.length) continue;
 
-    if (!suggestedGroups.length) continue;
-
-    await saveDocumentOverride(item.path, { groups: suggestedGroups });
+    await saveDocumentOverride(item.path, { groups: nextGroups });
     updatedCount += 1;
+    if (nextGroups.length === 1 && nextGroups[0] === UNGROUPED_LIBRARY_KEY) {
+      ungroupedCount += 1;
+    }
   }
 
-  return updatedCount;
+  return {
+    updatedCount,
+    ungroupedCount,
+  };
 }
 
 export async function addDocumentScanSource(scanRoot: string) {
@@ -442,7 +446,39 @@ export async function addDocumentScanSource(scanRoot: string) {
   });
 }
 
-export async function importCandidateScanSources(scanRoots: string[], scanNow: boolean) {
+export function resolveAutomaticLibraryGroups(
+  item: Pick<ParsedDocumentItem,
+    'bizCategory'
+    | 'confirmedBizCategory'
+    | 'category'
+    | 'schemaType'
+    | 'parseStatus'
+    | 'title'
+    | 'summary'
+    | 'excerpt'
+    | 'topicTags'
+    | 'groups'
+  >,
+  libraries: LoadedLibraries,
+) {
+  const suggestedGroups = resolveSuggestedLibraryKeys(item as ParsedDocumentItem, libraries).filter((key) => {
+    const matched = libraries.find((library) => library.key === key);
+    return matched && !matched.isDefault;
+  });
+
+  if (suggestedGroups.length) return suggestedGroups;
+
+  const effectiveCategory = item.confirmedBizCategory || item.bizCategory || 'general';
+  const shouldFallbackToUngrouped =
+    item.parseStatus !== 'parsed'
+    || effectiveCategory === 'general'
+    || item.category === 'resume'
+    || item.schemaType === 'resume';
+
+  return shouldFallbackToUngrouped ? [UNGROUPED_LIBRARY_KEY] : [];
+}
+
+export async function importCandidateScanSources(scanRoots: string[], scanNow: boolean, autoGroup = true) {
   const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
   const nextScanRoots = Array.from(new Set([...(config.scanRoots || [config.scanRoot]), ...scanRoots]));
   const savedConfig = await saveDocumentCategoryConfig(config.scanRoot, {
@@ -454,11 +490,19 @@ export async function importCandidateScanSources(scanRoots: string[], scanNow: b
   let totalFiles = 0;
   let importedCount = 0;
   let exists = true;
+  let autoGroupedCount = 0;
+  let ungroupedCount = 0;
   if (scanNow) {
     const loaded = await loadParsedDocuments(200, false, savedConfig.scanRoots);
     totalFiles = loaded.files.length;
     importedCount = loaded.items.length;
     exists = loaded.exists;
+    if (autoGroup) {
+      const libraries = await loadDocumentLibraries();
+      const result = await autoAssignSuggestedLibraries(loaded.items, libraries);
+      autoGroupedCount = result.updatedCount;
+      ungroupedCount = result.ungroupedCount;
+    }
   }
 
   return {
@@ -467,6 +511,8 @@ export async function importCandidateScanSources(scanRoots: string[], scanNow: b
     exists,
     totalFiles,
     importedCount,
+    autoGroupedCount,
+    ungroupedCount,
   };
 }
 
