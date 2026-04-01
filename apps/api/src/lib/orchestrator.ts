@@ -7,6 +7,7 @@ import {
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
+import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import type { ChatOutput } from './knowledge-output.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
@@ -74,6 +75,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const chatHistory = normalizeHistory(input.chatHistory);
   const gatewayReachable = await isOpenClawGatewayReachable();
   const gatewayConfigured = gatewayReachable || isOpenClawGatewayConfigured();
+  const intelligence = await getIntelligenceModeStatus();
   const traceId = `trace_${Date.now()}`;
   const requestMode = input.mode || 'general';
   const existingState = requestMode === 'knowledge_output'
@@ -177,13 +179,18 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       references: [],
     },
     sources: [],
-    permissions: { mode: 'read-only' as const },
+    permissions: {
+      mode: intelligence.mode,
+      readOnly: !intelligence.capabilities.canModifyLocalSystemFiles,
+      capabilities: intelligence.capabilities,
+    },
     orchestration: {
       mode,
       routeKind,
       docMatches: libraries.length,
       evidenceMode,
       gatewayConfigured,
+      intelligenceMode: intelligence.mode,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
       intentContract,
     },

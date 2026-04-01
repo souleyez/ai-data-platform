@@ -328,6 +328,12 @@
 - 语义改成“完全智能模式升级密钥”
 - 增加 `intelligenceMode` 状态
 
+实现注记（2026-04-01）：
+
+- 已新增 `/api/access-keys/*` 与 `/api/intelligence-mode*` 基础接口。
+- 根接口 `/` 与健康检查 `/api/health` 已透出当前 `intelligenceMode` 与能力矩阵。
+- 当前阶段仍以运行时状态与能力描述为主，前端切换入口和具体执行层约束将在后续阶段继续接入。
+
 ### Phase 2：UI 模式切换
 
 - 首页展示当前模式
