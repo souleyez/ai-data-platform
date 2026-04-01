@@ -55,6 +55,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     output,
     guard: data?.guard || null,
     conversationState: data?.conversationState || null,
+    savedReport: data?.savedReport || null,
   };
 }
 

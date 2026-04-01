@@ -1,3 +1,4 @@
+import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
@@ -97,6 +98,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let routeKind = 'general';
   let evidenceMode: string | null = null;
   let intentContract: Record<string, unknown> | null = null;
+  let savedReport: Record<string, unknown> | null = null;
 
   if (gatewayConfigured) {
     try {
@@ -158,6 +160,19 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     }
   }
 
+  if (output.type !== 'answer') {
+    try {
+      savedReport = await persistChatOutputIfNeeded({
+        prompt,
+        output,
+        libraries,
+        reportTemplate,
+      });
+    } catch (error) {
+      console.warn(`[chat:auto-save] trace=${traceId} reason=${summarizeError(error)}`);
+    }
+  }
+
   return {
     mode,
     intent,
@@ -165,6 +180,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     libraries,
     output,
     reportTemplate,
+    savedReport,
     knowledgePlan,
     guard: {
       requiresConfirmation: false,

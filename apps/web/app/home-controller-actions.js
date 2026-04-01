@@ -16,7 +16,7 @@ import {
   patchMessagesWithIngestItems,
 } from './home-message-helpers';
 import { appendChatMessageKeepingLatestFailure, buildRecentChatHistory } from './lib/chat-memory';
-import { createGeneratedReport } from './lib/generated-reports';
+import { createGeneratedReport, normalizeGeneratedReportRecord } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
 
 function appendAssistantMessage(setMessages, message) {
@@ -35,6 +35,19 @@ function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
 
 async function persistGeneratedReport(normalized, message, context, requestPrompt = '') {
   const { setReportItems, setSelectedReportId, loadReports } = context;
+  if (normalized?.savedReport) {
+    const savedItem = normalizeGeneratedReportRecord(normalized.savedReport);
+    try {
+      await loadReports?.();
+      setSelectedReportId?.(savedItem.id);
+      return;
+    } catch {
+      setReportItems?.((prev) => [savedItem, ...prev.filter((item) => item.id !== savedItem.id)]);
+      setSelectedReportId?.(savedItem.id);
+      return;
+    }
+  }
+
   const generatedReport = createGeneratedReport({ response: normalized, message, requestPrompt });
   if (!generatedReport) return;
 
