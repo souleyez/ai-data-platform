@@ -164,6 +164,18 @@ function resolveDocumentReadablePath(rawPath: string) {
   return path.join(DEFAULT_SCAN_DIR, relative);
 }
 
+async function hasReadableDocumentSource(rawPath: string) {
+  const readablePath = resolveDocumentReadablePath(rawPath);
+  if (!readablePath) return false;
+
+  try {
+    await fs.access(readablePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveLibraryScenarioKey(
   library: { isDefault?: boolean; sourceCategoryKey?: string; key: string },
   items: Array<{ bizCategory?: string; confirmedBizCategory?: string }>,
@@ -310,6 +322,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       item: {
         ...detailItem,
         id,
+        sourceAvailable: await hasReadableDocumentSource(found.path),
       },
       meta: {
         category: detailItem.category,
@@ -340,7 +353,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     const readablePath = resolveDocumentReadablePath(found.path);
-    await fs.access(readablePath);
+    try {
+      await fs.access(readablePath);
+    } catch {
+      return reply.code(404).send({ error: 'document source file is not available on this server' });
+    }
     reply.header('Cache-Control', 'private, max-age=60');
     reply.type(contentType);
     return reply.send(createReadStream(readablePath));
@@ -366,7 +383,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     const readablePath = resolveDocumentReadablePath(found.path);
-    await fs.access(readablePath);
+    try {
+      await fs.access(readablePath);
+    } catch {
+      return reply.code(404).send({ error: 'document source file is not available on this server' });
+    }
     const fileName = sanitizeFileName(found.name || path.basename(found.path));
     reply.header('Cache-Control', 'private, max-age=60');
     reply.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`);
@@ -390,7 +411,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     }
 
     const readablePath = resolveDocumentReadablePath(found.path);
-    await fs.access(readablePath);
+    try {
+      await fs.access(readablePath);
+    } catch {
+      return reply.code(404).send({ error: 'document source file is not available on this server' });
+    }
     const fileName = sanitizeFileName(found.name || path.basename(found.path));
     const contentType = IMAGE_CONTENT_TYPES[String(found.ext || '').toLowerCase()] || 'application/octet-stream';
 

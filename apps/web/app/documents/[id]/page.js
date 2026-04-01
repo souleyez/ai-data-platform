@@ -14,14 +14,14 @@ function resolveDocumentId(params) {
 }
 
 function joinGroups(groups) {
-  return Array.isArray(groups) && groups.length ? groups.map(getDocumentGroupLabel).join('、') : '未分组';
+  return Array.isArray(groups) && groups.length
+    ? groups.map(getDocumentGroupLabel).join('、')
+    : '未分组';
 }
 
 export default async function DocumentPreviewPage({ params }) {
   const documentId = resolveDocumentId(params);
-  if (!documentId) {
-    return null;
-  }
+  if (!documentId) return null;
 
   let item = null;
   let meta = null;
@@ -65,8 +65,15 @@ export default async function DocumentPreviewPage({ params }) {
   const isTextPreview = TEXT_PREVIEW_EXTENSIONS.has(ext);
   const isPdf = ext === '.pdf';
   const canPreview = isImage || isTextPreview || isPdf;
+  const sourceAvailable = item?.sourceAvailable !== false;
   const previewUrl = canPreview ? buildApiUrl(`/api/documents/preview?id=${encodeURIComponent(documentId)}`) : '';
   const downloadUrl = buildApiUrl(`/api/documents/download?id=${encodeURIComponent(documentId)}`);
+
+  const previewHint = sourceAvailable
+    ? (canPreview
+      ? '当前直接预览原文件，右上角可下载。'
+      : '当前文件类型不支持浏览器内原件预览，请直接下载查看。')
+    : '原始文件未同步到当前服务器，下方展示已解析内容和摘要。';
 
   return (
     <div className="app-shell">
@@ -78,7 +85,11 @@ export default async function DocumentPreviewPage({ params }) {
             <p>{item.name}</p>
           </div>
           <div className="topbar-actions">
-            <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+            {sourceAvailable ? (
+              <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+            ) : (
+              <span className="ghost-btn disabled-btn" aria-disabled="true">原文件暂不可下载</span>
+            )}
             <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
           </div>
         </header>
@@ -96,26 +107,36 @@ export default async function DocumentPreviewPage({ params }) {
           <div className="panel-header">
             <div>
               <h3>原文件预览</h3>
-              <p>{canPreview ? '当前直接预览原件，右上角可下载。' : '当前文件类型不支持浏览器内原件预览，请直接下载查看。'}</p>
+              <p>{previewHint}</p>
             </div>
           </div>
 
-          {isImage && previewUrl ? (
+          {isImage && canPreview && previewUrl ? (
             <div className="document-preview-wrap">
-              <img src={previewUrl} alt={item.title || item.name || 'document preview'} className="document-image-preview document-image-preview-large" />
+              <img
+                src={previewUrl}
+                alt={item.title || item.name || 'document preview'}
+                className="document-image-preview document-image-preview-large"
+              />
             </div>
           ) : null}
 
           {!isImage && canPreview && previewUrl ? (
             <div className="document-file-frame-wrap">
-              <iframe src={previewUrl} title={item.name || 'document preview'} className="document-file-frame" />
+              <iframe
+                src={previewUrl}
+                title={item.name || 'document preview'}
+                className="document-file-frame"
+              />
             </div>
           ) : null}
 
           {!canPreview ? (
             <div className="document-preview-empty">
               <p>当前文件类型暂不支持浏览器内原件预览。</p>
-              <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+              {sourceAvailable ? (
+                <a href={downloadUrl} className="ghost-btn" download>下载原文件</a>
+              ) : null}
             </div>
           ) : null}
         </section>

@@ -116,6 +116,7 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .primary-btn { background: var(--primary); color: white; }
 .primary-btn:hover { background: var(--primary-deep); }
 .ghost-btn { background: white; border: 1px solid var(--line); }
+.disabled-btn { color: #94a3b8; border-color: #e2e8f0; background: #f8fafc; cursor: not-allowed; }
 
 .workspace-grid { display: grid; grid-template-columns: minmax(0, 1.48fr) minmax(360px, 0.92fr); gap: 20px; align-items: start; }
 .workspace-grid-compact { grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.7fr); }
