@@ -10,6 +10,7 @@ import { normalizeReportOutput } from './knowledge-output.js';
 import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
 import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
+import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
 
 const REPORT_CONFIG_DIR = STORAGE_CONFIG_DIR;
@@ -2058,9 +2059,17 @@ async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutput
     templates: Array.isArray(templates) ? templates : [],
     outputs: Array.isArray(outputs) ? outputs : [],
   });
+  scheduleOpenClawMemoryCatalogSync('report-center-state-changed');
 }
 
 export async function loadReportCenterState() {
+  return loadReportCenterStateWithOptions();
+}
+
+export async function loadReportCenterStateWithOptions(options?: {
+  refreshDynamicPages?: boolean;
+  persistFixups?: boolean;
+}) {
   const [{ state, migrated }, libraries] = await Promise.all([readState(), loadDocumentLibraries()]);
   const storedGroups = Array.isArray(state.groups) ? state.groups : [];
   const groups = libraries.map((library) => {
@@ -2090,7 +2099,8 @@ export async function loadReportCenterState() {
   const { outputs, changed } = reconcileOutputRecords(rawOutputs, groups);
   let nextOutputs = outputs;
   let refreshedChanged = false;
-  if (nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled)) {
+  const refreshDynamicPages = options?.refreshDynamicPages !== false;
+  if (refreshDynamicPages && nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled)) {
     const documentState = await loadParsedDocuments(400, false);
     nextOutputs = nextOutputs.map((item) => {
       if (!(item.kind === 'page' && item.dynamicSource?.enabled)) return item;
@@ -2124,7 +2134,8 @@ export async function loadReportCenterState() {
     });
   }
 
-  if (migrated || changed || refreshedChanged) {
+  const persistFixups = options?.persistFixups !== false;
+  if (persistFixups && (migrated || changed || refreshedChanged)) {
     await saveGroupsAndOutputs(groups, nextOutputs, templates);
   }
 

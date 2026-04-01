@@ -5,7 +5,8 @@ import { loadDocumentLibraries, documentMatchesLibrary, type DocumentLibrary } f
 import type { ParsedDocument } from './document-parser.js';
 import {
   buildSharedTemplateEnvelope,
-  loadReportCenterState,
+  loadReportCenterStateWithOptions,
+  type ReportOutputRecord,
   type SharedReportTemplate,
 } from './report-center.js';
 import {
@@ -24,6 +25,7 @@ const CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
 const LIBRARIES_DIR = path.join(CATALOG_ROOT, 'libraries');
 const DOCUMENTS_DIR = path.join(CATALOG_ROOT, 'documents');
 const TEMPLATES_DIR = path.join(CATALOG_ROOT, 'templates');
+const REPORTS_DIR = path.join(CATALOG_ROOT, 'reports');
 const CHANGES_DIR = path.join(CATALOG_ROOT, 'changes');
 const ARCHIVE_DIR = path.join(CHANGES_DIR, 'archive');
 const STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
@@ -54,9 +56,11 @@ export type OpenClawMemoryCatalogSnapshot = {
   libraryCount: number;
   documentCount: number;
   templateCount: number;
+  outputCount: number;
   libraries: OpenClawMemoryLibrarySnapshot[];
   documents: CatalogDocumentCard[];
   templates: OpenClawMemoryTemplateSnapshot[];
+  outputs: OpenClawMemoryReportOutputSnapshot[];
 };
 
 type CatalogDocumentCard = OpenClawMemoryDocumentState & {
@@ -89,6 +93,19 @@ export type OpenClawMemoryTemplateSnapshot = {
   pageSections: string[];
   tableColumns: string[];
   referenceNames: string[];
+};
+
+export type OpenClawMemoryReportOutputSnapshot = {
+  id: string;
+  title: string;
+  kind: string;
+  templateLabel: string;
+  summary: string;
+  libraryLabels: string[];
+  triggerSource: 'report-center' | 'chat';
+  createdAt: string;
+  updatedAt: string;
+  reusable: boolean;
 };
 
 function sanitizeText(value: unknown, maxLength = 240) {
@@ -461,7 +478,7 @@ function buildLibrarySnapshot(library: DocumentLibrary, cards: CatalogDocumentCa
   };
 }
 
-function buildTemplateSnapshots(input: Awaited<ReturnType<typeof loadReportCenterState>>) {
+function buildTemplateSnapshots(input: Awaited<ReturnType<typeof loadReportCenterStateWithOptions>>) {
   const groupMap = new Map<string, { keys: Set<string>; labels: Set<string> }>();
   for (const group of input.groups) {
     for (const template of group.templates) {
@@ -505,11 +522,57 @@ function buildTemplateSnapshots(input: Awaited<ReturnType<typeof loadReportCente
     ));
 }
 
+function resolveReportOutputUpdatedAt(item: ReportOutputRecord) {
+  const candidates = [
+    item.dynamicSource?.lastRenderedAt,
+    item.dynamicSource?.updatedAt,
+    item.dynamicSource?.lastRenderedAt,
+    item.createdAt,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .map((value) => Date.parse(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  const latest = candidates.length ? Math.max(...candidates) : 0;
+  return latest > 0 ? new Date(latest).toISOString() : '';
+}
+
+export function buildReportOutputMemorySnapshots(outputs: ReportOutputRecord[]) {
+  return [...(outputs || [])]
+    .filter((item) => String(item.status || '').trim() === 'ready')
+    .sort((left, right) => (
+      Date.parse(String(right.createdAt || '')) - Date.parse(String(left.createdAt || ''))
+    ))
+    .slice(0, 40)
+    .map((item) => ({
+      id: sanitizeText(item.id, 80),
+      title: sanitizeText(item.title, 120),
+      kind: sanitizeText(item.kind || item.outputType, 32) || 'page',
+      templateLabel: sanitizeText(item.templateLabel, 80),
+      summary: sanitizeText(item.summary || item.content || item.page?.summary || '', 220),
+      libraryLabels: sanitizeList(
+        (item.libraries || []).map((entry) => entry.label || entry.key),
+        60,
+        6,
+      ),
+      triggerSource: item.triggerSource === 'report-center' ? 'report-center' : 'chat',
+      createdAt: String(item.createdAt || '').trim(),
+      updatedAt: resolveReportOutputUpdatedAt(item),
+      reusable: Boolean(item.kind === 'page' || item.kind === 'table' || item.kind === 'pdf'),
+    } satisfies OpenClawMemoryReportOutputSnapshot));
+}
+
 export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemoryCatalogSnapshot> {
   const [libraries, loadedDocuments, reportCenterState] = await Promise.all([
     loadDocumentLibraries(),
-    loadParsedDocuments(CATALOG_DOCUMENT_LIMIT, false),
-    loadReportCenterState(),
+    loadParsedDocuments(CATALOG_DOCUMENT_LIMIT, false, undefined, {
+      skipBackgroundTasks: true,
+    }),
+    loadReportCenterStateWithOptions({
+      refreshDynamicPages: false,
+      persistFixups: false,
+    }),
   ]);
 
   const resolvedDocuments = loadedDocuments.items.map((item) => ({
@@ -531,6 +594,7 @@ export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemo
     cards.filter((item) => item.libraryKeys.includes(library.key)),
   ));
   const templateSnapshots = buildTemplateSnapshots(reportCenterState);
+  const outputSnapshots = buildReportOutputMemorySnapshots(reportCenterState.outputs);
 
   return {
     version: OPENCLAW_MEMORY_STATE_VERSION,
@@ -538,11 +602,13 @@ export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemo
     libraryCount: librarySnapshots.length,
     documentCount: cards.length,
     templateCount: templateSnapshots.length,
+    outputCount: outputSnapshots.length,
     libraries: librarySnapshots.sort((left, right) => (
       right.documentCount - left.documentCount || left.label.localeCompare(right.label, 'zh-CN')
     )),
     documents: cards,
     templates: templateSnapshots,
+    outputs: outputSnapshots,
   };
 }
 
@@ -550,6 +616,7 @@ async function ensureCatalogDirs() {
   await fs.mkdir(LIBRARIES_DIR, { recursive: true });
   await fs.mkdir(DOCUMENTS_DIR, { recursive: true });
   await fs.mkdir(TEMPLATES_DIR, { recursive: true });
+  await fs.mkdir(REPORTS_DIR, { recursive: true });
   await fs.mkdir(ARCHIVE_DIR, { recursive: true });
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
 }
@@ -584,6 +651,7 @@ function renderIndex(snapshot: OpenClawMemoryCatalogSnapshot, recentChanges: Ope
     `- Libraries: ${snapshot.libraryCount}`,
     `- Documents: ${snapshot.documentCount}`,
     `- Templates: ${snapshot.templateCount}`,
+    `- Saved outputs: ${snapshot.outputCount}`,
     '',
     '## Libraries',
     topLibraries || '- None',
@@ -695,6 +763,30 @@ function renderTemplatesFile(templates: OpenClawMemoryTemplateSnapshot[]) {
   ].join('\n');
 }
 
+function renderOutputsFile(outputs: OpenClawMemoryReportOutputSnapshot[]) {
+  return [
+    '# Saved Report Outputs',
+    '',
+    'These are reusable outputs already published into the local report center. They can be reopened, revised, and reused.',
+    '',
+    ...(outputs.length
+      ? outputs.map((item) => [
+        `## ${item.title || item.id}`,
+        `- Output id: ${item.id}`,
+        `- Kind: ${item.kind}`,
+        `- Template: ${item.templateLabel || '-'}`,
+        `- Libraries: ${item.libraryLabels.join(' | ') || '-'}`,
+        `- Trigger source: ${item.triggerSource}`,
+        `- Created at: ${formatIsoDateTime(item.createdAt)}`,
+        `- Updated at: ${formatIsoDateTime(item.updatedAt)}`,
+        `- Reusable: ${item.reusable ? 'yes' : 'no'}`,
+        `- Summary: ${item.summary || '-'}`,
+        '',
+      ].join('\n'))
+      : ['- None', '']),
+  ].join('\n');
+}
+
 async function writeCatalogFiles(
   snapshot: OpenClawMemoryCatalogSnapshot,
   state: OpenClawMemoryState,
@@ -706,6 +798,7 @@ async function writeCatalogFiles(
   await fs.writeFile(path.join(CATALOG_ROOT, 'index.md'), renderIndex(snapshot, state.recentChanges), 'utf8');
   await fs.writeFile(path.join(CHANGES_DIR, 'recent.md'), renderRecentChanges(state.recentChanges), 'utf8');
   await fs.writeFile(path.join(TEMPLATES_DIR, 'index.md'), renderTemplatesFile(snapshot.templates), 'utf8');
+  await fs.writeFile(path.join(REPORTS_DIR, 'index.md'), renderOutputsFile(snapshot.outputs), 'utf8');
 
   for (const library of snapshot.libraries) {
     const fileKey = slugifyKey(library.key);
@@ -743,6 +836,7 @@ export async function refreshOpenClawMemoryCatalog() {
     libraryCount: snapshot.libraryCount,
     documentCount: snapshot.documentCount,
     templateCount: snapshot.templateCount,
+    outputCount: snapshot.outputCount,
     changeCount: nextState.recentChanges.length,
     changedThisRun: nextState.recentChanges.filter((item) => item.happenedAt === snapshot.generatedAt).length,
     memoryRoot: CATALOG_ROOT,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
 import {
   buildCatalogMemoryDetail,
+  buildReportOutputMemorySnapshots,
   resolveCatalogMemoryDetailLevel,
   selectCatalogMemoryTitle,
 } from '../src/lib/openclaw-memory-catalog.js';
@@ -124,4 +125,49 @@ test('buildCatalogMemoryDetail should suppress resume facts for non-resume busin
   assert.ok(!detail.keyFacts.some((line) => line.startsWith('Latest company:')));
   assert.ok(!detail.keyFacts.some((line) => line.startsWith('companies:')));
   assert.ok(detail.evidenceHighlights.some((line) => line.includes('ERP data')));
+});
+
+test('buildReportOutputMemorySnapshots should expose reusable saved outputs for memory replay', () => {
+  const snapshots = buildReportOutputMemorySnapshots([
+    {
+      id: 'report-1',
+      groupKey: 'resume',
+      groupLabel: '简历',
+      templateKey: 'tpl-resume-page',
+      templateLabel: '客户汇报页',
+      title: '简历客户汇报页',
+      outputType: '静态页',
+      kind: 'page',
+      format: 'html',
+      createdAt: '2026-04-01T05:30:00.000Z',
+      status: 'ready',
+      summary: '整理了 4 位候选人的代表经历与匹配建议。',
+      triggerSource: 'chat',
+      content: '',
+      page: {
+        summary: '整理了 4 位候选人的代表经历与匹配建议。',
+        cards: [],
+        sections: [],
+        charts: [],
+      },
+      libraries: [{ key: 'resume', label: '简历' }],
+      dynamicSource: {
+        enabled: true,
+        request: '请输出静态页',
+        outputType: 'page',
+        libraries: [{ key: 'resume', label: '简历' }],
+        updatedAt: '2026-04-01T05:35:00.000Z',
+        lastRenderedAt: '2026-04-01T05:36:00.000Z',
+      },
+    },
+  ]);
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].id, 'report-1');
+  assert.equal(snapshots[0].kind, 'page');
+  assert.equal(snapshots[0].templateLabel, '客户汇报页');
+  assert.deepEqual(snapshots[0].libraryLabels, ['简历']);
+  assert.equal(snapshots[0].triggerSource, 'chat');
+  assert.equal(snapshots[0].reusable, true);
+  assert.equal(snapshots[0].updatedAt, '2026-04-01T05:36:00.000Z');
 });

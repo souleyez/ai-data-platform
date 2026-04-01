@@ -486,16 +486,24 @@ function scheduleVectorIndexSync(items: ParsedDocument[]) {
     });
 }
 
-export async function loadParsedDocuments(limit = 200, forceRefresh = false, scanRoot?: string | string[]): Promise<LoadParsedDocumentsResult> {
+export async function loadParsedDocuments(
+  limit = 200,
+  forceRefresh = false,
+  scanRoot?: string | string[],
+  options?: { skipBackgroundTasks?: boolean },
+): Promise<LoadParsedDocumentsResult> {
   const activeScanRoots = await resolveScanRoots(scanRoot);
   const cache = !forceRefresh ? await readCache() : null;
+  const skipBackgroundTasks = options?.skipBackgroundTasks === true;
 
   if (cache) {
-    await enqueueDetailedParse(
-      cache.items
-        .filter((item) => item.parseStatus === 'parsed' && item.parseStage !== 'detailed')
-        .map((item) => item.path),
-    );
+    if (!skipBackgroundTasks) {
+      await enqueueDetailedParse(
+        cache.items
+          .filter((item) => item.parseStatus === 'parsed' && item.parseStage !== 'detailed')
+          .map((item) => item.path),
+      );
+    }
     const overrides = await loadDocumentOverrides();
     const mergedItems = dedupeDocuments(sortDocumentsByRecency(
       await mergeWithRetainedDocuments(
@@ -506,7 +514,9 @@ export async function loadParsedDocuments(limit = 200, forceRefresh = false, sca
         ),
       ),
     ));
-    scheduleVectorIndexSync(mergedItems);
+    if (!skipBackgroundTasks) {
+      scheduleVectorIndexSync(mergedItems);
+    }
     return {
       exists: true,
       files: [],
