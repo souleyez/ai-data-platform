@@ -5,15 +5,17 @@ PROJECT_DIR="${PROJECT_DIR:-/srv/ai-data-platform}"
 BRANCH="${BRANCH:-master}"
 REMOTE_NAME="${REMOTE_NAME:-origin}"
 INSTALL_CMD="${INSTALL_CMD:-corepack pnpm install --frozen-lockfile}"
-BUILD_PACKAGES="${BUILD_PACKAGES:-api web worker}"
-SERVICES="${SERVICES:-ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web}"
+BUILD_PACKAGES="${BUILD_PACKAGES:-api control-plane-api control-plane-web web worker}"
+SERVICES="${SERVICES:-ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web ai-data-platform-control-plane-api ai-data-platform-control-plane-web}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3100/api/health}"
+CONTROL_PLANE_HEALTH_URL="${CONTROL_PLANE_HEALTH_URL:-http://127.0.0.1:3210/api/health}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-20}"
 HEALTH_RETRY_INTERVAL="${HEALTH_RETRY_INTERVAL:-2}"
 REMOTE_WORKTREE_MODE="${REMOTE_WORKTREE_MODE:-fail}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 STASH_MESSAGE="${STASH_MESSAGE:-ai-data-platform deploy preflight $(date -u +%Y%m%dT%H%M%SZ)}"
 DIRTY_WORKTREE_EXIT_CODE="${DIRTY_WORKTREE_EXIT_CODE:-42}"
+SYSTEMD_UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
 if [[ ! -d "$PROJECT_DIR/.git" ]]; then
   echo "Project directory is not a git repository: $PROJECT_DIR" >&2
@@ -152,12 +154,13 @@ ensure_remote_worktree_ready() {
 }
 
 wait_for_health() {
+  local url="${1:-$HEALTH_URL}"
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   local last_error=''
   local health_output=''
 
   while true; do
-    if health_output="$(curl --fail --silent --show-error --max-time "$HEALTH_RETRY_INTERVAL" "$HEALTH_URL" 2>&1)"; then
+    if health_output="$(curl --fail --silent --show-error --max-time "$HEALTH_RETRY_INTERVAL" "$url" 2>&1)"; then
       printf '%s\n' "$health_output"
       return 0
     fi
@@ -180,6 +183,13 @@ wait_for_health() {
   done
 }
 
+install_systemd_units() {
+  echo "==> Installing systemd units"
+  install -m 0644 deploy/server/systemd/*.service "$SYSTEMD_UNIT_DIR"/
+  systemctl daemon-reload
+  systemctl enable $SERVICES >/dev/null 2>&1 || true
+}
+
 ensure_remote_worktree_ready
 
 if [[ "$PREFLIGHT_ONLY" == "1" ]]; then
@@ -200,10 +210,16 @@ for pkg in $BUILD_PACKAGES; do
   corepack pnpm --filter "$pkg" build
 done
 
+install_systemd_units
+
 echo "==> Restarting services: $SERVICES"
 systemctl restart $SERVICES
 systemctl is-active $SERVICES
 
 echo "==> Health check: $HEALTH_URL"
-wait_for_health
+wait_for_health "$HEALTH_URL"
+if [[ -n "$CONTROL_PLANE_HEALTH_URL" ]]; then
+  echo "==> Health check: $CONTROL_PLANE_HEALTH_URL"
+  wait_for_health "$CONTROL_PLANE_HEALTH_URL"
+fi
 echo "Deployment finished."

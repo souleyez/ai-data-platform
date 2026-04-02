@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Data Platform Control Plane Web
+After=network-online.target ai-data-platform-control-plane-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/ai-data-platform/apps/control-plane-web
+EnvironmentFile=/srv/ai-data-platform/deploy/server/ai-data-platform.env
+ExecStart=/bin/sh -lc '/usr/local/bin/node node_modules/next/dist/bin/next start -p ${CONTROL_PLANE_WEB_PORT:-3001}'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

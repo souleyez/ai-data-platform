@@ -56,17 +56,22 @@ function resolveProvider(modelRef) {
     };
   }
 
-  if (providerKey === 'minimax') {
-    const apiKey = env('MINIMAX_API_KEY');
+  if (providerKey === 'minimax' || providerKey === 'minimax-cn') {
+    const useCn = providerKey === 'minimax-cn';
+    const apiKey = useCn
+      ? env('MINIMAX_CN_API_KEY', env('MINIMAX_API_KEY'))
+      : env('MINIMAX_API_KEY', env('MINIMAX_CN_API_KEY'));
     if (!apiKey) {
-      throw new Error('MINIMAX_API_KEY is missing');
+      throw new Error(useCn ? 'MINIMAX_CN_API_KEY is missing' : 'MINIMAX_API_KEY is missing');
     }
 
     return {
       providerKey,
       model,
       apiKey,
-      baseUrl: env('MINIMAX_BASE_URL', 'https://api.minimaxi.com/v1'),
+      baseUrl: useCn
+        ? env('MINIMAX_CN_BASE_URL', env('MINIMAX_BASE_URL', 'https://api.minimaxi.com/v1'))
+        : env('MINIMAX_BASE_URL', env('MINIMAX_CN_BASE_URL', 'https://api.minimaxi.com/v1')),
       chatPath: '/chat/completions',
     };
   }

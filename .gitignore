@@ -11,6 +11,7 @@ coverage/
 # local runtime/cache artifacts
 storage/cache/
 storage/files/
+storage/control-plane/
 storage/web-captures/
 storage/config/document-overrides.json
 storage/config/document-libraries.json

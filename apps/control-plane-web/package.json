@@ -1,0 +1,15 @@
+{
+  "name": "control-plane-web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node node_modules/next/dist/bin/next dev -p 3001",
+    "build": "node node_modules/next/dist/bin/next build",
+    "start": "node node_modules/next/dist/bin/next start -p 3001"
+  },
+  "dependencies": {
+    "next": "15.3.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  }
+}
