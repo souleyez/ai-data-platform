@@ -5,7 +5,7 @@ export function isUngroupedDocument(item) {
 }
 
 export function buildVisibleItems(items) {
-  return (items || []).filter((item) => !item.ignored && item.parseStatus !== 'error');
+  return (items || []).filter((item) => !item.ignored);
 }
 
 export function buildFilteredItems({

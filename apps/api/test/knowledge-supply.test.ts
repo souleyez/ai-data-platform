@@ -13,10 +13,14 @@ import { STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR } from '../src/lib/paths.js';
 
 const DOCUMENT_CACHE_FILE = path.join(STORAGE_CACHE_DIR, 'documents-cache.json');
 const DOCUMENT_OVERRIDES_FILE = path.join(STORAGE_CONFIG_DIR, 'document-overrides.json');
+const DOCUMENT_CONFIG_FILE = path.join(STORAGE_CONFIG_DIR, 'document-categories.json');
+const RETAINED_DOCUMENTS_FILE = path.join(STORAGE_CONFIG_DIR, 'retained-documents.json');
 
 async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, fn: () => Promise<T>) {
   let previousCache: string | null = null;
   let previousOverrides: string | null = null;
+  let previousConfig: string | null = null;
+  let previousRetained: string | null = null;
 
   try {
     previousCache = await fs.readFile(DOCUMENT_CACHE_FILE, 'utf8');
@@ -30,10 +34,30 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
     previousOverrides = null;
   }
 
+  try {
+    previousConfig = await fs.readFile(DOCUMENT_CONFIG_FILE, 'utf8');
+  } catch {
+    previousConfig = null;
+  }
+
+  try {
+    previousRetained = await fs.readFile(RETAINED_DOCUMENTS_FILE, 'utf8');
+  } catch {
+    previousRetained = null;
+  }
+
   await fs.mkdir(STORAGE_CACHE_DIR, { recursive: true });
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
   await fs.writeFile(DOCUMENT_CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
   await fs.writeFile(DOCUMENT_OVERRIDES_FILE, JSON.stringify({}, null, 2), 'utf8');
+  await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
+    scanRoot: payload.scanRoot,
+    scanRoots: payload.scanRoots,
+    categories: {},
+    customCategories: [],
+    updatedAt: '2026-03-31T10:00:00.000Z',
+  }, null, 2), 'utf8');
+  await fs.writeFile(RETAINED_DOCUMENTS_FILE, JSON.stringify({ items: [] }, null, 2), 'utf8');
 
   try {
     return await fn();
@@ -48,6 +72,18 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
       await fs.rm(DOCUMENT_OVERRIDES_FILE, { force: true });
     } else {
       await fs.writeFile(DOCUMENT_OVERRIDES_FILE, previousOverrides, 'utf8');
+    }
+
+    if (previousConfig === null) {
+      await fs.rm(DOCUMENT_CONFIG_FILE, { force: true });
+    } else {
+      await fs.writeFile(DOCUMENT_CONFIG_FILE, previousConfig, 'utf8');
+    }
+
+    if (previousRetained === null) {
+      await fs.rm(RETAINED_DOCUMENTS_FILE, { force: true });
+    } else {
+      await fs.writeFile(RETAINED_DOCUMENTS_FILE, previousRetained, 'utf8');
     }
   }
 }

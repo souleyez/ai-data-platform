@@ -152,11 +152,15 @@ export async function upsertDocumentsInCache(items: ParsedDocument[], scanRoot?:
 export async function buildScanSignature(files: string[]) {
   const stats = await Promise.all(
     files.map(async (filePath) => {
-      const stat = await fs.stat(filePath);
-      return `${filePath}:${stat.size}:${Math.floor(stat.mtimeMs)}`;
+      try {
+        const stat = await fs.stat(filePath);
+        return `${filePath}:${stat.size}:${Math.floor(stat.mtimeMs)}`;
+      } catch {
+        return null;
+      }
     }),
   );
-  return stats.sort().join('|');
+  return stats.filter(Boolean).sort().join('|');
 }
 
 function extractPathTimestamp(filePath: string) {

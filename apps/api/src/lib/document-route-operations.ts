@@ -8,6 +8,7 @@ export {
   runDocumentOrganizeAction,
   runReclusterUngroupedAction,
   runDocumentDeepParseAction,
+  runDocumentReparseAction,
   runDocumentVectorRebuildAction,
 } from './document-route-maintenance-operations.js';
 

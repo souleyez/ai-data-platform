@@ -162,6 +162,17 @@ export async function ingestDocumentFiles(input: {
       continue;
     }
 
+    if (parsed.parseStatus === 'error') {
+      metrics.parseFailedCount += 1;
+      parsedItems.push(parsed);
+      ingestItems.push(buildFailedFilePreviewItem(
+        file,
+        input.sourceNameResolver,
+        'File was saved but parsing failed. You can retry after fixing OCR or parser dependencies.',
+      ));
+      continue;
+    }
+
     if (parsed.parseStatus !== 'parsed') {
       metrics.unsupportedCount += 1;
       ingestItems.push(buildFailedFilePreviewItem(
@@ -219,7 +230,11 @@ export async function ingestDocumentFiles(input: {
   }
 
   await upsertDocumentsInCache(parsedItems, input.documentConfig.scanRoots);
-  await enqueueDetailedParse(parsedItems.map((item) => item.path));
+  await enqueueDetailedParse(
+    parsedItems
+      .filter((item) => item.parseStatus === 'parsed' || item.parseStatus === 'error')
+      .map((item) => item.path),
+  );
   metrics.detailedQueuedCount = parsedItems.length;
 
   return {

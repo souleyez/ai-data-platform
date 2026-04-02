@@ -64,6 +64,14 @@ export async function saveDocumentGroups(items) {
   });
 }
 
+export async function reparseDocuments(items) {
+  return requestJson('/api/documents/reparse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+}
+
 export async function acceptDocumentGroupSuggestions(items) {
   return requestJson('/api/documents/groups/accept-suggestions', {
     method: 'POST',

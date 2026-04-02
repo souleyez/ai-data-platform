@@ -7,6 +7,7 @@ import {
   buildScanSignature,
   dedupeDocuments,
   getCurrentFiles,
+  resolveScanRoots,
   sameScanRoots,
   sortDocumentsByRecency,
 } from './document-scan-runtime.js';
@@ -28,16 +29,15 @@ export async function loadParsedDocuments(
   scanRoot?: string | string[],
   options?: { skipBackgroundTasks?: boolean },
 ): Promise<LoadParsedDocumentsResult> {
-  const currentFiles = await getCurrentFiles(scanRoot);
-  const activeScanRoots = currentFiles.scanRoots;
   const cache = !forceRefresh ? await readDocumentCache() : null;
   const skipBackgroundTasks = options?.skipBackgroundTasks === true;
+  const configuredScanRoots = await resolveScanRoots(scanRoot);
 
-  if (cache) {
+  if (cache && sameScanRoots(cache.scanRoots || [cache.scanRoot], configuredScanRoots)) {
     if (!skipBackgroundTasks) {
       await enqueueDetailedParse(
         cache.items
-          .filter((item) => item.parseStatus === 'parsed' && item.parseStage !== 'detailed')
+          .filter((item) => (item.parseStatus === 'parsed' || item.parseStatus === 'error') && item.parseStage !== 'detailed')
           .map((item) => item.path),
       );
     }
@@ -59,11 +59,11 @@ export async function loadParsedDocuments(
       files: [],
       totalFiles: cache.totalFiles || cache.items.length,
       items: mergedItems.slice(0, limit),
-      cacheHit: sameScanRoots(cache.scanRoots || [cache.scanRoot], activeScanRoots),
+      cacheHit: true,
     };
   }
 
-  const { exists, files, scanRoot: activeScanRoot, scanRoots: resolvedScanRoots } = currentFiles;
+  const { exists, files, scanRoot: activeScanRoot, scanRoots: resolvedScanRoots } = await getCurrentFiles(configuredScanRoots);
   if (!exists) {
     return { exists, files, totalFiles: 0, items: [], cacheHit: false };
   }
@@ -73,7 +73,11 @@ export async function loadParsedDocuments(
     parseStage: 'quick',
     cloudEnhancement: false,
   });
-  await enqueueDetailedParse(items.filter((item) => item.parseStatus === 'parsed').map((item) => item.path));
+  await enqueueDetailedParse(
+    items
+      .filter((item) => item.parseStatus === 'parsed' || item.parseStatus === 'error')
+      .map((item) => item.path),
+  );
   await writeDocumentCache({
     generatedAt: new Date().toISOString(),
     scanRoot: activeScanRoot,

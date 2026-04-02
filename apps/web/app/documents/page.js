@@ -14,6 +14,7 @@ import {
   fetchDatasources,
   fetchDocuments,
   ignoreDocuments,
+  reparseDocuments,
   reclusterUngroupedDocuments,
   saveDocumentGroups,
 } from './api';
@@ -63,6 +64,7 @@ export default function DocumentsPage() {
   const [activeLibrary, setActiveLibrary] = useState('all');
   const [assignmentSubmittingId, setAssignmentSubmittingId] = useState('');
   const [ignoreSubmittingId, setIgnoreSubmittingId] = useState('');
+  const [reparseSubmittingId, setReparseSubmittingId] = useState('');
   const [libraryDrafts, setLibraryDrafts] = useState({});
   const [expandedLibraryEditorId, setExpandedLibraryEditorId] = useState('');
   const [recentNewIds, setRecentNewIds] = useState([]);
@@ -125,6 +127,20 @@ export default function DocumentsPage() {
       setScanMessage('忽略文档失败，请稍后重试');
     } finally {
       setIgnoreSubmittingId('');
+    }
+  };
+
+  const reparseDocument = async (itemId) => {
+    if (!itemId || reparseSubmittingId) return;
+    try {
+      setReparseSubmittingId(itemId);
+      const json = await reparseDocuments([{ id: itemId }]);
+      await loadDocuments();
+      setScanMessage(json.message || '文档已重新解析');
+    } catch {
+      setScanMessage('重新解析失败，请稍后重试');
+    } finally {
+      setReparseSubmittingId('');
     }
   };
 
@@ -310,9 +326,11 @@ export default function DocumentsPage() {
               onCloseLibraryEditor={closeLibraryEditor}
               assignmentSubmittingId={assignmentSubmittingId}
               ignoreSubmittingId={ignoreSubmittingId}
+              reparseSubmittingId={reparseSubmittingId}
               updateDocumentLibraries={updateDocumentLibraries}
               acceptSuggestedGroups={acceptSuggestedGroups}
               ignoreDocument={ignoreDocument}
+              reparseDocument={reparseDocument}
               formatDocumentBusinessResult={formatDocumentBusinessResult}
               parseMethodLabels={PARSE_METHOD_LABELS}
               onFirstPage={() => setCurrentPage(1)}

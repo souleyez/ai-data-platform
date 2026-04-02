@@ -27,6 +27,7 @@ import {
   loadDocumentLibrariesPayload,
   runDocumentDeepParseAction,
   runDocumentOrganizeAction,
+  runDocumentReparseAction,
   runDocumentUploadAction,
   runDocumentVectorRebuildAction,
   runReclusterUngroupedAction,
@@ -363,6 +364,25 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       mode: 'read-only',
       ...result,
       message: `已处理 ${result.processedCount} 条详细解析任务，成功 ${result.succeededCount} 条，失败 ${result.failedCount} 条。`,
+    };
+  });
+
+  app.post('/documents/reparse', async (request, reply) => {
+    const body = (request.body || {}) as { items?: Array<{ id?: string }> };
+    const ids = Array.isArray(body.items) ? body.items.map((item) => String(item?.id || '').trim()).filter(Boolean) : [];
+
+    if (!ids.length) {
+      return reply.code(400).send({ error: 'reparse items are required' });
+    }
+
+    const result = await runDocumentReparseAction(ids);
+    return {
+      status: 'completed',
+      matchedCount: result.matchedCount,
+      succeededCount: result.succeededCount,
+      failedCount: result.failedCount,
+      missingIds: result.missingIds,
+      message: `已重新解析 ${result.matchedCount} 条文档，成功 ${result.succeededCount} 条，失败 ${result.failedCount} 条。`,
     };
   });
 

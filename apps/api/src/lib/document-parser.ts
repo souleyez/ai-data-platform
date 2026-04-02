@@ -1484,9 +1484,9 @@ async function extractText(filePath: string, ext: string) {
     }
 
     return {
-      status: 'parsed' as const,
-      text: `Image file: ${imageName}\n\nOCR text was not extracted from this image. The file is still indexed as an uploaded image.`,
-      parseMethod: 'image-metadata',
+      status: 'error' as const,
+      text: `Image file: ${imageName}\n\nOCR text was not extracted from this image.`,
+      parseMethod: 'image-ocr-empty',
     };
   }
 
@@ -1567,6 +1567,51 @@ export async function parseDocument(
           title: path.parse(name).name,
           topicTags,
           summary: unsupportedSummary,
+        }),
+      };
+    }
+
+    if (status === 'error') {
+      const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+      const groups = detectGroups(filePath, '', topicTags, config);
+      const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
+      const fallbackSummary = IMAGE_EXTENSIONS.has(ext)
+        ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
+        : (topicTags.length
+          ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
+          : '文档解析失败，后续可补充依赖后手动重新解析。');
+
+      return {
+        path: filePath,
+        name,
+        ext,
+        title: path.parse(name).name,
+        category,
+        bizCategory,
+        parseStatus: 'error',
+        parseMethod,
+        summary: fallbackSummary,
+        excerpt: fallbackSummary,
+        fullText: text,
+        extractedChars: 0,
+        evidenceChunks: [],
+        entities: [],
+        claims: [],
+        intentSlots: {},
+        topicTags,
+        groups,
+        parseStage,
+        detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
+        detailParseQueuedAt: defaultDetailQueuedAt,
+        detailParsedAt: defaultDetailParsedAt,
+        detailParseAttempts: defaultDetailAttempts,
+        detailParseError: IMAGE_EXTENSIONS.has(ext) ? 'ocr-text-not-extracted' : 'parse-error',
+        schemaType,
+        structuredProfile: buildStructuredProfile({
+          schemaType,
+          title: path.parse(name).name,
+          topicTags,
+          summary: fallbackSummary,
         }),
       };
     }

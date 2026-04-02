@@ -3,6 +3,12 @@
 function renderParseStage(item, parseMethodLabels) {
   const methodLabel = parseMethodLabels[item.parseMethod] || item.parseMethod || '-';
   const stageLabel = item.parseStage === 'detailed' ? '进阶解析' : '快速解析';
+  const isFailed = item.parseStatus === 'error' || item.detailParseStatus === 'failed';
+  const detailErrorLabel = item.detailParseError === 'ocr-text-not-extracted'
+    ? 'OCR 未提取到文本'
+    : item.detailParseError === 'parse-error'
+      ? '解析失败'
+      : item.detailParseError;
   const detailStatusLabel = (() => {
     switch (item.detailParseStatus) {
       case 'queued':
@@ -20,7 +26,7 @@ function renderParseStage(item, parseMethodLabels) {
 
   return (
     <div style={{ display: 'grid', gap: 6 }}>
-      <span>{item.parseStatus || '-'}</span>
+      <span style={isFailed ? { color: '#b91c1c', fontWeight: 600 } : undefined}>{item.parseStatus || '-'}</span>
       <span style={{ fontSize: 12, color: '#64748b' }}>{methodLabel}</span>
       <span style={{ fontSize: 12, color: '#64748b' }}>{stageLabel}</span>
       {detailStatusLabel ? (
@@ -28,8 +34,15 @@ function renderParseStage(item, parseMethodLabels) {
           {detailStatusLabel}
         </span>
       ) : null}
+      {detailErrorLabel ? (
+        <span style={{ fontSize: 12, color: '#b91c1c' }}>{detailErrorLabel}</span>
+      ) : null}
     </div>
   );
+}
+
+function canReparseDocument(item) {
+  return item?.parseStatus === 'error' || item?.detailParseStatus === 'failed';
 }
 
 export default function DocumentsTable({
@@ -49,9 +62,11 @@ export default function DocumentsTable({
   onCloseLibraryEditor,
   assignmentSubmittingId,
   ignoreSubmittingId,
+  reparseSubmittingId,
   updateDocumentLibraries,
   acceptSuggestedGroups,
   ignoreDocument,
+  reparseDocument,
   formatDocumentBusinessResult,
   parseMethodLabels,
   onFirstPage,
@@ -64,7 +79,7 @@ export default function DocumentsTable({
       <div className="panel-header">
         <div>
           <h3>文档列表</h3>
-          <p>上传后先进入快速解析，进阶解析会在后台继续完成。你可以在这里调整分组或删除文档索引。</p>
+          <p>上传后先进入快速解析，进阶解析会在后台继续完成。失败文档可在列表里直接手动重新解析。</p>
         </div>
         <div className="table-pagination-summary">
           <span>{`第 ${currentPage} / ${totalPages} 页`}</span>
@@ -107,14 +122,24 @@ export default function DocumentsTable({
                         <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span>
                       ) : null}
                     </div>
-                    <div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {canReparseDocument(item) ? (
+                        <button
+                          type="button"
+                          className="ghost-btn compact-inline-btn"
+                          onClick={() => reparseDocument(item.id)}
+                          disabled={reparseSubmittingId === item.id}
+                        >
+                          {reparseSubmittingId === item.id ? '重新解析中..' : '重新解析'}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="ghost-btn compact-inline-btn"
                         onClick={() => ignoreDocument(item.id)}
                         disabled={ignoreSubmittingId === item.id}
                       >
-                        {ignoreSubmittingId === item.id ? '删除中...' : '删除'}
+                        {ignoreSubmittingId === item.id ? '删除中..' : '删除'}
                       </button>
                     </div>
                   </div>
@@ -160,7 +185,7 @@ export default function DocumentsTable({
                             onClick={() => acceptSuggestedGroups([item.id])}
                             disabled={assignmentSubmittingId === item.id}
                           >
-                            {assignmentSubmittingId === item.id ? '接受中...' : '接受建议'}
+                            {assignmentSubmittingId === item.id ? '接受中..' : '接受建议'}
                           </button>
                         </div>
                       </div>
@@ -189,7 +214,7 @@ export default function DocumentsTable({
                                 onCloseLibraryEditor();
                               }}
                             >
-                              {assignmentSubmittingId === item.id ? '保存中...' : '确认'}
+                              {assignmentSubmittingId === item.id ? '保存中..' : '确认'}
                             </button>
                             <button
                               className="ghost-btn"
