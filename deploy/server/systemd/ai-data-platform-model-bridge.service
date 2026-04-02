@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/srv/ai-data-platform
 EnvironmentFile=/srv/ai-data-platform/deploy/server/ai-data-platform.env
-ExecStart=/usr/bin/node tools/http-model-bridge.mjs
+ExecStart=/usr/local/bin/node tools/http-model-bridge.mjs
 Restart=always
 RestartSec=5
 

@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/srv/ai-data-platform/apps/worker
 EnvironmentFile=/srv/ai-data-platform/deploy/server/ai-data-platform.env
-ExecStart=/usr/bin/node dist/index.js
+ExecStart=/usr/local/bin/node dist/index.js
 Restart=always
 RestartSec=5
 
