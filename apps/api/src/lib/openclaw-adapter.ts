@@ -1,4 +1,4 @@
-import { getActiveOpenClawModel, loadModelConfigState } from './model-config.js';
+import { ensureNativeSearchPreferredConfig, getActiveOpenClawModel } from './model-config.js';
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -18,6 +18,27 @@ export type OpenClawChatResult = {
   provider: 'cloud-gateway';
   model: string;
   raw?: unknown;
+};
+
+type OpenClawResponseInputItem = {
+  type: 'message';
+  role: 'system' | 'developer' | 'user' | 'assistant';
+  content: string;
+};
+
+type OpenClawResponsesPayload = {
+  id?: string;
+  output?: Array<
+    | {
+        type?: 'message';
+        content?: Array<{ type?: string; text?: string }>;
+      }
+    | {
+        type?: 'reasoning';
+        content?: string;
+        summary?: string;
+      }
+  >;
 };
 
 function env(name: string, fallback?: string) {
@@ -94,6 +115,55 @@ function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
   return messages;
 }
 
+function buildResponsesInstructions(input: OpenClawChatRequest, preferNativeWebSearch = false) {
+  const context = (input.contextBlocks || []).filter(Boolean);
+  const instructionParts = [input.systemPrompt || buildDefaultSystemPrompt()];
+
+  if (preferNativeWebSearch) {
+    instructionParts.push(
+      [
+        '如果用户问题包含最新、当前、官网、新闻、价格、天气、比分、赛程、公告等实时信息，',
+        '并且原生网页搜索能力可用，请优先使用 OpenClaw 的原生网页搜索后再回答。',
+        '回答中直接给结论，并尽量基于搜索结果表述，不要暴露内部工具细节。',
+      ].join(''),
+    );
+  }
+
+  if (context.length) {
+    instructionParts.push(
+      ['以下是与当前请求相关的补充上下文，请一并参考：', context.join('\n\n')].join('\n\n'),
+    );
+  }
+
+  return instructionParts.filter(Boolean).join('\n\n');
+}
+
+function buildResponsesInput(input: OpenClawChatRequest): OpenClawResponseInputItem[] {
+  const items: OpenClawResponseInputItem[] = [];
+
+  for (const item of input.chatHistory || []) {
+    const role = item?.role === 'assistant' ? 'assistant' : 'user';
+    const content = String(item?.content || '').trim();
+    if (!content) continue;
+    items.push({
+      type: 'message',
+      role,
+      content,
+    });
+  }
+
+  const prompt = String(input.prompt || '').trim();
+  if (prompt) {
+    items.push({
+      type: 'message',
+      role: 'user',
+      content: prompt,
+    });
+  }
+
+  return items;
+}
+
 function sanitizeModelContent(content: string) {
   return String(content || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -142,6 +212,34 @@ async function requestChatCompletion(baseUrl: string, headers: Record<string, st
   }
 }
 
+async function requestOpenResponses(baseUrl: string, headers: Record<string, string>, body: unknown) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/responses`, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`OpenResponses request failed (${response.status}): ${text}`);
+    }
+
+    return (await response.json()) as OpenClawResponsesPayload;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`OpenResponses request timed out after ${getGatewayTimeoutMs()}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function isRetryableCloudGatewayError(error: unknown) {
   const message = String(error instanceof Error ? error.message : error || '').toLowerCase();
   if (!message) return false;
@@ -156,6 +254,68 @@ export function isRetryableCloudGatewayError(error: unknown) {
     || message.includes('timeout')
     || message.includes('overloaded')
   );
+}
+
+function extractResponseOutputText(payload: OpenClawResponsesPayload) {
+  const blocks: string[] = [];
+  for (const item of payload.output || []) {
+    if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (String(part?.type || '') !== 'output_text') continue;
+      const text = sanitizeModelContent(String(part?.text || '').trim());
+      if (text) blocks.push(text);
+    }
+  }
+  return blocks.join('\n\n').trim();
+}
+
+export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatRequest): Promise<OpenClawChatResult | null> {
+  const baseUrl = env('OPENCLAW_GATEWAY_URL');
+  const token = env('OPENCLAW_GATEWAY_TOKEN');
+  const agentId = env('OPENCLAW_AGENT_ID', 'main');
+  const selectedModel = await getActiveOpenClawModel();
+  const model = selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+
+  if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
+    return null;
+  }
+
+  try {
+    await ensureNativeSearchPreferredConfig();
+  } catch {
+    // Keep going; the request itself can still fail over to project-side search.
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
+  if (agentId) headers['x-openclaw-agent-id'] = agentId;
+
+  try {
+    const json = await requestOpenResponses(baseUrl, headers, {
+      model,
+      user: input.sessionUser,
+      input: buildResponsesInput(input),
+      instructions: buildResponsesInstructions(input, true),
+      temperature: 0.1,
+      reasoning: {
+        effort: 'medium',
+        summary: 'auto',
+      },
+    });
+    const content = extractResponseOutputText(json);
+    if (!content) return null;
+
+    return {
+      content,
+      provider: 'cloud-gateway',
+      model: selectedModel || model || 'cloud-model',
+      raw: json,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function requestChatCompletionWithRetry(baseUrl: string, headers: Record<string, string>, body: unknown) {
@@ -213,15 +373,8 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const baseUrl = env('OPENCLAW_GATEWAY_URL');
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
-  const [selectedModel, modelState] = await Promise.all([
-    getActiveOpenClawModel(),
-    loadModelConfigState(),
-  ]);
-
-  const model =
-    modelState?.openclaw?.usesDevBridge || modelState?.openclaw?.installMode === 'wsl'
-      ? agentId ? `openclaw/${agentId}` : 'openclaw'
-      : (selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`));
+  const selectedModel = await getActiveOpenClawModel();
+  const model = selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');

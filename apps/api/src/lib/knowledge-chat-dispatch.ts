@@ -14,7 +14,8 @@ import {
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
-import { runOpenClawChat } from './openclaw-adapter.js';
+import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
+import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
@@ -31,6 +32,32 @@ export type GeneralKnowledgeDispatchResult = {
   evidenceMode?: KnowledgeEvidenceMode | null;
   intentContract?: KnowledgeIntentContract | null;
 };
+
+async function runCloudChatWithSearchFallback(input: {
+  prompt: string;
+  chatHistory: ChatHistoryItem[];
+  sessionUser?: string;
+}) {
+  const { prompt, chatHistory, sessionUser } = input;
+  const needsWebSearch = shouldUseWebSearchForPrompt(prompt);
+
+  if (needsWebSearch) {
+    const native = await tryRunOpenClawNativeWebSearchChat({
+      prompt,
+      sessionUser,
+      chatHistory,
+    });
+    if (native) return native;
+  }
+
+  const fallbackContext = needsWebSearch ? await buildWebSearchContextBlock(prompt) : '';
+  return runOpenClawChat({
+    prompt,
+    sessionUser,
+    chatHistory,
+    contextBlocks: fallbackContext ? [fallbackContext] : [],
+  });
+}
 
 export async function runGeneralKnowledgeAwareChat(input: {
   prompt: string;
@@ -58,7 +85,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   }
 
   if (explicitlyRejectsKnowledgeMode(prompt)) {
-    const cloud = await runOpenClawChat({
+    const cloud = await runCloudChatWithSearchFallback({
       prompt,
       sessionUser,
       chatHistory,
@@ -135,7 +162,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     };
   }
 
-  const cloud = await runOpenClawChat({
+  const cloud = await runCloudChatWithSearchFallback({
     prompt,
     sessionUser,
     chatHistory,

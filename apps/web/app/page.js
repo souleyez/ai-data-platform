@@ -13,6 +13,7 @@ const INITIAL_MODEL_STATE = {
   },
   currentModel: null,
   availableModels: [],
+  providers: [],
 };
 
 async function getInitialModelState() {
@@ -30,6 +31,7 @@ async function getInitialModelState() {
       openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
       currentModel: json.currentModel || null,
       availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+      providers: Array.isArray(json.providers) ? json.providers : [],
     };
   } catch {
     return INITIAL_MODEL_STATE;

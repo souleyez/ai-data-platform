@@ -3,13 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NAV_ITEMS } from '../lib/types';
 
-const NAV_LINKS = {
-  智能工作台: '/',
-  文档中心: '/documents',
-  数据源管理: '/datasources',
-  报表中心: '/reports',
-  审计日志: '/audit',
-};
+const NAV_PATHS = ['/', '/documents', '/datasources', '/reports', '/audit'];
 
 const INITIAL_MODEL_STATE = {
   openclaw: {
@@ -23,18 +17,39 @@ const INITIAL_MODEL_STATE = {
   },
   currentModel: null,
   availableModels: [],
+  providers: [],
 };
 
 function getRuntimeLabel(openclaw) {
   if (openclaw.running) {
-    return `已连接${openclaw.installedVersion ? ` · ${openclaw.installedVersion}` : ''}`;
+    return `已连接${openclaw.installedVersion ? ` / ${openclaw.installedVersion}` : ''}`;
   }
-
   if (openclaw.installed) {
-    return '已安装，网关未连接';
+    return '已安装，网关未连通';
   }
-
   return '未安装';
+}
+
+function buildProviderDrafts(providers = []) {
+  return providers.reduce((drafts, provider) => {
+    const selectedMethod = provider.methods?.find((item) => item.selected) || provider.methods?.[0] || null;
+    drafts[provider.id] = {
+      methodId: selectedMethod?.id || '',
+      apiKey: '',
+    };
+    return drafts;
+  }, {});
+}
+
+function inputStyle() {
+  return {
+    width: '100%',
+    borderRadius: 12,
+    border: '1px solid rgba(148, 163, 184, 0.32)',
+    background: 'rgba(15, 23, 42, 0.72)',
+    color: '#e2e8f0',
+    padding: '10px 12px',
+  };
 }
 
 export default function Sidebar({
@@ -44,6 +59,7 @@ export default function Sidebar({
 }) {
   const [modelPanelOpen, setModelPanelOpen] = useState(false);
   const [modelState, setModelState] = useState(initialModelState);
+  const [providerDrafts, setProviderDrafts] = useState(() => buildProviderDrafts(initialModelState.providers));
   const [modelBusy, setModelBusy] = useState(false);
   const [modelMessage, setModelMessage] = useState('');
 
@@ -59,6 +75,7 @@ export default function Sidebar({
           openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
           currentModel: json.currentModel || null,
           availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+          providers: Array.isArray(json.providers) ? json.providers : [],
         });
       } catch {
         if (!alive) return;
@@ -71,6 +88,10 @@ export default function Sidebar({
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    setProviderDrafts(buildProviderDrafts(modelState.providers));
+  }, [modelState.providers]);
 
   const currentModel = useMemo(
     () => modelState.currentModel || modelState.availableModels[0] || null,
@@ -85,58 +106,100 @@ export default function Sidebar({
         openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
         currentModel: json.currentModel || null,
         availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+        providers: Array.isArray(json.providers) ? json.providers : [],
       });
-      setModelMessage(message);
+      if (message) setModelMessage(message);
     } catch {
       if (message) setModelMessage(message);
     }
   }
 
-  async function handleSelectModel(modelId) {
+  async function submitModelAction(payload, fallbackMessage) {
     setModelBusy(true);
     setModelMessage('');
-
     try {
       const response = await fetch('/api/model-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId }),
+        body: JSON.stringify(payload),
       });
       const json = await response.json();
       if (!response.ok) {
-        throw new Error(json.message || '模型切换失败');
+        throw new Error(json.message || fallbackMessage);
       }
-
       setModelState({
         openclaw: json.openclaw || INITIAL_MODEL_STATE.openclaw,
         currentModel: json.currentModel || null,
         availableModels: Array.isArray(json.availableModels) ? json.availableModels : [],
+        providers: Array.isArray(json.providers) ? json.providers : [],
       });
-      setModelMessage(json.message || '模型已切换。');
+      setModelMessage(json.message || fallbackMessage);
     } catch (error) {
-      setModelMessage(error instanceof Error ? error.message : '模型切换失败，请稍后重试。');
+      setModelMessage(error instanceof Error ? error.message : fallbackMessage);
     } finally {
       setModelBusy(false);
     }
   }
 
+  async function handleSelectModel(modelId) {
+    if (!modelId) return;
+    await submitModelAction(
+      { action: 'select-model', modelId },
+      '模型切换失败，请稍后重试。',
+    );
+  }
+
   async function handleInstallOpenClaw() {
     setModelBusy(true);
-    setModelMessage('正在安装云端模型服务，并启动默认网关...');
-
+    setModelMessage('正在安装 OpenClaw 并启动默认网关...');
     try {
       const response = await fetch('/api/model-config/install', { method: 'POST' });
       const json = await response.json();
       if (!response.ok) {
         throw new Error(json.message || 'install_openclaw_failed');
       }
-
-      await refreshModelState(json.message || '云端模型服务已安装完成。');
+      await refreshModelState(json.message || 'OpenClaw 已安装。');
     } catch (error) {
-      setModelMessage(error instanceof Error ? error.message : '云端模型服务安装失败。');
+      setModelMessage(error instanceof Error ? error.message : 'OpenClaw 安装失败。');
     } finally {
       setModelBusy(false);
     }
+  }
+
+  function updateProviderDraft(providerId, patch) {
+    setProviderDrafts((current) => ({
+      ...current,
+      [providerId]: {
+        ...(current[providerId] || {}),
+        ...patch,
+      },
+    }));
+  }
+
+  async function handleSaveProvider(providerId) {
+    const draft = providerDrafts[providerId] || {};
+    await submitModelAction(
+      {
+        action: 'save-provider',
+        providerId,
+        methodId: draft.methodId,
+        apiKey: draft.apiKey,
+      },
+      '供应商配置保存失败。',
+    );
+    updateProviderDraft(providerId, { apiKey: '' });
+  }
+
+  async function handleLaunchLogin(providerId) {
+    const draft = providerDrafts[providerId] || {};
+    await submitModelAction(
+      {
+        action: 'launch-login',
+        providerId,
+        methodId: draft.methodId,
+      },
+      '登录窗口拉起失败。',
+    );
   }
 
   return (
@@ -151,11 +214,11 @@ export default function Sidebar({
 
       <nav className="nav-section">
         <div className="nav-title">工作台</div>
-        {NAV_ITEMS.map((item) => {
-          const href = NAV_LINKS[item] || '#';
+        {NAV_ITEMS.map((item, index) => {
+          const href = NAV_PATHS[index] || '#';
           const active = href !== '#' && currentPath === href;
           return (
-            <a key={item} href={href} className={`nav-item ${active ? 'active' : ''}`}>
+            <a key={`${item}-${href}`} href={href} className={`nav-item ${active ? 'active' : ''}`}>
               {item}
             </a>
           );
@@ -186,44 +249,37 @@ export default function Sidebar({
           {currentModel ? ` ${currentModel.provider} / ${currentModel.label}` : ' 未配置'}
         </p>
         <p style={{ marginTop: 8, fontSize: 12, color: '#b7c3d6' }}>
-          云端模型：{getRuntimeLabel(modelState.openclaw)}
+          OpenClaw：{getRuntimeLabel(modelState.openclaw)}
         </p>
-        <button
-          className="ghost-btn"
-          type="button"
-          style={{ marginTop: 10, width: '100%' }}
-          onClick={() => setModelPanelOpen((prev) => !prev)}
-        >
-          {modelPanelOpen ? '收起模型面板' : '打开模型面板'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <button className="ghost-btn" type="button" onClick={() => setModelPanelOpen((prev) => !prev)}>
+            {modelPanelOpen ? '收起面板' : '打开面板'}
+          </button>
+          <button className="ghost-btn" type="button" onClick={() => refreshModelState('模型状态已刷新。')} disabled={modelBusy}>
+            刷新状态
+          </button>
+        </div>
 
         {modelPanelOpen ? (
-          <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-            {modelState.availableModels.length ? (
-              modelState.availableModels.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="ghost-btn"
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    borderColor: item.id === currentModel?.id ? '#93c5fd' : undefined,
-                    background: item.id === currentModel?.id ? '#eff6ff' : '#fff',
-                    opacity: modelBusy ? 0.72 : 1,
-                  }}
-                  onClick={() => handleSelectModel(item.id)}
-                  disabled={modelBusy}
-                >
-                  <div style={{ fontWeight: 700 }}>{item.label}</div>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>{item.provider}</div>
-                </button>
-              ))
-            ) : (
-              <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
-                当前还没有读取到云端模型列表。
-              </div>
-            )}
+          <div style={{ marginTop: 14, display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <label style={{ fontSize: 12, color: '#cbd5e1' }}>默认模型</label>
+              <select
+                value={currentModel?.id || ''}
+                onChange={(event) => handleSelectModel(event.target.value)}
+                disabled={modelBusy || !modelState.availableModels.length}
+                style={inputStyle()}
+              >
+                <option value="" disabled>
+                  请选择模型
+                </option>
+                {modelState.availableModels.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.provider} / {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {!modelState.openclaw.installed ? (
               <button
@@ -231,24 +287,116 @@ export default function Sidebar({
                 className="ghost-btn"
                 onClick={handleInstallOpenClaw}
                 disabled={modelBusy}
-                style={{ width: '100%', marginTop: 4 }}
+                style={{ width: '100%' }}
               >
-                {modelBusy ? '安装中...' : '安装云端模型服务'}
+                {modelBusy ? '安装中...' : '安装 OpenClaw'}
               </button>
             ) : null}
 
             <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
               {modelState.openclaw.usesDevBridge
-                ? '当前为开发机模式：页面通过本机桥接接入云端模型服务。'
-                : '当前为直连模式：项目 API 直接访问云端模型服务网关。'}
+                ? '当前页面通过本机桥接读取 WSL 里的 OpenClaw 配置与网关。'
+                : '当前页面直接读取本机 OpenClaw 配置。'}
             </div>
 
-            <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
-              系统仍可独立运行：即使未安装云端模型服务，也会保留本地AI兜底能力。
+            <div style={{ display: 'grid', gap: 12 }}>
+              {modelState.providers.map((provider) => {
+                const draft = providerDrafts[provider.id] || { methodId: provider.methods?.[0]?.id || '', apiKey: '' };
+                const currentMethod = provider.methods.find((item) => item.id === draft.methodId) || provider.methods[0] || null;
+                const usesApiKey = currentMethod?.kind === 'apiKey';
+                return (
+                  <div
+                    key={provider.id}
+                    style={{
+                      border: '1px solid rgba(148, 163, 184, 0.24)',
+                      borderRadius: 14,
+                      padding: 12,
+                      background: 'rgba(15, 23, 42, 0.45)',
+                      display: 'grid',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ color: '#f8fafc', fontWeight: 700 }}>{provider.label}</div>
+                        <div style={{ marginTop: 4, fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>{provider.description}</div>
+                      </div>
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          background: provider.configured ? 'rgba(34, 197, 94, 0.18)' : 'rgba(148, 163, 184, 0.18)',
+                          color: provider.configured ? '#86efac' : '#cbd5e1',
+                        }}
+                      >
+                        {provider.statusText}
+                      </span>
+                    </div>
+
+                    <select
+                      value={draft.methodId}
+                      onChange={(event) => updateProviderDraft(provider.id, { methodId: event.target.value })}
+                      disabled={modelBusy}
+                      style={inputStyle()}
+                    >
+                      {provider.methods.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
+                      {currentMethod?.description || '请选择配置方式。'}
+                    </div>
+
+                    {usesApiKey ? (
+                      <>
+                        <input
+                          type="password"
+                          value={draft.apiKey}
+                          placeholder="输入 API Key"
+                          onChange={(event) => updateProviderDraft(provider.id, { apiKey: event.target.value })}
+                          disabled={modelBusy}
+                          style={inputStyle()}
+                        />
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => handleSaveProvider(provider.id)}
+                          disabled={modelBusy}
+                        >
+                          保存到 OpenClaw
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => handleLaunchLogin(provider.id)}
+                        disabled={modelBusy}
+                      >
+                        打开登录窗口
+                      </button>
+                    )}
+
+                    <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                      支持模型：{provider.models.map((item) => item.label).join(' / ')}
+                    </div>
+
+                    {provider.id === 'moonshot' ? (
+                      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                        {provider.webSearchConfigured ? 'Kimi 搜索已同步到 OpenClaw。' : '保存 Moonshot API Key 时会同时同步 Kimi 搜索配置。'}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
 
             {modelMessage ? (
-              <div style={{ fontSize: 12, color: '#60a5fa', lineHeight: 1.6 }}>{modelMessage}</div>
+              <div style={{ fontSize: 12, color: '#93c5fd', lineHeight: 1.6 }}>{modelMessage}</div>
             ) : null}
           </div>
         ) : null}
