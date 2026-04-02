@@ -37,15 +37,18 @@ async function runCloudChatWithSearchFallback(input: {
   prompt: string;
   chatHistory: ChatHistoryItem[];
   sessionUser?: string;
+  systemContextBlocks?: string[];
 }) {
-  const { prompt, chatHistory, sessionUser } = input;
+  const { prompt, chatHistory, sessionUser, systemContextBlocks } = input;
   const needsWebSearch = shouldUseWebSearchForPrompt(prompt);
+  const contextBlocks = [...(systemContextBlocks || [])];
 
   if (needsWebSearch) {
     const native = await tryRunOpenClawNativeWebSearchChat({
       prompt,
       sessionUser,
       chatHistory,
+      contextBlocks,
     });
     if (native) return native;
   }
@@ -55,7 +58,7 @@ async function runCloudChatWithSearchFallback(input: {
     prompt,
     sessionUser,
     chatHistory,
-    contextBlocks: fallbackContext ? [fallbackContext] : [],
+    contextBlocks: fallbackContext ? [...contextBlocks, fallbackContext] : contextBlocks,
   });
 }
 
@@ -65,8 +68,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
   existingState: KnowledgeConversationState | null;
   sessionUser?: string;
   debugResumePage?: boolean;
+  systemContextBlocks?: string[];
 }): Promise<GeneralKnowledgeDispatchResult> {
-  const { prompt, chatHistory, existingState, sessionUser } = input;
+  const { prompt, chatHistory, existingState, sessionUser, systemContextBlocks } = input;
 
   if (existingState && isKnowledgeCancelPhrase(prompt)) {
     const content = '已取消这次按库处理准备。你可以继续直接提问。';
@@ -89,6 +93,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       prompt,
       sessionUser,
       chatHistory,
+      systemContextBlocks,
     });
 
     return {
@@ -166,6 +171,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     prompt,
     sessionUser,
     chatHistory,
+    systemContextBlocks,
   });
 
   return {

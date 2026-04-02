@@ -7,9 +7,14 @@ import {
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
-import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
+import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable, runOpenClawChat } from './openclaw-adapter.js';
 import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import type { ChatOutput } from './knowledge-output.js';
+import {
+  buildFullModeOperationResultBlock,
+  buildFullModeSystemContextBlock,
+} from './full-mode-system-context.js';
+import { runFullModeSystemOperationIfNeeded } from './full-mode-system-operations.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
@@ -82,6 +87,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const existingState = requestMode === 'knowledge_output'
     ? parseKnowledgeConversationState(input.conversationState)
     : null;
+  const systemContextBlocks = intelligence.mode === 'full'
+    ? [buildFullModeSystemContextBlock(intelligence.capabilities)]
+    : [];
 
   let {
     mode,
@@ -102,7 +110,47 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
 
   if (gatewayConfigured) {
     try {
-      if (requestMode === 'knowledge_plan') {
+      if (requestMode === 'general' && intelligence.mode === 'full') {
+        const operationSummary = await runFullModeSystemOperationIfNeeded(prompt);
+        if (operationSummary) {
+          const cloud = await runOpenClawChat({
+            prompt,
+            sessionUser: input.sessionUser,
+            chatHistory,
+            contextBlocks: [
+              ...systemContextBlocks,
+              buildFullModeOperationResultBlock(operationSummary),
+            ],
+          });
+          content = cloud.content;
+          output = { type: 'answer', content };
+          intent = 'general';
+          mode = cloud.provider === 'cloud-gateway' ? 'openclaw' : 'fallback';
+          routeKind = 'system_operation';
+          debug = {
+            systemOperation: operationSummary,
+          };
+        } else {
+          const result = await runGeneralKnowledgeAwareChat({
+            prompt,
+            chatHistory,
+            existingState,
+            sessionUser: input.sessionUser,
+            debugResumePage: input.debugResumePage === true,
+            systemContextBlocks,
+          });
+          libraries = result.libraries;
+          output = result.output;
+          content = result.content;
+          intent = result.intent;
+          mode = result.mode;
+          conversationState = result.conversationState;
+          debug = result.debug || null;
+          routeKind = result.routeKind || 'general';
+          evidenceMode = result.evidenceMode || null;
+          intentContract = result.intentContract || null;
+        }
+      } else if (requestMode === 'knowledge_plan') {
         const result = await executeKnowledgePlan(prompt, chatHistory, input.sessionUser);
         libraries = result.libraries;
         knowledgePlan = result.knowledgePlan;
@@ -135,6 +183,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           existingState,
           sessionUser: input.sessionUser,
           debugResumePage: input.debugResumePage === true,
+          systemContextBlocks,
         });
         libraries = result.libraries;
         output = result.output;
