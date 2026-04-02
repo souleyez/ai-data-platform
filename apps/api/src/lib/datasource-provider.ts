@@ -29,6 +29,11 @@ export type DatasourceProviderRuntime = {
   discoveredCount?: number;
   capturedCount?: number;
   ingestedCount?: number;
+  skippedCount?: number;
+  unsupportedCount?: number;
+  failedCount?: number;
+  groupedCount?: number;
+  ungroupedCount?: number;
   libraryKeys?: string[];
   libraryLabels?: string[];
   documentIds?: string[];

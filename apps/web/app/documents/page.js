@@ -11,23 +11,16 @@ import { formatDocumentBusinessResult } from '../lib/types';
 import {
   acceptDocumentGroupSuggestions,
   createDocumentLibrary,
-  fetchCandidateSources,
   fetchDatasources,
   fetchDocuments,
   ignoreDocuments,
-  importCandidateSources,
-  organizeDocuments,
   reclusterUngroupedDocuments,
-  removeDocumentScanSource,
   saveDocumentGroups,
-  setPrimaryDocumentScanSource,
 } from './api';
 import DocumentFiltersBar from './DocumentFiltersBar';
 import DocumentsTable from './DocumentsTable';
 import LibraryTabs from './LibraryTabs';
-import ScanSourcesPanel from './ScanSourcesPanel';
 import {
-  buildDirectoryOptions,
   buildExtensionSummary,
   buildFilteredItems,
   buildVisibleItems,
@@ -55,7 +48,6 @@ const PARSE_METHOD_LABELS = {
 const PAGE_SIZE = 50;
 const DEFAULT_SIDEBAR_SOURCES = [
   { name: '文档中心', status: 'success' },
-  { name: '本地扫描源', status: 'success' },
   { name: '知识库分组', status: 'success' },
 ];
 
@@ -73,22 +65,10 @@ export default function DocumentsPage() {
   const [ignoreSubmittingId, setIgnoreSubmittingId] = useState('');
   const [libraryDrafts, setLibraryDrafts] = useState({});
   const [expandedLibraryEditorId, setExpandedLibraryEditorId] = useState('');
-  const [scanRootDraft, setScanRootDraft] = useState('');
-  const [scanSourceSubmitting, setScanSourceSubmitting] = useState(false);
-  const [candidateSourceLoading, setCandidateSourceLoading] = useState(false);
-  const [candidateSourceSubmitting, setCandidateSourceSubmitting] = useState(false);
-  const [candidateSources, setCandidateSources] = useState([]);
-  const [selectedCandidatePaths, setSelectedCandidatePaths] = useState([]);
-  const [scanSourcesExpanded, setScanSourcesExpanded] = useState(false);
   const [recentNewIds, setRecentNewIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [libraryCreateDraft, setLibraryCreateDraft] = useState('');
   const [libraryCreateSubmitting, setLibraryCreateSubmitting] = useState(false);
-
-  const formatLocalTime = (value) => {
-    const timestamp = Number(value || 0);
-    return timestamp > 0 ? new Date(timestamp).toLocaleString('zh-CN') : '未知';
-  };
 
   const loadDocuments = async () => {
     try {
@@ -96,7 +76,6 @@ export default function DocumentsPage() {
       setError('');
       const normalized = await fetchDocuments();
       setData(normalized);
-      setScanRootDraft((current) => current || normalized.scanRoot || '');
       return normalized;
     } catch {
       setError('文档中心接口暂时不可用');
@@ -122,28 +101,6 @@ export default function DocumentsPage() {
     loadDatasources();
   }, []);
 
-  const runScanWorkflow = async (request, successMessage) => {
-    const beforeIds = new Set((data?.items || []).map((item) => item.id));
-    setScanSourcesExpanded(false);
-    setScanMessage('');
-
-    const json = await request();
-    await organizeDocuments();
-
-    const refreshed = await loadDocuments();
-    const newIds = (refreshed?.items || [])
-      .filter((item) => !beforeIds.has(item.id))
-      .map((item) => item.id);
-
-    if (newIds.length) {
-      await acceptDocumentGroupSuggestions(newIds.map((id) => ({ id })));
-      await loadDocuments();
-    }
-
-    setRecentNewIds(newIds);
-    setScanMessage(json.message || successMessage);
-  };
-
   const handlePrimaryScan = async () => {
     try {
       setScanLoading(true);
@@ -154,43 +111,6 @@ export default function DocumentsPage() {
       setScanMessage('未分组文档重新分组失败，请稍后重试');
     } finally {
       setScanLoading(false);
-    }
-  };
-
-  const loadCandidateSources = async () => {
-    try {
-      setCandidateSourceLoading(true);
-      setScanMessage('');
-      const items = await fetchCandidateSources();
-      setCandidateSources(items);
-      setSelectedCandidatePaths((current) => current.filter((item) => items.some((candidate) => candidate.path === item)));
-    } catch {
-      setScanMessage('发现本机候选目录失败，请稍后重试');
-    } finally {
-      setCandidateSourceLoading(false);
-    }
-  };
-
-  const toggleCandidatePath = (candidatePath) => {
-    setSelectedCandidatePaths((current) => (
-      current.includes(candidatePath)
-        ? current.filter((item) => item !== candidatePath)
-        : [...current, candidatePath]
-    ));
-  };
-
-  const handleCandidateImportScan = async () => {
-    if (!selectedCandidatePaths.length) return;
-    try {
-      setCandidateSourceSubmitting(true);
-      await runScanWorkflow(
-        () => importCandidateSources(selectedCandidatePaths),
-        '候选目录已加入扫描源并完成索引入库',
-      );
-    } catch {
-      setScanMessage('候选目录导入失败，请稍后重试');
-    } finally {
-      setCandidateSourceSubmitting(false);
     }
   };
 
@@ -208,36 +128,6 @@ export default function DocumentsPage() {
     }
   };
 
-  const addScanSource = () => {
-    const scanRoot = scanRootDraft.trim();
-    if (!scanRoot) return;
-
-    setCandidateSources((current) => {
-      if (current.some((item) => item.path === scanRoot)) return current;
-      return [{
-        key: `manual-${scanRoot}`,
-        label: '手动指定目录',
-        reason: '用户手动输入的本地目录',
-        path: scanRoot,
-        exists: true,
-        fileCount: 0,
-        latestModifiedAt: Date.now(),
-        truncated: false,
-        pendingScan: true,
-        sampleExtensions: [],
-        hotspots: [],
-        discoverySource: 'manual',
-        discoveryExplanation: '手动指定：由用户直接输入本地目录，加入后会在扫描阶段读取真实文件信息。',
-        manual: true,
-      }, ...current];
-    });
-
-    setSelectedCandidatePaths((current) => (
-      current.includes(scanRoot) ? current : [...current, scanRoot]
-    ));
-    setScanRootDraft('');
-  };
-
   const handleLibraryDraftChange = (itemId, nextValue) => {
     setLibraryDrafts((current) => ({ ...current, [itemId]: nextValue }));
   };
@@ -248,37 +138,6 @@ export default function DocumentsPage() {
 
   const closeLibraryEditor = () => {
     setExpandedLibraryEditorId('');
-  };
-
-  const setPrimaryScanSource = async (scanRoot) => {
-    if (!scanRoot) return;
-    try {
-      setScanSourceSubmitting(true);
-      setScanMessage('');
-      const json = await setPrimaryDocumentScanSource(scanRoot);
-      setScanMessage(json.message || '主扫描目录已更新');
-      setScanRootDraft(scanRoot);
-      await loadDocuments();
-    } catch {
-      setScanMessage('更新主扫描目录失败，请稍后重试');
-    } finally {
-      setScanSourceSubmitting(false);
-    }
-  };
-
-  const removeScanSource = async (scanRoot) => {
-    if (!scanRoot) return;
-    try {
-      setScanSourceSubmitting(true);
-      setScanMessage('');
-      const json = await removeDocumentScanSource(scanRoot);
-      setScanMessage(json.message || '扫描目录已移除');
-      await loadDocuments();
-    } catch {
-      setScanMessage('移除扫描目录失败，请稍后重试');
-    } finally {
-      setScanSourceSubmitting(false);
-    }
   };
 
   const updateDocumentLibraries = async (itemId, groups) => {
@@ -368,7 +227,6 @@ export default function DocumentsPage() {
     () => visibleItems.filter((item) => isUngroupedDocument(item)).length,
     [visibleItems],
   );
-  const scanSources = data?.scanRoots || [];
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const paginatedItems = useMemo(
     () => paginateItems(filteredItems, currentPage, PAGE_SIZE),
@@ -384,15 +242,6 @@ export default function DocumentsPage() {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  const directoryOptions = useMemo(
-    () => buildDirectoryOptions({
-      candidateSources,
-      scanSources,
-      scanRoot: data?.scanRoot,
-    }),
-    [candidateSources, data?.scanRoot, scanSources],
-  );
 
   return (
     <div className="app-shell">
@@ -429,27 +278,6 @@ export default function DocumentsPage() {
               onCreateDraftChange={setLibraryCreateDraft}
               onCreateLibrary={handleCreateLibrary}
               createSubmitting={libraryCreateSubmitting}
-            />
-
-            <ScanSourcesPanel
-              expanded={scanSourcesExpanded}
-              onToggleExpanded={() => setScanSourcesExpanded((current) => !current)}
-              candidateSourceLoading={candidateSourceLoading}
-              candidateSourceSubmitting={candidateSourceSubmitting}
-              selectedCandidatePaths={selectedCandidatePaths}
-              onLoadCandidateSources={loadCandidateSources}
-              onImportCandidateSources={handleCandidateImportScan}
-              scanRootDraft={scanRootDraft}
-              onScanRootDraftChange={setScanRootDraft}
-              onAddScanSource={addScanSource}
-              scanSourceSubmitting={scanSourceSubmitting}
-              directoryOptions={directoryOptions}
-              data={data}
-              scanSources={scanSources}
-              onToggleCandidatePath={toggleCandidatePath}
-              formatLocalTime={formatLocalTime}
-              onSetPrimaryScanSource={setPrimaryScanSource}
-              onRemoveScanSource={removeScanSource}
             />
 
             <DocumentFiltersBar

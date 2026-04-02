@@ -44,6 +44,11 @@ function buildSyntheticRun(
     discoveredCount: 0,
     capturedCount: 0,
     ingestedCount: 0,
+    skippedCount: 0,
+    unsupportedCount: 0,
+    failedCount: 0,
+    groupedCount: 0,
+    ungroupedCount: 0,
     documentIds: [],
     libraryKeys: definition.targetLibraries.map((item) => item.key),
     summary,
@@ -163,10 +168,16 @@ export async function runDatasourceDefinition(id: string) {
         discoveredCount: result.discoveredCount,
         capturedCount: result.plannedCount,
         ingestedCount: result.ingestedCount,
+        skippedCount: result.skippedKnownCount,
+        unsupportedCount: result.unsupportedCount,
+        failedCount: result.failedCount,
+        groupedCount: result.groupedCount,
+        ungroupedCount: result.ungroupedCount,
         documentIds: result.ingestedPaths,
         libraryKeys: result.confirmedLibraryKeys?.length
           ? result.confirmedLibraryKeys
           : definition.targetLibraries.map((item) => item.key),
+        resultSummaries: result.resultSummaries,
         summary,
         errorMessage: result.failedCount ? 'some files failed parsing or were unsupported' : '',
       });

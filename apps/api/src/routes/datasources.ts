@@ -36,6 +36,7 @@ import {
   listDatasourceProviderSummaries,
 } from '../lib/datasource-service.js';
 import { listDatasourcePresets } from '../lib/datasource-presets.js';
+import { buildDocumentIngestSummaryItems } from '../lib/document-ingest-service.js';
 import { sourceItems } from '../lib/mock-data.js';
 import { listWebCaptureTasks } from '../lib/web-capture.js';
 import { DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js';
@@ -178,8 +179,14 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       discoveredCount: files.length,
       capturedCount: files.length,
       ingestedCount: ingestResult.summary.successCount,
+      skippedCount: 0,
+      unsupportedCount: ingestResult.metrics.unsupportedCount,
+      failedCount: ingestResult.summary.failedCount,
+      groupedCount: ingestResult.metrics.groupedCount,
+      ungroupedCount: ingestResult.metrics.ungroupedCount,
       documentIds: ingestResult.parsedItems.map((item) => item.path),
       libraryKeys: ingestResult.confirmedLibraryKeys.length ? ingestResult.confirmedLibraryKeys : definition.targetLibraries.map((item) => item.key),
+      resultSummaries: buildDocumentIngestSummaryItems(ingestResult.metrics),
       summary,
       errorMessage: ingestResult.summary.failedCount ? '部分文件快速解析失败。' : '',
     });

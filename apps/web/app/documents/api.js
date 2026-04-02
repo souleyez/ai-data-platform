@@ -44,23 +44,6 @@ export async function createDocumentLibrary(name, description = '') {
   });
 }
 
-export async function fetchCandidateSources() {
-  const payload = await requestJson('/api/documents/candidate-sources');
-  return Array.isArray(payload?.items) ? payload.items : [];
-}
-
-export async function importCandidateSources(scanRoots) {
-  return requestJson('/api/documents/candidate-sources/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scanRoots, scanNow: true }),
-  });
-}
-
-export async function organizeDocuments() {
-  return requestJson('/api/documents/organize', { method: 'POST' });
-}
-
 export async function reclusterUngroupedDocuments() {
   return requestJson('/api/documents/recluster-ungrouped', { method: 'POST' });
 }
@@ -86,21 +69,5 @@ export async function acceptDocumentGroupSuggestions(items) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items }),
-  });
-}
-
-export async function setPrimaryDocumentScanSource(scanRoot) {
-  return requestJson('/api/documents/scan-sources/primary', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scanRoot }),
-  });
-}
-
-export async function removeDocumentScanSource(scanRoot) {
-  return requestJson('/api/documents/scan-sources/remove', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scanRoot }),
   });
 }

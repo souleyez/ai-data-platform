@@ -4,6 +4,7 @@ import { loadDocumentCategoryConfig } from './document-config.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { loadDocumentOverrides } from './document-overrides.js';
 import { DEFAULT_SCAN_DIR, listCachedDocumentPaths } from './document-store.js';
+import { buildDocumentIngestSummaryItems } from './document-ingest-service.js';
 import { ingestExistingLocalFiles } from './document-upload-ingest.js';
 
 const LOCAL_DIRECTORY_ALLOWED_EXTENSIONS = new Set([
@@ -48,6 +49,7 @@ function isAllowedExtension(fileName: string) {
 
 async function listLocalFilesRecursive(root: string) {
   const results: string[] = [];
+  let unsupportedCount = 0;
   const stack = [root];
 
   while (stack.length) {
@@ -70,12 +72,18 @@ async function listLocalFilesRecursive(root: string) {
       }
 
       if (!entry.isFile()) continue;
-      if (!isAllowedExtension(entry.name)) continue;
+      if (!isAllowedExtension(entry.name)) {
+        unsupportedCount += 1;
+        continue;
+      }
       results.push(fullPath);
     }
   }
 
-  return results;
+  return {
+    files: results,
+    unsupportedCount,
+  };
 }
 
 export async function runLocalDirectoryDatasource(input: {
@@ -112,7 +120,8 @@ export async function runLocalDirectoryDatasource(input: {
   ]);
   const maxItems = Math.max(1, Number(input.maxItems || 20));
 
-  const discoveredFiles = await listLocalFilesRecursive(directory);
+  const discovery = await listLocalFilesRecursive(directory);
+  const discoveredFiles = discovery.files;
   const candidates = discoveredFiles.filter((filePath) => !knownPaths.has(filePath));
   const planned = candidates.slice(0, maxItems);
   const ingestResult = await ingestExistingLocalFiles({
@@ -126,16 +135,49 @@ export async function runLocalDirectoryDatasource(input: {
     .map((item) => String(item.sourceName || ''))
     .filter(Boolean);
   const ingestedPaths = ingestResult.parsedItems.map((item) => item.path);
+  const skippedKnownCount = Math.max(0, discoveredFiles.length - candidates.length);
+  const unsupportedCount = discovery.unsupportedCount + ingestResult.metrics.unsupportedCount;
+  const resultSummaries = [
+    {
+      id: 'local:planned',
+      label: '本次计划处理',
+      summary: `${planned.length} 个候选文件进入统一 ingest 链路。`,
+      count: planned.length,
+    },
+    {
+      id: 'local:skipped-known',
+      label: '已存在跳过',
+      summary: `${skippedKnownCount} 个文件已存在于索引或覆盖记录中，本轮跳过。`,
+      count: skippedKnownCount,
+    },
+    {
+      id: 'local:filtered-ext',
+      label: '格式过滤',
+      summary: `${discovery.unsupportedCount} 个文件因不在明确支持格式白名单而未进入 ingest。`,
+      count: discovery.unsupportedCount,
+    },
+    ...buildDocumentIngestSummaryItems({
+      ...ingestResult.metrics,
+      unsupportedCount,
+    }).map((item) => ({ ...item, count: 1 })),
+  ]
+    .filter((item) => item.count > 0)
+    .map(({ count: _count, ...item }) => item);
 
   return {
     directory,
     discoveredCount: discoveredFiles.length,
     candidateCount: candidates.length,
     plannedCount: planned.length,
+    skippedKnownCount,
+    unsupportedCount,
     ingestedCount: ingestResult.summary.successCount,
     failedCount: ingestResult.summary.failedCount,
+    groupedCount: ingestResult.metrics.groupedCount,
+    ungroupedCount: ingestResult.metrics.ungroupedCount,
     ingestedPaths,
     failedPaths,
     confirmedLibraryKeys: ingestResult.confirmedLibraryKeys,
+    resultSummaries,
   };
 }

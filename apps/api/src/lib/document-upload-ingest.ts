@@ -4,37 +4,16 @@ import { promises as fs } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import type { DocumentCategoryConfig } from './document-config.js';
 import type { DocumentLibrary } from './document-libraries.js';
-import { UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
-import { saveDocumentOverride } from './document-overrides.js';
-import { enqueueDetailedParse } from './document-deep-parse-queue.js';
-import type { ParsedDocument } from './document-parser.js';
-import { parseDocument } from './document-parser.js';
-import { upsertDocumentsInCache } from './document-store.js';
+import { buildFailedPreviewItem, type IngestPreviewItem } from './ingest-feedback.js';
 import {
-  buildFailedPreviewItem,
-  buildPreviewItemFromDocument,
-  resolveSuggestedLibraryKeys,
-  type IngestPreviewItem,
-} from './ingest-feedback.js';
+  ingestDocumentFiles,
+  type DocumentIngestResult,
+  type IngestFileRecord,
+} from './document-ingest-service.js';
 
-export type UploadedFileRecord = {
-  name: string;
-  path: string;
-  bytes: number;
-  mimeType?: string;
-  originalPath?: string;
-};
-
-export type UploadIngestResult = {
-  ingestItems: IngestPreviewItem[];
-  parsedItems: ParsedDocument[];
+export type UploadedFileRecord = IngestFileRecord;
+export type UploadIngestResult = Omit<DocumentIngestResult, 'files'> & {
   uploadedFiles: UploadedFileRecord[];
-  confirmedLibraryKeys: string[];
-  summary: {
-    total: number;
-    successCount: number;
-    failedCount: number;
-  };
 };
 
 export type SaveMultipartResult = {
@@ -44,45 +23,6 @@ export type SaveMultipartResult = {
 
 function sanitizeFileName(fileName: string) {
   return fileName.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || `upload-${Date.now()}`;
-}
-
-function uniq(items: string[]) {
-  return [...new Set((items || []).map((item) => String(item || '').trim()).filter(Boolean))];
-}
-
-function resolveConfirmedGroups(
-  parsed: ParsedDocument,
-  libraries: DocumentLibrary[],
-  preferredLibraryKeys: string[],
-) {
-  const preferredLibraries = preferredLibraryKeys.length
-    ? libraries.filter((library) => preferredLibraryKeys.includes(library.key))
-    : libraries;
-  const suggestedGroups = resolveSuggestedLibraryKeys(parsed, preferredLibraries);
-  const fallbackGroups = suggestedGroups.length ? [] : [UNGROUPED_LIBRARY_KEY];
-  const confirmedGroups = uniq([
-    ...suggestedGroups,
-    ...fallbackGroups,
-    ...(parsed.confirmedGroups || []),
-  ]);
-
-  return {
-    suggestedGroups,
-    confirmedGroups,
-  };
-}
-
-function buildFailedFilePreviewItem(
-  file: UploadedFileRecord,
-  sourceNameResolver: ((file: UploadedFileRecord) => string) | undefined,
-  errorMessage: string,
-) {
-  return buildFailedPreviewItem({
-    id: Buffer.from(file.path).toString('base64url'),
-    sourceType: 'file',
-    sourceName: sourceNameResolver ? sourceNameResolver(file) : file.name,
-    errorMessage,
-  });
 }
 
 export async function saveMultipartFiles(
@@ -171,91 +111,10 @@ export async function ingestUploadedFiles(input: {
   sourceNameResolver?: (file: UploadedFileRecord) => string;
   preferredLibraryKeys?: string[];
 }) {
-  const preferredLibraryKeys = uniq(input.preferredLibraryKeys || []);
-
-  const ingestItems: IngestPreviewItem[] = [];
-  const parsedItems: ParsedDocument[] = [];
-  const confirmedLibraryKeys = new Set<string>();
-
-  for (const file of input.files) {
-    let parsed: ParsedDocument | null = null;
-    try {
-      parsed = await parseDocument(file.path, input.documentConfig, { stage: 'quick' });
-    } catch {
-      parsed = null;
-    }
-
-    if (!parsed) {
-      ingestItems.push(buildFailedFilePreviewItem(
-        file,
-        input.sourceNameResolver,
-        'File was saved but quick parsing failed.',
-      ));
-      continue;
-    }
-
-    if (parsed.parseStatus !== 'parsed') {
-      ingestItems.push(buildFailedFilePreviewItem(
-        file,
-        input.sourceNameResolver,
-        'Only file formats that can be parsed are indexed into the document library.',
-      ));
-      continue;
-    }
-
-    const { suggestedGroups, confirmedGroups } = resolveConfirmedGroups(
-      parsed,
-      input.libraries,
-      preferredLibraryKeys,
-    );
-
-    parsedItems.push({
-      ...parsed,
-      suggestedGroups,
-      confirmedGroups,
-    });
-
-    if (confirmedGroups.length) {
-      await saveDocumentOverride(parsed.path, { groups: confirmedGroups });
-      confirmedGroups.forEach((key) => confirmedLibraryKeys.add(key));
-      ingestItems.push(
-        buildPreviewItemFromDocument(
-          {
-            ...parsed,
-            suggestedGroups: [],
-            confirmedGroups,
-          },
-          'file',
-          input.sourceNameResolver ? input.sourceNameResolver(file) : file.name,
-          input.libraries,
-        ),
-      );
-      continue;
-    }
-
-    ingestItems.push(
-      buildPreviewItemFromDocument(
-        parsed,
-        'file',
-        input.sourceNameResolver ? input.sourceNameResolver(file) : file.name,
-        input.libraries,
-      ),
-    );
-  }
-
-  await upsertDocumentsInCache(parsedItems, input.documentConfig.scanRoots);
-  await enqueueDetailedParse(parsedItems.map((item) => item.path));
-
+  const result = await ingestDocumentFiles(input);
   return {
-    ingestItems,
-    parsedItems,
+    ...result,
     uploadedFiles: input.files,
-    confirmedLibraryKeys: [...confirmedLibraryKeys],
-    summary: {
-      total: ingestItems.length,
-      successCount: ingestItems.filter((item) => item.status === 'success').length,
-      failedCount: ingestItems.filter((item) => item.status === 'failed').length,
-    },
   } satisfies UploadIngestResult;
 }
 
@@ -303,7 +162,7 @@ export async function ingestExistingLocalFiles(input: {
   }
 
   const ingestResult = files.length
-    ? await ingestUploadedFiles({
+    ? await ingestDocumentFiles({
       files,
       documentConfig: input.documentConfig,
       libraries: input.libraries,
@@ -313,24 +172,37 @@ export async function ingestExistingLocalFiles(input: {
     : {
       ingestItems: [],
       parsedItems: [],
-      uploadedFiles: [],
+      files: [],
       confirmedLibraryKeys: [],
       summary: {
         total: 0,
         successCount: 0,
         failedCount: 0,
       },
-    } satisfies UploadIngestResult;
+      metrics: {
+        invalidCount: 0,
+        parseFailedCount: 0,
+        unsupportedCount: 0,
+        groupedCount: 0,
+        ungroupedCount: 0,
+        detailedQueuedCount: 0,
+      },
+    } satisfies DocumentIngestResult;
 
   const ingestItems = [...failedItems, ...ingestResult.ingestItems];
 
   return {
     ...ingestResult,
+    uploadedFiles: files,
     ingestItems,
     summary: {
       total: ingestItems.length,
       successCount: ingestItems.filter((item) => item.status === 'success').length,
       failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+    },
+    metrics: {
+      ...ingestResult.metrics,
+      invalidCount: ingestResult.metrics.invalidCount + failedItems.length,
     },
   } satisfies UploadIngestResult;
 }
@@ -362,6 +234,14 @@ export async function ingestLocalFilesIntoLibrary(input: {
         successCount: 0,
         failedCount: 0,
       },
+      metrics: {
+        invalidCount: 0,
+        parseFailedCount: 0,
+        unsupportedCount: 0,
+        groupedCount: 0,
+        ungroupedCount: 0,
+        detailedQueuedCount: 0,
+      },
     } satisfies UploadIngestResult;
 
   const ingestItems = [...failedItems, ...ingestResult.ingestItems];
@@ -373,6 +253,10 @@ export async function ingestLocalFilesIntoLibrary(input: {
       total: ingestItems.length,
       successCount: ingestItems.filter((item) => item.status === 'success').length,
       failedCount: ingestItems.filter((item) => item.status === 'failed').length,
+    },
+    metrics: {
+      ...ingestResult.metrics,
+      invalidCount: ingestResult.metrics.invalidCount + failedItems.length,
     },
   } satisfies UploadIngestResult;
 }

@@ -47,63 +47,6 @@ export function countRecentDocuments(items) {
   return items.filter((item) => extractDocumentTimestamp(item) > 0).slice(0, 10).length;
 }
 
-export function buildDirectoryOptions({ candidateSources, scanSources, scanRoot }) {
-  const byPath = new Map();
-
-  for (const source of scanSources) {
-    byPath.set(source, {
-      key: `source-${source}`,
-      label: source === scanRoot ? '当前主扫描目录' : '已加入扫描源',
-      reason: '当前已经纳入文档中心扫描范围。',
-      path: source,
-      exists: true,
-      fileCount: 0,
-      latestModifiedAt: 0,
-      truncated: false,
-      pendingScan: true,
-      sampleExtensions: [],
-      hotspots: [],
-      discoverySource: 'existing',
-      discoveryExplanation: '已加入扫描源：当前目录已经纳入文档中心扫描范围，等待下一次扫描或刷新统计。',
-      alreadyAdded: true,
-    });
-  }
-
-  for (const candidate of candidateSources) {
-    byPath.set(candidate.path, {
-      ...candidate,
-      sampleExtensions: Array.isArray(candidate.sampleExtensions) ? candidate.sampleExtensions : [],
-      hotspots: Array.isArray(candidate.hotspots) ? candidate.hotspots : [],
-      discoveryExplanation: candidate.discoveryExplanation || candidate.reason || '',
-      alreadyAdded: byPath.has(candidate.path),
-    });
-
-    for (const hotspot of candidate.hotspots || []) {
-      byPath.set(hotspot.path, {
-        ...hotspot,
-        label: hotspot.label ? `${candidate.label} / ${hotspot.label}` : `${candidate.label} / 热点子目录`,
-        reason: hotspot.reason || `${candidate.label} 下文档更集中的子目录`,
-        sampleExtensions: Array.isArray(hotspot.sampleExtensions) ? hotspot.sampleExtensions : [],
-        hotspots: [],
-        discoverySource: hotspot.discoverySource || 'hotspot',
-        discoveryExplanation: hotspot.discoveryExplanation || hotspot.reason || '',
-        alreadyAdded: byPath.has(hotspot.path),
-        hotspot: true,
-      });
-    }
-  }
-
-  return Array.from(byPath.values()).sort((a, b) => {
-    const addedDiff = Number(Boolean(b.alreadyAdded)) - Number(Boolean(a.alreadyAdded));
-    if (addedDiff !== 0) return addedDiff;
-
-    const hotspotDiff = Number(Boolean(a.hotspot)) - Number(Boolean(b.hotspot));
-    if (hotspotDiff !== 0) return hotspotDiff;
-
-    return (b.fileCount || 0) - (a.fileCount || 0) || (b.latestModifiedAt || 0) - (a.latestModifiedAt || 0);
-  });
-}
-
 export function paginateItems(items, currentPage, pageSize) {
   const start = (currentPage - 1) * pageSize;
   return items.slice(start, start + pageSize);

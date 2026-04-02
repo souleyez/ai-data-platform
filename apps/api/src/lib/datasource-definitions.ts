@@ -1,6 +1,9 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { STORAGE_CONFIG_DIR } from './paths.js';
+import {
+  readDatasourceDefinitionPayload,
+  readDatasourceRunPayload,
+  writeDatasourceDefinitionPayload,
+  writeDatasourceRunPayload,
+} from './datasource-state-repository.js';
 import { computeNextRunAt } from './datasource-schedule.js';
 
 export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp' | 'upload_public' | 'local_directory';
@@ -64,24 +67,17 @@ export type DatasourceRun = {
   discoveredCount: number;
   capturedCount: number;
   ingestedCount: number;
+  skippedCount?: number;
+  unsupportedCount?: number;
+  failedCount?: number;
+  groupedCount?: number;
+  ungroupedCount?: number;
   documentIds: string[];
   libraryKeys: string[];
   resultSummaries?: DatasourceRunSummaryItem[];
   summary?: string;
   errorMessage?: string;
 };
-
-type DatasourceDefinitionPayload = {
-  items: DatasourceDefinition[];
-};
-
-type DatasourceRunPayload = {
-  items: DatasourceRun[];
-};
-
-const DATASOURCE_CONFIG_DIR = path.join(STORAGE_CONFIG_DIR, 'datasources');
-const DEFINITIONS_FILE = path.join(DATASOURCE_CONFIG_DIR, 'definitions.json');
-const RUNS_FILE = path.join(DATASOURCE_CONFIG_DIR, 'runs.json');
 
 function generateUploadToken() {
   return `upl_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
@@ -171,6 +167,11 @@ function normalizeRun(item: Partial<DatasourceRun>): DatasourceRun {
     discoveredCount: Number(item.discoveredCount || 0),
     capturedCount: Number(item.capturedCount || 0),
     ingestedCount: Number(item.ingestedCount || 0),
+    skippedCount: Number(item.skippedCount || 0),
+    unsupportedCount: Number(item.unsupportedCount || 0),
+    failedCount: Number(item.failedCount || 0),
+    groupedCount: Number(item.groupedCount || 0),
+    ungroupedCount: Number(item.ungroupedCount || 0),
     documentIds: Array.isArray(item.documentIds) ? item.documentIds.map((value) => String(value || '').trim()).filter(Boolean) : [],
     libraryKeys: Array.isArray(item.libraryKeys) ? item.libraryKeys.map((value) => String(value || '').trim()).filter(Boolean) : [],
     resultSummaries: Array.isArray(item.resultSummaries)
@@ -187,38 +188,22 @@ function normalizeRun(item: Partial<DatasourceRun>): DatasourceRun {
   };
 }
 
-async function ensureDatasourceConfigDir() {
-  await fs.mkdir(DATASOURCE_CONFIG_DIR, { recursive: true });
-}
-
 async function readDefinitions(): Promise<DatasourceDefinition[]> {
-  try {
-    const raw = await fs.readFile(DEFINITIONS_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as DatasourceDefinitionPayload;
-    return Array.isArray(parsed.items) ? parsed.items.map(normalizeDefinition).filter((item) => item.id && item.name) : [];
-  } catch {
-    return [];
-  }
+  const parsed = await readDatasourceDefinitionPayload();
+  return Array.isArray(parsed?.items) ? parsed.items.map(normalizeDefinition).filter((item) => item.id && item.name) : [];
 }
 
 async function writeDefinitions(items: DatasourceDefinition[]) {
-  await ensureDatasourceConfigDir();
-  await fs.writeFile(DEFINITIONS_FILE, JSON.stringify({ items }, null, 2), 'utf8');
+  await writeDatasourceDefinitionPayload(items);
 }
 
 async function readRuns(): Promise<DatasourceRun[]> {
-  try {
-    const raw = await fs.readFile(RUNS_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as DatasourceRunPayload;
-    return Array.isArray(parsed.items) ? parsed.items.map(normalizeRun).filter((item) => item.id && item.datasourceId) : [];
-  } catch {
-    return [];
-  }
+  const parsed = await readDatasourceRunPayload();
+  return Array.isArray(parsed?.items) ? parsed.items.map(normalizeRun).filter((item) => item.id && item.datasourceId) : [];
 }
 
 async function writeRuns(items: DatasourceRun[]) {
-  await ensureDatasourceConfigDir();
-  await fs.writeFile(RUNS_FILE, JSON.stringify({ items }, null, 2), 'utf8');
+  await writeDatasourceRunPayload(items);
 }
 
 export async function listDatasourceDefinitions() {
