@@ -6,7 +6,12 @@ import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
 import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
-import { buildAugmentedEnv, getOcrMyPdfCommandCandidates, getPythonCommandCandidates } from './runtime-executables.js';
+import {
+  buildAugmentedEnv,
+  getOcrMyPdfCommandCandidates,
+  getPythonCommandCandidates,
+  getTesseractLanguageCandidates,
+} from './runtime-executables.js';
 import { extractWithUIEWorker } from './uie-process-client.js';
 
 export { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-schema.js';
@@ -314,18 +319,24 @@ async function extractImageTextWithTesseract(filePath: string) {
     process.platform === 'win32' ? 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe' : '',
     'tesseract',
   ].filter(Boolean);
+  const languageCandidates = getTesseractLanguageCandidates();
+  const psmCandidates = ['6', '3'];
 
   return withTemporaryAsciiCopy(filePath, async (inputPath) => {
     for (const command of candidates) {
-      try {
-        const { stdout } = await execFileAsync(command, [inputPath, 'stdout', '--psm', '3'], {
-          maxBuffer: 16 * 1024 * 1024,
-          env,
-        });
-        const text = normalizeText(String(stdout || ''));
-        if (text) return text;
-      } catch {
-        // Try the next tesseract candidate.
+      for (const language of languageCandidates) {
+        for (const psm of psmCandidates) {
+          try {
+            const { stdout } = await execFileAsync(command, [inputPath, 'stdout', '--psm', psm, '-l', language], {
+              maxBuffer: 16 * 1024 * 1024,
+              env,
+            });
+            const text = normalizeText(String(stdout || ''));
+            if (text) return text;
+          } catch {
+            // Try the next OCR configuration.
+          }
+        }
       }
     }
 

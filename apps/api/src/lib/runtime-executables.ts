@@ -40,6 +40,19 @@ export function buildAugmentedEnv() {
   };
 }
 
+export function getTesseractLanguageCandidates() {
+  const configured = [
+    process.env.TESSERACT_LANGS || '',
+    process.env.TESSERACT_LANG || '',
+  ]
+    .flatMap((value) => String(value).split(/[,\s]+/g))
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const defaults = ['chi_sim+eng', 'chi_sim', 'eng'];
+  return unique([...configured, ...defaults]);
+}
+
 export function getPythonCommandCandidates() {
   const commands = [process.env.PYTHON_BIN || ''];
 
