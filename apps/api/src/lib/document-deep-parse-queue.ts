@@ -147,10 +147,14 @@ export async function applyDetailedParseQueueMetadata(items: ParsedDocument[]) {
   return items.map((item) => {
     const queueItem = byPath.get(normalizeQueuePath(item.path));
     if (!queueItem) return item;
+    const effectiveDetailStatus =
+      queueItem.status === 'succeeded'
+        ? (item.detailParseStatus || (item.parseStage === 'detailed' ? 'succeeded' : 'queued'))
+        : queueItem.status;
 
     return {
       ...item,
-      detailParseStatus: item.parseStage === 'detailed' ? 'succeeded' : queueItem.status,
+      detailParseStatus: effectiveDetailStatus,
       detailParseQueuedAt: queueItem.queuedAt,
       detailParsedAt: item.detailParsedAt || queueItem.completedAt,
       detailParseAttempts: Math.max(Number(item.detailParseAttempts || 0), Number(queueItem.attempts || 0)),
