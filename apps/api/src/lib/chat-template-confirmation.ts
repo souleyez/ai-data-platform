@@ -204,7 +204,7 @@ export async function buildTemplateConfirmationPayload(input: {
     options: [
       {
         key: 'openclaw_action',
-        title: '按 OpenClaw 理解执行',
+        title: '按智能助手理解执行',
         description: openClawAction,
         executeMode: 'general',
         executePrompt: requestText,

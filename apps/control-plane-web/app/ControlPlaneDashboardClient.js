@@ -627,7 +627,7 @@ export default function ControlPlaneDashboardClient({
                   <strong>{item.deviceName || 'Unnamed device'}</strong>
                   <p>{item.userPhone || 'No phone'} | {item.osVersion || 'Unknown Windows version'}</p>
                   <p className="cp-code">{item.deviceFingerprint}</p>
-                  <p>client {item.clientVersion || 'n/a'} | openclaw {item.openclawVersion || 'n/a'}</p>
+                  <p>client {item.clientVersion || 'n/a'} | runtime {item.openclawVersion || 'n/a'}</p>
                 </div>
                 <div className="cp-row-actions">
                   <span className="cp-pill muted">{formatDateTime(item.lastSeenAt)}</span>

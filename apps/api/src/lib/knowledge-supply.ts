@@ -405,11 +405,17 @@ async function resolveKnowledgeScope(
   preferredLibraries: KnowledgeLibraryRef[],
   timeRange?: string,
   contentFocus?: string,
+  preferredDocumentIds?: string[],
 ) {
   const [documentLibraries, documentState] = await Promise.all([
     loadDocumentLibraries(),
     loadParsedDocuments(240, false),
   ]);
+  const preferredDocumentSet = new Set(
+    Array.isArray(preferredDocumentIds)
+      ? preferredDocumentIds.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+  );
 
   const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
   const preferredLabels = new Set(preferredLibraries.map((item) => item.label));
@@ -421,20 +427,48 @@ async function resolveKnowledgeScope(
   const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), documentLibraries);
   const candidates = explicitCandidates.length ? explicitCandidates : scoredCandidates;
   let libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
+  const preferredScopedItems = preferredDocumentSet.size
+    ? documentState.items.filter((item) => preferredDocumentSet.has(buildDocumentId(item.path)))
+    : [];
 
   const libraryScopedItems = candidates.length
     ? documentState.items.filter((item) => candidates.some((candidate) => documentMatchesLibrary(item, candidate.library)))
     : [];
-  const baseScopedItems = candidates.length
-    ? prioritizeScopedItems(filterDocumentsByContentFocus(filterDocumentsByTimeRange(libraryScopedItems, timeRange), contentFocus))
-    : buildFallbackScopedItems({
-      requestText,
-      items: documentState.items,
-      timeRange,
-      contentFocus,
-    });
+  const preferredItemsByFilters = preferredScopedItems.length
+    ? prioritizeScopedItems(
+      filterDocumentsByContentFocus(
+        filterDocumentsByTimeRange(preferredScopedItems, timeRange),
+        contentFocus,
+      ),
+    )
+    : [];
+  const baseScopedItems = preferredItemsByFilters.length
+    ? preferredItemsByFilters
+    : preferredScopedItems.length
+      ? prioritizeScopedItems(preferredScopedItems)
+      : candidates.length
+        ? prioritizeScopedItems(
+          filterDocumentsByContentFocus(
+            filterDocumentsByTimeRange(libraryScopedItems, timeRange),
+            contentFocus,
+          ),
+        )
+        : buildFallbackScopedItems({
+          requestText,
+          items: documentState.items,
+          timeRange,
+          contentFocus,
+        });
 
   const scopedItems = baseScopedItems;
+  if (!libraries.length && scopedItems.length) {
+    const derivedLibraries = documentLibraries
+      .filter((library) => scopedItems.some((item) => documentMatchesLibrary(item, library)))
+      .map((library) => ({ key: library.key, label: library.label }));
+    if (derivedLibraries.length) {
+      libraries = derivedLibraries;
+    }
+  }
   if (!libraries.length && scopedItems.length) {
     const ungroupedLibrary = documentLibraries.find((item) => item.key === UNGROUPED_LIBRARY_KEY);
     if (ungroupedLibrary && scopedItems.some((item) => documentMatchesLibrary(item, ungroupedLibrary))) {
@@ -451,6 +485,7 @@ export async function prepareKnowledgeScope(input: {
   preferredLibraries?: KnowledgeLibraryRef[];
   timeRange?: string;
   contentFocus?: string;
+  preferredDocumentIds?: string[];
 }): Promise<KnowledgeScopeState> {
   const knowledgeChatHistory = buildKnowledgeChatHistory(input.chatHistory, input.requestText);
   const preferredLibraries = normalizePreferredLibraries(input.preferredLibraries);
@@ -460,6 +495,7 @@ export async function prepareKnowledgeScope(input: {
     preferredLibraries,
     input.timeRange,
     input.contentFocus,
+    input.preferredDocumentIds,
   );
 
   return {

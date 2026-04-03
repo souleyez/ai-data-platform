@@ -30,7 +30,7 @@ export async function registerModelConfigRoutes(app: FastifyInstance) {
     try {
       const result = await installLatestOpenClaw();
       return {
-        message: 'OpenClaw installed and gateway startup requested.',
+        message: '模型引擎已安装，并已请求启动默认网关。',
         ...result,
       };
     } catch (error) {
@@ -87,7 +87,7 @@ export async function registerModelConfigRoutes(app: FastifyInstance) {
         });
         return {
           status: 'provider_saved',
-          message: 'OpenClaw provider configuration saved.',
+          message: '模型提供方配置已保存。',
           ...state,
         };
       } catch (error) {

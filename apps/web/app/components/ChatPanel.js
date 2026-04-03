@@ -300,7 +300,7 @@ export default function ChatPanel({
                 if (!isLoading) onSubmit(input);
               }
             }}
-            placeholder="直接提问。普通对话默认只向 OpenClaw 供料；只有命中库内资料模板输出时，系统才会先让你确认两种执行方式。"
+            placeholder="直接提问。普通对话默认只做资料供给；只有命中库内资料模板输出时，系统才会先让你确认两种执行方式。"
           />
           <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
             {isLoading ? '思考中...' : '发送'}

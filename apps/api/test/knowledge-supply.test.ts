@@ -248,6 +248,82 @@ test('prepareKnowledgeScope should route recent uploaded image questions to ungr
   });
 });
 
+test('prepareKnowledgeScope should honor preferred document ids before fallback routing', async () => {
+  const firstPath = 'C:\\uploads\\1743390000000-contract-a.png';
+  const secondPath = 'C:\\uploads\\1743393600000-contract-b.png';
+
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-03-31T10:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 2,
+    scanSignature: 'preferred-document-scope',
+    items: [
+      {
+        path: firstPath,
+        name: '1743390000000-contract-a.png',
+        ext: '.png',
+        title: 'contract-a',
+        category: 'contract',
+        bizCategory: 'contract',
+        parseStatus: 'parsed',
+        parseMethod: 'image-ocr',
+        summary: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        excerpt: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        fullText: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        extractedChars: 64,
+        topicTags: ['合同'],
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-03-31T10:30:00.000Z',
+      },
+      {
+        path: secondPath,
+        name: '1743393600000-contract-b.png',
+        ext: '.png',
+        title: 'contract-b',
+        category: 'contract',
+        bizCategory: 'contract',
+        parseStatus: 'parsed',
+        parseMethod: 'image-ocr',
+        summary: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        excerpt: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        fullText: '甲方为广州轻工建筑安装工程公司，乙方为广州廉明建筑有限公司。',
+        extractedChars: 64,
+        topicTags: ['合同'],
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-03-31T10:31:00.000Z',
+      },
+    ],
+  }, async () => {
+    await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
+      scanRoot: 'C:\\uploads',
+      scanRoots: ['C:\\uploads'],
+      categories: {
+        contract: { label: '合同协议' },
+      },
+      customCategories: [],
+      updatedAt: '2026-03-31T10:00:00.000Z',
+    }, null, 2), 'utf8');
+
+    const scope = await prepareKnowledgeScope({
+      requestText: '最近解析的两份文档里的公司名是啥',
+      chatHistory: [],
+      preferredDocumentIds: [buildDocumentId(firstPath), buildDocumentId(secondPath)],
+    });
+
+    assert.deepEqual(scope.libraries, [{ key: 'contract', label: '合同协议' }]);
+    assert.equal(scope.scopedItems.length, 2);
+    assert.equal(scope.scopedItems[0]?.title, 'contract-b');
+    assert.equal(scope.scopedItems[1]?.title, 'contract-a');
+  });
+});
+
 test('buildConceptPageSupplyBlock should provide structure hints for resume company pages', () => {
   const block = buildConceptPageSupplyBlock({
     requestText: '基于人才简历知识库，按公司维度输出数据可视化静态页',

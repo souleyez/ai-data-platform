@@ -4,6 +4,11 @@ import {
   prepareKnowledgeSupply,
   type KnowledgeLibraryRef,
 } from './knowledge-supply.js';
+import {
+  buildOpenClawMemorySelectionContextBlock,
+  loadOpenClawMemorySelectionState,
+  selectOpenClawMemoryDocumentCandidatesFromState,
+} from './openclaw-memory-selection.js';
 import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
@@ -67,14 +72,21 @@ export async function runGeneralKnowledgeAwareChat(input: {
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
+  const memoryState = await loadOpenClawMemorySelectionState();
+  const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
+    state: memoryState,
+    requestText,
+    limit: 5,
+  });
   const supply = await prepareKnowledgeSupply({
     requestText,
     chatHistory: input.chatHistory,
     docLimit: 5,
     evidenceLimit: 6,
+    preferredDocumentIds: memorySelection.documentIds,
   });
 
-  const knowledgeContext = supply.libraries.length
+  const knowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
       requestText,
       supply.libraries,
@@ -92,7 +104,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
       },
     )
     : '';
-  const fullContextBlocks = [...systemContextBlocks, knowledgeContext].filter(Boolean);
+  const fullContextBlocks = [
+    ...systemContextBlocks,
+    buildOpenClawMemorySelectionContextBlock(memorySelection),
+    knowledgeContext,
+  ].filter(Boolean);
 
   const confirmation = input.skipTemplateConfirmation
     ? null
@@ -107,7 +123,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   if (confirmation) {
     const content = [
       '这次命中了库内资料模板输出。',
-      '我不直接推进，先给你两个确认选项：一个按 OpenClaw 自己的理解执行，一个按命中资料和模板输出。',
+      '我不直接推进，先给你两个确认选项：一个按智能助手自己的理解执行，一个按命中资料和模板输出。',
       '请直接点选其中一个继续。',
     ].join('\n\n');
 
@@ -118,6 +134,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       intent: 'general',
       mode: 'openclaw',
       debug: {
+        memorySelectedDocuments: memorySelection.documentIds.length,
         supplyDocuments: supply.effectiveRetrieval.documents.length,
         supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       },
@@ -146,6 +163,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     intent: 'general',
     mode: 'openclaw',
     debug: {
+      memorySelectedDocuments: memorySelection.documentIds.length,
       supplyDocuments: supply.effectiveRetrieval.documents.length,
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       searchEnabledByDefault: true,

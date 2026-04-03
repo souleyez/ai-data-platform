@@ -126,7 +126,7 @@ const PROVIDER_FAMILIES: ProviderFamilyDescriptor[] = [
   {
     id: 'openai',
     label: 'OpenAI Codex',
-    description: '使用 ChatGPT OAuth 登录后直接让 OpenClaw 调用 OpenAI Codex 模型。',
+    description: '使用 ChatGPT OAuth 登录后，把 OpenAI Codex 模型接入当前系统。',
     methods: [
       {
         id: 'oauth',
@@ -145,7 +145,7 @@ const PROVIDER_FAMILIES: ProviderFamilyDescriptor[] = [
   {
     id: 'github-copilot',
     label: 'GitHub Copilot',
-    description: '通过 GitHub 设备码登录，把 Copilot 提供的模型接入 OpenClaw。',
+    description: '通过 GitHub 设备码登录，把 Copilot 提供的模型接入当前系统。',
     methods: [
       {
         id: 'device',
@@ -165,7 +165,7 @@ const PROVIDER_FAMILIES: ProviderFamilyDescriptor[] = [
   {
     id: 'minimax',
     label: 'MiniMax',
-    description: '支持 CN / Global 的 API Key 或 OAuth 登录，模型接入后直接写入 OpenClaw 配置。',
+    description: '支持 CN / Global 的 API Key 或 OAuth 登录，模型接入后直接写入系统配置。',
     methods: [
       {
         id: 'oauth',
@@ -212,7 +212,7 @@ const PROVIDER_FAMILIES: ProviderFamilyDescriptor[] = [
   {
     id: 'moonshot',
     label: 'Moonshot / Kimi',
-    description: '配置 Kimi 模型 API Key，并同时把 Kimi 搜索配置同步到 OpenClaw。',
+    description: '配置 Kimi 模型 API Key，并同时同步 Kimi 搜索配置。',
     methods: [
       {
         id: 'api-key',
@@ -241,7 +241,7 @@ const PROVIDER_FAMILIES: ProviderFamilyDescriptor[] = [
   {
     id: 'zai',
     label: 'Z.AI / GLM',
-    description: '支持 Global / CN / Coding-Plan 多种 GLM 端点，直接配置给 OpenClaw。',
+    description: '支持 Global / CN / Coding-Plan 多种 GLM 端点，直接配置给当前系统。',
     methods: [
       {
         id: 'global',
@@ -310,7 +310,7 @@ function prettifyProviderLabel(providerId: string) {
     'minimax-portal': 'MiniMax',
     moonshot: 'Moonshot / Kimi',
     zai: 'Z.AI / GLM',
-    openclaw: 'OpenClaw',
+    openclaw: '系统默认',
   };
   return map[providerId] || providerId;
 }

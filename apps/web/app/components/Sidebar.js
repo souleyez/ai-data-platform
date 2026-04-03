@@ -151,16 +151,16 @@ export default function Sidebar({
 
   async function handleInstallOpenClaw() {
     setModelBusy(true);
-    setModelMessage('正在安装 OpenClaw 并启动默认网关...');
+    setModelMessage('正在安装模型引擎并启动默认网关...');
     try {
       const response = await fetch('/api/model-config/install', { method: 'POST' });
       const json = await response.json();
       if (!response.ok) {
-        throw new Error(json.message || 'install_openclaw_failed');
+        throw new Error(json.message || '模型引擎安装请求失败。');
       }
-      await refreshModelState(json.message || 'OpenClaw 已安装。');
+      await refreshModelState(json.message || '模型引擎已安装。');
     } catch (error) {
-      setModelMessage(error instanceof Error ? error.message : 'OpenClaw 安装失败。');
+      setModelMessage(error instanceof Error ? error.message : '模型引擎安装失败。');
     } finally {
       setModelBusy(false);
     }
@@ -249,7 +249,7 @@ export default function Sidebar({
           {currentModel ? ` ${currentModel.provider} / ${currentModel.label}` : ' 未配置'}
         </p>
         <p style={{ marginTop: 8, fontSize: 12, color: '#b7c3d6' }}>
-          OpenClaw：{getRuntimeLabel(modelState.openclaw)}
+          模型引擎：{getRuntimeLabel(modelState.openclaw)}
         </p>
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           <button className="ghost-btn" type="button" onClick={() => setModelPanelOpen((prev) => !prev)}>
@@ -289,14 +289,14 @@ export default function Sidebar({
                 disabled={modelBusy}
                 style={{ width: '100%' }}
               >
-                {modelBusy ? '安装中...' : '安装 OpenClaw'}
+                {modelBusy ? '安装中...' : '安装模型引擎'}
               </button>
             ) : null}
 
             <div style={{ fontSize: 12, color: '#b7c3d6', lineHeight: 1.6 }}>
               {modelState.openclaw.usesDevBridge
-                ? '当前页面通过本机桥接读取 WSL 里的 OpenClaw 配置与网关。'
-                : '当前页面直接读取本机 OpenClaw 配置。'}
+                ? '当前页面通过本机桥接读取 WSL 里的模型引擎配置与网关。'
+                : '当前页面直接读取本机模型引擎配置。'}
             </div>
 
             <div style={{ display: 'grid', gap: 12 }}>
@@ -367,7 +367,7 @@ export default function Sidebar({
                           onClick={() => handleSaveProvider(provider.id)}
                           disabled={modelBusy}
                         >
-                          保存到 OpenClaw
+                          保存到模型引擎
                         </button>
                       </>
                     ) : (
@@ -387,7 +387,7 @@ export default function Sidebar({
 
                     {provider.id === 'moonshot' ? (
                       <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-                        {provider.webSearchConfigured ? 'Kimi 搜索已同步到 OpenClaw。' : '保存 Moonshot API Key 时会同时同步 Kimi 搜索配置。'}
+                        {provider.webSearchConfigured ? 'Kimi 搜索已同步到模型网关。' : '保存 Moonshot API Key 时会同时同步 Kimi 搜索配置。'}
                       </div>
                     ) : null}
                   </div>
