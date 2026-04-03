@@ -74,7 +74,19 @@ function isLocalGatewayUrl(url?: string) {
   return value.startsWith('http://127.0.0.1') || value.startsWith('http://localhost');
 }
 
-function buildGatewayRequestModel(agentId?: string) {
+// The API layer must always speak to gateways using the gateway-scoped model ids:
+// `openclaw` or `openclaw/<agentId>`.
+//
+// Windows local development and the 120 server do not use the same bridge
+// implementation:
+// - Windows uses `tools/openclaw-local-gateway.mjs`
+// - 120 uses `tools/http-model-bridge.mjs`
+//
+// Both bridge layers are required to accept these `openclaw`-scoped ids and
+// translate them to the real provider model. Do not change this helper back to
+// emitting provider ids such as `minimax/...`, or one side of the deployment
+// matrix will break again.
+export function buildGatewayRequestModel(agentId?: string) {
   const normalizedAgentId = String(agentId || '').trim();
   if (!normalizedAgentId || normalizedAgentId === 'main') {
     return 'openclaw';

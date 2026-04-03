@@ -111,6 +111,10 @@ async function tryWslGateway(method, pathname, payloadText = '') {
 function resolveRequestedModel(config, requestedModel) {
   const primary = String(config?.agents?.defaults?.model?.primary || '').trim();
   const normalizedRequestedModel = String(requestedModel || '').trim();
+  // Keep Windows local development compatible with the same gateway-scoped
+  // model ids that the API uses in production (`openclaw` /
+  // `openclaw/<agentId>`). Local fallback must resolve those ids back to the
+  // configured provider model instead of treating them as provider names.
   const isGatewayScopedModel = !normalizedRequestedModel
     || normalizedRequestedModel === 'openclaw'
     || normalizedRequestedModel.startsWith('openclaw/')

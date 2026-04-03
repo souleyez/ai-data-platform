@@ -38,6 +38,11 @@ function readBody(request) {
 
 function resolveProvider(modelRef) {
   const normalized = String(modelRef || defaultModel).trim();
+  // The API now talks to gateways with standard OpenClaw gateway ids
+  // (`openclaw` / `openclaw/<agentId>`). The bridge running on the 120 server
+  // must treat those ids as aliases for the real provider model configured in
+  // OPENCLAW_MODEL, otherwise server deploys regress into
+  // "Unsupported provider in bridge: openclaw".
   const isGatewayScopedModel = !normalized
     || normalized === 'openclaw'
     || normalized.startsWith('openclaw/')

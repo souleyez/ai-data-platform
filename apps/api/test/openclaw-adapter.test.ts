@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isRetryableCloudGatewayError } from '../src/lib/openclaw-adapter.js';
+import { buildGatewayRequestModel, isRetryableCloudGatewayError } from '../src/lib/openclaw-adapter.js';
+
+test('buildGatewayRequestModel should always emit OpenClaw-scoped gateway model ids', () => {
+  assert.equal(buildGatewayRequestModel('main'), 'openclaw');
+  assert.equal(buildGatewayRequestModel(''), 'openclaw');
+  assert.equal(buildGatewayRequestModel('planner'), 'openclaw/planner');
+});
 
 test('isRetryableCloudGatewayError should treat provider 500 and 520 failures as retryable', () => {
   assert.equal(
