@@ -38,7 +38,12 @@ function readBody(request) {
 
 function resolveProvider(modelRef) {
   const normalized = String(modelRef || defaultModel).trim();
-  const [providerKey, ...rest] = normalized.split('/');
+  const isGatewayScopedModel = !normalized
+    || normalized === 'openclaw'
+    || normalized.startsWith('openclaw/')
+    || normalized.startsWith('openclaw:');
+  const effectiveModelRef = isGatewayScopedModel ? defaultModel : normalized;
+  const [providerKey, ...rest] = effectiveModelRef.split('/');
   const model = rest.join('/') || 'deepseek-chat';
 
   if (providerKey === 'deepseek') {
