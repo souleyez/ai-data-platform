@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { diffOpenClawMemoryState, type OpenClawMemoryState } from '../src/lib/openclaw-memory-changes.js';
 
+function makeDocument(input: {
+  id: string;
+  libraryKeys: string[];
+  title: string;
+  summary: string;
+  availability: string;
+  updatedAt: string;
+  fingerprint: string;
+  parseStatus?: string;
+  parseStage?: string;
+  detailParseStatus?: string;
+}) {
+  return {
+    parseStatus: input.parseStatus || 'parsed',
+    parseStage: input.parseStage || 'detailed',
+    detailParseStatus: input.detailParseStatus || 'succeeded',
+    ...input,
+  };
+}
+
 function makeState(overrides?: Partial<OpenClawMemoryState>): OpenClawMemoryState {
   return {
     version: 1,
@@ -17,15 +37,15 @@ test('diffOpenClawMemoryState should mark new documents as added', () => {
     previous: null,
     generatedAt: '2026-03-30T10:00:00.000Z',
     nextDocuments: [
-      {
+      makeDocument({
         id: 'doc-1',
         libraryKeys: ['resume'],
-        title: '夏天宇简历',
-        summary: 'AIGC 与座舱方向候选人。',
+        title: 'Candidate Resume',
+        summary: 'Product and AI delivery background.',
         availability: 'available',
         updatedAt: '2026-03-30T09:00:00.000Z',
         fingerprint: 'fp-1',
-      },
+      }),
     ],
   });
 
@@ -38,15 +58,15 @@ test('diffOpenClawMemoryState should mark new documents as added', () => {
 test('diffOpenClawMemoryState should classify audit exclusion and restoration transitions', () => {
   const previous = makeState({
     documents: {
-      'doc-1': {
+      'doc-1': makeDocument({
         id: 'doc-1',
         libraryKeys: ['resume'],
-        title: '候选人A',
-        summary: '最初可用。',
+        title: 'Candidate A',
+        summary: 'Initially available.',
         availability: 'available',
         updatedAt: '2026-03-30T09:00:00.000Z',
         fingerprint: 'fp-1',
-      },
+      }),
     },
   });
 
@@ -54,15 +74,15 @@ test('diffOpenClawMemoryState should classify audit exclusion and restoration tr
     previous,
     generatedAt: '2026-03-30T10:00:00.000Z',
     nextDocuments: [
-      {
+      makeDocument({
         id: 'doc-1',
         libraryKeys: ['resume'],
-        title: '候选人A',
-        summary: '被排除。',
+        title: 'Candidate A',
+        summary: 'Excluded by audit.',
         availability: 'audit-excluded',
         updatedAt: '2026-03-30T10:00:00.000Z',
         fingerprint: 'fp-2',
-      },
+      }),
     ],
   });
 
@@ -72,15 +92,15 @@ test('diffOpenClawMemoryState should classify audit exclusion and restoration tr
     previous: excluded,
     generatedAt: '2026-03-30T11:00:00.000Z',
     nextDocuments: [
-      {
+      makeDocument({
         id: 'doc-1',
         libraryKeys: ['resume'],
-        title: '候选人A',
-        summary: '恢复可用。',
+        title: 'Candidate A',
+        summary: 'Available again.',
         availability: 'available',
         updatedAt: '2026-03-30T11:00:00.000Z',
         fingerprint: 'fp-3',
-      },
+      }),
     ],
   });
 
@@ -90,24 +110,24 @@ test('diffOpenClawMemoryState should classify audit exclusion and restoration tr
 test('diffOpenClawMemoryState should keep updated and deleted records in recent changes', () => {
   const previous = makeState({
     documents: {
-      'doc-1': {
+      'doc-1': makeDocument({
         id: 'doc-1',
         libraryKeys: ['iot'],
-        title: 'IOT 方案 A',
-        summary: '初始摘要。',
+        title: 'IoT Plan A',
+        summary: 'Original summary.',
         availability: 'available',
         updatedAt: '2026-03-30T08:00:00.000Z',
         fingerprint: 'fp-1',
-      },
-      'doc-2': {
+      }),
+      'doc-2': makeDocument({
         id: 'doc-2',
         libraryKeys: ['iot'],
-        title: 'IOT 方案 B',
-        summary: '即将删除。',
+        title: 'IoT Plan B',
+        summary: 'Will be removed.',
         availability: 'available',
         updatedAt: '2026-03-30T08:30:00.000Z',
         fingerprint: 'fp-2',
-      },
+      }),
     },
   });
 
@@ -115,15 +135,15 @@ test('diffOpenClawMemoryState should keep updated and deleted records in recent 
     previous,
     generatedAt: '2026-03-30T12:00:00.000Z',
     nextDocuments: [
-      {
+      makeDocument({
         id: 'doc-1',
         libraryKeys: ['iot'],
-        title: 'IOT 方案 A',
-        summary: '摘要已更新。',
+        title: 'IoT Plan A',
+        summary: 'Updated summary.',
         availability: 'available',
         updatedAt: '2026-03-30T12:00:00.000Z',
         fingerprint: 'fp-3',
-      },
+      }),
     ],
   });
 

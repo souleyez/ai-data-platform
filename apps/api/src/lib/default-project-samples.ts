@@ -1,13 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadDocumentCategoryConfig } from './document-config.js';
-import { enqueueDetailedParse, runDetailedParseBatch } from './document-deep-parse-queue.js';
+import { runDetailedParseBatch } from './document-deep-parse-queue.js';
 import { createDocumentLibrary, loadDocumentLibraries, type DocumentLibrary } from './document-libraries.js';
+import { upsertDocumentsIntoKnowledgeBase } from './document-knowledge-lifecycle.js';
 import { saveDocumentOverride } from './document-overrides.js';
 import { parseDocument } from './document-parser.js';
 import { REPO_ROOT, STORAGE_FILES_DIR } from './paths.js';
 import { createReportOutput, deleteReportOutput, loadReportCenterState } from './report-center.js';
-import { loadParsedDocuments, upsertDocumentsInCache } from './document-store.js';
+import { loadParsedDocuments } from './document-store.js';
 
 type SampleDocDefinition = {
   sourceFileName: string;
@@ -521,7 +522,6 @@ async function ensureSampleDocuments(libraryMap: Record<string, DocumentLibrary>
   const config = await loadDocumentCategoryConfig(STORAGE_FILES_DIR);
   const existingDocuments = await loadParsedDocuments(400, false, config.scanRoots);
   const parsedItems = [];
-  const queuedPaths: string[] = [];
 
   for (const definition of DEFAULT_SAMPLE_DOCUMENTS) {
     const knownNames = new Set([definition.storedFileName, ...(definition.legacyFileNames || [])]);
@@ -532,11 +532,15 @@ async function ensureSampleDocuments(libraryMap: Record<string, DocumentLibrary>
     const parsed = await parseDocument(targetPath, config, { stage: 'quick' });
     parsedItems.push(parsed);
     await saveDocumentOverride(targetPath, { groups: [libraryMap[definition.groupLabel].key] });
-    queuedPaths.push(targetPath);
   }
 
-  await upsertDocumentsInCache(parsedItems, config.scanRoots);
-  await enqueueDetailedParse(queuedPaths);
+  await upsertDocumentsIntoKnowledgeBase({
+    items: parsedItems,
+    scanRoot: config.scanRoots,
+    queueDetailedParse: true,
+    memorySyncMode: 'scheduled',
+    memorySyncReason: 'default-project-samples',
+  });
   await runDetailedParseBatch(4, config.scanRoots);
   await runDetailedParseBatch(4, config.scanRoots);
 }

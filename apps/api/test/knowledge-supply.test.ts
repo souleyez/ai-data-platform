@@ -248,6 +248,116 @@ test('prepareKnowledgeScope should route recent uploaded image questions to ungr
   });
 });
 
+test('prepareKnowledgeScope should route recent parsed document questions to recently detailed documents', async () => {
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-04-03T10:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 3,
+    scanSignature: 'recent-parsed-scope',
+    items: [
+      {
+        path: 'C:\\uploads\\1743660000000-contract-a.png',
+        name: '1743660000000-contract-a.png',
+        ext: '.png',
+        title: 'contract-a',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-03T09:00:00.000Z',
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+      },
+      {
+        path: 'C:\\uploads\\1743663600000-contract-b.png',
+        name: '1743663600000-contract-b.png',
+        ext: '.png',
+        title: 'contract-b',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-03T10:00:00.000Z',
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+      },
+      {
+        path: 'C:\\uploads\\1743570000000-older-note.txt',
+        name: '1743570000000-older-note.txt',
+        ext: '.txt',
+        title: 'older-note',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'quick',
+        detailParseStatus: 'queued',
+        groups: ['notes'],
+        confirmedGroups: ['notes'],
+      },
+    ],
+  }, async () => {
+    const scope = await prepareKnowledgeScope({
+      requestText: 'show the 2 most recently parsed documents',
+      chatHistory: [],
+    });
+
+    assert.equal(scope.scopedItems.length, 2);
+    assert.equal(scope.scopedItems[0]?.title, 'contract-b');
+    assert.equal(scope.scopedItems[1]?.title, 'contract-a');
+    assert.deepEqual(scope.libraries, [{ key: 'contract', label: '合同协议' }]);
+  });
+});
+
+test('prepareKnowledgeScope should route failed parse questions to failed documents before generic image fallback', async () => {
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-04-03T10:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 2,
+    scanSignature: 'failed-parse-scope',
+    items: [
+      {
+        path: 'C:\\uploads\\1743663600000-contract-failed.png',
+        name: '1743663600000-contract-failed.png',
+        ext: '.png',
+        title: 'contract-failed',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'error',
+        parseStage: 'detailed',
+        detailParseStatus: 'failed',
+        groups: ['ungrouped'],
+        confirmedGroups: ['ungrouped'],
+      },
+      {
+        path: 'C:\\uploads\\1743660000000-contract-ok.png',
+        name: '1743660000000-contract-ok.png',
+        ext: '.png',
+        title: 'contract-ok',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+      },
+    ],
+  }, async () => {
+    const scope = await prepareKnowledgeScope({
+      requestText: 'which files failed OCR and need reparse',
+      chatHistory: [],
+    });
+
+    assert.equal(scope.scopedItems.length, 1);
+    assert.equal(scope.scopedItems[0]?.title, 'contract-failed');
+    assert.deepEqual(scope.libraries, [{ key: 'ungrouped', label: '未分组' }]);
+  });
+});
+
 test('prepareKnowledgeScope should honor preferred document ids before fallback routing', async () => {
   const firstPath = 'C:\\uploads\\1743390000000-contract-a.png';
   const secondPath = 'C:\\uploads\\1743393600000-contract-b.png';

@@ -30,6 +30,7 @@ import {
   runReclusterUngroupedAction,
 } from './document-route-operations.js';
 import { buildDocumentId, loadParsedDocuments } from './document-store.js';
+import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { prepareKnowledgeSupply } from './knowledge-supply.js';
 import {
@@ -394,6 +395,16 @@ async function runDocumentCommand(subcommand: string, flags: CommandFlags): Prom
         availableLibraries: libraries.map((item) => ({ key: item.key, label: item.label })),
         items,
       },
+    };
+  }
+
+  if (subcommand === 'sync-status') {
+    const status = await readOpenClawMemorySyncStatus();
+    return {
+      ok: true,
+      action: 'documents.sync-status',
+      summary: `Memory sync status: ${status.status}.`,
+      data: status as unknown as Record<string, unknown>,
     };
   }
 

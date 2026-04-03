@@ -5,6 +5,9 @@ export type OpenClawMemoryDocumentState = {
   summary: string;
   availability: string;
   updatedAt: string;
+  parseStatus: string;
+  parseStage: string;
+  detailParseStatus: string;
   fingerprint: string;
 };
 

@@ -17,6 +17,7 @@ const datasourceDefinitions = await importFresh<typeof import('../src/lib/dataso
 const platformControl = await importFresh<typeof import('../src/lib/platform-control.js')>(
   '../src/lib/platform-control.js',
 );
+const syncStatusFile = path.join(storageRoot, 'config', 'openclaw-memory-sync-status.json');
 
 test.after(async () => {
   await fs.rm(storageRoot, { recursive: true, force: true });
@@ -116,4 +117,37 @@ test('platform control should tolerate pnpm forwarded separator args', async () 
   ]);
   assert.equal(result.ok, true);
   assert.equal(result.action, 'capabilities.list');
+});
+
+test('platform control should expose document memory sync status', async () => {
+  await fs.mkdir(path.dirname(syncStatusFile), { recursive: true });
+  await fs.writeFile(syncStatusFile, JSON.stringify({
+    status: 'success',
+    lastRequestedAt: '2026-04-03T10:00:00.000Z',
+    lastStartedAt: '2026-04-03T10:00:01.000Z',
+    lastFinishedAt: '2026-04-03T10:00:02.000Z',
+    lastSuccessAt: '2026-04-03T10:00:02.000Z',
+    lastErrorAt: '',
+    lastErrorMessage: '',
+    pendingReasons: [],
+    lastReasons: ['document-merge-detailed'],
+    lastResult: {
+      generatedAt: '2026-04-03T10:00:02.000Z',
+      libraryCount: 3,
+      documentCount: 12,
+      templateCount: 2,
+      outputCount: 1,
+      changeCount: 4,
+      changedThisRun: 2,
+    },
+  }, null, 2), 'utf8');
+
+  const result = await platformControl.executePlatformControlCommand([
+    'documents',
+    'sync-status',
+  ]);
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'documents.sync-status');
+  assert.equal((result.data as { status?: string })?.status, 'success');
+  assert.equal((result.data as { lastResult?: { documentCount?: number } })?.lastResult?.documentCount, 12);
 });

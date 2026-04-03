@@ -18,6 +18,9 @@ function makeState(): OpenClawMemoryState {
         summary: 'Candidate A product and smart-campus experience.',
         availability: 'available',
         updatedAt: '2026-03-30T10:00:00.000Z',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
         fingerprint: 'fp-1',
       },
       'doc-2': {
@@ -27,6 +30,9 @@ function makeState(): OpenClawMemoryState {
         summary: 'Candidate B backend and ERP delivery background.',
         availability: 'available',
         updatedAt: '2026-03-20T10:00:00.000Z',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
         fingerprint: 'fp-2',
       },
       'doc-3': {
@@ -36,6 +42,9 @@ function makeState(): OpenClawMemoryState {
         summary: 'Tender material and qualification risk summary.',
         availability: 'available',
         updatedAt: '2026-03-30T09:00:00.000Z',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
         fingerprint: 'fp-3',
       },
       'doc-4': {
@@ -45,7 +54,22 @@ function makeState(): OpenClawMemoryState {
         summary: 'Should not be selected.',
         availability: 'audit-excluded',
         updatedAt: '2026-03-30T11:00:00.000Z',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
         fingerprint: 'fp-4',
+      },
+      'doc-5': {
+        id: 'doc-5',
+        libraryKeys: ['resume'],
+        title: 'Failed OCR Resume',
+        summary: 'Document OCR failed and needs reparse.',
+        availability: 'parse-error',
+        updatedAt: '2026-03-30T12:00:00.000Z',
+        parseStatus: 'error',
+        parseStage: 'detailed',
+        detailParseStatus: 'failed',
+        fingerprint: 'fp-5',
       },
     },
     recentChanges: [],
@@ -76,4 +100,26 @@ test('buildOpenClawMemorySelectionContextBlock should expose selected ids and ti
   assert.match(block, /Memory-selected documents:/);
   assert.match(block, /Latest Resume A/);
   assert.match(block, /id=doc-1/);
+  assert.match(block, /detail=succeeded/);
+});
+
+test('selectOpenClawMemoryDocumentCandidatesFromState should match parse lifecycle metadata', () => {
+  const selection = selectOpenClawMemoryDocumentCandidatesFromState({
+    state: makeState(),
+    requestText: '看看失败的扫描文件',
+    limit: 3,
+  });
+
+  assert.equal(selection.documentIds[0], 'doc-5');
+});
+
+test('selectOpenClawMemoryDocumentCandidatesFromState should treat recent parsed phrasing as a recency signal', () => {
+  const selection = selectOpenClawMemoryDocumentCandidatesFromState({
+    state: makeState(),
+    requestText: 'show the 2 most recently parsed documents',
+    libraries: [{ key: 'resume', label: '简历' }],
+    limit: 2,
+  });
+
+  assert.deepEqual(selection.documentIds, ['doc-1', 'doc-2']);
 });

@@ -23,6 +23,7 @@ storage/config/access-keys.json
 storage/config/intelligence-mode.json
 storage/config/document-library-public-links.json
 storage/config/openclaw-memory-catalog.json
+storage/config/openclaw-memory-sync-status.json
 storage/config/datasources/
 memory/catalog/
 tmp/

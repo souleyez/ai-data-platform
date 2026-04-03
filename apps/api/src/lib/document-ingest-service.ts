@@ -2,10 +2,9 @@ import type { DocumentCategoryConfig } from './document-config.js';
 import type { DocumentLibrary } from './document-libraries.js';
 import { UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
 import { saveDocumentOverride } from './document-overrides.js';
-import { enqueueDetailedParse } from './document-deep-parse-queue.js';
 import type { ParsedDocument } from './document-parser.js';
 import { parseDocument } from './document-parser.js';
-import { upsertDocumentsInCache } from './document-store.js';
+import { upsertDocumentsIntoKnowledgeBase } from './document-knowledge-lifecycle.js';
 import {
   buildFailedPreviewItem,
   buildPreviewItemFromDocument,
@@ -229,13 +228,14 @@ export async function ingestDocumentFiles(input: {
     );
   }
 
-  await upsertDocumentsInCache(parsedItems, input.documentConfig.scanRoots);
-  await enqueueDetailedParse(
-    parsedItems
-      .filter((item) => item.parseStatus === 'parsed' || item.parseStatus === 'error')
-      .map((item) => item.path),
-  );
-  metrics.detailedQueuedCount = parsedItems.length;
+  const knowledgeResult = await upsertDocumentsIntoKnowledgeBase({
+    items: parsedItems,
+    scanRoot: input.documentConfig.scanRoots,
+    queueDetailedParse: true,
+    memorySyncMode: 'scheduled',
+    memorySyncReason: 'document-ingest',
+  });
+  metrics.detailedQueuedCount = knowledgeResult.queuedCount;
 
   return {
     ingestItems,

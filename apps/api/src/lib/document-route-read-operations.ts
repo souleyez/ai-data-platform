@@ -5,6 +5,7 @@ import {
   buildDocumentsIndexPayload,
   buildDocumentsOverviewPayload,
 } from './document-route-read-models.js';
+import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { DEFAULT_SCAN_DIR, loadParsedDocuments } from './document-store.js';
 import { loadDocumentStateSnapshot } from './document-route-loaders.js';
 
@@ -23,7 +24,10 @@ export async function loadDocumentLibrariesPayload() {
 
 export async function loadDocumentsIndexRoutePayload() {
   const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
-  const libraries = await loadDocumentLibraries();
+  const [libraries, memorySync] = await Promise.all([
+    loadDocumentLibraries(),
+    readOpenClawMemorySyncStatus(),
+  ]);
 
   return buildDocumentsIndexPayload({
     config,
@@ -33,12 +37,16 @@ export async function loadDocumentsIndexRoutePayload() {
     items,
     cacheHit,
     libraries,
+    memorySync,
   });
 }
 
 export async function loadDocumentsOverviewRoutePayload() {
   const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
-  const libraries = await loadDocumentLibraries();
+  const [libraries, memorySync] = await Promise.all([
+    loadDocumentLibraries(),
+    readOpenClawMemorySyncStatus(),
+  ]);
 
   return buildDocumentsOverviewPayload({
     config,
@@ -48,5 +56,6 @@ export async function loadDocumentsOverviewRoutePayload() {
     items,
     cacheHit,
     libraries,
+    memorySync,
   });
 }

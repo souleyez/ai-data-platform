@@ -27,6 +27,7 @@ test('operations overview endpoint should expose capture parse and output summar
   assert.equal(typeof payload.generatedAt, 'string');
   assert.equal(typeof payload.capture.datasourceSummary.total, 'number');
   assert.equal(typeof payload.parse.scanSummary.totalFiles, 'number');
+  assert.equal(typeof payload.parse.memorySync.status, 'string');
   assert.equal(typeof payload.output.summary.templates, 'number');
   assert.equal(typeof payload.audit.summary.cleanupRecommendedDocuments, 'number');
   assert.equal(Array.isArray(payload.capture.recentRuns), true);

@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { mergeParsedDocumentsForPaths } from './document-store.js';
+import { refreshOpenClawMemoryCatalogNow } from './openclaw-memory-sync.js';
 import { STORAGE_CACHE_DIR } from './paths.js';
 import { upsertDocumentVectorIndex } from './document-vector-index.js';
 
@@ -231,6 +232,7 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
       updatedAt: new Date().toISOString(),
       items,
     });
+    await refreshOpenClawMemoryCatalogNow('document-deep-parse-succeeded').catch(() => null);
 
     return {
       processedCount: queued.length,
@@ -262,6 +264,7 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
         updatedAt: new Date().toISOString(),
         items,
       });
+      await refreshOpenClawMemoryCatalogNow('document-deep-parse-failed').catch(() => null);
     }
 
     return {

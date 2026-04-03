@@ -4,6 +4,7 @@ import { buildDatasourceMeta, buildDatasourceRunReadModels } from './datasource-
 import { loadDocumentLibraries } from './document-libraries.js';
 import { loadDocumentsIndexRoutePayload } from './document-route-read-operations.js';
 import { loadParsedDocuments } from './document-store.js';
+import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { loadReportCenterState } from './report-center.js';
 
 function countByStatus(items: Array<Record<string, unknown>>, field: string) {
@@ -22,6 +23,7 @@ export async function loadOperationsOverviewPayload() {
     documentsPayload,
     rawDocuments,
     documentLibraries,
+    memorySyncStatus,
     reportState,
     auditSnapshot,
   ] = await Promise.all([
@@ -31,6 +33,7 @@ export async function loadOperationsOverviewPayload() {
     loadDocumentsIndexRoutePayload(),
     loadParsedDocuments(5000, false),
     loadDocumentLibraries(),
+    readOpenClawMemorySyncStatus(),
     loadReportCenterState(),
     buildAuditSnapshot(),
   ]);
@@ -128,6 +131,7 @@ export async function loadOperationsOverviewPayload() {
         failed: parseDetailCounts.failed || 0,
         idle: parseDetailCounts.idle || 0,
       },
+      memorySync: memorySyncStatus,
       recentDocuments,
     },
     output: {

@@ -1,6 +1,7 @@
 import { buildDocumentId } from './document-store.js';
 import { documentMatchesLibrary, type DocumentLibrary } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
+import type { OpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 
 function truncateText(value: unknown, maxLength: number) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -118,6 +119,7 @@ export function buildDocumentsIndexPayload(input: {
   items: ParsedDocument[];
   cacheHit: boolean;
   libraries: DocumentLibrary[];
+  memorySync?: OpenClawMemorySyncStatus | null;
 }) {
   const byExtension = input.items.reduce<Record<string, number>>((acc, item) => {
     acc[item.ext] = (acc[item.ext] || 0) + 1;
@@ -166,6 +168,7 @@ export function buildDocumentsIndexPayload(input: {
       error: byStatus.error || 0,
       bizCategories: byBizCategory,
       libraryCounts,
+      memorySync: input.memorySync || null,
     },
   };
 }
@@ -178,6 +181,7 @@ export function buildDocumentsOverviewPayload(input: {
   items: ParsedDocument[];
   cacheHit: boolean;
   libraries: DocumentLibrary[];
+  memorySync?: OpenClawMemorySyncStatus | null;
 }) {
   const summarizedLibraries = input.libraries
     .map((library) => {
@@ -214,6 +218,7 @@ export function buildDocumentsOverviewPayload(input: {
     parsed: input.items.filter((item) => item.parseStatus === 'parsed').length,
     cacheHit: input.cacheHit,
     lastScanAt: new Date().toISOString(),
+    memorySync: input.memorySync || null,
     libraries: summarizedLibraries,
   };
 }

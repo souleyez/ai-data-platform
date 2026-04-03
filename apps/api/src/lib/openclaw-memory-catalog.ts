@@ -71,6 +71,7 @@ type CatalogDocumentCard = OpenClawMemoryDocumentState & {
   schemaType: string;
   parseStatus: string;
   parseStage: string;
+  detailParseStatus: string;
   topicTags: string[];
   detailLevel: CatalogMemoryDetailLevel;
   keyFacts: string[];
@@ -360,6 +361,7 @@ function buildDocumentFingerprint(card: {
   updatedAt: string;
   parseStatus: string;
   parseStage: string;
+  detailParseStatus: string;
   topicTags: string[];
   keyFacts: string[];
   evidenceHighlights: string[];
@@ -373,6 +375,7 @@ function buildDocumentFingerprint(card: {
     updatedAt: card.updatedAt,
     parseStatus: card.parseStatus,
     parseStage: card.parseStage,
+    detailParseStatus: card.detailParseStatus,
     topicTags: card.topicTags,
     keyFacts: card.keyFacts,
     evidenceHighlights: card.evidenceHighlights,
@@ -408,6 +411,7 @@ function buildDocumentCard(
   const updatedAt = extractDocumentUpdatedAt(item);
   const parseStatus = sanitizeText(item.parseStatus, 40);
   const parseStage = sanitizeText(item.parseStage, 40);
+  const detailParseStatus = sanitizeText(item.detailParseStatus, 40);
   const detailLevel = resolveLibraryScopedDetailLevel(libraryKeys, libraryDocumentCounts);
   const detail = buildCatalogMemoryDetail(item, detailLevel);
 
@@ -424,6 +428,7 @@ function buildDocumentCard(
     updatedAt,
     parseStatus,
     parseStage,
+    detailParseStatus,
     topicTags: detail.topicTags,
     detailLevel,
     keyFacts: detail.keyFacts,
@@ -436,6 +441,7 @@ function buildDocumentCard(
       updatedAt,
       parseStatus,
       parseStage,
+      detailParseStatus,
       topicTags: detail.topicTags,
       keyFacts: detail.keyFacts,
       evidenceHighlights: detail.evidenceHighlights,
@@ -700,6 +706,7 @@ function renderDocumentsFile(library: OpenClawMemoryLibrarySnapshot, cards: Cata
     `- Business category: ${item.bizCategory || '-'}`,
     `- Parse status: ${item.parseStatus || '-'}`,
     `- Parse stage: ${item.parseStage || '-'}`,
+    `- Detail parse status: ${item.detailParseStatus || '-'}`,
     `- Memory detail level: ${item.detailLevel}`,
     `- Summary: ${item.summary || '-'}`,
     ...(item.topicTags.length
@@ -825,6 +832,9 @@ export async function refreshOpenClawMemoryCatalog() {
       summary: item.summary,
       availability: item.availability,
       updatedAt: item.updatedAt,
+      parseStatus: item.parseStatus,
+      parseStage: item.parseStage,
+      detailParseStatus: item.detailParseStatus,
       fingerprint: item.fingerprint,
     })),
     generatedAt: snapshot.generatedAt,

@@ -1,6 +1,7 @@
 import { refreshDerivedSchemaProfile, type ParsedDocument } from './document-parser.js';
 import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
-import { readDocumentCache, writeDocumentCache } from './document-cache-repository.js';
+import { readDocumentCache } from './document-cache-repository.js';
+import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 import {
   DEFAULT_SCAN_DIR,
@@ -73,23 +74,25 @@ export async function loadParsedDocuments(
     parseStage: 'quick',
     cloudEnhancement: false,
   });
-  await enqueueDetailedParse(
-    items
+  const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
+  await replaceDocumentKnowledgeSnapshot({
+    cachePayload: {
+      generatedAt: new Date().toISOString(),
+      scanRoot: activeScanRoot,
+      scanRoots: resolvedScanRoots,
+      totalFiles: files.length,
+      scanSignature,
+      indexedPaths: files,
+      items,
+    },
+    queuePaths: items
       .filter((item) => item.parseStatus === 'parsed' || item.parseStatus === 'error')
       .map((item) => item.path),
-  );
-  await writeDocumentCache({
-    generatedAt: new Date().toISOString(),
-    scanRoot: activeScanRoot,
-    scanRoots: resolvedScanRoots,
-    totalFiles: files.length,
-    scanSignature,
-    indexedPaths: files,
-    items,
+    vectorItems: mergedItems,
+    memorySyncMode: 'scheduled',
+    memorySyncReason: 'document-scan-refresh',
   });
 
-  const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
-  scheduleDocumentVectorIndexSync(mergedItems);
   return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
 
@@ -112,12 +115,13 @@ export async function mergeParsedDocumentsForPaths(
     return loadParsedDocuments(limit, true, activeScanRoots);
   }
 
+  const effectiveParseStage = options?.parseStage || 'detailed';
   const reparsedItems = await parseDocumentFiles(
     normalizedPaths.filter((filePath) => files.includes(filePath)),
     activeScanRoots,
     {
       cloudEnhancement: options?.cloudEnhancement ?? false,
-      parseStage: options?.parseStage || 'detailed',
+      parseStage: effectiveParseStage,
     },
   );
 
@@ -133,17 +137,22 @@ export async function mergeParsedDocumentsForPaths(
   );
 
   const scanSignature = await buildScanSignature(files);
-  await writeDocumentCache({
-    generatedAt: new Date().toISOString(),
-    scanRoot: activeScanRoot,
-    scanRoots: activeScanRoots,
-    totalFiles: files.length,
-    scanSignature,
-    indexedPaths: files,
-    items,
-  });
-
   const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
-  scheduleDocumentVectorIndexSync(mergedItems);
+  await replaceDocumentKnowledgeSnapshot({
+    cachePayload: {
+      generatedAt: new Date().toISOString(),
+      scanRoot: activeScanRoot,
+      scanRoots: activeScanRoots,
+      totalFiles: files.length,
+      scanSignature,
+      indexedPaths: files,
+      items,
+    },
+    vectorItems: mergedItems,
+    memorySyncMode: effectiveParseStage === 'detailed' ? 'immediate' : 'scheduled',
+    memorySyncReason: effectiveParseStage === 'detailed'
+      ? 'document-merge-detailed'
+      : 'document-merge-quick',
+  });
   return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }
