@@ -76,7 +76,7 @@ export type ReportTemplateEnvelope = {
 export type ReportDynamicSource = {
   enabled: boolean;
   request: string;
-  outputType: 'table' | 'page' | 'ppt' | 'pdf';
+  outputType: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   conceptMode?: boolean;
   templateKey?: string;
   templateLabel?: string;
@@ -105,7 +105,7 @@ export type ReportOutputRecord = {
   templateLabel: string;
   title: string;
   outputType: string;
-  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   format?: string;
   createdAt: string;
   status: 'ready';
@@ -326,12 +326,12 @@ function summarizePageForAnalysis(page?: ReportOutputRecord['page']) {
 function buildLocalReportAnalysis(record: {
   groupLabel: string;
   templateLabel: string;
-  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   table?: ReportOutputRecord['table'];
   page?: ReportOutputRecord['page'];
   content?: string;
 }) {
-  if (record.kind === 'page') {
+  if (record.kind && record.kind !== 'table') {
     const cards = record.page?.cards || [];
     const strongestCard = cards[0];
     return [
@@ -356,7 +356,7 @@ function buildLocalReportAnalysis(record: {
 async function buildCloudReportAnalysis(record: {
   groupLabel: string;
   templateLabel: string;
-  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   table?: ReportOutputRecord['table'];
   page?: ReportOutputRecord['page'];
   content?: string;
@@ -367,7 +367,7 @@ async function buildCloudReportAnalysis(record: {
   }
 
   const context = [
-    record.kind === 'page' ? summarizePageForAnalysis(record.page) : summarizeTableForAnalysis(record.table),
+    record.kind && record.kind !== 'table' ? summarizePageForAnalysis(record.page) : summarizeTableForAnalysis(record.table),
     record.content ? `正文：${record.content}` : '',
     Array.isArray(record.libraries) && record.libraries.length
       ? `知识库：${record.libraries.map((item) => item.label || item.key).filter(Boolean).join('、')}`
@@ -381,7 +381,7 @@ async function buildCloudReportAnalysis(record: {
   try {
     const response = await runOpenClawChat({
       prompt: [
-        `请基于以下${record.kind === 'page' ? '静态页' : '报表'}内容，输出一段“AI综合分析”。`,
+        `请基于以下${record.kind && record.kind !== 'table' ? '叙事型输出' : '表格报表'}内容，输出一段“AI综合分析”。`,
         '要求：',
         '1. 只输出一段自然中文，不要标题，不要编号，不要 Markdown。',
         '2. 聚焦核心发现、风险点、可执行建议。',
@@ -409,7 +409,7 @@ async function attachReportAnalysis(record: ReportOutputRecord) {
 
   if (!analysis) return record;
 
-  if (record.kind === 'page') {
+  if (isNarrativeReportKind(record.kind)) {
     const sections = Array.isArray(record.page?.sections) ? [...record.page.sections] : [];
     const filteredSections = sections.filter((item) => String(item?.title || '').trim() !== 'AI综合分析');
     filteredSections.push({
@@ -450,7 +450,7 @@ function attachLocalReportAnalysis(record: ReportOutputRecord) {
   const analysis = buildLocalReportAnalysis(record);
   if (!analysis) return record;
 
-  if (record.kind === 'page') {
+  if (isNarrativeReportKind(record.kind)) {
     const sections = Array.isArray(record.page?.sections) ? [...record.page.sections] : [];
     if (!sections.some((item) => String(item?.title || '').trim() === 'AI综合分析')) {
       sections.push({ title: 'AI综合分析', body: analysis, bullets: [] });
@@ -491,7 +491,7 @@ function normalizeDynamicSource(
   },
 ): ReportDynamicSource | null {
   const enabled = Boolean(dynamicSource?.enabled) || fallback.kind === 'page';
-  const outputType = (dynamicSource?.outputType || fallback.kind || 'page') as 'table' | 'page' | 'ppt' | 'pdf';
+  const outputType = (dynamicSource?.outputType || fallback.kind || 'page') as 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   const conceptMode = Boolean(dynamicSource?.conceptMode)
     || (outputType === 'page' && !String(dynamicSource?.templateKey || '').trim());
   const libraries = Array.isArray(dynamicSource?.libraries) && dynamicSource?.libraries.length
@@ -927,21 +927,45 @@ function buildDynamicPageRecord(
   });
 }
 
-function resolveTemplateTypeFromKind(kind?: 'table' | 'page' | 'ppt' | 'pdf'): ReportTemplateType | null {
+function resolveTemplateTypeFromKind(kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md'): ReportTemplateType | null {
   if (kind === 'table') return 'table';
   if (kind === 'page') return 'static-page';
-  if (kind === 'ppt' || kind === 'pdf') return 'ppt';
+  if (kind === 'ppt') return 'ppt';
+  if (kind === 'pdf' || kind === 'doc' || kind === 'md') return 'document';
   return null;
 }
 
-function resolveOutputTypeLabel(kind?: 'table' | 'page' | 'ppt' | 'pdf', templateType?: ReportTemplateType) {
+function resolveOutputTypeLabel(kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md', templateType?: ReportTemplateType) {
   if (kind === 'table') return '表格';
   if (kind === 'page') return '静态页';
   if (kind === 'pdf') return 'PDF';
   if (kind === 'ppt') return 'PPT';
+  if (kind === 'doc') return '文档';
+  if (kind === 'md') return 'Markdown';
   if (templateType === 'table') return '表格';
   if (templateType === 'static-page') return '静态页';
+  if (templateType === 'document') return '文档';
   return 'PPT';
+}
+
+function isNarrativeReportKind(kind?: ReportOutputRecord['kind']) {
+  return Boolean(kind && kind !== 'table');
+}
+
+function resolveDefaultReportKind(templateType: ReportTemplateType): NonNullable<ReportOutputRecord['kind']> {
+  if (templateType === 'table') return 'table';
+  if (templateType === 'static-page') return 'page';
+  if (templateType === 'document') return 'doc';
+  return 'ppt';
+}
+
+function resolveDefaultReportFormat(kind: NonNullable<ReportOutputRecord['kind']>) {
+  if (kind === 'table') return 'csv';
+  if (kind === 'page') return 'html';
+  if (kind === 'ppt') return 'pptx';
+  if (kind === 'pdf') return 'pdf';
+  if (kind === 'md') return 'md';
+  return 'docx';
 }
 
 type PersistedState = {
@@ -2147,7 +2171,7 @@ export async function createReportOutput(input: {
   templateKey?: string;
   title?: string;
   triggerSource?: 'report-center' | 'chat';
-  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   format?: string;
   content?: string;
   table?: ReportOutputRecord['table'];
@@ -2169,6 +2193,7 @@ export async function createReportOutput(input: {
   if (!template) throw new Error('shared report template not found');
 
   const createdAt = new Date().toISOString();
+  const resolvedKind = input.kind || resolveDefaultReportKind(template.type);
   const baseRecord: ReportOutputRecord = {
     id: buildId('report'),
     groupKey: group.key,
@@ -2176,32 +2201,9 @@ export async function createReportOutput(input: {
     templateKey: template.key,
     templateLabel: template.label,
     title: input.title?.trim() || `${group.label}-${template.label}-${createdAt.slice(0, 10)}`,
-    outputType:
-      template.type === 'table'
-        ? '表格'
-        : template.type === 'static-page'
-          ? '静态页'
-          : template.type === 'document'
-            ? '文档'
-            : 'PPT',
-    kind:
-      input.kind
-      || (template.type === 'table'
-        ? 'table'
-        : template.type === 'static-page'
-          ? 'page'
-          : template.type === 'document'
-            ? 'pdf'
-            : 'ppt'),
-    format:
-      input.format
-      || (template.type === 'table'
-        ? 'csv'
-        : template.type === 'static-page'
-          ? 'html'
-          : template.type === 'document'
-            ? 'docx'
-            : 'ppt'),
+    outputType: resolveOutputTypeLabel(resolvedKind, template.type),
+    kind: resolvedKind,
+    format: input.format || resolveDefaultReportFormat(resolvedKind),
     createdAt,
     status: 'ready',
     summary: `${group.label} 分组已按 ${template.label} 模板生成成型报表。`,
@@ -2213,15 +2215,7 @@ export async function createReportOutput(input: {
     downloadUrl: input.downloadUrl || '',
     dynamicSource: normalizeDynamicSource(input.dynamicSource, {
       request: input.title || group.label,
-      kind:
-        input.kind
-        || (template.type === 'table'
-          ? 'table'
-          : template.type === 'static-page'
-            ? 'page'
-            : template.type === 'document'
-              ? 'pdf'
-              : 'ppt'),
+      kind: resolvedKind,
       templateKey: template.key,
       templateLabel: template.label,
       libraries: Array.isArray(input.libraries) && input.libraries.length
@@ -2528,7 +2522,7 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
   const group =
     resolveReportGroup(state.groups, record.groupKey)
     || resolveReportGroup(state.groups, record.groupLabel);
-  const conceptMode = record.kind === 'page' && Boolean(record.dynamicSource?.conceptMode);
+  const conceptMode = isNarrativeReportKind(record.kind) && Boolean(record.dynamicSource?.conceptMode);
 
   const envelope = conceptMode
     ? buildConceptPageEnvelope(group || null, normalizedInstruction || record.title || '')
@@ -2566,7 +2560,7 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
     });
 
     const normalized = normalizeReportOutput(
-      record.kind === 'page' ? 'page' : record.kind === 'ppt' ? 'ppt' : record.kind === 'pdf' ? 'pdf' : 'table',
+      record.kind || 'page',
       normalizedInstruction,
       cloud.content,
       envelope,

@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "test": "tsx --test test/**/*.test.ts",
     "memory:refresh": "tsx src/scripts/refresh-openclaw-memory-catalog.ts",
-    "validate:au20260316": "tsx src/scripts/validate-au20260316.ts"
+    "validate:au20260316": "tsx src/scripts/validate-au20260316.ts",
+    "platform:control": "tsx src/scripts/platform-control.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^9.4.0",

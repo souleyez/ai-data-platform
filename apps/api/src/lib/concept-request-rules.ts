@@ -1,6 +1,6 @@
 import type { ReportTemplateEnvelope } from './report-center.js';
 
-type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
+type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md';
 
 type ConceptEnvelopeVariant = {
   title: string;
@@ -165,7 +165,7 @@ export function adaptConceptRequestEnvelope<TView extends string>(
   const variantSet = rules[view as Exclude<TView, 'generic'>];
   if (!variantSet) return envelope;
 
-  const variant = kind === 'page' ? variantSet.page : variantSet.table;
+  const variant = kind === 'table' ? variantSet.table : variantSet.page;
   return {
     ...envelope,
     title: variant.title,

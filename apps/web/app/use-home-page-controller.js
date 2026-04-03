@@ -18,6 +18,7 @@ import {
 import {
   acceptIngestGroupSuggestion,
   assignIngestToSelectedLibrary,
+  confirmTemplateOption,
   runDocumentUpload,
   submitCredentialForMessage,
   submitQuestion,
@@ -28,6 +29,17 @@ import { initialMessages, sourceItems } from './lib/mock-data';
 
 function createLocalMessageId(prefix = 'assistant') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
+
+function loadStoredSystemConstraints() {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(window.localStorage.getItem(CHAT_CONSTRAINTS_STORAGE_KEY) || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 export function useHomePageController() {
@@ -45,6 +57,7 @@ export function useHomePageController() {
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
+  const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
 
   async function loadDatasources() {
     try {
@@ -92,6 +105,15 @@ export function useHomePageController() {
   useEffect(() => {
     persistChatMessages(messages);
   }, [messages]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(CHAT_CONSTRAINTS_STORAGE_KEY, String(systemConstraints || ''));
+    } catch {
+      // Ignore local persistence failures.
+    }
+  }, [systemConstraints]);
 
   useEffect(() => {
     if (!reportItems.length) {
@@ -174,6 +196,7 @@ export function useHomePageController() {
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
+    systemConstraints,
     setUploadLoading,
     uploadInputRef,
   };
@@ -189,6 +212,7 @@ export function useHomePageController() {
     reportItems,
     selectedReportId,
     selectedManualLibraries,
+    systemConstraints,
     sidebarSources,
     uploadInputRef,
     uploadLoading,
@@ -196,10 +220,16 @@ export function useHomePageController() {
     setReportCollapsed,
     setSelectedManualLibraries,
     setSelectedReportId,
+    setSystemConstraints,
     deleteReport,
     reviseReport,
     resetConversation,
     submitQuestion: (value) => submitQuestion(value, {
+      ...baseActionContext,
+      inputState: { isLoading, uploadLoading },
+      messages,
+    }),
+    confirmTemplateOption: (option) => confirmTemplateOption(option, {
       ...baseActionContext,
       inputState: { isLoading, uploadLoading },
       messages,

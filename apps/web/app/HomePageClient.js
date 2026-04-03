@@ -20,14 +20,17 @@ function buildTopSummary(documentTotal, documentLibraries) {
 
   const prefix = `已管理文档 ${documentTotal} 份，知识库 ${libraries.length} 个`;
   if (!visibleNames) {
-    return `${prefix}。日常问题可直接对话；当你明确要求基于库内材料生成结果时，系统会自动补齐必要信息后再执行。`;
+    return `${prefix}。普通对话默认只做供料，不再强行编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
   }
 
-  return `${prefix}，当前重点包括 ${visibleNames}${libraries.length > 3 ? ' 等' : ''}。日常问题可直接对话；当你明确要求基于库内材料生成结果时，系统会自动补齐必要信息后再执行。`;
+  return `${prefix}，当前重点包括 ${visibleNames}${libraries.length > 3 ? ' 等' : ''}。普通对话默认只做供料，不再强行编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
 }
 
 export default function HomePageClient({ initialModelState }) {
   const {
+    acceptIngestGroupSuggestion,
+    assignIngestToSelectedLibrary,
+    confirmTemplateOption,
     deleteReport,
     documentLibraries,
     documentTotal,
@@ -37,21 +40,21 @@ export default function HomePageClient({ initialModelState }) {
     messages,
     reportCollapsed,
     reportItems,
+    reviseReport,
+    runDocumentUpload,
     selectedManualLibraries,
     selectedReportId,
     setInput,
     setReportCollapsed,
     setSelectedManualLibraries,
     setSelectedReportId,
+    setSystemConstraints,
     sidebarSources,
+    submitCredentialForMessage,
     submitQuestion,
+    systemConstraints,
     uploadInputRef,
     uploadLoading,
-    runDocumentUpload,
-    reviseReport,
-    acceptIngestGroupSuggestion,
-    assignIngestToSelectedLibrary,
-    submitCredentialForMessage,
   } = useHomePageController();
 
   return (
@@ -65,7 +68,10 @@ export default function HomePageClient({ initialModelState }) {
             <span className="topbar-inline-note">{buildTopSummary(documentTotal, documentLibraries)}</span>
           </div>
           <div className="topbar-actions">
-            <FullIntelligenceModeButton />
+            <FullIntelligenceModeButton
+              systemConstraints={systemConstraints}
+              onSystemConstraintsChange={setSystemConstraints}
+            />
           </div>
         </header>
 
@@ -89,6 +95,7 @@ export default function HomePageClient({ initialModelState }) {
               onAssignLibrary={assignIngestToSelectedLibrary}
               groupSaving={groupSaving}
               onSubmitCredential={submitCredentialForMessage}
+              onConfirmTemplateOption={confirmTemplateOption}
             />
 
             <InsightPanel

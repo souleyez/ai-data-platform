@@ -110,9 +110,12 @@ async function tryWslGateway(method, pathname, payloadText = '') {
 
 function resolveRequestedModel(config, requestedModel) {
   const primary = String(config?.agents?.defaults?.model?.primary || '').trim();
-  const fallback = requestedModel && !String(requestedModel).startsWith('openclaw:')
-    ? String(requestedModel).trim()
-    : primary;
+  const normalizedRequestedModel = String(requestedModel || '').trim();
+  const isGatewayScopedModel = !normalizedRequestedModel
+    || normalizedRequestedModel === 'openclaw'
+    || normalizedRequestedModel.startsWith('openclaw/')
+    || normalizedRequestedModel.startsWith('openclaw:');
+  const fallback = !isGatewayScopedModel ? normalizedRequestedModel : primary;
 
   const modelRef = fallback || primary;
   if (!modelRef) {

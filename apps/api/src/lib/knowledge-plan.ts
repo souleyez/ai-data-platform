@@ -42,18 +42,20 @@ function normalizeText(value: string) {
   return String(value || '')
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[，。、、“”"'‘’；;!?！？（）()\[\]\-_/\\|]+/g, ' ')
+    .replace(/[，。、“”‘’；;!?！？（）()\[\]\-_/\\|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt' | null {
+export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md' | null {
   const normalized = normalizeText(text);
   if (!normalized) return null;
-  if (/静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|\bpage\b/.test(normalized)) return 'page';
+  if (/(静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|\bpage\b)/.test(normalized)) return 'page';
   if (/\bppt\b|演示稿|汇报稿|汇报提纲/.test(normalized)) return 'ppt';
-  if (/\bpdf\b|文档版|正式文档|word|docx/.test(normalized)) return 'pdf';
-  if (/报表|表格|对比表|清单|报告/.test(normalized)) return 'table';
+  if (/\bmarkdown\b|\bmd\b|markdown 文档|md 文档/.test(normalized)) return 'md';
+  if (/\bdocs\b|\bdoc\b|\bdocx\b|word|word 文档|doc 文档|docx 文档|docs 文档|文档文件|正式文档|文档/.test(normalized)) return 'doc';
+  if (/\bpdf\b/.test(normalized)) return 'pdf';
+  if (/(报表|表格|对比表|清单|报告)/.test(normalized)) return 'table';
   return null;
 }
 
@@ -76,9 +78,9 @@ export function isBroadCatalogDocumentQuery(prompt: string) {
   const text = normalizeText(prompt);
   if (!text) return false;
 
-  const mentionsDocuments = /(?:documents|document|docs|files|file|\u6587\u6863|\u6587\u4ef6)/.test(text);
-  const broadScope = /(?:all|every|local|native|disk|computer|\u6240\u6709|\u5168\u90e8|\u672c\u5730|\u78c1\u76d8|\u7535\u8111|\u4e2d\u6587)/.test(text);
-  const notOnlySpecificLibrary = /(?:\u4e0d\u6b62\u662f|\u4e0d\u53ea\u662f|\u4e0d\u53ea\u770b|\u4e0d\u662f\u53ea\u6709).*(?:resume|cv|\u7b80\u5386|\u5408\u540c|\u8ba2\u5355|\u6807\u4e66|bids|iot)/.test(text);
+  const mentionsDocuments = /(?:documents|document|docs|files|file|文档|文件)/.test(text);
+  const broadScope = /(?:all|every|local|native|disk|computer|所有|全部|本地|磁盘|电脑|中文)/.test(text);
+  const notOnlySpecificLibrary = /(?:不止是|不只是|不只看|不是只有).*(?:resume|cv|简历|合同|订单|标书|bids|iot)/.test(text);
 
   return mentionsDocuments && (broadScope || notOnlySpecificLibrary);
 }
@@ -161,7 +163,7 @@ export function buildKnowledgePlanPrompt(
     '请把最近 3 到 5 轮对话整理成一条“按知识库输出”的执行需求。',
     '要求:',
     '1. 只返回 JSON，不要解释，不要 Markdown。',
-    '2. JSON schema 为 {"request":"...", "outputType":"page|table|pdf|ppt"}。',
+    '2. JSON schema 为 {"request":"...", "outputType":"page|table|doc|md|pdf|ppt"}。',
     '3. request 必须是一句完整中文，明确主题、输出形式和重点。',
     '4. 如果无法稳定判断输出形式，outputType 默认使用 page。',
   ]
@@ -199,11 +201,15 @@ export function buildLocalKnowledgePlan(
   const outputKind = detectOutputKind(source) || 'page';
   const outputLabel = outputKind === 'page'
     ? '数据可视化静态页'
-    : outputKind === 'pdf'
-      ? '文档'
-      : outputKind === 'ppt'
-        ? 'PPT'
-        : '表格报表';
+    : outputKind === 'doc'
+      ? 'DOC 文档'
+      : outputKind === 'md'
+        ? 'Markdown 文档'
+        : outputKind === 'pdf'
+          ? 'PDF 文档'
+          : outputKind === 'ppt'
+            ? 'PPT'
+            : '表格报表';
 
   const request = source
     ? `${source}，输出形式为${outputLabel}`
@@ -239,7 +245,7 @@ export function extractPlanningResult(
     const parsed = JSON.parse(jsonText);
     const request = String(parsed?.request || '').trim() || fallbackPrompt;
     const detected = String(parsed?.outputType || '').trim().toLowerCase();
-    const outputType = ['page', 'table', 'pdf', 'ppt'].includes(detected) ? detected : 'page';
+    const outputType = ['page', 'table', 'doc', 'md', 'pdf', 'ppt'].includes(detected) ? detected : 'page';
     return { request, outputType };
   } catch {
     return { request: fallbackPrompt, outputType: 'page' };

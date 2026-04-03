@@ -12,7 +12,7 @@ import {
 } from './concept-request-rules.js';
 import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 
-export type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
+export type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md';
 export type KnowledgeTemplateTaskHint =
   | 'general'
   | 'resume-comparison'
@@ -93,7 +93,7 @@ function hasAnyKeyword(text: string, keywords: string[]) {
 function mapOutputKindToTemplateType(kind: KnowledgeOutputKind): SharedReportTemplate['type'] {
   if (kind === 'page') return 'static-page';
   if (kind === 'ppt') return 'ppt';
-  if (kind === 'pdf') return 'document';
+  if (kind === 'pdf' || kind === 'doc' || kind === 'md') return 'document';
   return 'table';
 }
 

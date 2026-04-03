@@ -40,6 +40,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     meta: data?.message?.meta || '',
     references: Array.isArray(data?.message?.references) ? data.message.references : [],
     orchestration: data?.orchestration || data?.message?.orchestration || null,
+    confirmation: data?.message?.confirmation || data?.guard?.confirmation || null,
     output,
   };
 

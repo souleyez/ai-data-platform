@@ -8,7 +8,7 @@ import { isWeakResumeCandidateName, mergeResumeFields } from './resume-canonical
 export type ChatOutput =
   | { type: 'answer'; content: string }
   | {
-      type: 'table' | 'page' | 'pdf' | 'ppt';
+      type: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md';
       title: string;
       content: string;
       format?: string;
@@ -178,11 +178,23 @@ function isObject(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function buildDefaultTitle(kind: 'table' | 'page' | 'pdf' | 'ppt') {
+function buildDefaultTitle(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md') {
   if (kind === 'page') return '知识库静态页';
   if (kind === 'ppt') return '知识库PPT';
   if (kind === 'pdf') return '知识库文档';
   return '知识库表格';
+}
+
+function isNarrativeOutputKind(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md') {
+  return kind !== 'table';
+}
+
+function resolveNarrativeOutputFormat(kind: 'page' | 'pdf' | 'ppt' | 'doc' | 'md') {
+  if (kind === 'page') return 'html';
+  if (kind === 'ppt') return 'pptx';
+  if (kind === 'pdf') return 'pdf';
+  if (kind === 'doc') return 'docx';
+  return 'md';
 }
 
 function sanitizeText(value: unknown) {
@@ -460,7 +472,7 @@ function buildSupplySectionBullets(
 }
 
 function buildSupplyEchoPageOutput(
-  kind: 'page' | 'pdf' | 'ppt',
+  kind: 'page' | 'pdf' | 'ppt' | 'doc' | 'md',
   title: string,
   payload: JsonRecord,
   envelope?: ReportTemplateEnvelope | null,
@@ -487,7 +499,7 @@ function buildSupplyEchoPageOutput(
     type: kind === 'page' ? 'page' : kind,
     title,
     content: summary,
-    format: kind === 'page' ? 'html' : kind,
+    format: resolveNarrativeOutputFormat(kind),
     page,
   };
 }
@@ -524,7 +536,7 @@ function looksLikePromptEchoPage(
 }
 
 function buildPromptEchoFallbackOutput(
-  kind: 'page' | 'pdf' | 'ppt',
+  kind: 'page' | 'pdf' | 'ppt' | 'doc' | 'md',
   title: string,
   requestText: string,
   envelope?: ReportTemplateEnvelope | null,
@@ -572,7 +584,7 @@ function buildPromptEchoFallbackOutput(
     type: kind === 'page' ? 'page' : kind,
     title,
     content: summary,
-    format: kind === 'page' ? 'html' : kind,
+    format: resolveNarrativeOutputFormat(kind),
     page,
   };
 }
@@ -3044,13 +3056,13 @@ function shouldUseResumePageFallback(
   return false;
 }
 
-function wrapPageOutputAsKind(kind: 'page' | 'pdf' | 'ppt', page: KnowledgePageOutput): ChatOutput {
+function wrapPageOutputAsKind(kind: 'page' | 'pdf' | 'ppt' | 'doc' | 'md', page: KnowledgePageOutput): ChatOutput {
   if (kind === 'page') return page;
   return {
     type: kind,
     title: page.title,
     content: page.content,
-    format: kind,
+    format: resolveNarrativeOutputFormat(kind),
     page: page.page,
   };
 }
@@ -3107,7 +3119,7 @@ function buildFallbackPageOutput(
 }
 
 function buildGenericFallbackOutput(
-  kind: 'table' | 'page' | 'pdf' | 'ppt',
+  kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md',
   requestText: string,
   rawContent: string,
   envelope?: ReportTemplateEnvelope | null,
@@ -3115,7 +3127,7 @@ function buildGenericFallbackOutput(
   const title = envelope?.title || buildDefaultTitle(kind);
   const content = sanitizeText(rawContent) || sanitizeText(requestText) || '当前未能稳定提取更多结构化结果。';
 
-  if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
+  if (isNarrativeOutputKind(kind)) {
     const page = buildFallbackPageOutput(title, content, envelope);
     return wrapPageOutputAsKind(kind, page);
   }
@@ -3130,7 +3142,7 @@ export function buildKnowledgeMissMessage(libraries: Array<{ key: string; label:
   return '当前没有稳定命中的知识库，暂不生成结果。请先说明要基于哪个知识库输出。';
 }
 
-export function buildReportInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt') {
+export function buildReportInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md') {
   if (kind === 'page') {
     return [
       '只输出 JSON。',
@@ -3140,7 +3152,7 @@ export function buildReportInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt') {
     ].join('\n');
   }
 
-  if (kind === 'pdf' || kind === 'ppt') {
+  if (kind === 'pdf' || kind === 'ppt' || kind === 'doc' || kind === 'md') {
     return [
       '只输出 JSON。',
       'Schema:',
@@ -3158,7 +3170,7 @@ export function buildReportInstruction(kind: 'table' | 'page' | 'pdf' | 'ppt') {
 }
 
 export function buildKnowledgeFallbackOutput(
-  kind: 'table' | 'page' | 'pdf' | 'ppt',
+  kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md',
   requestText: string,
   documents: ParsedDocument[],
   envelope?: ReportTemplateEnvelope | null,
@@ -3170,7 +3182,7 @@ export function buildKnowledgeFallbackOutput(
   const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
 
   if (resumeDocuments.length) {
-    if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
+    if (isNarrativeOutputKind(kind)) {
       const page = buildResumePageOutput(view, resumeDocuments, envelope, displayProfiles);
       return wrapPageOutputAsKind(kind, page);
     }
@@ -3250,7 +3262,7 @@ export function buildKnowledgeFallbackOutput(
     }
   }
 
-  if (orderDocuments.length && (kind === 'page' || kind === 'pdf' || kind === 'ppt')) {
+  if (orderDocuments.length && isNarrativeOutputKind(kind)) {
     const page = buildOrderPageOutput(orderView, orderDocuments, envelope);
     return wrapPageOutputAsKind(kind, page);
   }
@@ -3259,7 +3271,7 @@ export function buildKnowledgeFallbackOutput(
 }
 
 export function normalizeReportOutput(
-  kind: 'table' | 'page' | 'pdf' | 'ppt',
+  kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md',
   requestText: string,
   rawContent: string,
   envelope?: ReportTemplateEnvelope | null,
@@ -3287,7 +3299,7 @@ export function normalizeReportOutput(
     rawContent,
   );
 
-  if (kind === 'page' || kind === 'pdf' || kind === 'ppt') {
+  if (isNarrativeOutputKind(kind)) {
     const wrapperPageSource = pickNestedObject(payload, [['page']]) || pickNestedObject(root, [['page']]) || payload;
     const nestedPagePayload = extractEmbeddedStructuredPayload(
       isObject(wrapperPageSource) ? wrapperPageSource.summary : null,
@@ -3347,7 +3359,7 @@ export function normalizeReportOutput(
       type: kind === 'page' ? 'page' : kind,
       title: normalizedTitle,
       content: content || summary,
-      format: kind === 'page' ? 'html' : kind,
+      format: resolveNarrativeOutputFormat(kind),
       page: {
         summary,
         cards,

@@ -16,6 +16,7 @@
     "openclaw:skills:list": "corepack pnpm exec clawhub list --workdir .",
     "openclaw:skills:update": "corepack pnpm exec clawhub update --all --workdir .",
     "openclaw:memory:refresh": "corepack pnpm --filter api memory:refresh",
+    "system:control": "corepack pnpm --filter api platform:control",
     "client:install": "powershell -ExecutionPolicy Bypass -File tools/windows-client/manage-client.ps1 -Action install",
     "client:preflight": "powershell -ExecutionPolicy Bypass -File tools/windows-client/manage-client.ps1 -Action preflight",
     "client:auth": "powershell -ExecutionPolicy Bypass -File tools/windows-client/manage-client.ps1 -Action auth",

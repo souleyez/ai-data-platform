@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import IngestFeedback from './IngestFeedback';
-import { formatOrchestrationLabel, formatSourceLabel } from '../lib/types';
+import { formatSourceLabel } from '../lib/types';
 
 function sanitizeReadableText(content) {
   return String(content || '')
@@ -115,6 +115,35 @@ function CredentialRequestCard({ request, onSubmit, disabled }) {
   );
 }
 
+function TemplateConfirmationCard({ confirmation, disabled, onConfirm }) {
+  if (!confirmation?.options?.length) return null;
+
+  return (
+    <div className="template-confirm-card">
+      <div className="template-confirm-head">
+        <strong>{confirmation.title || '请先确认执行方式'}</strong>
+        {confirmation.description ? <div className="template-confirm-desc">{confirmation.description}</div> : null}
+      </div>
+      <div className="template-confirm-options">
+        {confirmation.options.map((option) => (
+          <article className="template-confirm-option" key={option.key || option.title}>
+            <div className="template-confirm-option-title">{option.title}</div>
+            <div className="template-confirm-option-desc">{option.description}</div>
+            <button
+              type="button"
+              className="ghost-btn"
+              disabled={disabled}
+              onClick={() => onConfirm?.(option)}
+            >
+              {disabled ? '处理中...' : '按此继续'}
+            </button>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatPanel({
   messages,
   input,
@@ -131,6 +160,7 @@ export default function ChatPanel({
   onAssignLibrary,
   groupSaving,
   onSubmitCredential,
+  onConfirmTemplateOption,
 }) {
   const messagesRef = useRef(null);
   const composerRef = useRef(null);
@@ -163,6 +193,14 @@ export default function ChatPanel({
               {message.title ? <strong>{message.title}</strong> : null}
               <div className="message-content-block">{renderParagraphs(message.content)}</div>
               {message.table ? <FormulaTable table={message.table} /> : null}
+
+              {message.confirmation ? (
+                <TemplateConfirmationCard
+                  confirmation={message.confirmation}
+                  disabled={isLoading}
+                  onConfirm={onConfirmTemplateOption}
+                />
+              ) : null}
 
               {message.credentialRequest ? (
                 <CredentialRequestCard
@@ -208,13 +246,6 @@ export default function ChatPanel({
                       </span>
                     ))}
                   </div>
-                </div>
-              ) : null}
-
-              {message.orchestration ? (
-                <div className="message-extra-block">
-                  <div className="message-ref-title">分析状态</div>
-                  <div className="orchestration-chip">{formatOrchestrationLabel(message.orchestration)}</div>
                 </div>
               ) : null}
             </div>
@@ -269,7 +300,7 @@ export default function ChatPanel({
                 if (!isLoading) onSubmit(input);
               }
             }}
-            placeholder="输入问题。系统会先正常问答；当你明确要求基于库内文件产出结果时，会自动补充必要信息后再按库输出。"
+            placeholder="直接提问。普通对话默认只向 OpenClaw 供料；只有命中库内资料模板输出时，系统才会先让你确认两种执行方式。"
           />
           <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
             {isLoading ? '思考中...' : '发送'}

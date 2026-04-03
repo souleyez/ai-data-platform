@@ -9,7 +9,7 @@ import {
   IOT_CONCEPT_RULES,
 } from './concept-request-rules.js';
 
-type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt';
+type KnowledgeOutputKind = 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md';
 type ResumeRequestView = 'generic' | 'company' | 'project' | 'talent' | 'skill';
 type BidRequestView = 'generic' | 'section' | 'response' | 'risk';
 type OrderRequestView = 'generic' | 'platform' | 'category' | 'stock';

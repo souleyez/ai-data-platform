@@ -5,7 +5,7 @@ export type KnowledgeConversationState = {
   libraries: Array<{ key: string; label: string }>;
   timeRange: string;
   contentFocus: string;
-  outputType: '' | 'table' | 'page' | 'pdf' | 'ppt';
+  outputType: '' | 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md';
   missingSlot: 'time' | 'content' | 'output';
 };
 
@@ -37,7 +37,7 @@ export function parseKnowledgeConversationState(value: unknown): KnowledgeConver
 
   const outputType = String(raw.outputType || '').trim();
   const missingSlot = String(raw.missingSlot || '').trim();
-  if (!['', 'table', 'page', 'pdf', 'ppt'].includes(outputType)) return null;
+  if (!['', 'table', 'page', 'pdf', 'ppt', 'doc', 'md'].includes(outputType)) return null;
   if (!['time', 'content', 'output'].includes(missingSlot)) return null;
 
   return {
@@ -63,14 +63,18 @@ export function parseKnowledgeConversationState(value: unknown): KnowledgeConver
 function mapOutputTypeLabel(outputType: KnowledgeConversationState['outputType']) {
   if (outputType === 'page') return '数据可视化静态页';
   if (outputType === 'ppt') return 'PPT';
+  if (outputType === 'md') return 'Markdown 文档';
   if (outputType === 'pdf') return '文档';
+  if (outputType === 'doc') return 'Word 文档';
   return '表格';
 }
 
 function extractOutputType(text: string): KnowledgeConversationState['outputType'] {
   const detected = detectOutputKind(text || '');
   if (detected) return detected;
-  return /\u6587\u6863|\u6b63\u6587\u6587\u6863|\u6b63\u5f0f\u6587\u6863|word|docx?/i.test(String(text || '').trim()) ? 'pdf' : '';
+  const source = String(text || '').trim();
+  if (/markdown|\bmd\b/i.test(source)) return 'md';
+  return /\u6587\u6863|\u6b63\u6587\u6587\u6863|\u6b63\u5f0f\u6587\u6863|word|docx?/i.test(source) ? 'doc' : '';
 }
 
 function extractLooseTimeRange(text: string) {
@@ -90,7 +94,7 @@ function stripControlWords(text: string) {
     .replace(/\u8bf7|\u8bf7\u4f60|\u5e2e\u6211|\u9ebb\u70e6|\u60f3\u8981|\u9700\u8981|\u5e0c\u671b|\u5e2e\u5fd9|\u57fa\u4e8e|\u6839\u636e|\u6309\u7167|\u56f4\u7ed5|\u805a\u7126|\u9488\u5bf9|\u4f18\u5148/gi, ' ')
     .replace(/\u77e5\u8bc6\u5e93|\u6587\u6863\u5e93|\u8d44\u6599\u5e93|\u5e93\u5185|\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|\u8fd9\u4efd\u6587\u6863|\u8fd9\u4e2a\u6587\u4ef6|\u8fd9\u4e9b\u6750\u6599|\u8fd9\u6279\u6750\u6599|\u8fd9\u6279\u6587\u6863/gi, ' ')
     .replace(/\u8f93\u51fa|\u751f\u6210|\u505a\u6210|\u505a\u4e00\u4efd|\u505a\u4e2a|\u6574\u7406|\u6c47\u603b|\u5bfc\u51fa|\u5f62\u6210|\u4ea7\u51fa/gi, ' ')
-    .replace(/\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u6570\u636e\u53ef\u89c6\u5316\u9759\u6001\u9875|ppt|pdf|\u6587\u6863/gi, ' ')
+    .replace(/\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u6570\u636e\u53ef\u89c6\u5316\u9759\u6001\u9875|ppt|pdf|markdown|\bmd\b|word|docx?|\u6587\u6863/gi, ' ')
     .replace(/\u4eca\u5929|\u4eca\u65e5|\u6628\u5929|\u6628\u65e5|\u672c\u5468|\u8fd9\u5468|\u8fd9\u4e00\u5468|\u4e0a\u5468|\u4e0a\u4e00\u5468|\u672c\u6708|\u8fd9\u4e2a\u6708|\u4e0a\u4e2a\u6708|\u4e0a\u6708|\u6700\u8fd1\u4e00\u5468|\u8fd1\u4e00\u5468|\u6700\u8fd1\u4e00\u4e2a\u6708|\u8fd1\u4e00\u4e2a\u6708|\u6700\u8fd1\u4e09\u4e2a\u6708|\u8fd1\u4e09\u4e2a\u6708|\u6700\u8fd1\u534a\u5e74|\u8fd1\u534a\u5e74|\u6700\u8fd1\u4e00\u5e74|\u8fd1\u4e00\u5e74|\u672c\u5b63\u5ea6|\u5168\u90e8\u65f6\u95f4|\u5168\u65f6\u95f4|\u6240\u6709\u65f6\u95f4|\u5168\u91cf|\u5168\u90e8|all time|all-time|full range/gi, ' ')
     .replace(/[，。；;,.!?！？()（）【】[\]<>《》“”"'‘’]/g, ' ')
     .replace(/\s+/g, ' ')

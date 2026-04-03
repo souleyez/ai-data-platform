@@ -59,7 +59,7 @@ type ReportPlanTaskHintInput = {
   groupLabel?: string;
   templateKey?: string;
   templateLabel?: string;
-  kind?: 'table' | 'page' | 'ppt' | 'pdf';
+  kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
 };
 
 const RESUME_HINT_KEYWORDS = ['resume', 'cv', '简历', '候选人', '人才'];

@@ -74,6 +74,14 @@ function isLocalGatewayUrl(url?: string) {
   return value.startsWith('http://127.0.0.1') || value.startsWith('http://localhost');
 }
 
+function buildGatewayRequestModel(agentId?: string) {
+  const normalizedAgentId = String(agentId || '').trim();
+  if (!normalizedAgentId || normalizedAgentId === 'main') {
+    return 'openclaw';
+  }
+  return `openclaw/${normalizedAgentId}`;
+}
+
 function buildDefaultSystemPrompt() {
   return [
     '你是产品“AI智能服务”中的云端智能助手。',
@@ -274,7 +282,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
   const selectedModel = await getActiveOpenClawModel();
-  const model = selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+  const model = buildGatewayRequestModel(agentId);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     return null;
@@ -374,10 +382,16 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const token = env('OPENCLAW_GATEWAY_TOKEN');
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
   const selectedModel = await getActiveOpenClawModel();
-  const model = selectedModel || env('OPENCLAW_MODEL', `openclaw:${agentId}`);
+  const model = buildGatewayRequestModel(agentId);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');
+  }
+
+  try {
+    await ensureNativeSearchPreferredConfig();
+  } catch {
+    // Keep chat available even if config normalization fails.
   }
 
   const headers: Record<string, string> = {

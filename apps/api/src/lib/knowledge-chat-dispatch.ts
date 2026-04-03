@@ -1,19 +1,9 @@
-import { loadDocumentLibraries } from './document-libraries.js';
-import { executeKnowledgeAnswer, executeKnowledgeOutput } from './knowledge-execution.js';
+import { buildKnowledgeContext } from './knowledge-evidence.js';
+import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
 import {
-  resolveKnowledgeChatRoute,
-  type KnowledgeChatRouteKind,
-  type KnowledgeEvidenceMode,
-  type KnowledgeIntentContract,
-} from './knowledge-chat-router.js';
-import {
-  explicitlyRejectsKnowledgeMode,
-  isKnowledgeCancelPhrase,
-} from './knowledge-intent.js';
-import {
-  parseKnowledgeConversationState,
-  type KnowledgeConversationState,
-} from './knowledge-request-state.js';
+  prepareKnowledgeSupply,
+  type KnowledgeLibraryRef,
+} from './knowledge-supply.js';
 import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
@@ -21,16 +11,20 @@ import type { ChatOutput } from './knowledge-output.js';
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
 export type GeneralKnowledgeDispatchResult = {
-  libraries: Array<{ key: string; label: string }>;
+  libraries: KnowledgeLibraryRef[];
   content: string;
   output: ChatOutput;
-  intent: 'general' | 'report';
+  intent: 'general';
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
-  conversationState: KnowledgeConversationState | null;
-  routeKind?: KnowledgeChatRouteKind;
-  evidenceMode?: KnowledgeEvidenceMode | null;
-  intentContract?: KnowledgeIntentContract | null;
+  conversationState: null;
+  routeKind?: 'general' | 'template_confirmation';
+  evidenceMode?: 'supply_only' | null;
+  guard?: {
+    requiresConfirmation: boolean;
+    reason: string;
+    confirmation: TemplateConfirmationPayload | null;
+  } | null;
 };
 
 async function runCloudChatWithSearchFallback(input: {
@@ -65,125 +59,105 @@ async function runCloudChatWithSearchFallback(input: {
 export async function runGeneralKnowledgeAwareChat(input: {
   prompt: string;
   chatHistory: ChatHistoryItem[];
-  existingState: KnowledgeConversationState | null;
+  existingState: unknown;
   sessionUser?: string;
   debugResumePage?: boolean;
   systemContextBlocks?: string[];
+  skipTemplateConfirmation?: boolean;
 }): Promise<GeneralKnowledgeDispatchResult> {
-  const { prompt, chatHistory, existingState, sessionUser, systemContextBlocks } = input;
+  const requestText = String(input.prompt || '').trim();
+  const systemContextBlocks = [...(input.systemContextBlocks || [])];
+  const supply = await prepareKnowledgeSupply({
+    requestText,
+    chatHistory: input.chatHistory,
+    docLimit: 5,
+    evidenceLimit: 6,
+  });
 
-  if (existingState && isKnowledgeCancelPhrase(prompt)) {
-    const content = '已取消这次按库处理准备。你可以继续直接提问。';
+  const knowledgeContext = supply.libraries.length
+    ? buildKnowledgeContext(
+      requestText,
+      supply.libraries,
+      supply.effectiveRetrieval,
+      {},
+      {
+        maxDocuments: 5,
+        maxEvidence: 5,
+        includeExcerpt: false,
+        maxClaimsPerDocument: 1,
+        maxEvidenceChunksPerDocument: 1,
+        maxStructuredProfileEntries: 4,
+        maxStructuredArrayValues: 3,
+        maxStructuredObjectEntries: 3,
+      },
+    )
+    : '';
+  const fullContextBlocks = [...systemContextBlocks, knowledgeContext].filter(Boolean);
+
+  const confirmation = input.skipTemplateConfirmation
+    ? null
+    : await buildTemplateConfirmationPayload({
+      prompt: requestText,
+      chatHistory: input.chatHistory,
+      sessionUser: input.sessionUser,
+      supply,
+      systemContextBlocks: fullContextBlocks,
+    });
+
+  if (confirmation) {
+    const content = [
+      '这次命中了库内资料模板输出。',
+      '我不直接推进，先给你两个确认选项：一个按 OpenClaw 自己的理解执行，一个按命中资料和模板输出。',
+      '请直接点选其中一个继续。',
+    ].join('\n\n');
+
     return {
-      libraries: [],
+      libraries: supply.libraries,
       content,
       output: { type: 'answer', content },
       intent: 'general',
       mode: 'openclaw',
-      debug: null,
+      debug: {
+        supplyDocuments: supply.effectiveRetrieval.documents.length,
+        supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      },
       conversationState: null,
-      routeKind: 'general',
-      evidenceMode: null,
-      intentContract: null,
-    };
-  }
-
-  if (explicitlyRejectsKnowledgeMode(prompt)) {
-    const cloud = await runCloudChatWithSearchFallback({
-      prompt,
-      sessionUser,
-      chatHistory,
-      systemContextBlocks,
-    });
-
-    return {
-      libraries: [],
-      content: cloud.content,
-      output: { type: 'answer', content: cloud.content },
-      intent: 'general',
-      mode: 'openclaw',
-      debug: null,
-      conversationState: null,
-      routeKind: 'general',
-      evidenceMode: null,
-      intentContract: null,
-    };
-  }
-
-  const documentLibraries = await loadDocumentLibraries();
-  const routeDecision = await resolveKnowledgeChatRoute({
-    prompt,
-    chatHistory,
-    libraries: documentLibraries,
-    sessionUser,
-  });
-
-  if (routeDecision.route === 'output') {
-    const result = await executeKnowledgeOutput({
-      prompt,
-      confirmedRequest: routeDecision.contract.normalizedRequest || prompt,
-      preferredLibraries: routeDecision.libraries,
-      sessionUser,
-      debugResumePage: input.debugResumePage === true,
-      chatHistory,
-    });
-
-    return {
-      libraries: result.libraries,
-      content: result.content,
-      output: result.output,
-      intent: result.intent,
-      mode: result.mode,
-      debug: result.debug || null,
-      conversationState: parseKnowledgeConversationState(input.existingState),
-      routeKind: 'output',
-      evidenceMode: routeDecision.evidenceMode,
-      intentContract: routeDecision.contract,
-    };
-  }
-
-  if (routeDecision.route === 'catalog' || routeDecision.route === 'detail') {
-    const result = await executeKnowledgeAnswer({
-      prompt: routeDecision.contract.normalizedRequest || prompt,
-      preferredLibraries: routeDecision.libraries,
-      sessionUser,
-      chatHistory,
-      answerMode: routeDecision.evidenceMode === 'catalog_memory'
-        ? 'catalog_memory'
-        : 'live_detail',
-    });
-
-    return {
-      libraries: result.libraries,
-      content: result.content,
-      output: result.output,
-      intent: result.intent,
-      mode: result.mode,
-      debug: null,
-      conversationState: null,
-      routeKind: routeDecision.route,
-      evidenceMode: routeDecision.evidenceMode,
-      intentContract: routeDecision.contract,
+      routeKind: 'template_confirmation',
+      evidenceMode: 'supply_only',
+      guard: {
+        requiresConfirmation: true,
+        reason: 'template_output_confirmation',
+        confirmation,
+      },
     };
   }
 
   const cloud = await runCloudChatWithSearchFallback({
-    prompt,
-    sessionUser,
-    chatHistory,
-    systemContextBlocks,
+    prompt: requestText,
+    sessionUser: input.sessionUser,
+    chatHistory: input.chatHistory,
+    systemContextBlocks: fullContextBlocks,
   });
 
   return {
-    libraries: [],
+    libraries: supply.libraries,
     content: cloud.content,
     output: { type: 'answer', content: cloud.content },
     intent: 'general',
     mode: 'openclaw',
-    debug: null,
+    debug: {
+      supplyDocuments: supply.effectiveRetrieval.documents.length,
+      supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      searchEnabledByDefault: true,
+      nativeSearchPreferred: true,
+    },
     conversationState: null,
     routeKind: 'general',
-    evidenceMode: null,
-    intentContract: routeDecision.contract,
+    evidenceMode: 'supply_only',
+    guard: {
+      requiresConfirmation: false,
+      reason: '',
+      confirmation: null,
+    },
   };
 }

@@ -78,6 +78,16 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
   setSelectedReportId?.(generatedReport.id);
 }
 
+function buildChatOptions(context, overrides = {}) {
+  return {
+    mode: overrides.mode || 'general',
+    confirmedRequest: overrides.confirmedRequest || '',
+    confirmedAction: overrides.confirmedAction || '',
+    preferredLibraries: Array.isArray(overrides.preferredLibraries) ? overrides.preferredLibraries : [],
+    systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
+  };
+}
+
 export async function runDocumentUpload(files, context) {
   const {
     defaultUploadNote,
@@ -137,14 +147,13 @@ export async function submitQuestion(value, context) {
   const text = String(value || '').trim();
   if (!text || inputState.isLoading || inputState.uploadLoading) return;
 
-  setMessages((prev) => [...prev, { id: createMessageId('user'), role: 'user', content: text }]);
+  const userMessage = { id: createMessageId('user'), role: 'user', content: text };
+  setMessages((prev) => [...prev, userMessage]);
   setInput('');
   setIsLoading(true);
 
   try {
-    const data = await sendChatPrompt(text, buildRecentChatHistory(messages), {
-      mode: 'general',
-    });
+    const data = await sendChatPrompt(text, buildRecentChatHistory([...messages, userMessage]), buildChatOptions(context));
     const normalized = normalizeChatResponse(data, null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
@@ -155,6 +164,52 @@ export async function submitQuestion(value, context) {
       role: 'assistant',
       content: error instanceof Error ? error.message : '当前云端问答暂时不可用，请稍后再试。',
       meta: '云端问答未返回结果',
+      messageType: 'system_failure',
+    });
+  } finally {
+    setIsLoading(false);
+  }
+}
+
+export async function confirmTemplateOption(option, context) {
+  const { inputState, messages, setIsLoading, setMessages } = context;
+  if (!option || inputState.isLoading || inputState.uploadLoading) return;
+
+  const choiceText = `选择：${option.title || '继续执行'}`;
+  const userMessage = {
+    id: createMessageId('user'),
+    role: 'user',
+    content: choiceText,
+  };
+  setMessages((prev) => [...prev, userMessage]);
+  setIsLoading(true);
+
+  try {
+    const data = await sendChatPrompt(
+      option.executePrompt || option.confirmedRequest || option.title || '',
+      buildRecentChatHistory([...messages, userMessage]),
+      buildChatOptions(context, {
+        mode: option.executeMode || 'general',
+        confirmedAction: option.confirmedAction || '',
+        confirmedRequest: option.confirmedRequest || '',
+        preferredLibraries: option.preferredLibraries || [],
+      }),
+    );
+    const normalized = normalizeChatResponse(data, null);
+    const message = { ...normalized.message, id: createMessageId('assistant') };
+    appendAssistantMessage(setMessages, message);
+    await persistGeneratedReport(
+      normalized,
+      message,
+      context,
+      option.confirmedRequest || option.executePrompt || option.title || '',
+    );
+  } catch (error) {
+    appendAssistantMessage(setMessages, {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      title: '执行失败',
+      content: error instanceof Error ? error.message : '当前执行失败，请稍后再试。',
       messageType: 'system_failure',
     });
   } finally {

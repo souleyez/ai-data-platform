@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectLibraryMatches } from '../src/lib/knowledge-plan.js';
+import { collectLibraryMatches, detectOutputKind } from '../src/lib/knowledge-plan.js';
 
 test('collectLibraryMatches should prefer resume library for latest resume comparison prompts', () => {
   const matches = collectLibraryMatches(
@@ -21,4 +21,11 @@ test('collectLibraryMatches should prefer resume library for latest resume compa
   );
 
   assert.equal(matches[0]?.library.key, 'resume');
+});
+
+test('detectOutputKind should recognize doc and markdown outputs', () => {
+  assert.equal(detectOutputKind('按合同库输出正式文档'), 'doc');
+  assert.equal(detectOutputKind('按合同库输出 docs 文件'), 'doc');
+  assert.equal(detectOutputKind('按合同库输出 markdown 文档'), 'md');
+  assert.equal(detectOutputKind('按合同库输出 md'), 'md');
 });

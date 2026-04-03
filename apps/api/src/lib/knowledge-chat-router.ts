@@ -15,7 +15,7 @@ export type KnowledgeEvidenceMode = 'catalog_memory' | 'live_detail' | 'mixed' |
 export type KnowledgeIntentContract = {
   route: KnowledgeChatRouteKind;
   subject: string;
-  requestedForm: 'answer' | 'table' | 'page' | 'pdf' | 'ppt' | 'unknown';
+  requestedForm: 'answer' | 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md' | 'unknown';
   targetScope: 'general' | 'library_overview' | 'recent_changes' | 'latest_documents' | 'specific_document' | 'document_facts' | 'comparison';
   needsLiveDetail: boolean;
   normalizedRequest: string;
@@ -85,7 +85,7 @@ const OUTPUT_ACTION_PATTERNS = [
 ];
 
 const OUTPUT_ARTIFACT_PATTERNS = [
-  /\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u53ef\u89c6\u5316|\u62a5\u544a|dashboard|\u9a7e\u9a76\u8231|ppt|pdf|word|docx|table|report|static page|page|visualization|cockpit/i,
+  /\u62a5\u8868|\u8868\u683c|\u5bf9\u6bd4\u8868|\u9759\u6001\u9875|\u53ef\u89c6\u5316|\u62a5\u544a|dashboard|\u9a7e\u9a76\u8231|ppt|pdf|word|docx|markdown|table|report|static page|page|visualization|cockpit|\bdocs?\b|\bmd\b/i,
 ];
 
 const SUMMARY_PATTERNS =
@@ -122,7 +122,7 @@ function normalizeRoute(value: unknown): KnowledgeChatRouteKind {
 
 function normalizeRequestedForm(value: unknown, prompt: string): KnowledgeIntentContract['requestedForm'] {
   const text = String(value || '').trim().toLowerCase();
-  if (['answer', 'table', 'page', 'pdf', 'ppt'].includes(text)) {
+  if (['answer', 'table', 'page', 'pdf', 'ppt', 'doc', 'md'].includes(text)) {
     return text as KnowledgeIntentContract['requestedForm'];
   }
   const detected = detectOutputKind(prompt);

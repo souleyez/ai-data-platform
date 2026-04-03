@@ -68,7 +68,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       groupKey?: string;
       templateKey?: string;
       title?: string;
-      kind?: 'table' | 'page' | 'ppt' | 'pdf';
+      kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
       format?: string;
       content?: string;
       table?: {
@@ -87,7 +87,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       dynamicSource?: {
         enabled?: boolean;
         request?: string;
-        outputType?: 'table' | 'page' | 'ppt' | 'pdf';
+        outputType?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
         templateKey?: string;
         templateLabel?: string;
         timeRange?: string;

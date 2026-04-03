@@ -1,4 +1,8 @@
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
+import {
+  buildSystemCapabilityContextBlock,
+  buildUserConstraintsContextBlock,
+} from './chat-system-context.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
@@ -7,14 +11,9 @@ import {
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
-import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable, runOpenClawChat } from './openclaw-adapter.js';
+import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
 import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import type { ChatOutput } from './knowledge-output.js';
-import {
-  buildFullModeOperationResultBlock,
-  buildFullModeSystemContextBlock,
-} from './full-mode-system-context.js';
-import { runFullModeSystemOperationIfNeeded } from './full-mode-system-operations.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
@@ -27,6 +26,8 @@ export type ChatRequestInput = {
   confirmedRequest?: string;
   preferredLibraries?: Array<{ key: string; label: string }>;
   conversationState?: unknown;
+  systemConstraints?: string;
+  confirmedAction?: 'openclaw_action' | 'template_output';
 };
 
 function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
@@ -65,8 +66,8 @@ function buildFallbackResponse(
 } {
   const content = buildCloudUnavailableAnswer();
   return {
-    mode: 'fallback' as const,
-    intent: requestMode === 'general' ? ('general' as const) : ('report' as const),
+    mode: 'fallback',
+    intent: requestMode === 'general' ? 'general' : 'report',
     content,
     output: { type: 'answer', content },
     libraries: [],
@@ -87,9 +88,13 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const existingState = requestMode === 'knowledge_output'
     ? parseKnowledgeConversationState(input.conversationState)
     : null;
-  const systemContextBlocks = intelligence.mode === 'full'
-    ? [buildFullModeSystemContextBlock(intelligence.capabilities)]
-    : [];
+  const systemContextBlocks = [
+    buildSystemCapabilityContextBlock({
+      mode: intelligence.mode,
+      capabilities: intelligence.capabilities,
+    }),
+    buildUserConstraintsContextBlock(input.systemConstraints),
+  ].filter(Boolean);
 
   let {
     mode,
@@ -105,52 +110,16 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let debug: Record<string, unknown> | null = null;
   let routeKind = 'general';
   let evidenceMode: string | null = null;
-  let intentContract: Record<string, unknown> | null = null;
   let savedReport: Record<string, unknown> | null = null;
+  let guard = {
+    requiresConfirmation: false,
+    reason: '',
+  };
+  let confirmation: Record<string, unknown> | null = null;
 
   if (gatewayConfigured) {
     try {
-      if (requestMode === 'general' && intelligence.mode === 'full') {
-        const operationSummary = await runFullModeSystemOperationIfNeeded(prompt);
-        if (operationSummary) {
-          const cloud = await runOpenClawChat({
-            prompt,
-            sessionUser: input.sessionUser,
-            chatHistory,
-            contextBlocks: [
-              ...systemContextBlocks,
-              buildFullModeOperationResultBlock(operationSummary),
-            ],
-          });
-          content = cloud.content;
-          output = { type: 'answer', content };
-          intent = 'general';
-          mode = cloud.provider === 'cloud-gateway' ? 'openclaw' : 'fallback';
-          routeKind = 'system_operation';
-          debug = {
-            systemOperation: operationSummary,
-          };
-        } else {
-          const result = await runGeneralKnowledgeAwareChat({
-            prompt,
-            chatHistory,
-            existingState,
-            sessionUser: input.sessionUser,
-            debugResumePage: input.debugResumePage === true,
-            systemContextBlocks,
-          });
-          libraries = result.libraries;
-          output = result.output;
-          content = result.content;
-          intent = result.intent;
-          mode = result.mode;
-          conversationState = result.conversationState;
-          debug = result.debug || null;
-          routeKind = result.routeKind || 'general';
-          evidenceMode = result.evidenceMode || null;
-          intentContract = result.intentContract || null;
-        }
-      } else if (requestMode === 'knowledge_plan') {
+      if (requestMode === 'knowledge_plan') {
         const result = await executeKnowledgePlan(prompt, chatHistory, input.sessionUser);
         libraries = result.libraries;
         knowledgePlan = result.knowledgePlan;
@@ -176,6 +145,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         mode = result.mode;
         reportTemplate = result.reportTemplate || null;
         debug = result.debug || null;
+        routeKind = 'knowledge_output';
       } else {
         const result = await runGeneralKnowledgeAwareChat({
           prompt,
@@ -184,6 +154,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           sessionUser: input.sessionUser,
           debugResumePage: input.debugResumePage === true,
           systemContextBlocks,
+          skipTemplateConfirmation: input.confirmedAction === 'openclaw_action',
         });
         libraries = result.libraries;
         output = result.output;
@@ -194,7 +165,11 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         debug = result.debug || null;
         routeKind = result.routeKind || 'general';
         evidenceMode = result.evidenceMode || null;
-        intentContract = result.intentContract || null;
+        guard = {
+          requiresConfirmation: Boolean(result.guard?.requiresConfirmation),
+          reason: String(result.guard?.reason || ''),
+        };
+        confirmation = result.guard?.confirmation || null;
       }
     } catch (error) {
       fallbackReason = summarizeError(error);
@@ -205,7 +180,11 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       conversationState = null;
       routeKind = 'general';
       evidenceMode = null;
-      intentContract = null;
+      guard = {
+        requiresConfirmation: false,
+        reason: '',
+      };
+      confirmation = null;
     }
   }
 
@@ -232,8 +211,8 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     savedReport,
     knowledgePlan,
     guard: {
-      requiresConfirmation: false,
-      reason: '',
+      requiresConfirmation: guard.requiresConfirmation,
+      reason: guard.reason,
     },
     traceId,
     message: {
@@ -242,6 +221,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       output,
       meta: mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用',
       references: [],
+      confirmation,
     },
     sources: [],
     permissions: {
@@ -257,7 +237,8 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       gatewayConfigured,
       intelligenceMode: intelligence.mode,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
-      intentContract,
+      searchEnabledByDefault: true,
+      nativeSearchPreferred: true,
     },
     debug,
     conversationState,

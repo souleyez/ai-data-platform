@@ -34,6 +34,18 @@ function normalizeNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function resolveGeneratedReportFormat(kind, incomingFormat, hasTable = false) {
+  const normalized = String(incomingFormat || '').trim();
+  if (normalized) return normalized;
+  if (hasTable || kind === 'table') return 'csv';
+  if (kind === 'page') return 'html';
+  if (kind === 'ppt') return 'pptx';
+  if (kind === 'pdf') return 'pdf';
+  if (kind === 'md') return 'md';
+  if (kind === 'doc') return 'docx';
+  return 'txt';
+}
+
 export function createGeneratedReportId() {
   return `report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -144,7 +156,7 @@ export function createGeneratedReport({ response, message, requestPrompt = '' })
     id: createGeneratedReportId(),
     title,
     kind: outputType,
-    format: output?.format || (outputType === 'table' ? 'csv' : outputType === 'page' ? 'html' : 'txt'),
+    format: resolveGeneratedReportFormat(outputType, output?.format, outputType === 'table'),
     source: 'chat',
     createdAt,
     content: output?.content || message?.content || '',
@@ -167,7 +179,7 @@ export function normalizeGeneratedReportRecord(item) {
     id: item?.id || createGeneratedReportId(),
     title: item?.title || '生成报表',
     kind: item?.kind || (item?.table ? 'table' : item?.page ? 'page' : 'page'),
-    format: item?.format || (item?.table ? 'csv' : 'html'),
+    format: resolveGeneratedReportFormat(item?.kind, item?.format, Boolean(item?.table)),
     source: item?.triggerSource || item?.source || 'chat',
     createdAt: item?.createdAt || new Date().toISOString(),
     summary: item?.summary || '',
@@ -483,7 +495,9 @@ export async function downloadGeneratedReportAs(item, mode = 'table') {
   }
 
   if (mode === 'text') {
-    downloadBlob(`${sanitizeFilename(item.title, 'report')}.txt`, buildPlainText(item), 'text/plain;charset=utf-8');
+    const extension = item?.kind === 'md' || item?.format === 'md' ? 'md' : 'txt';
+    const mimeType = extension === 'md' ? 'text/markdown;charset=utf-8' : 'text/plain;charset=utf-8';
+    downloadBlob(`${sanitizeFilename(item.title, 'report')}.${extension}`, buildPlainText(item), mimeType);
     return;
   }
 

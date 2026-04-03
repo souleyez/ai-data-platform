@@ -13,6 +13,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
       preferredLibraries?: Array<{ key?: string; label?: string }>;
       chatHistory?: Array<{ role?: string; content?: string }>;
       conversationState?: unknown;
+      systemConstraints?: string;
+      confirmedAction?: string;
     };
     let prompt = String(body.prompt || '').trim();
 
@@ -43,6 +45,10 @@ export async function registerChatRoutes(app: FastifyInstance) {
       sessionUser: body.sessionUser,
       debugResumePage: body.debugResumePage === true,
       conversationState: body.conversationState ?? null,
+      systemConstraints: String(body.systemConstraints || '').trim(),
+      confirmedAction: String(body.confirmedAction || '').trim() === 'openclaw_action'
+        ? 'openclaw_action'
+        : (String(body.confirmedAction || '').trim() === 'template_output' ? 'template_output' : undefined),
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory
           .map((item) => ({

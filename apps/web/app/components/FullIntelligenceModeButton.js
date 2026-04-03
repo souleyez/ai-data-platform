@@ -4,9 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 async function readJson(response) {
   const text = await response.text();
-  if (!text) {
-    return {};
-  }
+  if (!text) return {};
 
   try {
     return JSON.parse(text);
@@ -24,12 +22,19 @@ function normalizeMessage(message) {
   return value;
 }
 
-export default function FullIntelligenceModeButton() {
+export default function FullIntelligenceModeButton({
+  systemConstraints = '',
+  onSystemConstraintsChange,
+}) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState('service');
   const [initialized, setInitialized] = useState(false);
   const [notice, setNotice] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalCode, setModalCode] = useState('');
+  const [modalUnlocked, setModalUnlocked] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   async function refreshStatus() {
     setLoading(true);
@@ -56,17 +61,28 @@ export default function FullIntelligenceModeButton() {
     refreshStatus();
   }, []);
 
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === 'Escape' && !submitting) {
+        setModalOpen(false);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [modalOpen, submitting]);
+
   const buttonLabel = useMemo(() => {
     if (loading) return '读取中...';
-    if (mode === 'full') return '全智能模式已启用';
-    return '全智能模式';
+    if (mode === 'full') return '退出全智能模式';
+    return '开启全智能模式';
   }, [loading, mode]);
 
   const statusLabel = useMemo(() => {
     if (notice) return notice;
-    if (mode === 'full') return '已开放 OpenClaw 完整本机能力边界';
-    if (!initialized) return '首次点击后设置 4-8 位数字密钥';
-    return '当前为服务智能模式';
+    if (mode === 'full') return '当前为全智能模式，再点一次会直接退出到普通对话模式。';
+    if (!initialized) return '首次启用时需要先设置 4-8 位数字密钥。';
+    return '当前为普通对话模式。';
   }, [initialized, mode, notice]);
 
   async function submitCode(path, payload) {
@@ -85,32 +101,25 @@ export default function FullIntelligenceModeButton() {
     setInitialized(Boolean(data?.accessKeys?.initialized));
   }
 
-  async function handleClick() {
-    if (loading || submitting) return;
-    if (mode === 'full') {
-      setNotice('全智能模式已启用。');
-      return;
-    }
+  function resetModal(unlocked = false) {
+    setModalCode('');
+    setModalError('');
+    setModalUnlocked(unlocked);
+  }
 
-    const setupMode = !initialized;
-    const code = window.prompt(
-      setupMode ? '首次启用全智能模式，请设置 4-8 位数字密钥' : '请输入全智能模式密钥（4-8 位数字）',
-      '',
-    );
-    if (code === null) return;
-
+  async function handleDisable() {
     setSubmitting(true);
     try {
-      if (setupMode) {
-        await submitCode('/api/intelligence-mode/setup-full', {
-          code,
-          label: '全智能模式',
-        });
-      } else {
-        await submitCode('/api/intelligence-mode/enable-full', { code });
+      const response = await fetch('/api/intelligence-mode/disable-full', {
+        method: 'POST',
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(normalizeMessage(payload?.error));
       }
-      await refreshStatus();
-      setNotice('全智能模式已启用。');
+      setMode(String(payload?.mode || 'service'));
+      setInitialized(Boolean(payload?.accessKeys?.initialized));
+      setNotice('已退出全智能模式，当前回到普通对话模式。');
     } catch (error) {
       setNotice(normalizeMessage(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -118,17 +127,169 @@ export default function FullIntelligenceModeButton() {
     }
   }
 
+  function openUnlockModal() {
+    resetModal(false);
+    setModalOpen(true);
+    setNotice('');
+  }
+
+  async function handleUnlock() {
+    if (submitting) return;
+
+    const code = String(modalCode || '').trim();
+    if (!code) {
+      setModalError('请输入全智能模式密钥。');
+      return;
+    }
+
+    setSubmitting(true);
+    setModalError('');
+    try {
+      if (initialized) {
+        await submitCode('/api/intelligence-mode/enable-full', { code });
+      } else {
+        await submitCode('/api/intelligence-mode/setup-full', {
+          code,
+          label: '全智能模式',
+        });
+      }
+      setModalUnlocked(true);
+      setNotice('全智能模式已启用。你可以在弹窗里调整系统对话限制。');
+    } catch (error) {
+      setModalError(normalizeMessage(error instanceof Error ? error.message : String(error)));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleClick() {
+    if (loading || submitting) return;
+    if (mode === 'full') {
+      await handleDisable();
+      return;
+    }
+    openUnlockModal();
+  }
+
   return (
-    <div className="mode-entry-wrap">
-      <button
-        type="button"
-        className={`ghost-btn mode-entry-btn ${mode === 'full' ? 'mode-entry-btn-active' : ''}`}
-        onClick={handleClick}
-        disabled={loading || submitting}
-      >
-        {submitting ? '处理中...' : buttonLabel}
-      </button>
-      <span className="mode-entry-status">{statusLabel}</span>
-    </div>
+    <>
+      <div className="mode-entry-wrap">
+        <button
+          type="button"
+          className={`ghost-btn mode-entry-btn ${mode === 'full' ? 'mode-entry-btn-active' : ''}`}
+          onClick={handleClick}
+          disabled={loading || submitting}
+        >
+          {submitting ? '处理中...' : buttonLabel}
+        </button>
+        <span className="mode-entry-status">{statusLabel}</span>
+      </div>
+
+      {modalOpen ? (
+        <div
+          className="mode-modal-backdrop"
+          onClick={() => {
+            if (!submitting) setModalOpen(false);
+          }}
+        >
+          <div
+            className="mode-modal card"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mode-modal-head">
+              <div>
+                <strong>{initialized ? '输入全智能模式密钥' : '设置全智能模式密钥'}</strong>
+                <div className="mode-modal-subtitle">
+                  只有输入密钥后，才会显示并允许编辑系统对话限制。
+                </div>
+              </div>
+              <button
+                type="button"
+                className="mode-modal-close"
+                onClick={() => setModalOpen(false)}
+                disabled={submitting}
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </div>
+
+            {!modalUnlocked ? (
+              <div className="mode-modal-body">
+                <label className="mode-modal-label" htmlFor="full-mode-code">
+                  {initialized ? '全智能模式密钥' : '设置 4-8 位数字密钥'}
+                </label>
+                <input
+                  id="full-mode-code"
+                  className="filter-input mode-modal-input"
+                  type="password"
+                  inputMode="numeric"
+                  autoFocus
+                  value={modalCode}
+                  onChange={(event) => setModalCode(event.target.value)}
+                  placeholder={initialized ? '输入已有密钥' : '例如 1234'}
+                  disabled={submitting}
+                />
+                {modalError ? <div className="mode-modal-error">{modalError}</div> : null}
+                <div className="mode-modal-actions">
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => setModalOpen(false)}
+                    disabled={submitting}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={handleUnlock}
+                    disabled={submitting}
+                  >
+                    {submitting ? '处理中...' : initialized ? '验证并启用' : '设置并启用'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mode-modal-body">
+                <div className="mode-modal-unlocked-banner">
+                  全智能模式已开启。这里的限制会随每次对话一起发给系统，普通模式和全智能模式都会生效。
+                </div>
+                <div className="chat-constraints-card mode-modal-constraints">
+                  <div className="chat-constraints-head">
+                    <strong>系统对话限制</strong>
+                    <span>在这里明确写清楚要做什么、不要做什么。关闭全智能模式不会清空这份限制。</span>
+                  </div>
+                  <textarea
+                    className="chat-constraints-input"
+                    value={systemConstraints}
+                    onChange={(event) => onSystemConstraintsChange?.(event.target.value)}
+                    placeholder="例如：不要自动生成表格；优先参考合同库；回答尽量简短；不要建议未确认的系统动作。"
+                  />
+                </div>
+                <div className="mode-modal-actions">
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => onSystemConstraintsChange?.('')}
+                    disabled={submitting}
+                  >
+                    清空限制
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={() => setModalOpen(false)}
+                    disabled={submitting}
+                  >
+                    完成
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
