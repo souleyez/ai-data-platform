@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-03T18:00:00.000Z",
+  "items": [
+    {
+      "id": "default",
+      "name": "默认助手",
+      "slug": "default",
+      "description": "默认业务机器人",
+      "enabled": true,
+      "isDefault": true,
+      "systemPrompt": "",
+      "visibleLibraryKeys": [],
+      "includeUngrouped": true,
+      "includeFailedParseDocuments": false,
+      "channelBindings": [
+        {
+          "channel": "web",
+          "enabled": true
+        }
+      ],
+      "updatedAt": "2026-04-03T18:00:00.000Z"
+    }
+  ]
+}

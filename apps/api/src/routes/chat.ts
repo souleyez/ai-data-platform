@@ -15,6 +15,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       conversationState?: unknown;
       systemConstraints?: string;
       confirmedAction?: string;
+      botId?: string;
     };
     let prompt = String(body.prompt || '').trim();
 
@@ -46,6 +47,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       debugResumePage: body.debugResumePage === true,
       conversationState: body.conversationState ?? null,
       systemConstraints: String(body.systemConstraints || '').trim(),
+      botId: String(body.botId || '').trim() || undefined,
       confirmedAction: String(body.confirmedAction || '').trim() === 'openclaw_action'
         ? 'openclaw_action'
         : (String(body.confirmedAction || '').trim() === 'template_output' ? 'template_output' : undefined),

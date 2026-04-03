@@ -38,6 +38,29 @@ export async function fetchReportsSnapshot() {
   return parseApiResponse(response, 'load reports failed');
 }
 
+export async function fetchBots() {
+  const response = await fetch(buildApiUrl('/api/bots'), { cache: 'no-store' });
+  return parseApiResponse(response, 'load bots failed');
+}
+
+export async function createBot(payload) {
+  const response = await fetch(buildApiUrl('/api/bots'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'create bot failed');
+}
+
+export async function updateBot(botId, payload) {
+  const response = await fetch(buildApiUrl(`/api/bots/${encodeURIComponent(botId)}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'update bot failed');
+}
+
 export async function uploadDocuments(formData) {
   const response = await fetch(buildApiUrl('/api/documents/upload'), {
     method: 'POST',
@@ -62,6 +85,7 @@ export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
       confirmedAction: options.confirmedAction || '',
       preferredLibraries: Array.isArray(options.preferredLibraries) ? options.preferredLibraries : [],
       systemConstraints: options.systemConstraints || '',
+      botId: options.botId || '',
     }),
   });
   return parseApiResponse(response, 'chat api failed');

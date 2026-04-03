@@ -4,6 +4,7 @@ import { registerCapabilitiesRoutes } from './routes/capabilities.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAccessKeyRoutes } from './routes/access-keys.js';
 import { registerAuditRoutes } from './routes/audit.js';
+import { registerBotRoutes } from './routes/bots.js';
 import { registerDatasourceRoutes } from './routes/datasources.js';
 import { registerDocumentRoutes } from './routes/documents.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -47,6 +48,7 @@ export function createApp() {
   });
 
   app.register(registerAccessKeyRoutes, { prefix: '/api' });
+  app.register(registerBotRoutes, { prefix: '/api' });
   app.register(registerCapabilitiesRoutes, { prefix: '/api' });
   app.register(registerHealthRoutes, { prefix: '/api' });
   app.register(registerIntelligenceModeRoutes, { prefix: '/api' });

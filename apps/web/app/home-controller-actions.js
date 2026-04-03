@@ -85,6 +85,7 @@ function buildChatOptions(context, overrides = {}) {
     confirmedAction: overrides.confirmedAction || '',
     preferredLibraries: Array.isArray(overrides.preferredLibraries) ? overrides.preferredLibraries : [],
     systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
+    botId: overrides.botId ?? context.selectedBotId ?? '',
   };
 }
 

@@ -16,6 +16,7 @@ import {
   selectOpenClawMemoryDocumentCandidatesFromState,
   type OpenClawMemorySelection,
 } from './openclaw-memory-selection.js';
+import type { BotDefinition } from './bot-definitions.js';
 import type {
   OpenClawMemoryChange,
   OpenClawMemoryState,
@@ -102,6 +103,7 @@ export type KnowledgeExecutionInput = {
   sessionUser?: string;
   debugResumePage?: boolean;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
+  botDefinition?: BotDefinition | null;
 };
 
 export type ResumePageDebugTrace = {
@@ -162,6 +164,7 @@ export type KnowledgeAnswerInput = {
   sessionUser?: string;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   answerMode?: 'catalog_memory' | 'live_detail';
+  botDefinition?: BotDefinition | null;
 };
 
 export type KnowledgeAnswerResult = {
@@ -475,6 +478,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     preferredLibraries: input.preferredLibraries,
     timeRange: input.timeRange,
     contentFocus: input.contentFocus,
+    botDefinition: input.botDefinition,
   });
 
   const selectedTemplates = requestedTemplateKey
@@ -501,6 +505,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     limit: isOrderInventoryPageRequest
       ? ORDER_OUTPUT_MEMORY_LIMIT
       : (requestedKind === 'page' ? 10 : 8),
+    botId: input.botDefinition?.id,
   });
   const supply = await prepareKnowledgeRetrieval({
     requestText,
@@ -835,7 +840,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
 export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promise<KnowledgeAnswerResult> {
   const requestText = String(input.prompt || '').trim();
   const preferLiveDetail = (input.answerMode || 'live_detail') === 'live_detail';
-  const memoryState = await loadOpenClawMemorySelectionState();
+  const memoryState = await loadOpenClawMemorySelectionState(input.botDefinition?.id);
   const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
     state: memoryState,
     requestText,
@@ -857,6 +862,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
       docLimit: 5,
       evidenceLimit: 6,
       preferredDocumentIds: memorySelection.documentIds,
+      botDefinition: input.botDefinition,
     });
     libraries = supply.libraries;
     knowledgeChatHistory = supply.knowledgeChatHistory;

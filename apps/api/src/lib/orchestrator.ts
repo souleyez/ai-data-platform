@@ -1,8 +1,10 @@
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
 import {
+  buildBotIdentityContextBlock,
   buildSystemCapabilityContextBlock,
   buildUserConstraintsContextBlock,
 } from './chat-system-context.js';
+import { resolveBotDefinition } from './bot-definitions.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
@@ -28,6 +30,7 @@ export type ChatRequestInput = {
   conversationState?: unknown;
   systemConstraints?: string;
   confirmedAction?: 'openclaw_action' | 'template_output';
+  botId?: string;
 };
 
 function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
@@ -83,6 +86,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const gatewayReachable = await isOpenClawGatewayReachable();
   const gatewayConfigured = gatewayReachable || isOpenClawGatewayConfigured();
   const intelligence = await getIntelligenceModeStatus();
+  const botDefinition = await resolveBotDefinition(input.botId);
   const traceId = `trace_${Date.now()}`;
   const requestMode = input.mode || 'general';
   const existingState = requestMode === 'knowledge_output'
@@ -92,6 +96,10 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     buildSystemCapabilityContextBlock({
       mode: intelligence.mode,
       capabilities: intelligence.capabilities,
+    }),
+    buildBotIdentityContextBlock({
+      bot: botDefinition,
+      channel: 'web',
     }),
     buildUserConstraintsContextBlock(input.systemConstraints),
   ].filter(Boolean);
@@ -137,6 +145,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           sessionUser: input.sessionUser,
           debugResumePage: input.debugResumePage === true,
           chatHistory,
+          botDefinition,
         });
         libraries = result.libraries;
         output = result.output;
@@ -155,6 +164,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           debugResumePage: input.debugResumePage === true,
           systemContextBlocks,
           skipTemplateConfirmation: input.confirmedAction === 'openclaw_action',
+          botDefinition,
         });
         libraries = result.libraries;
         output = result.output;
@@ -239,7 +249,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
-    },
+      botId: botDefinition?.id || '',
+      botName: botDefinition?.name || '',
+      },
     debug,
     conversationState,
     latencyMs: 120,

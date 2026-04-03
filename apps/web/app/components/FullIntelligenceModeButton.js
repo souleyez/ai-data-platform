@@ -19,12 +19,15 @@ function normalizeMessage(message) {
   if (value === 'invalid access key code') return '密钥需为 4-8 位数字。';
   if (value === 'invalid access key') return '密钥不正确。';
   if (value === 'full mode already initialized') return '全智能模式已经初始化。';
+  if (value === 'full mode access key is required') return '需要先输入全智能模式密钥。';
   return value;
 }
 
 export default function FullIntelligenceModeButton({
   systemConstraints = '',
   onSystemConstraintsChange,
+  botConfigSlot = null,
+  onAccessStateChange,
 }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -80,7 +83,7 @@ export default function FullIntelligenceModeButton({
 
   const statusLabel = useMemo(() => {
     if (notice) return notice;
-    if (mode === 'full') return '当前为全智能模式，再点一次会直接退出到普通对话模式。';
+    if (mode === 'full') return '当前已是全智能模式，再点一次会直接退回普通对话模式。';
     if (!initialized) return '首次启用时需要先设置 4-8 位数字密钥。';
     return '当前为普通对话模式。';
   }, [initialized, mode, notice]);
@@ -119,7 +122,9 @@ export default function FullIntelligenceModeButton({
       }
       setMode(String(payload?.mode || 'service'));
       setInitialized(Boolean(payload?.accessKeys?.initialized));
+      setModalUnlocked(false);
       setNotice('已退出全智能模式，当前回到普通对话模式。');
+      await onAccessStateChange?.();
     } catch (error) {
       setNotice(normalizeMessage(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -153,8 +158,9 @@ export default function FullIntelligenceModeButton({
           label: '全智能模式',
         });
       }
+      await onAccessStateChange?.();
       setModalUnlocked(true);
-      setNotice('全智能模式已启用。你可以在弹窗里调整系统对话限制。');
+      setNotice('全智能模式已启用。你可以在弹窗里调整系统限制和 Bot 配置。');
     } catch (error) {
       setModalError(normalizeMessage(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -200,7 +206,7 @@ export default function FullIntelligenceModeButton({
               <div>
                 <strong>{initialized ? '输入全智能模式密钥' : '设置全智能模式密钥'}</strong>
                 <div className="mode-modal-subtitle">
-                  只有输入密钥后，才会显示并允许编辑系统对话限制。
+                  只有通过密钥验证后，才会显示系统限制和 Bot 配置入口。
                 </div>
               </div>
               <button
@@ -253,12 +259,12 @@ export default function FullIntelligenceModeButton({
             ) : (
               <div className="mode-modal-body">
                 <div className="mode-modal-unlocked-banner">
-                  全智能模式已开启。这里的限制会随每次对话一起发给系统，普通模式和全智能模式都会生效。
+                  全智能模式已开启。这里的限制和 Bot 配置只在全智能模式下开放编辑。
                 </div>
                 <div className="chat-constraints-card mode-modal-constraints">
                   <div className="chat-constraints-head">
                     <strong>系统对话限制</strong>
-                    <span>在这里明确写清楚要做什么、不要做什么。关闭全智能模式不会清空这份限制。</span>
+                    <span>明确写清楚要做什么、不要做什么。关闭全智能模式不会自动清空这份限制。</span>
                   </div>
                   <textarea
                     className="chat-constraints-input"
@@ -267,6 +273,7 @@ export default function FullIntelligenceModeButton({
                     placeholder="例如：不要自动生成表格；优先参考合同库；回答尽量简短；不要建议未确认的系统动作。"
                   />
                 </div>
+                {botConfigSlot}
                 <div className="mode-modal-actions">
                   <button
                     type="button"

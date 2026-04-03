@@ -24,6 +24,8 @@ storage/config/intelligence-mode.json
 storage/config/document-library-public-links.json
 storage/config/openclaw-memory-catalog.json
 storage/config/openclaw-memory-sync-status.json
+storage/config/bots.json
+storage/config/bots/
 storage/config/datasources/
 memory/catalog/
 tmp/

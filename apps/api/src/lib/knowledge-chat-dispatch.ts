@@ -4,6 +4,7 @@ import {
   prepareKnowledgeSupply,
   type KnowledgeLibraryRef,
 } from './knowledge-supply.js';
+import type { BotDefinition } from './bot-definitions.js';
 import {
   buildOpenClawMemorySelectionContextBlock,
   loadOpenClawMemorySelectionState,
@@ -69,10 +70,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
   debugResumePage?: boolean;
   systemContextBlocks?: string[];
   skipTemplateConfirmation?: boolean;
+  botDefinition?: BotDefinition | null;
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
-  const memoryState = await loadOpenClawMemorySelectionState();
+  const memoryState = await loadOpenClawMemorySelectionState(input.botDefinition?.id);
   const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
     state: memoryState,
     requestText,
@@ -84,6 +86,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     docLimit: 5,
     evidenceLimit: 6,
     preferredDocumentIds: memorySelection.documentIds,
+    botDefinition: input.botDefinition,
   });
 
   const knowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
@@ -134,10 +137,13 @@ export async function runGeneralKnowledgeAwareChat(input: {
       intent: 'general',
       mode: 'openclaw',
       debug: {
-        memorySelectedDocuments: memorySelection.documentIds.length,
-        supplyDocuments: supply.effectiveRetrieval.documents.length,
-        supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
-      },
+      memorySelectedDocuments: memorySelection.documentIds.length,
+      supplyDocuments: supply.effectiveRetrieval.documents.length,
+      supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      botId: input.botDefinition?.id || '',
+      botName: input.botDefinition?.name || '',
+      visibleLibraries: input.botDefinition?.visibleLibraryKeys || [],
+    },
       conversationState: null,
       routeKind: 'template_confirmation',
       evidenceMode: 'supply_only',
@@ -168,6 +174,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
+      botId: input.botDefinition?.id || '',
+      botName: input.botDefinition?.name || '',
+      visibleLibraries: input.botDefinition?.visibleLibraryKeys || [],
     },
     conversationState: null,
     routeKind: 'general',

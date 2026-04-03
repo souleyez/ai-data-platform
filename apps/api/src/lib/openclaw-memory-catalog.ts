@@ -20,6 +20,7 @@ import {
   type OpenClawMemoryDocumentState,
   type OpenClawMemoryState,
 } from './openclaw-memory-changes.js';
+import { refreshBotMemoryCatalogs } from './bot-memory-catalog.js';
 
 const CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
 const LIBRARIES_DIR = path.join(CATALOG_ROOT, 'libraries');
@@ -841,6 +842,7 @@ export async function refreshOpenClawMemoryCatalog() {
   });
   await writeCatalogFiles(snapshot, nextState);
   await writeState(nextState);
+  const botRefresh = await refreshBotMemoryCatalogs(nextState);
   return {
     generatedAt: snapshot.generatedAt,
     libraryCount: snapshot.libraryCount,
@@ -849,6 +851,7 @@ export async function refreshOpenClawMemoryCatalog() {
     outputCount: snapshot.outputCount,
     changeCount: nextState.recentChanges.length,
     changedThisRun: nextState.recentChanges.filter((item) => item.happenedAt === snapshot.generatedAt).length,
+    botCount: botRefresh.botCount,
     memoryRoot: CATALOG_ROOT,
   };
 }

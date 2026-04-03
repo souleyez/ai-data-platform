@@ -8,6 +8,7 @@ import {
   prepareKnowledgeScope,
   prepareKnowledgeRetrieval,
 } from '../src/lib/knowledge-supply.js';
+import type { BotDefinition } from '../src/lib/bot-definitions.js';
 import { buildDocumentId } from '../src/lib/document-store.js';
 import { STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR } from '../src/lib/paths.js';
 
@@ -431,6 +432,82 @@ test('prepareKnowledgeScope should honor preferred document ids before fallback 
     assert.equal(scope.scopedItems.length, 2);
     assert.equal(scope.scopedItems[0]?.title, 'contract-b');
     assert.equal(scope.scopedItems[1]?.title, 'contract-a');
+  });
+});
+
+test('prepareKnowledgeScope should enforce bot visibility before recent parsed fallback', async () => {
+  const bot: BotDefinition = {
+    id: 'resume-bot',
+    name: '简历助理',
+    slug: 'resume-bot',
+    description: '',
+    enabled: true,
+    isDefault: false,
+    systemPrompt: '',
+    visibleLibraryKeys: ['resume'],
+    includeUngrouped: false,
+    includeFailedParseDocuments: false,
+    channelBindings: [{ channel: 'web', enabled: true }],
+    updatedAt: '2026-04-03T18:00:00.000Z',
+  };
+
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-04-03T10:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 2,
+    scanSignature: 'bot-scope-recent-parsed',
+    items: [
+      {
+        path: 'C:\\uploads\\1743660000000-contract-a.png',
+        name: '1743660000000-contract-a.png',
+        ext: '.png',
+        title: 'contract-a',
+        category: 'contract',
+        bizCategory: 'contract',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-03T09:00:00.000Z',
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+      },
+      {
+        path: 'C:\\uploads\\1743663600000-resume-a.txt',
+        name: '1743663600000-resume-a.txt',
+        ext: '.txt',
+        title: 'resume-a',
+        category: 'resume',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-03T10:00:00.000Z',
+        groups: ['resume'],
+        confirmedGroups: ['resume'],
+      },
+    ],
+  }, async () => {
+    await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
+      scanRoot: 'C:\\uploads',
+      scanRoots: ['C:\\uploads'],
+      categories: {
+        contract: { label: '合同协议' },
+        resume: { label: '人才简历' },
+      },
+      customCategories: [],
+      updatedAt: '2026-04-03T10:00:00.000Z',
+    }, null, 2), 'utf8');
+
+    const scope = await prepareKnowledgeScope({
+      requestText: 'show the most recently parsed document',
+      chatHistory: [],
+      botDefinition: bot,
+    });
+
+    assert.deepEqual(scope.libraries, [{ key: 'resume', label: '人才简历' }]);
+    assert.equal(scope.scopedItems.length, 1);
+    assert.equal(scope.scopedItems[0]?.title, 'resume-a');
   });
 });
 

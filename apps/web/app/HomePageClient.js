@@ -1,5 +1,7 @@
 'use client';
 
+import BotConfigPanel from './components/BotConfigPanel';
+import BotSelector from './components/BotSelector';
 import ChatPanel from './components/ChatPanel';
 import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
 import InsightPanel from './components/InsightPanel';
@@ -20,17 +22,21 @@ function buildTopSummary(documentTotal, documentLibraries) {
 
   const prefix = `已管理文档 ${documentTotal} 份，知识库 ${libraries.length} 个`;
   if (!visibleNames) {
-    return `${prefix}。普通对话默认只做供料，不再强行编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
+    return `${prefix}。普通对话默认只做供料，不再强制编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
   }
 
-  return `${prefix}，当前重点包括 ${visibleNames}${libraries.length > 3 ? ' 等' : ''}。普通对话默认只做供料，不再强行编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
+  return `${prefix}，当前重点包括 ${visibleNames}${libraries.length > 3 ? ' 等' : ''}。普通对话默认只做供料，不再强制编排；只有命中库内资料模板输出时，才会先让你确认两种执行方式。`;
 }
 
 export default function HomePageClient({ initialModelState }) {
   const {
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
+    botItems,
+    botLoading,
+    botManageEnabled,
     confirmTemplateOption,
+    createBotDefinition,
     deleteReport,
     documentLibraries,
     documentTotal,
@@ -38,14 +44,17 @@ export default function HomePageClient({ initialModelState }) {
     input,
     isLoading,
     messages,
+    refreshBots,
     reportCollapsed,
     reportItems,
     reviseReport,
     runDocumentUpload,
+    selectedBotId,
     selectedManualLibraries,
     selectedReportId,
     setInput,
     setReportCollapsed,
+    setSelectedBotId,
     setSelectedManualLibraries,
     setSelectedReportId,
     setSystemConstraints,
@@ -53,6 +62,7 @@ export default function HomePageClient({ initialModelState }) {
     submitCredentialForMessage,
     submitQuestion,
     systemConstraints,
+    updateBotDefinition,
     uploadInputRef,
     uploadLoading,
   } = useHomePageController();
@@ -67,10 +77,27 @@ export default function HomePageClient({ initialModelState }) {
             <h2>智能助手</h2>
             <span className="topbar-inline-note">{buildTopSummary(documentTotal, documentLibraries)}</span>
           </div>
-          <div className="topbar-actions">
+          <div className="topbar-actions topbar-actions-bots">
+            <BotSelector
+              items={botItems}
+              value={selectedBotId}
+              onChange={setSelectedBotId}
+              loading={botLoading}
+            />
             <FullIntelligenceModeButton
               systemConstraints={systemConstraints}
               onSystemConstraintsChange={setSystemConstraints}
+              onAccessStateChange={refreshBots}
+              botConfigSlot={(
+                <BotConfigPanel
+                  items={botItems}
+                  libraries={documentLibraries}
+                  manageEnabled={botManageEnabled}
+                  loading={botLoading}
+                  onCreate={createBotDefinition}
+                  onUpdate={updateBotDefinition}
+                />
+              )}
             />
           </div>
         </header>

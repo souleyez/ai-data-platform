@@ -112,6 +112,40 @@ button, textarea { font: inherit; }
 }
 .topbar p { margin: 8px 0 0; color: var(--subtle); max-width: 780px; }
 .topbar-actions { display: flex; gap: 12px; }
+.topbar-actions-bots {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.bot-selector-card {
+  min-width: 280px;
+  max-width: 320px;
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: rgba(255, 255, 255, 0.92);
+}
+.bot-selector-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+.bot-selector-input {
+  min-width: 0;
+}
+.bot-selector-meta {
+  display: grid;
+  gap: 4px;
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.bot-selector-meta strong {
+  color: var(--text);
+  font-size: 13px;
+}
 .mode-entry-wrap {
   display: grid;
   justify-items: end;
@@ -207,6 +241,155 @@ button, textarea { font: inherit; }
 }
 .mode-modal-constraints {
   margin: 0;
+}
+.bot-config-card {
+  display: grid;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
+}
+.bot-config-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.bot-config-section {
+  display: grid;
+  gap: 12px;
+}
+.bot-config-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+.bot-config-list {
+  display: grid;
+  gap: 12px;
+}
+.bot-config-subtle {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.bot-config-success,
+.bot-config-error,
+.bot-config-empty {
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.bot-config-success {
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  background: rgba(22, 163, 74, 0.08);
+  color: #166534;
+}
+.bot-config-error {
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+}
+.bot-config-empty {
+  border: 1px dashed #cbd5e1;
+  background: #fff;
+  color: var(--subtle);
+}
+.bot-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: rgba(255, 255, 255, 0.94);
+}
+.bot-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.bot-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.bot-field {
+  display: grid;
+  gap: 8px;
+}
+.bot-field span,
+.bot-chip-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+.bot-field input,
+.bot-field textarea {
+  width: 100%;
+  border: 1px solid #dbe7f5;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  padding: 10px 12px;
+}
+.bot-field textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.bot-field-span {
+  grid-column: span 2;
+}
+.bot-toggle-row {
+  display: flex;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+.bot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid #dbe7f5;
+  background: #f8fbff;
+  font-size: 13px;
+  color: #334155;
+}
+.bot-chip-group {
+  display: grid;
+  gap: 10px;
+}
+.bot-chip-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bot-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #dbe7f5;
+  background: #fff;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+.bot-chip.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.bot-chip input {
+  margin: 0;
+}
+.bot-config-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cursor: pointer; }
 .primary-btn { background: var(--primary); color: white; }
@@ -1384,11 +1567,15 @@ th { color: var(--subtle); font-weight: 600; }
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .topbar { flex-direction: column; }
+  .topbar-actions-bots { justify-content: stretch; }
+  .bot-selector-card { max-width: none; width: 100%; }
   .stats-grid { grid-template-columns: 1fr; }
   .chat-input-row { grid-template-columns: 1fr; }
   .capture-form-row { grid-template-columns: 1fr; }
   .workbench-toolbar { align-items: flex-start; flex-direction: column; }
   .chat-composer-wrap { position: sticky; bottom: 0; }
+  .bot-field-grid { grid-template-columns: 1fr; }
+  .bot-field-span { grid-column: span 1; }
 }
 
 .shared-report-shell {

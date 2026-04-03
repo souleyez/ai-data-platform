@@ -6,6 +6,8 @@ import {
   UNGROUPED_LIBRARY_LABEL,
 } from './document-libraries.js';
 import { buildDocumentId, loadParsedDocuments } from './document-store.js';
+import type { BotDefinition } from './bot-definitions.js';
+import { filterDocumentsForBot, filterLibrariesForBot } from './bot-visibility.js';
 import {
   buildKnowledgeRetrievalQuery,
   buildLibraryFallbackRetrieval,
@@ -442,6 +444,7 @@ async function resolveKnowledgeScope(
   timeRange?: string,
   contentFocus?: string,
   preferredDocumentIds?: string[],
+  botDefinition?: BotDefinition | null,
 ) {
   const [documentLibraries, documentState] = await Promise.all([
     loadDocumentLibraries(),
@@ -452,23 +455,29 @@ async function resolveKnowledgeScope(
       ? preferredDocumentIds.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
   );
+  const visibleLibraries = botDefinition
+    ? filterLibrariesForBot(botDefinition, documentLibraries)
+    : documentLibraries;
+  const visibleItems = botDefinition
+    ? filterDocumentsForBot(botDefinition, documentState.items, documentLibraries)
+    : documentState.items;
 
   const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
   const preferredLabels = new Set(preferredLibraries.map((item) => item.label));
   const explicitCandidates = preferredKeys.size || preferredLabels.size
-    ? documentLibraries
+    ? visibleLibraries
         .filter((library) => preferredKeys.has(library.key) || preferredLabels.has(library.label))
         .map((library, index) => ({ library, score: 100 - index }))
     : [];
-  const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), documentLibraries);
+  const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), visibleLibraries);
   const candidates = explicitCandidates.length ? explicitCandidates : scoredCandidates;
   let libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
   const preferredScopedItems = preferredDocumentSet.size
-    ? documentState.items.filter((item) => preferredDocumentSet.has(buildDocumentId(item.path)))
+    ? visibleItems.filter((item) => preferredDocumentSet.has(buildDocumentId(item.path)))
     : [];
 
   const libraryScopedItems = candidates.length
-    ? documentState.items.filter((item) => candidates.some((candidate) => documentMatchesLibrary(item, candidate.library)))
+    ? visibleItems.filter((item) => candidates.some((candidate) => documentMatchesLibrary(item, candidate.library)))
     : [];
   const preferredItemsByFilters = preferredScopedItems.length
     ? prioritizeScopedItems(
@@ -491,7 +500,7 @@ async function resolveKnowledgeScope(
         )
         : buildFallbackScopedItems({
           requestText,
-          items: documentState.items,
+          items: visibleItems,
           timeRange,
           contentFocus,
         });
@@ -499,6 +508,7 @@ async function resolveKnowledgeScope(
   const scopedItems = baseScopedItems;
   if (!libraries.length && scopedItems.length) {
     const derivedLibraries = documentLibraries
+      .filter((library) => visibleLibraries.some((visible) => visible.key === library.key))
       .filter((library) => scopedItems.some((item) => documentMatchesLibrary(item, library)))
       .map((library) => ({ key: library.key, label: library.label }));
     if (derivedLibraries.length) {
@@ -506,7 +516,7 @@ async function resolveKnowledgeScope(
     }
   }
   if (!libraries.length && scopedItems.length) {
-    const ungroupedLibrary = documentLibraries.find((item) => item.key === UNGROUPED_LIBRARY_KEY);
+    const ungroupedLibrary = visibleLibraries.find((item) => item.key === UNGROUPED_LIBRARY_KEY);
     if (ungroupedLibrary && scopedItems.some((item) => documentMatchesLibrary(item, ungroupedLibrary))) {
       libraries = [{ key: UNGROUPED_LIBRARY_KEY, label: ungroupedLibrary.label || UNGROUPED_LIBRARY_LABEL }];
     }
@@ -522,6 +532,7 @@ export async function prepareKnowledgeScope(input: {
   timeRange?: string;
   contentFocus?: string;
   preferredDocumentIds?: string[];
+  botDefinition?: BotDefinition | null;
 }): Promise<KnowledgeScopeState> {
   const knowledgeChatHistory = buildKnowledgeChatHistory(input.chatHistory, input.requestText);
   const preferredLibraries = normalizePreferredLibraries(input.preferredLibraries);
@@ -532,6 +543,7 @@ export async function prepareKnowledgeScope(input: {
     input.timeRange,
     input.contentFocus,
     input.preferredDocumentIds,
+    input.botDefinition,
   );
 
   return {
@@ -613,6 +625,7 @@ export async function prepareKnowledgeSupply(input: {
   templateTaskHint?: KnowledgeTemplateTaskHint | null;
   templateSearchHints?: string[];
   preferredDocumentIds?: string[];
+  botDefinition?: BotDefinition | null;
 }): Promise<KnowledgeSupply> {
   const scopeState = await prepareKnowledgeScope(input);
   return prepareKnowledgeRetrieval({

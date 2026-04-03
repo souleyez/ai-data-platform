@@ -2,6 +2,7 @@ import type {
   IntelligenceCapabilities,
   IntelligenceMode,
 } from './intelligence-mode.js';
+import type { BotDefinition, BotChannel } from './bot-definitions.js';
 import { buildPlatformCapabilityContextLines } from './platform-capabilities.js';
 
 function normalizeConstraintText(value: string) {
@@ -42,5 +43,23 @@ export function buildUserConstraintsContextBlock(systemConstraints?: string) {
     'User-visible operating constraints for this conversation:',
     normalized,
     'Treat the constraints above as explicit do/don’t rules unless they conflict with real system permissions.',
+  ].join('\n');
+}
+
+export function buildBotIdentityContextBlock(input: {
+  bot: BotDefinition | null;
+  channel: BotChannel;
+}) {
+  if (!input.bot) return '';
+
+  return [
+    'Current bot identity:',
+    `Bot name: ${input.bot.name}`,
+    `Bot id: ${input.bot.id}`,
+    `Current channel: ${input.channel}`,
+    `Visible libraries: ${input.bot.visibleLibraryKeys.join(' | ') || 'none'}`,
+    `Include ungrouped: ${input.bot.includeUngrouped ? 'yes' : 'no'}`,
+    `Include failed parse documents: ${input.bot.includeFailedParseDocuments ? 'yes' : 'no'}`,
+    'You must behave as this bot, and must not imply access to knowledge outside the visible libraries above.',
   ].join('\n');
 }

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { loadBotMemorySelectionState } from './bot-memory-catalog.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
 import type { OpenClawMemoryDocumentState, OpenClawMemoryState } from './openclaw-memory-changes.js';
 
@@ -175,7 +176,10 @@ export function selectOpenClawMemoryDocumentCandidatesFromState(input: {
   };
 }
 
-export async function loadOpenClawMemorySelectionState() {
+export async function loadOpenClawMemorySelectionState(botId?: string) {
+  if (botId) {
+    return loadBotMemorySelectionState(botId);
+  }
   try {
     const raw = await fs.readFile(STATE_FILE, 'utf8');
     return JSON.parse(raw) as OpenClawMemoryState;
@@ -188,8 +192,9 @@ export async function selectOpenClawMemoryDocumentCandidates(input: {
   requestText: string;
   libraries?: KnowledgeLibrary[];
   limit?: number;
+  botId?: string;
 }) {
-  const state = await loadOpenClawMemorySelectionState();
+  const state = await loadOpenClawMemorySelectionState(input.botId);
   return selectOpenClawMemoryDocumentCandidatesFromState({
     state,
     requestText: input.requestText,
