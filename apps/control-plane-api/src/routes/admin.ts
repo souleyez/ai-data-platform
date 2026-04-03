@@ -3,6 +3,7 @@ import {
   createAdminModelProviderKey,
   createAdminRelease,
   createAdminUser,
+  getAdminReportGovernance,
   listAdminDevices,
   listAdminModelLeases,
   listAdminModelProviderKeys,
@@ -12,6 +13,7 @@ import {
   listAdminUsers,
   publishAdminRelease,
   updateAdminModelProviderKey,
+  updateAdminReportGovernance,
   updateAdminPolicy,
   updateAdminRelease,
   updateAdminUser,
@@ -207,6 +209,22 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return {
         status: 'ok',
         item: await updateAdminModelProviderKey(request.params.id, request.body),
+      };
+    } catch (error) {
+      return sendAdminError(reply, error);
+    }
+  });
+
+  app.get('/admin/report-governance', async () => ({
+    status: 'ok',
+    item: await getAdminReportGovernance(),
+  }));
+
+  app.put<{ Body: Record<string, unknown> }>('/admin/report-governance', async (request, reply) => {
+    try {
+      return {
+        status: 'ok',
+        item: await updateAdminReportGovernance(request.body),
       };
     } catch (error) {
       return sendAdminError(reply, error);

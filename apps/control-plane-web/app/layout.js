@@ -1,4 +1,5 @@
 import './globals.css';
+import ControlPlaneNav from './components/ControlPlaneNav';
 
 export const metadata = {
   title: 'AI Data Platform Control Plane',
@@ -11,7 +12,12 @@ export const revalidate = 0;
 export default function RootLayout({ children }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <div className="cp-app-shell">
+          <ControlPlaneNav />
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

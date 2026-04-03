@@ -1,0 +1,967 @@
+{
+  "version": 1,
+  "updatedAt": "",
+  "datasourceProfiles": [
+    {
+      "id": "default",
+      "label": "Default",
+      "matchKeywords": [],
+      "description": "{label} grouped output templates.",
+      "triggerKeywords": [],
+      "defaultTemplateSuffix": "table",
+      "templates": [
+        {
+          "suffix": "table",
+          "label": "Structured Table",
+          "type": "table",
+          "description": "Structured table output for {label}.",
+          "supported": true
+        },
+        {
+          "suffix": "static-page",
+          "label": "Static Page",
+          "type": "static-page",
+          "description": "Static page output for {label}.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for {label}.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "formula",
+      "label": "Formula",
+      "matchKeywords": ["formula", "奶粉配方", "配方建议", "健脑", "抗抑郁"],
+      "description": "{label} uses a formula-first output set.",
+      "triggerKeywords": ["formula", "奶粉配方", "配方建议", "健脑", "抗抑郁"],
+      "defaultTemplateSuffix": "table",
+      "templates": [
+        {
+          "suffix": "table",
+          "label": "Formula Table",
+          "type": "table",
+          "description": "Structured formula recommendation table with ingredients, dosage, use cases, and evidence.",
+          "supported": true
+        },
+        {
+          "suffix": "static-page",
+          "label": "Formula Static Page",
+          "type": "static-page",
+          "description": "Static page for a formula recommendation summary.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Formula PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for formula review and discussion.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "resume",
+      "label": "Resume",
+      "matchKeywords": ["resume", "cv", "简历", "候选人"],
+      "description": "{label} uses a resume comparison output set.",
+      "triggerKeywords": ["resume", "cv", "简历", "候选人"],
+      "defaultTemplateSuffix": "table",
+      "templates": [
+        {
+          "suffix": "table",
+          "label": "Resume Comparison Table",
+          "type": "table",
+          "description": "Candidate comparison table with education, company history, skills, age, and fit.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Resume PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for candidate review.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "order",
+      "label": "Order",
+      "matchKeywords": ["order", "订单", "销售", "电商", "库存"],
+      "description": "{label} uses an order operations output set.",
+      "triggerKeywords": ["order", "订单", "销售", "电商", "库存"],
+      "defaultTemplateSuffix": "static-page",
+      "templates": [
+        {
+          "suffix": "static-page",
+          "label": "Order Operations Page",
+          "type": "static-page",
+          "description": "Static operations page covering metrics, platform comparison, inventory, and actions.",
+          "supported": true
+        },
+        {
+          "suffix": "table",
+          "label": "Order Analysis Table",
+          "type": "table",
+          "description": "Structured order analysis table for platform, category, and inventory actions.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Order Operations PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for order operations review.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "bid",
+      "label": "Bid",
+      "matchKeywords": ["bid", "bids", "tender", "标书", "招标", "投标"],
+      "description": "{label} uses a bid response output set.",
+      "triggerKeywords": ["bid", "bids", "tender", "标书", "招标", "投标"],
+      "defaultTemplateSuffix": "table",
+      "templates": [
+        {
+          "suffix": "table",
+          "label": "Bid Response Table",
+          "type": "table",
+          "description": "Bid response table with section, response focus, required materials, risks, and evidence.",
+          "supported": true
+        },
+        {
+          "suffix": "static-page",
+          "label": "Bid Summary Page",
+          "type": "static-page",
+          "description": "Static page for bid summary, milestones, risks, and response priorities.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Bid PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for bid review.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "label": "Paper",
+      "matchKeywords": ["paper", "论文", "学术", "研究", "期刊", "文献"],
+      "description": "{label} uses a research review output set.",
+      "triggerKeywords": ["paper", "论文", "学术", "研究", "期刊", "文献"],
+      "defaultTemplateSuffix": "static-page",
+      "templates": [
+        {
+          "suffix": "static-page",
+          "label": "Research Review Page",
+          "type": "static-page",
+          "description": "Static page for research overview, methods, findings, indicators, and limitations.",
+          "supported": true
+        },
+        {
+          "suffix": "table",
+          "label": "Research Findings Table",
+          "type": "table",
+          "description": "Structured table for title, subject, method, findings, indicators, and evidence.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Research PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for paper review and research retrospectives.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "id": "iot",
+      "label": "IoT",
+      "matchKeywords": ["iot", "物联网", "设备", "网关", "平台", "解决方案"],
+      "description": "{label} uses an IoT solution output set.",
+      "triggerKeywords": ["iot", "物联网", "设备", "网关", "平台", "解决方案"],
+      "defaultTemplateSuffix": "static-page",
+      "templates": [
+        {
+          "suffix": "static-page",
+          "label": "IoT Solution Page",
+          "type": "static-page",
+          "description": "Static page for solution overview, modules, interfaces, implementation path, value, and risks.",
+          "supported": true
+        },
+        {
+          "suffix": "table",
+          "label": "IoT Solution Table",
+          "type": "table",
+          "description": "Structured table for modules, capability notes, devices, platforms, implementation points, and evidence.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "IoT PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for solution demos and pre-sales reviews.",
+          "supported": true
+        }
+      ]
+    }
+  ],
+  "templateProfiles": [
+    {
+      "id": "static-page-default",
+      "label": "Default static page",
+      "type": "static-page",
+      "matchKeywords": [],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable business page layout with summary, key metrics, sections, charts, and actions.",
+          "The output should be shareable as a page, not as a chat reply."
+        ],
+        "variableZones": [
+          "summary",
+          "metric cards",
+          "section details",
+          "action items",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a stable page-oriented report.",
+        "pageSections": [
+          "Summary",
+          "Key Metrics",
+          "Analysis",
+          "Actions",
+          "AI Analysis"
+        ]
+      }
+    },
+    {
+      "id": "static-page-order",
+      "label": "Order static page",
+      "type": "static-page",
+      "matchKeywords": ["order", "订单", "销售", "库存", "电商"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable order operations page layout with overview, metric cards, platform comparison, category comparison, inventory and actions.",
+          "Include trend interpretation and replenishment recommendations."
+        ],
+        "variableZones": [
+          "ops summary",
+          "metric cards",
+          "platform comparison",
+          "category comparison",
+          "inventory actions",
+          "ai analysis"
+        ],
+        "outputHint": "Generate an order operations page suitable for direct sharing.",
+        "pageSections": [
+          "经营摘要",
+          "平台对比",
+          "品类对比",
+          "库存与备货建议",
+          "异常波动说明",
+          "AI综合分析"
+        ]
+      }
+    },
+    {
+      "id": "static-page-bid",
+      "label": "Bid static page",
+      "type": "static-page",
+      "matchKeywords": ["bid", "tender", "标书", "招标", "投标"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable bid summary page layout with project overview, qualification checkpoints, milestones, response priorities, and risks.",
+          "Format the output like a concise bid brief instead of a free-form answer."
+        ],
+        "variableZones": [
+          "project summary",
+          "qualification checkpoints",
+          "milestones",
+          "response priorities",
+          "risk notes",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a bid summary page for internal review.",
+        "pageSections": [
+          "项目概况",
+          "资格条件",
+          "关键时间节点",
+          "应答重点",
+          "风险提醒",
+          "AI综合分析"
+        ]
+      }
+    },
+    {
+      "id": "static-page-formula",
+      "label": "Formula static page",
+      "type": "static-page",
+      "matchKeywords": ["formula", "配方", "奶粉"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable formula page layout with recommendation summary, core ingredients, audience, mechanism, evidence, and risks.",
+          "Keep the language professional and review-oriented."
+        ],
+        "variableZones": [
+          "formula summary",
+          "core ingredients",
+          "target audience",
+          "mechanism",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a formula recommendation page.",
+        "pageSections": [
+          "Recommendation Summary",
+          "Core Ingredients",
+          "Target Audience",
+          "Mechanism",
+          "Evidence",
+          "AI Analysis"
+        ]
+      }
+    },
+    {
+      "id": "static-page-paper",
+      "label": "Paper static page",
+      "type": "static-page",
+      "matchKeywords": ["paper", "论文", "学术", "研究"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable research review page layout with overview, method, findings, indicators, limitations, and risks.",
+          "Prefer evidence from parsed paper content."
+        ],
+        "variableZones": [
+          "research summary",
+          "methods",
+          "findings",
+          "indicators",
+          "limitations",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a research review page.",
+        "pageSections": [
+          "研究概览",
+          "方法设计",
+          "核心结论",
+          "关键指标与证据",
+          "局限与风险",
+          "AI综合分析"
+        ]
+      }
+    },
+    {
+      "id": "static-page-iot",
+      "label": "IoT static page",
+      "type": "static-page",
+      "matchKeywords": ["iot", "物联网", "设备", "网关", "解决方案"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable solution page layout with overview, modules, platforms or interfaces, implementation path, business value, and risks.",
+          "Format the output for internal review or pre-sales sharing."
+        ],
+        "variableZones": [
+          "solution summary",
+          "modules",
+          "platforms and interfaces",
+          "implementation path",
+          "business value",
+          "ai analysis"
+        ],
+        "outputHint": "Generate an IoT solution page.",
+        "pageSections": [
+          "方案概览",
+          "核心模块",
+          "平台与接口",
+          "实施路径",
+          "业务价值",
+          "AI综合分析"
+        ]
+      }
+    },
+    {
+      "id": "table-default",
+      "label": "Default table",
+      "type": "table",
+      "matchKeywords": [],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable table structure.",
+          "Put the conclusion first, then explanation and evidence."
+        ],
+        "variableZones": [
+          "column schema",
+          "row details",
+          "evidence strength",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a stable structured table.",
+        "tableColumns": [
+          "Conclusion",
+          "Explanation",
+          "Evidence"
+        ]
+      }
+    },
+    {
+      "id": "table-resume",
+      "label": "Resume table",
+      "type": "table",
+      "matchKeywords": ["resume", "cv", "简历", "候选人"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable comparison table and map one row to one candidate.",
+          "Do not fabricate missing fields."
+        ],
+        "variableZones": [
+          "screening scope",
+          "skill summary",
+          "fit judgment",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a resume comparison table.",
+        "tableColumns": [
+          "候选人",
+          "第一学历",
+          "最近就职公司",
+          "核心能力",
+          "年龄",
+          "工作年限",
+          "匹配判断",
+          "证据来源"
+        ]
+      }
+    },
+    {
+      "id": "table-bid",
+      "label": "Bid table",
+      "type": "table",
+      "matchKeywords": ["bid", "tender", "标书", "招标", "投标"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable bid response table and map one row to one section or response point.",
+          "Prefer evidence from tender files and templates."
+        ],
+        "variableZones": [
+          "section breakdown",
+          "response focus",
+          "required materials",
+          "risks",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a bid response table.",
+        "tableColumns": [
+          "Section",
+          "Response Focus",
+          "Required Materials",
+          "Risks",
+          "Evidence"
+        ]
+      }
+    },
+    {
+      "id": "table-formula",
+      "label": "Formula table",
+      "type": "table",
+      "matchKeywords": ["formula", "配方", "奶粉"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable formula table and map one row to one recommendation unit.",
+          "Prefer evidence from uploaded materials."
+        ],
+        "variableZones": [
+          "module breakdown",
+          "ingredients",
+          "dosage",
+          "selling points",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a formula recommendation table.",
+        "tableColumns": [
+          "Module",
+          "Ingredient",
+          "Dosage",
+          "Core Effect",
+          "Audience",
+          "Evidence",
+          "Notes"
+        ]
+      }
+    },
+    {
+      "id": "table-paper",
+      "label": "Paper table",
+      "type": "table",
+      "matchKeywords": ["paper", "论文", "学术", "研究"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable research table and map one row to one paper or one stable conclusion.",
+          "Prefer evidence from parsed paper content."
+        ],
+        "variableZones": [
+          "paper title",
+          "study subject",
+          "methods",
+          "findings",
+          "indicators",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a research findings table.",
+        "tableColumns": [
+          "Paper Title",
+          "Study Subject",
+          "Methods",
+          "Findings",
+          "Indicators",
+          "Evidence"
+        ]
+      }
+    },
+    {
+      "id": "table-iot",
+      "label": "IoT table",
+      "type": "table",
+      "matchKeywords": ["iot", "物联网", "设备", "网关", "解决方案"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable solution table and map one row to one module or one solution unit.",
+          "Prefer evidence from uploaded solution materials."
+        ],
+        "variableZones": [
+          "module",
+          "capability note",
+          "device or gateway",
+          "platform or interface",
+          "implementation points",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate an IoT solution table.",
+        "tableColumns": [
+          "Module",
+          "Capability",
+          "Device or Gateway",
+          "Platform or Interface",
+          "Implementation Points",
+          "Evidence"
+        ]
+      }
+    },
+    {
+      "id": "ppt-default",
+      "label": "Default PPT",
+      "type": "ppt",
+      "matchKeywords": [],
+      "envelope": {
+        "fixedStructure": [
+          "Generate a stable presentation outline with title, summary, analysis, and actions.",
+          "Do not output as a free-form narrative."
+        ],
+        "variableZones": [
+          "title",
+          "section highlights",
+          "data highlights",
+          "actions"
+        ],
+        "outputHint": "Generate a presentation outline.",
+        "pageSections": [
+          "Title",
+          "Executive Summary",
+          "Key Analysis",
+          "Actions"
+        ]
+      }
+    },
+    {
+      "id": "document-default",
+      "label": "Default document",
+      "type": "document",
+      "matchKeywords": [],
+      "envelope": {
+        "fixedStructure": [
+          "Generate a stable document body with title, summary, sections, conclusion, and recommendations.",
+          "Do not collapse the output into a table or chat reply."
+        ],
+        "variableZones": [
+          "title",
+          "summary",
+          "sections",
+          "conclusion"
+        ],
+        "outputHint": "Generate a formal document output.",
+        "pageSections": [
+          "Summary",
+          "Body",
+          "Conclusion"
+        ]
+      }
+    }
+  ],
+  "requestAdapterProfiles": [
+    {
+      "id": "resume",
+      "label": "简历请求适配",
+      "matchKeywords": ["resume", "cv", "简历", "候选人", "人才"],
+      "defaultViewId": "generic",
+      "fallbackEnvelopeKind": "table",
+      "views": [
+        {
+          "id": "generic",
+          "label": "通用",
+          "matchKeywords": [],
+          "kindOverrides": {}
+        },
+        {
+          "id": "company",
+          "label": "公司维度",
+          "matchKeywords": ["company", "employer", "organization", "公司维度", "按公司", "公司", "雇主"],
+          "kindOverrides": {
+            "page": {
+              "title": "简历公司维度 IT 项目静态页",
+              "pageSections": ["公司概览", "重点项目分布", "候选人覆盖", "技术关键词", "风险与机会", "AI综合分析"]
+            },
+            "table": {
+              "title": "简历 IT 项目公司维度表",
+              "tableColumns": ["公司", "候选人", "IT项目", "项目角色/职责", "技术栈/系统关键词", "时间线", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "project",
+          "label": "项目维度",
+          "matchKeywords": ["project", "projects", "system", "platform", "api", "implementation", "delivery", "architecture", "项目", "系统", "平台", "接口", "实施", "交付", "架构", "it"],
+          "kindOverrides": {
+            "page": {
+              "title": "简历项目维度静态页",
+              "pageSections": ["项目概览", "公司分布", "候选人参与", "技术关键词", "交付信号", "AI综合分析"]
+            },
+            "table": {
+              "title": "简历项目维度表",
+              "tableColumns": ["项目主题", "公司", "候选人", "角色/职责", "技术关键词", "时间线", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "skill",
+          "label": "技能维度",
+          "matchKeywords": ["skill", "skills", "ability", "abilities", "tech stack", "technology", "技能", "能力", "技术栈", "核心能力", "关键技能"],
+          "kindOverrides": {
+            "page": {
+              "title": "简历人才维度静态页",
+              "pageSections": ["人才概览", "学历与背景", "公司经历", "项目经历", "核心能力", "AI综合分析"]
+            },
+            "table": {
+              "title": "简历技能维度表",
+              "tableColumns": ["技能类别", "候选人", "技能详情", "最近公司", "关联项目", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "talent",
+          "label": "人才维度",
+          "matchKeywords": ["talent", "candidate", "candidates", "people", "person", "人才", "候选人", "人员", "画像", "学历", "工作经历"],
+          "kindOverrides": {
+            "page": {
+              "title": "简历人才维度静态页",
+              "pageSections": ["人才概览", "学历与背景", "公司经历", "项目经历", "核心能力", "AI综合分析"]
+            },
+            "table": {
+              "title": "简历人才维度表",
+              "tableColumns": ["候选人", "第一学历", "最近公司", "核心能力", "代表项目", "匹配判断", "证据来源"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "bid",
+      "label": "标书请求适配",
+      "matchKeywords": ["bid", "bids", "tender", "rfp", "proposal", "标书", "招标", "投标"],
+      "defaultViewId": "generic",
+      "fallbackEnvelopeKind": "page",
+      "views": [
+        {
+          "id": "generic",
+          "label": "通用",
+          "matchKeywords": [],
+          "kindOverrides": {}
+        },
+        {
+          "id": "section",
+          "label": "章节维度",
+          "matchKeywords": ["section", "sections", "chapter", "章节", "资格条件", "时间节点"],
+          "kindOverrides": {
+            "page": {
+              "title": "标书章节维度静态页",
+              "pageSections": ["项目概况", "章节拆解", "资格条件", "关键时间节点", "风险提醒", "AI综合分析"]
+            },
+            "table": {
+              "title": "标书章节维度表",
+              "tableColumns": ["章节", "重点要求", "资格条件", "时间节点", "风险提示", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "response",
+          "label": "应答维度",
+          "matchKeywords": ["response", "responses", "qualification", "应答", "资质", "方案"],
+          "kindOverrides": {
+            "page": {
+              "title": "标书应答维度静态页",
+              "pageSections": ["项目概况", "应答重点", "待补材料", "证据支撑", "风险提醒", "AI综合分析"]
+            },
+            "table": {
+              "title": "标书应答维度表",
+              "tableColumns": ["应答重点", "待补材料", "责任模块", "证据来源", "说明"]
+            }
+          }
+        },
+        {
+          "id": "risk",
+          "label": "风险维度",
+          "matchKeywords": ["risk", "risks", "risk view", "风险维度", "材料缺口", "时间风险", "资格风险", "deadline", "compliance", "风险", "截止", "合规"],
+          "kindOverrides": {
+            "page": {
+              "title": "标书风险维度静态页",
+              "pageSections": ["风险概览", "资格风险", "材料缺口", "时间风险", "应答建议", "AI综合分析"]
+            },
+            "table": {
+              "title": "标书风险维度表",
+              "tableColumns": ["风险项", "风险等级", "影响范围", "应对建议", "证据来源"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "order",
+      "label": "订单请求适配",
+      "matchKeywords": ["order", "orders", "订单", "销售", "电商", "库存"],
+      "defaultViewId": "generic",
+      "fallbackEnvelopeKind": "table",
+      "views": [
+        {
+          "id": "generic",
+          "label": "通用",
+          "matchKeywords": [],
+          "kindOverrides": {
+            "page": {
+              "title": "订单多渠道经营驾驶舱",
+              "pageSections": ["经营总览", "渠道结构", "SKU与品类焦点", "库存与补货", "异常波动解释", "行动建议", "AI综合分析"]
+            }
+          }
+        },
+        {
+          "id": "platform",
+          "label": "平台维度",
+          "matchKeywords": ["platform", "tmall", "jd", "douyin", "amazon", "shopify", "平台", "天猫", "京东", "抖音"],
+          "kindOverrides": {
+            "page": {
+              "title": "订单渠道经营驾驶舱",
+              "pageSections": ["经营总览", "渠道结构", "平台角色与增量来源", "SKU动销焦点", "库存与补货", "异常波动解释", "AI综合分析"]
+            },
+            "table": {
+              "title": "订单渠道维度表",
+              "tableColumns": ["渠道", "GMV/订单", "同比/环比", "动销SKU", "库存指数", "补货动作"]
+            }
+          }
+        },
+        {
+          "id": "category",
+          "label": "品类维度",
+          "matchKeywords": ["category", "categories", "sku", "品类", "类目", "商品"],
+          "kindOverrides": {
+            "page": {
+              "title": "订单品类/SKU经营驾驶舱",
+              "pageSections": ["经营总览", "品类梯队", "SKU集中度", "动销与毛利焦点", "库存与补货", "异常波动解释", "AI综合分析"]
+            },
+            "table": {
+              "title": "订单品类/SKU维度表",
+              "tableColumns": ["品类", "核心SKU", "GMV/销量", "动销率", "库存周转", "补货动作"]
+            }
+          }
+        },
+        {
+          "id": "stock",
+          "label": "库存维度",
+          "matchKeywords": ["inventory", "stock", "stockout", "replenishment", "库存", "缺货", "备货", "补货"],
+          "kindOverrides": {
+            "page": {
+              "title": "库存与补货驾驶舱",
+              "pageSections": ["经营总览", "库存健康", "高风险SKU", "动销与周转", "补货优先级", "异常波动解释", "AI综合分析"]
+            },
+            "table": {
+              "title": "库存与补货维度表",
+              "tableColumns": ["SKU", "库存健康", "风险等级", "近30天销量", "建议补货量", "处理动作"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paper",
+      "label": "论文请求适配",
+      "matchKeywords": ["paper", "papers", "study", "studies", "journal", "research", "论文", "研究", "期刊"],
+      "defaultViewId": "generic",
+      "fallbackEnvelopeKind": "table",
+      "views": [
+        {
+          "id": "generic",
+          "label": "通用",
+          "matchKeywords": [],
+          "kindOverrides": {}
+        },
+        {
+          "id": "method",
+          "label": "方法维度",
+          "matchKeywords": ["method", "methods", "methodology", "design", "trial", "randomized", "placebo", "方法", "研究设计", "试验设计"],
+          "kindOverrides": {
+            "page": {
+              "title": "论文方法维度静态页",
+              "pageSections": ["研究概览", "研究设计", "研究对象", "关键指标", "证据质量", "AI综合分析"]
+            },
+            "table": {
+              "title": "论文方法维度表",
+              "tableColumns": ["论文标题", "研究设计", "研究对象", "关键指标", "主要发现", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "result",
+          "label": "结果维度",
+          "matchKeywords": ["result", "results", "finding", "findings", "metric", "outcome", "结果", "指标", "发现"],
+          "kindOverrides": {
+            "page": {
+              "title": "论文结果维度静态页",
+              "pageSections": ["研究概览", "核心发现", "结果指标", "证据来源", "局限与风险", "AI综合分析"]
+            },
+            "table": {
+              "title": "论文结果维度表",
+              "tableColumns": ["论文标题", "核心发现", "结果指标", "效应方向", "局限性", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "conclusion",
+          "label": "结论维度",
+          "matchKeywords": ["conclusion", "conclusions", "takeaway", "summary", "insight", "结论", "摘要", "综述", "启示"],
+          "kindOverrides": {
+            "page": {
+              "title": "论文结论维度静态页",
+              "pageSections": ["研究概览", "研究结论", "适用人群", "证据等级", "局限与建议", "AI综合分析"]
+            },
+            "table": {
+              "title": "论文结论维度表",
+              "tableColumns": ["论文标题", "研究结论", "适用人群", "证据等级", "建议", "证据来源"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "iot",
+      "label": "IoT 请求适配",
+      "matchKeywords": ["iot", "internet of things", "物联网", "传感", "设备", "网关", "平台", "解决方案"],
+      "defaultViewId": "generic",
+      "fallbackEnvelopeKind": "page",
+      "views": [
+        {
+          "id": "generic",
+          "label": "通用",
+          "matchKeywords": [],
+          "kindOverrides": {}
+        },
+        {
+          "id": "scenario",
+          "label": "场景维度",
+          "matchKeywords": ["scenario", "scenarios", "use case", "场景", "应用场景", "业务场景"],
+          "kindOverrides": {
+            "page": {
+              "title": "IOT 场景维度静态页",
+              "pageSections": ["方案概览", "场景分布", "关键需求", "模块映射", "实施要点", "AI综合分析"]
+            },
+            "table": {
+              "title": "IOT 场景维度表",
+              "tableColumns": ["场景", "关键需求", "涉及模块", "价值说明", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "module",
+          "label": "模块维度",
+          "matchKeywords": ["module", "modules", "gateway", "sensor", "platform", "api", "模块", "网关", "传感", "平台", "接口"],
+          "kindOverrides": {
+            "page": {
+              "title": "IOT 模块维度静态页",
+              "pageSections": ["模块概览", "设备与网关", "平台能力", "接口集成", "交付关系", "AI综合分析"]
+            },
+            "table": {
+              "title": "IOT 模块维度表",
+              "tableColumns": ["模块", "职责", "集成对象", "实施要点", "证据来源"]
+            }
+          }
+        },
+        {
+          "id": "value",
+          "label": "价值维度",
+          "matchKeywords": ["value", "roi", "benefit", "benefits", "收益", "价值", "指标", "回报"],
+          "kindOverrides": {
+            "page": {
+              "title": "IOT 价值维度静态页",
+              "pageSections": ["方案概览", "价值主张", "指标收益", "落地条件", "风险提醒", "AI综合分析"]
+            },
+            "table": {
+              "title": "IOT 价值维度表",
+              "tableColumns": ["价值点", "指标收益", "适用场景", "落地条件", "风险提醒", "证据来源"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "systemTemplates": [
+    {
+      "key": "shared-static-page-default",
+      "label": "Default Static Page",
+      "type": "static-page",
+      "description": "Default page output for shareable dashboards and briefings.",
+      "supported": true,
+      "isDefault": true
+    },
+    {
+      "key": "shared-ppt-default",
+      "label": "Default PPT Outline",
+      "type": "ppt",
+      "description": "Default outline for presentation-oriented outputs.",
+      "supported": true,
+      "isDefault": true
+    },
+    {
+      "key": "shared-table-default",
+      "label": "Default Structured Table",
+      "type": "table",
+      "description": "Default structured table output with stable columns.",
+      "supported": true,
+      "isDefault": true
+    },
+    {
+      "key": "shared-document-default",
+      "label": "Default Document Output",
+      "type": "document",
+      "description": "Default long-form document output.",
+      "supported": true,
+      "isDefault": true
+    }
+  ]
+}

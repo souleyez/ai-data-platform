@@ -6,10 +6,22 @@ import {
 } from './datasource-state-repository.js';
 import { computeNextRunAt } from './datasource-schedule.js';
 
-export type DatasourceKind = 'web_public' | 'web_login' | 'web_discovery' | 'database' | 'erp' | 'upload_public' | 'local_directory';
+export const DATASOURCE_KINDS = [
+  'web_public',
+  'web_login',
+  'web_discovery',
+  'database',
+  'erp',
+  'upload_public',
+  'local_directory',
+] as const;
+
+export type DatasourceKind = typeof DATASOURCE_KINDS[number];
 export type DatasourceStatus = 'draft' | 'active' | 'paused' | 'error';
-export type DatasourceScheduleKind = 'manual' | 'daily' | 'weekly';
-export type DatasourceAuthMode = 'none' | 'credential' | 'manual_session' | 'database_password' | 'api_token';
+export const DATASOURCE_SCHEDULE_KINDS = ['manual', 'daily', 'weekly'] as const;
+export type DatasourceScheduleKind = typeof DATASOURCE_SCHEDULE_KINDS[number];
+export const DATASOURCE_AUTH_MODES = ['none', 'credential', 'manual_session', 'database_password', 'api_token'] as const;
+export type DatasourceAuthMode = typeof DATASOURCE_AUTH_MODES[number];
 export type DatasourceTargetMode = 'primary' | 'secondary';
 export type DatasourceRunStatus = 'running' | 'success' | 'partial' | 'failed';
 

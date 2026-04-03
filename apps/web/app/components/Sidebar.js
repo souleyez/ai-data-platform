@@ -1,9 +1,14 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { NAV_ITEMS } from '../lib/types';
 
-const NAV_PATHS = ['/', '/documents', '/datasources', '/reports', '/audit'];
+const NAV_LINKS = [
+  { label: '智能工作台', href: '/' },
+  { label: '文档中心', href: '/documents' },
+  { label: '数据源管理', href: '/datasources' },
+  { label: '报告中心', href: '/reports' },
+  { label: '审计日志', href: '/audit' },
+];
 
 const INITIAL_MODEL_STATE = {
   openclaw: {
@@ -214,12 +219,11 @@ export default function Sidebar({
 
       <nav className="nav-section">
         <div className="nav-title">工作台</div>
-        {NAV_ITEMS.map((item, index) => {
-          const href = NAV_PATHS[index] || '#';
-          const active = href !== '#' && currentPath === href;
+        {NAV_LINKS.map((item) => {
+          const active = currentPath === item.href;
           return (
-            <a key={`${item}-${href}`} href={href} className={`nav-item ${active ? 'active' : ''}`}>
-              {item}
+            <a key={`${item.label}-${item.href}`} href={item.href} className={`nav-item ${active ? 'active' : ''}`}>
+              {item.label}
             </a>
           );
         })}
@@ -404,3 +408,4 @@ export default function Sidebar({
     </aside>
   );
 }
+

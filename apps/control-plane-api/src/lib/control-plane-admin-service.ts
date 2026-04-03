@@ -17,6 +17,10 @@ import type {
   ControlPlaneRelease,
   ControlPlaneUser,
 } from './control-plane-schema.js';
+export {
+  getAdminReportGovernance,
+  updateAdminReportGovernance,
+} from './report-governance-admin-service.js';
 
 function nowIso() {
   return new Date().toISOString();

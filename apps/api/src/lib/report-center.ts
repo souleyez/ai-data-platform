@@ -1,4 +1,4 @@
-import { createWriteStream } from 'node:fs';
+﻿import { createWriteStream } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -8,6 +8,12 @@ import type { ParsedDocument } from './document-parser.js';
 import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
 import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
+import {
+  buildDefaultSystemTemplates,
+  expandDatasourceGovernanceProfile,
+  resolveDatasourceGovernanceProfile,
+  resolveTemplateEnvelopeProfile,
+} from './report-governance.js';
 import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
@@ -1265,289 +1271,44 @@ async function writeState(state: PersistedState) {
   );
 }
 
+function hasDatasourceGovernanceId(label: string, key: string, id: string) {
+  return resolveDatasourceGovernanceProfile(label, key)?.id === id;
+}
+
 function isFormulaLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('奶粉配方') || text.includes('配方建议') || text.includes('formula');
+  return hasDatasourceGovernanceId(label, key, 'formula');
 }
 
 function isResumeLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('resume') || text.includes('cv') || text.includes('简历') || text.includes('候选人');
+  return hasDatasourceGovernanceId(label, key, 'resume');
 }
 
 function isOrderLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('order') || text.includes('订单') || text.includes('销售') || text.includes('电商') || text.includes('库存');
+  return hasDatasourceGovernanceId(label, key, 'order');
 }
 
 function isBidLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('bids') || text.includes('bid') || text.includes('tender') || text.includes('标书') || text.includes('招标') || text.includes('投标');
+  return hasDatasourceGovernanceId(label, key, 'bid');
 }
 
 function isPaperLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('paper') || text.includes('论文') || text.includes('学术') || text.includes('研究');
+  return hasDatasourceGovernanceId(label, key, 'paper');
 }
 
 function isIotLibrary(label: string, key: string) {
-  const text = `${label} ${key}`.toLowerCase();
-  return text.includes('iot') || text.includes('物联网') || text.includes('设备') || text.includes('网关') || text.includes('解决方案');
+  return hasDatasourceGovernanceId(label, key, 'iot');
 }
 
 function buildTemplatesForLibrary(label: string, key: string) {
-  if (isFormulaLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-table`,
-      triggerKeywords: [label, '奶粉配方', '配方建议', '健脑', '抗抑郁', 'formula'],
-      description: `${label} 分组固定以配方表格为主，可上传参考图辅助后续输出样式。`,
-      templates: [
-        {
-          key: `${key}-table`,
-          label: '配方表格',
-          type: 'table' as const,
-          description: '按模块、建议原料、添加量、核心作用和配方说明输出。',
-          supported: true,
-        },
-        {
-          key: `${key}-static-page`,
-          label: '数据可视化静态页',
-          type: 'static-page' as const,
-          description: '后续扩展为固定可视化页面。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: 'PPT',
-          type: 'ppt' as const,
-          description: '后续扩展为固定汇报稿。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  if (isResumeLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-table`,
-      triggerKeywords: [label, 'resume', 'cv', '简历', '候选人'],
-      description: `${label} 分组固定以简历对比表格为主。`,
-      templates: [
-        {
-          key: `${key}-table`,
-          label: '简历对比表格',
-          type: 'table' as const,
-          description: '按第一学历、就职公司、核心能力、年龄等维度输出简历对比结果。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: 'PPT',
-          type: 'ppt' as const,
-          description: '后续扩展为候选人汇报稿。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  if (isOrderLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-static-page`,
-      triggerKeywords: [label, 'order', '订单', '销售', '电商', '库存'],
-      description: `${label} 分组固定以多品类多平台经营静态页为主。`,
-      templates: [
-        {
-          key: `${key}-static-page`,
-          label: '订单经营静态页',
-          type: 'static-page' as const,
-          description: '体现多品类、多平台、同比环比、预测销量、库存指数、备货推荐和异常波动。',
-          supported: true,
-        },
-        {
-          key: `${key}-table`,
-          label: '订单分析表格',
-          type: 'table' as const,
-          description: '按平台、品类和库存建议输出结构化表格。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: 'PPT',
-          type: 'ppt' as const,
-          description: '后续扩展为经营汇报简报。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  if (isBidLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-table`,
-      triggerKeywords: [label, 'bids', 'bid', 'tender', '标书', '招标', '投标'],
-      description: `${label} 分组固定以标书应答表格为主。`,
-      templates: [
-        {
-          key: `${key}-table`,
-          label: '标书应答表格',
-          type: 'table' as const,
-          description: '按章节、应答重点、需补充材料、风险提示和证据来源输出标书应答表格。',
-          supported: true,
-        },
-        {
-          key: `${key}-static-page`,
-          label: '标书摘要静态页',
-          type: 'static-page' as const,
-          description: '输出适合团队传阅的标书摘要静态页。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: '标书汇报提纲',
-          type: 'ppt' as const,
-          description: '输出适合投标汇报使用的结构化提纲。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  if (isPaperLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-static-page`,
-      triggerKeywords: [label, 'paper', '论文', '学术', '研究', '期刊', '文献'],
-      description: `${label} 分组固定以论文综述静态页为主。`,
-      templates: [
-        {
-          key: `${key}-static-page`,
-          label: '论文综述静态页',
-          type: 'static-page' as const,
-          description: '按研究主题、方法设计、核心结论、关键指标和局限性输出可视化综述页面。',
-          supported: true,
-        },
-        {
-          key: `${key}-table`,
-          label: '论文结论表格',
-          type: 'table' as const,
-          description: '按论文标题、研究对象、方法设计、核心结论、关键指标和证据来源输出结构化表格。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: '论文汇报提纲',
-          type: 'ppt' as const,
-          description: '输出适合论文汇报和研究复盘的结构化提纲。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  if (isIotLibrary(label, key)) {
-    return {
-      defaultTemplateKey: `${key}-static-page`,
-      triggerKeywords: [label, 'iot', '物联网', '设备', '网关', '平台', '解决方案'],
-      description: `${label} 分组固定以 IOT 方案静态页为主。`,
-      templates: [
-        {
-          key: `${key}-static-page`,
-          label: 'IOT解决方案静态页',
-          type: 'static-page' as const,
-          description: '按方案概览、核心模块、平台与接口、实施路径、业务价值和风险提示输出可视化静态页。',
-          supported: true,
-        },
-        {
-          key: `${key}-table`,
-          label: 'IOT方案表格',
-          type: 'table' as const,
-          description: '按模块、能力说明、设备网关、平台接口、实施要点和证据来源输出结构化表格。',
-          supported: true,
-        },
-        {
-          key: `${key}-ppt`,
-          label: 'IOT方案汇报提纲',
-          type: 'ppt' as const,
-          description: '输出适合方案汇报和售前讲解的结构化提纲。',
-          supported: true,
-        },
-      ],
-    };
-  }
-
-  return {
-    defaultTemplateKey: `${key}-table`,
-    triggerKeywords: [label],
-    description: `${label} 分组的固定输出模板。`,
-    templates: [
-      {
-        key: `${key}-table`,
-        label: '表格',
-        type: 'table' as const,
-        description: `按 ${label} 分组输出结构化表格结果。`,
-        supported: true,
-      },
-      {
-        key: `${key}-static-page`,
-        label: '数据可视化静态页',
-        type: 'static-page' as const,
-        description: `按 ${label} 分组生成静态页。`,
-        supported: true,
-      },
-      {
-        key: `${key}-ppt`,
-        label: 'PPT',
-        type: 'ppt' as const,
-        description: `按 ${label} 分组生成汇报稿。`,
-        supported: true,
-      },
-    ],
-  };
+  return expandDatasourceGovernanceProfile(resolveDatasourceGovernanceProfile(label, key), label, key);
 }
 
 function buildDefaultSharedTemplates(): SharedReportTemplate[] {
-  return [
-    {
-      key: 'shared-static-page-default',
-      label: '默认数据可视化静态页',
-      type: 'static-page',
-      description: '默认用于生成可转发的数据可视化静态页，强调摘要、核心指标、图表和行动建议。',
-      supported: true,
-      isDefault: true,
-      origin: 'system',
-      referenceImages: [],
-    },
-    {
-      key: 'shared-ppt-default',
-      label: '默认PPT提纲',
-      type: 'ppt',
-      description: '默认用于生成汇报型PPT提纲，强调标题页、关键结论、分章节要点和行动建议。',
-      supported: true,
-      isDefault: true,
-      origin: 'system',
-      referenceImages: [],
-    },
-    {
-      key: 'shared-table-default',
-      label: '默认结构化表格',
-      type: 'table',
-      description: '默认用于生成结构稳定的表格报表，强调结论、说明、证据来源等固定列。',
-      supported: true,
-      isDefault: true,
-      origin: 'system',
-      referenceImages: [],
-    },
-    {
-      key: 'shared-document-default',
-      label: '默认文档输出',
-      type: 'document',
-      description: '默认用于生成正文型文档输出，强调标题、摘要、分节和结论建议。',
-      supported: true,
-      isDefault: true,
-      origin: 'system',
-      referenceImages: [],
-    },
-  ];
+  return buildDefaultSystemTemplates().map((template) => ({
+    ...template,
+    origin: 'system',
+    referenceImages: [],
+  }));
 }
 
 function mergeSharedTemplates(storedTemplates: SharedReportTemplate[] | undefined) {
@@ -1617,6 +1378,18 @@ function looksLikeIotTemplate(template: SharedReportTemplate) {
 }
 
 export function buildSharedTemplateEnvelope(template: SharedReportTemplate): ReportTemplateEnvelope {
+  const governanceProfile = resolveTemplateEnvelopeProfile(template);
+  if (governanceProfile) {
+    return {
+      title: template.label,
+      fixedStructure: [...governanceProfile.envelope.fixedStructure],
+      variableZones: [...governanceProfile.envelope.variableZones],
+      outputHint: String(governanceProfile.envelope.outputHint || template.description || '').trim(),
+      tableColumns: governanceProfile.envelope.tableColumns?.length ? [...governanceProfile.envelope.tableColumns] : undefined,
+      pageSections: governanceProfile.envelope.pageSections?.length ? [...governanceProfile.envelope.pageSections] : undefined,
+    };
+  }
+
   if (template.type === 'static-page') {
     if (looksLikeOrderTemplate(template)) {
       return {
@@ -1813,169 +1586,15 @@ export function buildSharedTemplateEnvelope(template: SharedReportTemplate): Rep
 }
 
 export function buildTemplateEnvelope(group: ReportGroup, template: ReportGroupTemplate): ReportTemplateEnvelope {
-  if (template.type === 'table') {
-    if (isResumeLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 简历对比模板`,
-        fixedStructure: [
-          '列结构应稳定，优先包含候选人、第一学历、最近就职公司、核心能力、年龄、工作年限、匹配判断、证据来源。',
-          '每一行只代表一位候选人，不要把多位候选人的信息混在一行。',
-          '字段缺失可以留空，但不要自行补造。',
-        ],
-        variableZones: ['筛选范围', '核心能力归纳', '匹配判断', '证据引用细节'],
-        outputHint: '输出应适合招聘筛选和简历横向比较。',
-        tableColumns: ['候选人', '第一学历', '最近就职公司', '核心能力', '年龄', '工作年限', '匹配判断', '证据来源'],
-      };
-    }
-
-    if (isFormulaLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 配方表格模板`,
-        fixedStructure: [
-          '列结构应稳定，优先包含模块、建议原料或菌株、添加量或剂量、核心作用、适用人群、证据来源、备注。',
-          '每一行应对应一个明确的配方建议单元，不要把多个建议混在一格。',
-          '证据来源尽量来自知识库文档，不足时才补充常识性说明。',
-        ],
-        variableZones: ['模块拆分方式', '建议原料或菌株', '剂量建议', '卖点归纳', '证据引用细节'],
-        outputHint: '输出应适合专家级配方建议表格，结构稳定，便于继续迭代。',
-        tableColumns: ['模块', '建议原料或菌株', '添加量或剂量', '核心作用', '适用人群', '证据来源', '备注'],
-      };
-    }
-
-    if (isBidLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 标书应答模板`,
-        fixedStructure: [
-          '列结构必须稳定，优先包含章节、应答重点、需补充材料、风险提示、证据来源。',
-          '每一行只对应一个标书章节或应答要点，不要把多个章节混在同一行。',
-          '优先依据知识库中的招标文件和模板文档组织内容，不足时才补充通用表述。',
-        ],
-        variableZones: ['章节拆分方式', '应答重点', '需补充材料', '风险提示', '证据引用细节'],
-        outputHint: '输出应接近正式标书应答底稿，适合继续人工补充和迭代。',
-        tableColumns: ['章节', '应答重点', '需补充材料', '风险提示', '证据来源'],
-      };
-    }
-
-    if (isPaperLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 论文结论模板`,
-        fixedStructure: [
-          '列结构应稳定，优先包含论文标题、研究对象、方法设计、核心结论、关键指标、证据来源。',
-          '每一行对应一篇论文或一条稳定研究结论，不要把多篇论文混在一行。',
-          '证据优先来自知识库中的论文摘要、正文证据块和结构化解析结果。',
-        ],
-        variableZones: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源'],
-        outputHint: '输出应适合论文综述、研究复盘和资料研读。',
-        tableColumns: ['论文标题', '研究对象', '方法设计', '核心结论', '关键指标', '证据来源'],
-      };
-    }
-
-    if (isIotLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} IOT方案表格模板`,
-        fixedStructure: [
-          '列结构应稳定，优先包含模块、能力说明、设备/网关、平台/接口、实施要点、证据来源。',
-          '每一行对应一个稳定方案模块，不要把多个模块混在同一行。',
-          '证据优先来自知识库中的方案资料、接口材料和实施说明。',
-        ],
-        variableZones: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源'],
-        outputHint: '输出应适合方案梳理、售前交流和项目评审。',
-        tableColumns: ['模块', '能力说明', '设备/网关', '平台/接口', '实施要点', '证据来源'],
-      };
-    }
-
-    return {
-      title: `${group.label} 表格模板`,
-      fixedStructure: [
-        '输出必须保持表格化，不要改成散文。',
-        '列结构要稳定，先给结论，再给说明或证据。',
-        '知识库证据优先，不足时才做克制补充。',
-      ],
-      variableZones: ['具体列名', '每行内容细节', '补充说明强度'],
-      outputHint: '输出保持整洁、克制，便于后续继续追问优化。',
-      tableColumns: ['结论', '说明', '证据来源'],
-    };
-  }
-
-  if (template.type === 'static-page') {
-    if (isOrderLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 订单经营静态页模板`,
-        fixedStructure: [
-          '页面结构应稳定，优先包含经营摘要、核心指标卡片、平台对比、品类对比、库存与备货建议、异常波动说明。',
-          '必须体现多品类、多平台、同比、环比、预测销量、库存指数和备货推荐。',
-          '内容适合直接转发，不带平台入口与回链。',
-        ],
-        variableZones: ['经营摘要文本', '指标卡片数值', '平台与品类图表数据', '异常波动解释', '备货建议细节'],
-        outputHint: '输出应接近正式经营分析静态页，而不是聊天回答。',
-        pageSections: ['经营摘要', '平台对比', '品类对比', '库存与备货建议', '异常波动说明'],
-      };
-    }
-
-    if (isBidLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 标书摘要静态页模板`,
-        fixedStructure: [
-          '页面结构应稳定，优先包含项目概况、资格条件、关键时间节点、应答重点、风险提醒。',
-          '必须适合转发查看，不带平台入口或技术说明。',
-          '内容应接近正式投标摘要页，而不是聊天回答。',
-        ],
-        variableZones: ['项目摘要', '时间节点', '关键要求', '风险与待补材料', '证据引用细节'],
-        outputHint: '输出应适合团队内部传阅，用于快速判断是否进入正式标书编制。',
-        pageSections: ['项目概况', '资格条件', '关键时间节点', '应答重点', '风险提醒'],
-      };
-    }
-
-    if (isPaperLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} 论文综述静态页模板`,
-        fixedStructure: [
-          '页面结构稳定，优先包含研究概览、方法设计、核心结论、关键指标与证据、局限与风险。',
-          '内容应适合论文研读和团队复盘，不写成聊天回复。',
-          '证据优先来自知识库中的论文正文和结构化解析结果。',
-        ],
-        variableZones: ['研究主题摘要', '方法设计与样本信息', '核心结论', '关键指标与证据', '局限与风险'],
-        outputHint: '输出应适合研究复盘、论文综述和知识分享。',
-        pageSections: ['研究概览', '方法设计', '核心结论', '关键指标与证据', '局限与风险'],
-      };
-    }
-
-    if (isIotLibrary(group.label, group.key)) {
-      return {
-        title: `${group.label} IOT方案静态页模板`,
-        fixedStructure: [
-          '页面结构稳定，优先包含方案概览、核心模块、平台与接口、实施路径、业务价值和风险提示。',
-          '内容适合方案讲解、售前交流和内部评审，不要写成聊天回复。',
-          '证据优先来自知识库中的方案材料、设备说明和平台接口资料。',
-        ],
-        variableZones: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值'],
-        outputHint: '输出应适合方案汇报、售前展示和项目讨论。',
-        pageSections: ['方案概览', '核心模块', '平台与接口', '实施路径', '业务价值'],
-      };
-    }
-
-    return {
-      title: `${group.label} 静态页模板`,
-      fixedStructure: [
-        '页面结构稳定，优先包含摘要、核心卡片、分节正文、简单图表。',
-        '禁止出现平台入口或回链。',
-        '信息组织必须接近正式对外静态页，而不是聊天回答。',
-      ],
-      variableZones: ['摘要文本', '核心指标卡片', '分节内容', '图表数据项'],
-      outputHint: '输出应适合复制链接直接转发。',
-      pageSections: ['摘要', '核心指标', '重点分析', '补充说明'],
-    };
-  }
-
-  return {
-    title: `${group.label} 汇报模板`,
-    fixedStructure: [
-      '优先输出结构化摘要与分节要点。',
-      '不要自由改变输出形态。',
-    ],
-    variableZones: ['摘要内容', '章节要点'],
-    outputHint: '保持适合后续导出为 PDF/PPT 的结构。',
-  };
+  return buildSharedTemplateEnvelope({
+    key: template.key,
+    label: template.label,
+    type: template.type,
+    description: template.description,
+    supported: template.supported,
+    origin: 'system',
+    referenceImages: group.referenceImages || [],
+  });
 }
 
 function buildGroupFromLibrary(label: string, key: string): ReportGroup {

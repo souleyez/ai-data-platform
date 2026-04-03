@@ -40,6 +40,15 @@ test('admin routes should reject requests without the configured admin token', a
 test('admin routes should create users, releases, and provider keys', async () => {
   const app = appModule.createApp({ logger: false });
 
+  const governanceResponse = await app.inject({
+    method: 'GET',
+    url: '/api/admin/report-governance',
+    headers: adminHeaders,
+  });
+  assert.equal(governanceResponse.statusCode, 200);
+  assert.equal(Array.isArray(governanceResponse.json().item.datasourceProfiles), true);
+  assert.equal(Array.isArray(governanceResponse.json().item.requestAdapterProfiles), true);
+
   const userResponse = await app.inject({
     method: 'POST',
     url: '/api/admin/users',
@@ -90,6 +99,20 @@ test('admin routes should create users, releases, and provider keys', async () =
   });
   assert.equal(providerResponse.statusCode, 200);
   assert.match(providerResponse.json().item.apiKeyMasked, /^sk-t\.\.\./);
+
+  const nextGovernance = governanceResponse.json().item;
+  nextGovernance.datasourceProfiles[0].description = 'Updated by admin test';
+  nextGovernance.requestAdapterProfiles[0].label = 'Updated adapter profile';
+
+  const saveGovernance = await app.inject({
+    method: 'PUT',
+    url: '/api/admin/report-governance',
+    headers: adminHeaders,
+    payload: nextGovernance,
+  });
+  assert.equal(saveGovernance.statusCode, 200);
+  assert.equal(saveGovernance.json().item.datasourceProfiles[0].description, 'Updated by admin test');
+  assert.equal(saveGovernance.json().item.requestAdapterProfiles[0].label, 'Updated adapter profile');
 
   const bootstrapResponse = await app.inject({
     method: 'POST',

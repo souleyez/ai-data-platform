@@ -7,7 +7,7 @@ import { DEFAULT_SCAN_DIR, listCachedDocumentPaths } from './document-store.js';
 import { buildDocumentIngestSummaryItems } from './document-ingest-service.js';
 import { ingestExistingLocalFiles } from './document-upload-ingest.js';
 
-const LOCAL_DIRECTORY_ALLOWED_EXTENSIONS = new Set([
+export const LOCAL_DIRECTORY_ALLOWED_EXTENSIONS = new Set([
   '.pdf',
   '.txt',
   '.docx',

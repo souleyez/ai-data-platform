@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
+import { registerCapabilitiesRoutes } from './routes/capabilities.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAccessKeyRoutes } from './routes/access-keys.js';
 import { registerAuditRoutes } from './routes/audit.js';
@@ -8,6 +9,8 @@ import { registerDocumentRoutes } from './routes/documents.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerIntelligenceModeRoutes } from './routes/intelligence-mode.js';
 import { registerModelConfigRoutes } from './routes/model-config.js';
+import { registerOperationsRoutes } from './routes/operations.js';
+import { registerReportStandardsRoutes } from './routes/report-standards.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerWebCaptureRoutes } from './routes/web-captures.js';
 import { getIntelligenceModeStatus } from './lib/intelligence-mode.js';
@@ -44,11 +47,14 @@ export function createApp() {
   });
 
   app.register(registerAccessKeyRoutes, { prefix: '/api' });
+  app.register(registerCapabilitiesRoutes, { prefix: '/api' });
   app.register(registerHealthRoutes, { prefix: '/api' });
   app.register(registerIntelligenceModeRoutes, { prefix: '/api' });
   app.register(registerAuditRoutes, { prefix: '/api' });
   app.register(registerChatRoutes, { prefix: '/api' });
   app.register(registerModelConfigRoutes, { prefix: '/api' });
+  app.register(registerOperationsRoutes, { prefix: '/api' });
+  app.register(registerReportStandardsRoutes, { prefix: '/api' });
   app.register(registerDatasourceRoutes, { prefix: '/api' });
   app.register(registerDocumentRoutes, { prefix: '/api' });
   app.register(registerReportRoutes, { prefix: '/api' });
