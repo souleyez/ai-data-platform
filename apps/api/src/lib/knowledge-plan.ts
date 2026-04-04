@@ -53,7 +53,7 @@ export function detectOutputKind(text: string): 'table' | 'page' | 'pdf' | 'ppt'
   if (/(静态页|可视化页面|数据可视化|图表页面|dashboard|landing page|\bpage\b)/.test(normalized)) return 'page';
   if (/\bppt\b|演示稿|汇报稿|汇报提纲/.test(normalized)) return 'ppt';
   if (/\bmarkdown\b|\bmd\b|markdown 文档|md 文档/.test(normalized)) return 'md';
-  if (/\bdocs\b|\bdoc\b|\bdocx\b|word|word 文档|doc 文档|docx 文档|docs 文档|文档文件|正式文档|文档/.test(normalized)) return 'doc';
+  if (/\bdocs\b|\bdoc\b|\bdocx\b|word|word 文档|doc 文档|docx 文档|docs 文档|文档文件|正式文档/.test(normalized)) return 'doc';
   if (/\bpdf\b/.test(normalized)) return 'pdf';
   if (/(报表|表格|对比表|清单|报告)/.test(normalized)) return 'table';
   return null;

@@ -464,13 +464,25 @@ async function resolveKnowledgeScope(
 
   const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
   const preferredLabels = new Set(preferredLibraries.map((item) => item.label));
-  const explicitCandidates = preferredKeys.size || preferredLabels.size
-    ? visibleLibraries
+  const scoringPrompt = buildPromptForScoring(requestText, chatHistory);
+  const preferredCandidates = preferredKeys.size || preferredLabels.size
+    ? documentLibraries
         .filter((library) => preferredKeys.has(library.key) || preferredLabels.has(library.label))
         .map((library, index) => ({ library, score: 100 - index }))
     : [];
-  const scoredCandidates = collectLibraryMatches(buildPromptForScoring(requestText, chatHistory), visibleLibraries);
-  const candidates = explicitCandidates.length ? explicitCandidates : scoredCandidates;
+  const requestedCandidates = preferredCandidates.length
+    ? preferredCandidates
+    : collectLibraryMatches(scoringPrompt, documentLibraries);
+  const visibleLibraryKeySet = new Set(visibleLibraries.map((library) => library.key));
+  const visibleRequestedCandidates = requestedCandidates.filter((item) => visibleLibraryKeySet.has(item.library.key));
+  const requestTargetsInvisibleLibraries = requestedCandidates.length > 0 && !visibleRequestedCandidates.length;
+
+  if (requestTargetsInvisibleLibraries) {
+    return { libraries: [], scopedItems: [] };
+  }
+
+  const scoredCandidates = preferredCandidates.length ? [] : collectLibraryMatches(scoringPrompt, visibleLibraries);
+  const candidates = visibleRequestedCandidates.length ? visibleRequestedCandidates : scoredCandidates;
   let libraries = candidates.map((item) => ({ key: item.library.key, label: item.library.label }));
   const preferredScopedItems = preferredDocumentSet.size
     ? visibleItems.filter((item) => preferredDocumentSet.has(buildDocumentId(item.path)))

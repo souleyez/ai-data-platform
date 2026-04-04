@@ -11,6 +11,8 @@ const STORAGE_DIR = STORAGE_CONFIG_DIR;
 const MODEL_CONFIG_FILE = path.join(STORAGE_DIR, 'model-config.json');
 const WINDOWS_OPENCLAW_CONFIG_FILE = path.join(os.homedir(), '.openclaw-autoclaw', 'openclaw.json');
 const WSL_OPENCLAW_CONFIG_PATH = '~/.openclaw/openclaw.json';
+const WSL_CONFIG_READ_TIMEOUT_MS = 2500;
+const WSL_RUNTIME_META_TIMEOUT_MS = 3000;
 
 type PersistedProviderPreference = {
   methodId?: string;
@@ -410,7 +412,11 @@ async function readWslConfig() {
           "    sys.stdout.write(path.read_text(encoding='utf-8'))",
         ].join('\n'),
       ],
-      { windowsHide: true, maxBuffer: 2 * 1024 * 1024 },
+      {
+        windowsHide: true,
+        maxBuffer: 2 * 1024 * 1024,
+        timeout: WSL_CONFIG_READ_TIMEOUT_MS,
+      },
     );
     return JSON.parse(String(stdout || '{}').trim() || '{}') as OpenClawConfig;
   } catch {
@@ -815,11 +821,15 @@ async function loadWslRuntimeMeta() {
     const [{ stdout: versionStdout }, { stdout: statusStdout }] = await Promise.all([
       execFileAsync('wsl.exe', ['-d', distro, '--', 'bash', '-lc', 'openclaw --version 2>/dev/null || true'], {
         windowsHide: true,
+        timeout: WSL_RUNTIME_META_TIMEOUT_MS,
       }),
       execFileAsync(
         'wsl.exe',
         ['-d', distro, '--', 'bash', '-lc', 'systemctl --user is-active openclaw-gateway.service 2>/dev/null || true'],
-        { windowsHide: true },
+        {
+          windowsHide: true,
+          timeout: WSL_RUNTIME_META_TIMEOUT_MS,
+        },
       ),
     ]);
 

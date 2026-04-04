@@ -9,6 +9,28 @@ const host = process.env.OPENCLAW_LOCAL_HOST || '127.0.0.1';
 const wslDistro = process.env.OPENCLAW_WSL_DISTRO || 'Ubuntu-24.04';
 let wslGatewayCache = { token: null, expiresAt: 0 };
 
+function getWslHealthTimeoutMs() {
+  const parsed = Number(process.env.OPENCLAW_LOCAL_WSL_HEALTH_TIMEOUT_MS || 1500);
+  return Number.isFinite(parsed) && parsed >= 500 ? parsed : 1500;
+}
+
+function getWslChatTimeoutMs() {
+  // WSL gateway requests can spend a few seconds failing over between
+  // providers. Keep the local bridge patient enough to wait for the real WSL
+  // result instead of prematurely falling back to the Windows-side dev config.
+  const parsed = Number(process.env.OPENCLAW_LOCAL_WSL_CHAT_TIMEOUT_MS || 45000);
+  return Number.isFinite(parsed) && parsed >= 1000 ? parsed : 45000;
+}
+
+function getProviderTimeoutMs() {
+  const parsed = Number(process.env.OPENCLAW_LOCAL_PROVIDER_TIMEOUT_MS || 30000);
+  return Number.isFinite(parsed) && parsed >= 3000 ? parsed : 30000;
+}
+
+function allowDirectProviderFallback() {
+  return String(process.env.OPENCLAW_LOCAL_ALLOW_DIRECT_FALLBACK || '').trim().toLowerCase() === 'true';
+}
+
 function getConfigPath() {
   if (process.env.OPENCLAW_CONFIG_PATH) {
     return process.env.OPENCLAW_CONFIG_PATH;
@@ -23,11 +45,28 @@ async function loadConfig() {
   return JSON.parse(text);
 }
 
-function runCommand(file, args, input = '') {
+function runCommand(file, args, input = '', options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 0);
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    let timer = null;
+
+    function finishError(error) {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reject(error);
+    }
+
+    function finishSuccess(payload) {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(payload);
+    }
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -35,23 +74,33 @@ function runCommand(file, args, input = '') {
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
-    child.on('error', reject);
+    child.on('error', finishError);
     child.on('close', (code) => {
+      if (settled) return;
       if (code === 0) {
-        resolve({ stdout, stderr });
+        finishSuccess({ stdout, stderr });
       } else {
-        reject(new Error(stderr.trim() || `${file} exited with code ${code}`));
+        finishError(new Error(stderr.trim() || `${file} exited with code ${code}`));
       }
     });
+
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch {}
+        finishError(new Error(`${file} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    }
 
     if (input) child.stdin.write(input);
     child.stdin.end();
   });
 }
 
-async function getWslGatewayToken() {
+async function getWslGatewayToken(forceRefresh = false) {
   const now = Date.now();
-  if (wslGatewayCache.token && wslGatewayCache.expiresAt > now) {
+  if (!forceRefresh && wslGatewayCache.token && wslGatewayCache.expiresAt > now) {
     return wslGatewayCache.token;
   }
 
@@ -64,7 +113,9 @@ async function getWslGatewayToken() {
     'PY',
   ].join('\n');
 
-  const result = await runCommand('wsl.exe', ['-d', wslDistro, '--', 'bash', '-lc', script]);
+  const result = await runCommand('wsl.exe', ['-d', wslDistro, '--', 'bash', '-lc', script], '', {
+    timeoutMs: 3000,
+  });
   const token = result.stdout.trim();
   if (!token) {
     throw new Error('WSL OpenClaw gateway token not found');
@@ -77,9 +128,11 @@ async function getWslGatewayToken() {
   return token;
 }
 
-async function tryWslGateway(method, pathname, payloadText = '') {
+async function tryWslGateway(method, pathname, payloadText = '', options = {}) {
   try {
-    const token = await getWslGatewayToken();
+    const token = await getWslGatewayToken(pathname !== '/health');
+    const timeoutMs = pathname === '/health' ? getWslHealthTimeoutMs() : getWslChatTimeoutMs();
+    const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));
     const curlArgs = [
       '-d',
       wslDistro,
@@ -88,6 +141,7 @@ async function tryWslGateway(method, pathname, payloadText = '') {
       '-lc',
       [
         'curl -sS',
+        `-m ${timeoutSec}`,
         `-X ${method}`,
         `-H "Authorization: Bearer ${token}"`,
         '-H "Content-Type: application/json"',
@@ -96,12 +150,19 @@ async function tryWslGateway(method, pathname, payloadText = '') {
       ].filter(Boolean).join(' '),
     ];
 
-    const result = await runCommand('wsl.exe', curlArgs, payloadText);
+    const result = await runCommand('wsl.exe', curlArgs, payloadText, { timeoutMs });
     const lines = result.stdout.split(/\r?\n/);
     const status = Number(lines.pop() || 0);
     const body = lines.join('\n').trim();
 
     if (!status) return null;
+    const shouldRetryInvalidToken = !options.retriedInvalidToken
+      && status === 401
+      && /invalid token/i.test(body);
+    if (shouldRetryInvalidToken) {
+      wslGatewayCache = { token: null, expiresAt: 0 };
+      return tryWslGateway(method, pathname, payloadText, { retriedInvalidToken: true });
+    }
     return { status, body };
   } catch {
     return null;
@@ -266,6 +327,15 @@ async function handleChat(request, reply) {
       return sendJson(reply, wslResponse.status, payload);
     }
 
+    // On Windows dev machines this bridge exists primarily to forward requests
+    // into the WSL-hosted OpenClaw gateway. Falling back to a separate
+    // Windows-side provider config can diverge from the canonical WSL model
+    // selection and produce misleading auth failures. Keep that fallback
+    // opt-in only.
+    if (!allowDirectProviderFallback()) {
+      throw new Error('local gateway could not reach the WSL OpenClaw gateway');
+    }
+
     const config = await loadConfig();
     const { provider, modelId, displayModel } = resolveRequestedModel(config, body.model);
     const headers = buildHeaders(provider, modelId);
@@ -278,12 +348,15 @@ async function handleChat(request, reply) {
       user: body.user,
       stream: false,
     };
-
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), getProviderTimeoutMs());
     const response = await fetch(upstreamUrl, {
       method: 'POST',
       headers,
+      signal: controller.signal,
       body: JSON.stringify(upstreamBody),
     });
+    clearTimeout(timer);
 
     const text = await response.text();
     let json;
@@ -318,9 +391,12 @@ async function handleChat(request, reply) {
 
     sendJson(reply, 200, json);
   } catch (error) {
+    const message = String(error?.message || error);
     sendJson(reply, 500, {
       error: 'gateway_error',
-      detail: String(error?.message || error),
+      detail: message.includes('timed out after') || message.includes('The operation was aborted')
+        ? `local gateway upstream timed out: ${message}`
+        : message,
     });
   }
 }

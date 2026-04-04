@@ -511,6 +511,82 @@ test('prepareKnowledgeScope should enforce bot visibility before recent parsed f
   });
 });
 
+test('prepareKnowledgeScope should not backfill unrelated visible libraries when requested library is invisible to the bot', async () => {
+  const bot: BotDefinition = {
+    id: 'teams-assistant',
+    name: 'Teams Assistant',
+    slug: 'teams-assistant',
+    description: '',
+    enabled: true,
+    isDefault: false,
+    systemPrompt: '',
+    visibleLibraryKeys: ['paper', 'resume'],
+    includeUngrouped: false,
+    includeFailedParseDocuments: false,
+    channelBindings: [{ channel: 'web', enabled: true }],
+    updatedAt: '2026-04-04T09:00:00.000Z',
+  };
+
+  await withTemporaryDocumentCache({
+    generatedAt: '2026-04-04T09:00:00.000Z',
+    scanRoot: 'C:\\uploads',
+    scanRoots: ['C:\\uploads'],
+    totalFiles: 2,
+    scanSignature: 'bot-scope-blocked-library',
+    items: [
+      {
+        path: 'C:\\uploads\\1743732000000-contract-a.png',
+        name: '1743732000000-contract-a.png',
+        ext: '.png',
+        title: 'contract-a',
+        category: 'contract',
+        bizCategory: 'contract',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-04T08:00:00.000Z',
+        groups: ['contract'],
+        confirmedGroups: ['contract'],
+      },
+      {
+        path: 'C:\\uploads\\1743735600000-paper-a.pdf',
+        name: '1743735600000-paper-a.pdf',
+        ext: '.pdf',
+        title: 'paper-a',
+        category: 'paper',
+        bizCategory: 'paper',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        detailParsedAt: '2026-04-04T08:30:00.000Z',
+        groups: ['paper'],
+        confirmedGroups: ['paper'],
+      },
+    ],
+  }, async () => {
+    await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
+      scanRoot: 'C:\\uploads',
+      scanRoots: ['C:\\uploads'],
+      categories: {
+        contract: { label: 'Contract' },
+        paper: { label: 'Paper' },
+        resume: { label: 'Resume' },
+      },
+      customCategories: [],
+      updatedAt: '2026-04-04T09:00:00.000Z',
+    }, null, 2), 'utf8');
+
+    const scope = await prepareKnowledgeScope({
+      requestText: 'what recent documents are in the contract library',
+      chatHistory: [],
+      botDefinition: bot,
+    });
+
+    assert.deepEqual(scope.libraries, []);
+    assert.equal(scope.scopedItems.length, 0);
+  });
+});
+
 test('buildConceptPageSupplyBlock should provide structure hints for resume company pages', () => {
   const block = buildConceptPageSupplyBlock({
     requestText: '基于人才简历知识库，按公司维度输出数据可视化静态页',
