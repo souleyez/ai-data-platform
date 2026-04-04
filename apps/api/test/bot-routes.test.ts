@@ -14,6 +14,9 @@ function importFresh<T>(specifier: string): Promise<T> {
 const appModule = await importFresh<typeof import('../src/app.js')>(
   '../src/app.js',
 );
+const botModule = await importFresh<typeof import('../src/lib/bot-definitions.js')>(
+  '../src/lib/bot-definitions.js',
+);
 const app = appModule.createApp();
 
 test.after(async () => {
@@ -65,12 +68,17 @@ test('bot routes should expose public list and require full-mode access for writ
       visibleLibraryKeys: ['contract'],
       channelBindings: [
         { channel: 'web', enabled: true },
-        { channel: 'wecom', enabled: true, routeKey: 'corp-default' },
+        { channel: 'wecom', enabled: true, routeKey: 'corp-default', externalBotId: 'wbot-001' },
       ],
     },
   });
   assert.equal(created.statusCode, 200);
   assert.equal(created.json().item.id, 'wecom-assistant');
+
+  const resolvedByExternalBot = await botModule.resolveBotForChannel('wecom', {
+    externalBotId: 'wbot-001',
+  });
+  assert.equal(resolvedByExternalBot?.id, 'wecom-assistant');
 
   const managedList = await app.inject({
     method: 'GET',

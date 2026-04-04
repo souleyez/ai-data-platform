@@ -13,6 +13,7 @@
     "platform:control": "tsx src/scripts/platform-control.ts"
   },
   "dependencies": {
+    "@wecom/aibot-node-sdk": "^1.0.6",
     "@fastify/multipart": "^9.4.0",
     "dotenv": "16.4.7",
     "fastify": "5.2.1",

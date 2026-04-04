@@ -289,7 +289,12 @@ export async function resolveBotDefinition(botId?: string) {
     || null;
 }
 
-export async function resolveBotForChannel(channel: BotChannel, routeContext?: { botId?: string; routeKey?: string; tenantId?: string }) {
+export async function resolveBotForChannel(channel: BotChannel, routeContext?: {
+  botId?: string;
+  routeKey?: string;
+  tenantId?: string;
+  externalBotId?: string;
+}) {
   const config = await loadMergedConfig();
   const enabledItems = config.items.filter((item) => item.enabled);
   if (routeContext?.botId) {
@@ -313,6 +318,13 @@ export async function resolveBotForChannel(channel: BotChannel, routeContext?: {
     )))
     : null;
   if (matchedByTenant) return matchedByTenant;
+
+  const matchedByExternalBot = routeContext?.externalBotId
+    ? candidates.find((item) => item.channelBindings.some((binding) => (
+      binding.channel === channel && binding.externalBotId && binding.externalBotId === routeContext.externalBotId
+    )))
+    : null;
+  if (matchedByExternalBot) return matchedByExternalBot;
 
   return candidates.find((item) => item.isDefault) || candidates[0] || null;
 }

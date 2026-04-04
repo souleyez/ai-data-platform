@@ -8,6 +8,7 @@ export type ChannelIngressRequest = {
   prompt?: string;
   promptBase64?: string;
   botId?: string;
+  externalBotId?: string;
   routeKey?: string;
   tenantId?: string;
   sessionUser?: string;
@@ -56,6 +57,7 @@ export async function handleChannelIngress(input: ChannelIngressRequest) {
 
   const bot = await resolveBotForChannel(input.channel, {
     botId: String(input.botId || '').trim() || undefined,
+    externalBotId: String(input.externalBotId || '').trim() || undefined,
     routeKey: String(input.routeKey || '').trim() || undefined,
     tenantId: String(input.tenantId || '').trim() || undefined,
   });
