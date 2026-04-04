@@ -59,11 +59,14 @@ function normalizePermissionLevel(value, fallback = 0) {
   return Math.max(0, Math.floor(numeric));
 }
 
-function createLibrarySettingsDraft(library) {
+function buildLibrarySettingsDraft(library, draft) {
   return {
-    label: String(library?.label || library?.name || ''),
-    description: String(library?.description || ''),
-    permissionLevel: normalizePermissionLevel(library?.permissionLevel, 0),
+    label: typeof draft?.label === 'string' ? draft.label : String(library?.label || library?.name || ''),
+    description: typeof draft?.description === 'string' ? draft.description : String(library?.description || ''),
+    permissionLevel: normalizePermissionLevel(
+      draft?.permissionLevel ?? library?.permissionLevel ?? 0,
+      0,
+    ),
   };
 }
 
@@ -82,12 +85,10 @@ export default function DocumentsPage() {
   const [reparseSubmittingId, setReparseSubmittingId] = useState('');
   const [libraryDrafts, setLibraryDrafts] = useState({});
   const [expandedLibraryEditorId, setExpandedLibraryEditorId] = useState('');
-  const [recentNewIds] = useState([]);
+  const [recentNewIds, setRecentNewIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [libraryCreateDraft, setLibraryCreateDraft] = useState({
-    name: '',
-    permissionLevel: 0,
-  });
+  const [libraryCreateDraft, setLibraryCreateDraft] = useState('');
+  const [libraryCreatePermissionLevel, setLibraryCreatePermissionLevel] = useState(0);
   const [libraryCreateSubmitting, setLibraryCreateSubmitting] = useState(false);
   const [librarySettingsDrafts, setLibrarySettingsDrafts] = useState({});
   const [librarySettingsSubmittingId, setLibrarySettingsSubmittingId] = useState('');
@@ -190,14 +191,15 @@ export default function DocumentsPage() {
   };
 
   const handleCreateLibrary = async () => {
-    const name = String(libraryCreateDraft.name || '').trim();
-    const permissionLevel = normalizePermissionLevel(libraryCreateDraft.permissionLevel, 0);
+    const name = libraryCreateDraft.trim();
+    const permissionLevel = normalizePermissionLevel(libraryCreatePermissionLevel, 0);
     if (!name || libraryCreateSubmitting) return;
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
       const created = await createDocumentLibrary(name, '', permissionLevel);
-      setLibraryCreateDraft({ name: '', permissionLevel: 0 });
+      setLibraryCreateDraft('');
+      setLibraryCreatePermissionLevel(0);
       await loadDocuments();
       setActiveLibrary(created?.item?.key || 'all');
       setScanMessage(`已新建知识库分组“${name}”，权限等级 L${permissionLevel}`);
@@ -222,10 +224,7 @@ export default function DocumentsPage() {
     if (!libraryKey || librarySettingsSubmittingId) return;
     const library = (data?.libraries || []).find((item) => item.key === libraryKey);
     if (!library) return;
-    const draft = {
-      ...createLibrarySettingsDraft(library),
-      ...(librarySettingsDrafts[libraryKey] || {}),
-    };
+    const draft = buildLibrarySettingsDraft(library, librarySettingsDrafts[libraryKey]);
     const label = String(draft.label || '').trim();
     if (!label) {
       setScanMessage('知识库名称不能为空');
@@ -264,9 +263,22 @@ export default function DocumentsPage() {
     }
   };
 
-  const libraries = useMemo(
-    () => sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []),
-    [data],
+  const libraries = useMemo(() => {
+    const sorted = sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []);
+    return sorted.filter((library) => {
+      const count = getLibraryDocumentCount(library, data?.items || [], sorted);
+      return count > 0 || library.key === activeLibrary;
+    });
+  }, [activeLibrary, data]);
+
+  const activeLibraryRecord = useMemo(
+    () => libraries.find((item) => item.key === activeLibrary) || null,
+    [activeLibrary, libraries],
+  );
+
+  const activeLibrarySettingsDraft = useMemo(
+    () => (activeLibraryRecord ? buildLibrarySettingsDraft(activeLibraryRecord, librarySettingsDrafts[activeLibraryRecord.key]) : null),
+    [activeLibraryRecord, librarySettingsDrafts],
   );
 
   const libraryLabelMap = useMemo(
@@ -330,7 +342,7 @@ export default function DocumentsPage() {
         <header className="topbar">
           <div>
             <h2>AI 知识库</h2>
-            <p>知识库权限等级用于控制机器人可见范围。0 为最高权限，数字越大权限越低。机器人等级为 N 时，可访问权限等级大于等于 N 的知识库。</p>
+            <p>首次无法判断的文档会保留在未分组，右上角按钮只重扫未分组文档并尝试重新归组。</p>
           </div>
           <div className="topbar-actions">
             <a className="ghost-btn" href="/#upload-document">上传文档</a>
@@ -350,15 +362,18 @@ export default function DocumentsPage() {
             <LibraryTabs
               libraries={libraries}
               activeLibrary={activeLibrary}
+              activeLibraryRecord={activeLibraryRecord}
+              activeLibrarySettingsDraft={activeLibrarySettingsDraft}
               onSelectLibrary={setActiveLibrary}
               getLibraryDocumentCount={getLibraryDocumentCount}
               visibleItems={visibleItems}
               ungroupedCount={ungroupedCount}
               createDraft={libraryCreateDraft}
+              createPermissionLevel={libraryCreatePermissionLevel}
               onCreateDraftChange={setLibraryCreateDraft}
+              onCreatePermissionLevelChange={setLibraryCreatePermissionLevel}
               onCreateLibrary={handleCreateLibrary}
               createSubmitting={libraryCreateSubmitting}
-              settingsDrafts={librarySettingsDrafts}
               onSettingsChange={handleLibrarySettingChange}
               onSaveSettings={handleSaveLibrarySettings}
               settingsSubmittingId={librarySettingsSubmittingId}

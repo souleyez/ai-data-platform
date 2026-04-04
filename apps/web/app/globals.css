@@ -530,19 +530,7 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   background: #dbeafe;
   color: #1d4ed8;
 }
-.library-admin-panel {
-  display: grid;
-  gap: 12px;
-}
-.library-admin-head {
-  display: grid;
-  gap: 6px;
-}
-.library-admin-list {
-  display: grid;
-  gap: 12px;
-}
-.library-admin-card {
+.library-settings-inline {
   display: grid;
   gap: 12px;
   padding: 14px 16px;
@@ -550,21 +538,11 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
   border: 1px solid #dbe7f5;
   background: rgba(255, 255, 255, 0.88);
 }
-.library-admin-summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
+.library-settings-inline-head {
+  display: grid;
+  gap: 6px;
 }
-.library-admin-meta {
-  display: flex;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-  color: var(--subtle);
-  font-size: 12px;
-}
-.library-admin-grid {
+.library-settings-inline-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -1692,7 +1670,7 @@ th { color: var(--subtle); font-weight: 600; }
   .library-inline-create { align-items: stretch; }
   .library-inline-create-name,
   .library-inline-create-level { width: 100%; min-width: 0; }
-  .library-admin-grid { grid-template-columns: 1fr; }
+  .library-settings-inline-grid { grid-template-columns: 1fr; }
 }
 
 .shared-report-shell {

@@ -4,6 +4,8 @@ const CHANNEL_LABELS = {
   web: 'Web',
   wecom: '企业微信',
   teams: 'Microsoft Teams',
+  qq: 'QQ',
+  feishu: '飞书',
 };
 
 function summarizeChannels(item) {
