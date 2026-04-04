@@ -10,6 +10,7 @@
       "enabled": true,
       "isDefault": true,
       "systemPrompt": "",
+      "libraryAccessLevel": 0,
       "visibleLibraryKeys": [],
       "includeUngrouped": true,
       "includeFailedParseDocuments": false,

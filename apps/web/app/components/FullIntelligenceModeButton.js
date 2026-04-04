@@ -16,7 +16,7 @@ async function readJson(response) {
 function normalizeMessage(message) {
   const value = String(message || '').trim();
   if (!value) return '操作失败，请稍后再试。';
-  if (value === 'invalid access key code') return '密钥需为 4-8 位数字。';
+  if (value === 'invalid access key code') return '密钥需要是 4-8 位数字。';
   if (value === 'invalid access key') return '密钥不正确。';
   if (value === 'full mode already initialized') return '全智能模式已经初始化。';
   if (value === 'full mode access key is required') return '需要先输入全智能模式密钥。';
@@ -28,6 +28,7 @@ export default function FullIntelligenceModeButton({
   onSystemConstraintsChange,
   botConfigSlot = null,
   onAccessStateChange,
+  showSystemConstraints = true,
 }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -83,7 +84,7 @@ export default function FullIntelligenceModeButton({
 
   const statusLabel = useMemo(() => {
     if (notice) return notice;
-    if (mode === 'full') return '当前已是全智能模式，再点一次会直接退回普通对话模式。';
+    if (mode === 'full') return '当前已是全智能模式，再点一次会直接退出到普通对话模式。';
     if (!initialized) return '首次启用时需要先设置 4-8 位数字密钥。';
     return '当前为普通对话模式。';
   }, [initialized, mode, notice]);
@@ -160,7 +161,7 @@ export default function FullIntelligenceModeButton({
       }
       await onAccessStateChange?.();
       setModalUnlocked(true);
-      setNotice('全智能模式已启用。你可以在弹窗里调整系统限制和 Bot 配置。');
+      setNotice('全智能模式已启用。');
     } catch (error) {
       setModalError(normalizeMessage(error instanceof Error ? error.message : String(error)));
     } finally {
@@ -198,15 +199,12 @@ export default function FullIntelligenceModeButton({
             if (!submitting) setModalOpen(false);
           }}
         >
-          <div
-            className="mode-modal card"
-            onClick={(event) => event.stopPropagation()}
-          >
+          <div className="mode-modal card" onClick={(event) => event.stopPropagation()}>
             <div className="mode-modal-head">
               <div>
                 <strong>{initialized ? '输入全智能模式密钥' : '设置全智能模式密钥'}</strong>
                 <div className="mode-modal-subtitle">
-                  只有通过密钥验证后，才会显示系统限制和 Bot 配置入口。
+                  只有通过密钥验证后，才会开放系统限制和机器人治理入口。
                 </div>
               </div>
               <button
@@ -259,30 +257,34 @@ export default function FullIntelligenceModeButton({
             ) : (
               <div className="mode-modal-body">
                 <div className="mode-modal-unlocked-banner">
-                  全智能模式已开启。这里的限制和 Bot 配置只在全智能模式下开放编辑。
+                  全智能模式已开启。这里的限制和治理入口只在全智能模式下开放编辑。
                 </div>
-                <div className="chat-constraints-card mode-modal-constraints">
-                  <div className="chat-constraints-head">
-                    <strong>系统对话限制</strong>
-                    <span>明确写清楚要做什么、不要做什么。关闭全智能模式不会自动清空这份限制。</span>
+                {showSystemConstraints ? (
+                  <div className="chat-constraints-card mode-modal-constraints">
+                    <div className="chat-constraints-head">
+                      <strong>系统对话限制</strong>
+                      <span>明确写清楚要做什么、不要做什么。关闭全智能模式不会自动清空这份限制。</span>
+                    </div>
+                    <textarea
+                      className="chat-constraints-input"
+                      value={systemConstraints}
+                      onChange={(event) => onSystemConstraintsChange?.(event.target.value)}
+                      placeholder="例如：不要自动生成表格；优先参考合同库；回答尽量简短；不要建议未确认的系统动作。"
+                    />
                   </div>
-                  <textarea
-                    className="chat-constraints-input"
-                    value={systemConstraints}
-                    onChange={(event) => onSystemConstraintsChange?.(event.target.value)}
-                    placeholder="例如：不要自动生成表格；优先参考合同库；回答尽量简短；不要建议未确认的系统动作。"
-                  />
-                </div>
+                ) : null}
                 {botConfigSlot}
                 <div className="mode-modal-actions">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => onSystemConstraintsChange?.('')}
-                    disabled={submitting}
-                  >
-                    清空限制
-                  </button>
+                  {showSystemConstraints ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      onClick={() => onSystemConstraintsChange?.('')}
+                      disabled={submitting}
+                    >
+                      清空限制
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="primary-btn"

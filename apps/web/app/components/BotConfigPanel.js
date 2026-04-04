@@ -6,7 +6,19 @@ const CHANNEL_OPTIONS = [
   { key: 'web', label: 'Web' },
   { key: 'wecom', label: '企业微信' },
   { key: 'teams', label: 'Microsoft Teams' },
+  { key: 'qq', label: 'QQ' },
+  { key: 'feishu', label: '飞书' },
 ];
+
+function createEmptyChannelDraft(channel, enabled = false) {
+  return {
+    channel,
+    enabled,
+    routeKey: '',
+    tenantId: '',
+    externalBotId: '',
+  };
+}
 
 function createEmptyDraft() {
   return {
@@ -17,22 +29,30 @@ function createEmptyDraft() {
     isDefault: false,
     includeUngrouped: true,
     includeFailedParseDocuments: false,
+    libraryAccessLevel: 0,
     visibleLibraryKeys: [],
-    channels: {
-      web: true,
-      wecom: false,
-      teams: false,
-    },
+    channels: Object.fromEntries(CHANNEL_OPTIONS.map((option) => [
+      option.key,
+      createEmptyChannelDraft(option.key, option.key === 'web'),
+    ])),
   };
 }
 
 function createDraftFromBot(bot) {
   const draft = createEmptyDraft();
   const bindings = Array.isArray(bot?.channelBindings) ? bot.channelBindings : [];
+
   for (const option of CHANNEL_OPTIONS) {
     const binding = bindings.find((item) => item?.channel === option.key);
-    draft.channels[option.key] = binding ? binding.enabled !== false : option.key === 'web';
+    draft.channels[option.key] = {
+      ...createEmptyChannelDraft(option.key, option.key === 'web'),
+      enabled: binding ? binding.enabled !== false : option.key === 'web',
+      routeKey: String(binding?.routeKey || ''),
+      tenantId: String(binding?.tenantId || ''),
+      externalBotId: String(binding?.externalBotId || ''),
+    };
   }
+
   return {
     ...draft,
     name: String(bot?.name || ''),
@@ -42,6 +62,9 @@ function createDraftFromBot(bot) {
     isDefault: bot?.isDefault === true,
     includeUngrouped: bot?.includeUngrouped !== false,
     includeFailedParseDocuments: bot?.includeFailedParseDocuments === true,
+    libraryAccessLevel: Number.isFinite(Number(bot?.libraryAccessLevel))
+      ? Math.max(0, Math.floor(Number(bot.libraryAccessLevel)))
+      : 0,
     visibleLibraryKeys: Array.isArray(bot?.visibleLibraryKeys) ? bot.visibleLibraryKeys : [],
   };
 }
@@ -55,11 +78,18 @@ function serializeDraft(draft) {
     isDefault: draft?.isDefault === true,
     includeUngrouped: draft?.includeUngrouped !== false,
     includeFailedParseDocuments: draft?.includeFailedParseDocuments === true,
+    libraryAccessLevel: Math.max(0, Math.floor(Number(draft?.libraryAccessLevel || 0))),
     visibleLibraryKeys: Array.isArray(draft?.visibleLibraryKeys) ? draft.visibleLibraryKeys : [],
-    channelBindings: CHANNEL_OPTIONS.map((option) => ({
-      channel: option.key,
-      enabled: Boolean(draft?.channels?.[option.key]),
-    })),
+    channelBindings: CHANNEL_OPTIONS.map((option) => {
+      const binding = draft?.channels?.[option.key] || createEmptyChannelDraft(option.key);
+      return {
+        channel: option.key,
+        enabled: Boolean(binding.enabled),
+        routeKey: String(binding.routeKey || '').trim() || undefined,
+        tenantId: String(binding.tenantId || '').trim() || undefined,
+        externalBotId: String(binding.externalBotId || '').trim() || undefined,
+      };
+    }),
   };
 }
 
@@ -73,6 +103,208 @@ function toggleListValue(values, value) {
 function normalizeError(error, fallback) {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function formatLibraryLabel(library) {
+  const label = library?.label || library?.name || library?.key || '未命名知识库';
+  const permissionLevel = Number.isFinite(Number(library?.permissionLevel))
+    ? Math.max(0, Math.floor(Number(library.permissionLevel)))
+    : 0;
+  return `${label} · L${permissionLevel}`;
+}
+
+function ChannelBindingEditor({ value, onChange }) {
+  return (
+    <div className="bot-binding-grid">
+      <label className="bot-toggle bot-toggle-wide">
+        <input
+          type="checkbox"
+          checked={value.enabled}
+          onChange={(event) => onChange({ ...value, enabled: event.target.checked })}
+        />
+        <span>启用该渠道</span>
+      </label>
+      <label className="bot-field">
+        <span>routeKey</span>
+        <input
+          value={value.routeKey}
+          onChange={(event) => onChange({ ...value, routeKey: event.target.value })}
+          placeholder="用于第三方回调或路由键"
+        />
+      </label>
+      <label className="bot-field">
+        <span>tenantId</span>
+        <input
+          value={value.tenantId}
+          onChange={(event) => onChange({ ...value, tenantId: event.target.value })}
+          placeholder="多租户渠道可填"
+        />
+      </label>
+      <label className="bot-field">
+        <span>externalBotId</span>
+        <input
+          value={value.externalBotId}
+          onChange={(event) => onChange({ ...value, externalBotId: event.target.value })}
+          placeholder="第三方机器人 ID"
+        />
+      </label>
+    </div>
+  );
+}
+
+function BotEditorCard({
+  title,
+  draft,
+  libraries,
+  onChange,
+  actionLabel,
+  actionPending,
+  onSubmit,
+}) {
+  const hasLibraries = Array.isArray(libraries) && libraries.length > 0;
+
+  return (
+    <div className="bot-card">
+      <div className="bot-card-head">
+        <div>
+          <strong>{title}</strong>
+          <div className="bot-config-subtle">
+            机器人权限规则：机器人等级 N 可访问知识库权限等级大于等于 N 的库。0 可看全部，1 不能看 0 级库。
+          </div>
+        </div>
+        <button
+          type="button"
+          className="primary-btn"
+          onClick={onSubmit}
+          disabled={actionPending}
+        >
+          {actionPending ? '保存中...' : actionLabel}
+        </button>
+      </div>
+
+      <div className="bot-field-grid">
+        <label className="bot-field">
+          <span>机器人名称</span>
+          <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
+        </label>
+        <label className="bot-field">
+          <span>说明</span>
+          <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} />
+        </label>
+        <label className="bot-field">
+          <span>知识库权限等级</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={draft.libraryAccessLevel}
+            onChange={(event) => onChange({
+              ...draft,
+              libraryAccessLevel: Math.max(0, Math.floor(Number(event.target.value || 0))),
+            })}
+          />
+        </label>
+        <div className="bot-field bot-field-readonly">
+          <span>权限解释</span>
+          <div className="bot-config-subtle">
+            当前等级 L{draft.libraryAccessLevel}，可访问权限等级 ≥ {draft.libraryAccessLevel} 的知识库。
+          </div>
+        </div>
+        <label className="bot-field bot-field-span">
+          <span>自然语言约束</span>
+          <textarea
+            rows={4}
+            value={draft.systemPrompt}
+            onChange={(event) => onChange({ ...draft, systemPrompt: event.target.value })}
+            placeholder="例如：只回答合同相关事项；回答尽量简短；不要主动生成 PPT。"
+          />
+        </label>
+      </div>
+
+      <div className="bot-toggle-row">
+        <label className="bot-toggle">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+          />
+          <span>启用</span>
+        </label>
+        <label className="bot-toggle">
+          <input
+            type="checkbox"
+            checked={draft.isDefault}
+            onChange={(event) => onChange({ ...draft, isDefault: event.target.checked })}
+          />
+          <span>默认机器人</span>
+        </label>
+        <label className="bot-toggle">
+          <input
+            type="checkbox"
+            checked={draft.includeUngrouped}
+            onChange={(event) => onChange({ ...draft, includeUngrouped: event.target.checked })}
+          />
+          <span>可看未分组文档</span>
+        </label>
+        <label className="bot-toggle">
+          <input
+            type="checkbox"
+            checked={draft.includeFailedParseDocuments}
+            onChange={(event) => onChange({ ...draft, includeFailedParseDocuments: event.target.checked })}
+          />
+          <span>可看解析失败文档</span>
+        </label>
+      </div>
+
+      <div className="bot-chip-group">
+        <div className="bot-chip-group-title">第三方渠道与机器人绑定</div>
+        <div className="bot-channel-stack">
+          {CHANNEL_OPTIONS.map((option) => (
+            <div key={option.key} className="bot-channel-card">
+              <div className="bot-channel-title">{option.label}</div>
+              <ChannelBindingEditor
+                value={draft.channels[option.key]}
+                onChange={(nextChannel) => onChange({
+                  ...draft,
+                  channels: {
+                    ...draft.channels,
+                    [option.key]: nextChannel,
+                  },
+                })}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bot-chip-group">
+        <div className="bot-chip-group-title">额外限定知识库（可选）</div>
+        {hasLibraries ? (
+          <div className="bot-chip-grid">
+            {libraries.map((library) => {
+              const libraryKey = library.key;
+              const active = draft.visibleLibraryKeys.includes(libraryKey);
+              return (
+                <label key={libraryKey} className={`bot-chip ${active ? 'active' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={() => onChange({
+                      ...draft,
+                      visibleLibraryKeys: toggleListValue(draft.visibleLibraryKeys, libraryKey),
+                    })}
+                  />
+                  <span>{formatLibraryLabel(library)}</span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bot-config-subtle">当前没有可选知识库。</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function BotConfigPanel({
@@ -98,18 +330,13 @@ export default function BotConfigPanel({
     setDrafts(next);
   }, [items]);
 
-  const hasLibraries = useMemo(() => Array.isArray(libraries) && libraries.length > 0, [libraries]);
-
-  function updateDraft(botId, updater) {
-    setDrafts((prev) => ({
-      ...prev,
-      [botId]: updater(prev[botId] || createEmptyDraft()),
-    }));
-  }
-
-  function updateCreateDraft(updater) {
-    setCreateDraft((prev) => updater(prev));
-  }
+  const sortedLibraries = useMemo(() => (
+    [...libraries].sort((a, b) => {
+      const levelDiff = Number(a?.permissionLevel || 0) - Number(b?.permissionLevel || 0);
+      if (levelDiff !== 0) return levelDiff;
+      return String(a?.label || a?.key || '').localeCompare(String(b?.label || b?.key || ''), 'zh-CN');
+    })
+  ), [libraries]);
 
   async function handleSave(botId) {
     const draft = drafts[botId];
@@ -119,9 +346,9 @@ export default function BotConfigPanel({
     setNotice('');
     try {
       const item = await onUpdate?.(botId, serializeDraft(draft));
-      setNotice(`已保存 Bot：${item?.name || botId}`);
+      setNotice(`已保存机器人：${item?.name || botId}`);
     } catch (saveError) {
-      setError(normalizeError(saveError, '保存 Bot 失败。'));
+      setError(normalizeError(saveError, '保存机器人失败。'));
     } finally {
       setSavingId('');
     }
@@ -134,9 +361,9 @@ export default function BotConfigPanel({
     try {
       const item = await onCreate?.(serializeDraft(createDraft));
       setCreateDraft(createEmptyDraft());
-      setNotice(`已创建 Bot：${item?.name || '新 Bot'}`);
+      setNotice(`已创建机器人：${item?.name || '新机器人'}`);
     } catch (createError) {
-      setError(normalizeError(createError, '创建 Bot 失败。'));
+      setError(normalizeError(createError, '创建机器人失败。'));
     } finally {
       setCreating(false);
     }
@@ -146,18 +373,18 @@ export default function BotConfigPanel({
     <div className="bot-config-card">
       <div className="bot-config-head">
         <div>
-          <strong>Bot 配置</strong>
+          <strong>机器人配置</strong>
           <div className="bot-config-subtle">
-            这里只在全智能模式密钥验证通过后开放，用于配置 Web、企业微信、Microsoft Teams 的 Bot 视图。
+            报表中心负责机器人治理。支持多个机器人并行，支持不同第三方渠道同时挂多个机器人。
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="bot-config-empty">正在读取 Bot 配置...</div>
+        <div className="bot-config-empty">正在读取机器人配置...</div>
       ) : !manageEnabled ? (
         <div className="bot-config-empty">
-          当前还没有拿到全智能模式管理权限，请先完成密钥验证。
+          当前还没有全智能模式管理权限。请先用全智能模式密钥解锁后再配置机器人。
         </div>
       ) : (
         <>
@@ -165,267 +392,34 @@ export default function BotConfigPanel({
           {error ? <div className="bot-config-error">{error}</div> : null}
 
           <div className="bot-config-section">
-            <div className="bot-config-section-title">现有 Bot</div>
+            <div className="bot-config-section-title">现有机器人</div>
             <div className="bot-config-list">
-              {items.map((item) => {
-                const draft = drafts[item.id] || createDraftFromBot(item);
-                return (
-                  <div key={item.id} className="bot-card">
-                    <div className="bot-card-head">
-                      <div>
-                        <strong>{item.name}</strong>
-                        <div className="bot-config-subtle">ID：{item.id}</div>
-                      </div>
-                      <button
-                        type="button"
-                        className="primary-btn"
-                        onClick={() => handleSave(item.id)}
-                        disabled={savingId === item.id}
-                      >
-                        {savingId === item.id ? '保存中...' : '保存'}
-                      </button>
-                    </div>
-
-                    <div className="bot-field-grid">
-                      <label className="bot-field">
-                        <span>名称</span>
-                        <input
-                          value={draft.name}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, name: event.target.value }))}
-                        />
-                      </label>
-                      <label className="bot-field">
-                        <span>描述</span>
-                        <input
-                          value={draft.description}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, description: event.target.value }))}
-                        />
-                      </label>
-                      <label className="bot-field bot-field-span">
-                        <span>职责说明</span>
-                        <textarea
-                          rows={3}
-                          value={draft.systemPrompt}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, systemPrompt: event.target.value }))}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="bot-toggle-row">
-                      <label className="bot-toggle">
-                        <input
-                          type="checkbox"
-                          checked={draft.enabled}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, enabled: event.target.checked }))}
-                        />
-                        <span>启用</span>
-                      </label>
-                      <label className="bot-toggle">
-                        <input
-                          type="checkbox"
-                          checked={draft.isDefault}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, isDefault: event.target.checked }))}
-                        />
-                        <span>默认 Bot</span>
-                      </label>
-                      <label className="bot-toggle">
-                        <input
-                          type="checkbox"
-                          checked={draft.includeUngrouped}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, includeUngrouped: event.target.checked }))}
-                        />
-                        <span>允许未分组文档</span>
-                      </label>
-                      <label className="bot-toggle">
-                        <input
-                          type="checkbox"
-                          checked={draft.includeFailedParseDocuments}
-                          onChange={(event) => updateDraft(item.id, (prev) => ({ ...prev, includeFailedParseDocuments: event.target.checked }))}
-                        />
-                        <span>允许失败文档</span>
-                      </label>
-                    </div>
-
-                    <div className="bot-chip-group">
-                      <div className="bot-chip-group-title">渠道绑定</div>
-                      <div className="bot-chip-grid">
-                        {CHANNEL_OPTIONS.map((option) => (
-                          <label key={option.key} className={`bot-chip ${draft.channels[option.key] ? 'active' : ''}`}>
-                            <input
-                              type="checkbox"
-                              checked={draft.channels[option.key]}
-                              onChange={(event) => updateDraft(item.id, (prev) => ({
-                                ...prev,
-                                channels: {
-                                  ...prev.channels,
-                                  [option.key]: event.target.checked,
-                                },
-                              }))}
-                            />
-                            <span>{option.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="bot-chip-group">
-                      <div className="bot-chip-group-title">可见知识库</div>
-                      {hasLibraries ? (
-                        <div className="bot-chip-grid">
-                          {libraries.map((library) => {
-                            const libraryKey = library.key;
-                            const active = draft.visibleLibraryKeys.includes(libraryKey);
-                            return (
-                              <label key={libraryKey} className={`bot-chip ${active ? 'active' : ''}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={active}
-                                  onChange={() => updateDraft(item.id, (prev) => ({
-                                    ...prev,
-                                    visibleLibraryKeys: toggleListValue(prev.visibleLibraryKeys, libraryKey),
-                                  }))}
-                                />
-                                <span>{library.label || library.name || library.key}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="bot-config-subtle">当前还没有可选知识库。</div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {items.map((item) => (
+                <BotEditorCard
+                  key={item.id}
+                  title={`${item.name} · ${item.id}`}
+                  draft={drafts[item.id] || createDraftFromBot(item)}
+                  libraries={sortedLibraries}
+                  onChange={(nextDraft) => setDrafts((prev) => ({ ...prev, [item.id]: nextDraft }))}
+                  actionLabel="保存"
+                  actionPending={savingId === item.id}
+                  onSubmit={() => handleSave(item.id)}
+                />
+              ))}
             </div>
           </div>
 
           <div className="bot-config-section">
-            <div className="bot-config-section-title">新增 Bot</div>
-            <div className="bot-card">
-              <div className="bot-field-grid">
-                <label className="bot-field">
-                  <span>名称</span>
-                  <input
-                    value={createDraft.name}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="例如：企业微信助手"
-                  />
-                </label>
-                <label className="bot-field">
-                  <span>描述</span>
-                  <input
-                    value={createDraft.description}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, description: event.target.value }))}
-                    placeholder="例如：面向企业微信渠道的合同助手"
-                  />
-                </label>
-                <label className="bot-field bot-field-span">
-                  <span>职责说明</span>
-                  <textarea
-                    rows={3}
-                    value={createDraft.systemPrompt}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, systemPrompt: event.target.value }))}
-                    placeholder="描述这个 Bot 的职责、边界和偏好。"
-                  />
-                </label>
-              </div>
-
-              <div className="bot-toggle-row">
-                <label className="bot-toggle">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.enabled}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, enabled: event.target.checked }))}
-                  />
-                  <span>启用</span>
-                </label>
-                <label className="bot-toggle">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.isDefault}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, isDefault: event.target.checked }))}
-                  />
-                  <span>设为默认 Bot</span>
-                </label>
-                <label className="bot-toggle">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.includeUngrouped}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, includeUngrouped: event.target.checked }))}
-                  />
-                  <span>允许未分组文档</span>
-                </label>
-                <label className="bot-toggle">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.includeFailedParseDocuments}
-                    onChange={(event) => updateCreateDraft((prev) => ({ ...prev, includeFailedParseDocuments: event.target.checked }))}
-                  />
-                  <span>允许失败文档</span>
-                </label>
-              </div>
-
-              <div className="bot-chip-group">
-                <div className="bot-chip-group-title">渠道绑定</div>
-                <div className="bot-chip-grid">
-                  {CHANNEL_OPTIONS.map((option) => (
-                    <label key={option.key} className={`bot-chip ${createDraft.channels[option.key] ? 'active' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={createDraft.channels[option.key]}
-                        onChange={(event) => updateCreateDraft((prev) => ({
-                          ...prev,
-                          channels: {
-                            ...prev.channels,
-                            [option.key]: event.target.checked,
-                          },
-                        }))}
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bot-chip-group">
-                <div className="bot-chip-group-title">可见知识库</div>
-                {hasLibraries ? (
-                  <div className="bot-chip-grid">
-                    {libraries.map((library) => {
-                      const libraryKey = library.key;
-                      const active = createDraft.visibleLibraryKeys.includes(libraryKey);
-                      return (
-                        <label key={libraryKey} className={`bot-chip ${active ? 'active' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={active}
-                            onChange={() => updateCreateDraft((prev) => ({
-                              ...prev,
-                              visibleLibraryKeys: toggleListValue(prev.visibleLibraryKeys, libraryKey),
-                            }))}
-                          />
-                          <span>{library.label || library.name || library.key}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="bot-config-subtle">当前还没有可选知识库。</div>
-                )}
-              </div>
-
-              <div className="bot-config-actions">
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={handleCreate}
-                  disabled={creating}
-                >
-                  {creating ? '创建中...' : '创建 Bot'}
-                </button>
-              </div>
-            </div>
+            <div className="bot-config-section-title">新增机器人</div>
+            <BotEditorCard
+              title="新机器人"
+              draft={createDraft}
+              libraries={sortedLibraries}
+              onChange={setCreateDraft}
+              actionLabel="创建"
+              actionPending={creating}
+              onSubmit={handleCreate}
+            />
           </div>
         </>
       )}

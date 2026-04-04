@@ -6,9 +6,11 @@ import {
   type BotDefinition,
 } from './bot-definitions.js';
 import {
+  buildVisibleLibraryKeySet,
   filterMemoryDocumentsForBot,
 } from './bot-visibility.js';
 import type { OpenClawMemoryState } from './openclaw-memory-changes.js';
+import { loadDocumentLibraries } from './document-libraries.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
 
 const GLOBAL_STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
@@ -30,12 +32,14 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
   }
 }
 
-function buildBotScopedMemoryState(bot: BotDefinition, state: OpenClawMemoryState): OpenClawMemoryState {
-  const documents = filterMemoryDocumentsForBot(bot, Object.values(state.documents || {}));
+function buildBotScopedMemoryState(
+  bot: BotDefinition,
+  state: OpenClawMemoryState,
+  visibleLibraryKeys: Set<string>,
+): OpenClawMemoryState {
+  const documents = filterMemoryDocumentsForBot(bot, Object.values(state.documents || {}), visibleLibraryKeys);
   const nextDocuments = Object.fromEntries(documents.map((item) => [item.id, item]));
   const visibleDocumentIds = new Set(documents.map((item) => item.id));
-  const visibleLibraryKeys = new Set(bot.visibleLibraryKeys);
-  if (bot.includeUngrouped) visibleLibraryKeys.add('ungrouped');
 
   return {
     version: state.version,
@@ -53,16 +57,18 @@ async function loadGlobalState() {
 }
 
 export async function refreshBotMemoryCatalogs(globalState?: OpenClawMemoryState | null) {
-  const [bots, state] = await Promise.all([
+  const [bots, state, libraries] = await Promise.all([
     listBotDefinitionsForManage(),
     globalState ? Promise.resolve(globalState) : loadGlobalState(),
+    loadDocumentLibraries(),
   ]);
 
   if (!state) return { botCount: 0 };
 
   const enabledBots = bots.filter((item) => item.enabled);
   await Promise.all(enabledBots.map(async (bot) => {
-    const scopedState = buildBotScopedMemoryState(bot, state);
+    const visibleLibraryKeys = buildVisibleLibraryKeySet(bot, libraries);
+    const scopedState = buildBotScopedMemoryState(bot, state, visibleLibraryKeys);
     await ensureBotDir(bot.id);
     await fs.writeFile(getBotStateFile(bot.id), JSON.stringify(scopedState, null, 2), 'utf8');
   }));
@@ -72,10 +78,13 @@ export async function refreshBotMemoryCatalogs(globalState?: OpenClawMemoryState
 
 export async function loadBotMemorySelectionState(botId?: string) {
   const bot = await getBotDefinition(botId);
-  const globalState = await loadGlobalState();
+  const [globalState, libraries] = await Promise.all([
+    loadGlobalState(),
+    loadDocumentLibraries(),
+  ]);
   if (!globalState) return null;
   if (!bot) return globalState;
 
   const fileState = await readJsonFile<OpenClawMemoryState>(getBotStateFile(bot.id));
-  return fileState || buildBotScopedMemoryState(bot, globalState);
+  return fileState || buildBotScopedMemoryState(bot, globalState, buildVisibleLibraryKeySet(bot, libraries));
 }

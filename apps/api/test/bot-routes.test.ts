@@ -50,6 +50,7 @@ test('bot routes should expose public list and require full-mode access for writ
     url: '/api/bots',
     payload: {
       name: '企业微信助理',
+      libraryAccessLevel: 1,
       visibleLibraryKeys: ['contract'],
     },
   });
@@ -65,6 +66,7 @@ test('bot routes should expose public list and require full-mode access for writ
       id: 'wecom-assistant',
       name: '企业微信助理',
       description: '企业微信渠道机器人',
+      libraryAccessLevel: 1,
       visibleLibraryKeys: ['contract'],
       channelBindings: [
         { channel: 'web', enabled: true },
@@ -74,6 +76,7 @@ test('bot routes should expose public list and require full-mode access for writ
   });
   assert.equal(created.statusCode, 200);
   assert.equal(created.json().item.id, 'wecom-assistant');
+  assert.equal(created.json().item.libraryAccessLevel, 1);
 
   const resolvedByExternalBot = await botModule.resolveBotForChannel('wecom', {
     externalBotId: 'wbot-001',
@@ -96,6 +99,11 @@ test('bot routes should expose public list and require full-mode access for writ
     )),
     true,
   );
+  assert.equal(
+    managedList.json().items.find((item: { id: string; libraryAccessLevel?: number }) => item.id === 'wecom-assistant')
+      ?.libraryAccessLevel,
+    1,
+  );
 
   const updated = await app.inject({
     method: 'PATCH',
@@ -106,10 +114,12 @@ test('bot routes should expose public list and require full-mode access for writ
     payload: {
       isDefault: true,
       includeFailedParseDocuments: true,
+      libraryAccessLevel: 2,
     },
   });
 
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().item.isDefault, true);
   assert.equal(updated.json().item.includeFailedParseDocuments, true);
+  assert.equal(updated.json().item.libraryAccessLevel, 2);
 });

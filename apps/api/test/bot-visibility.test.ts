@@ -1,17 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterDocumentsForBot, filterLibrariesForBot, isMemoryDocumentVisibleToBot } from '../src/lib/bot-visibility.js';
+import {
+  filterDocumentsForBot,
+  filterLibrariesForBot,
+  isMemoryDocumentVisibleToBot,
+} from '../src/lib/bot-visibility.js';
 import type { BotDefinition } from '../src/lib/bot-definitions.js';
 import type { DocumentLibrary } from '../src/lib/document-libraries.js';
 
 const BOT: BotDefinition = {
   id: 'wecom-assistant',
-  name: '企业微信助理',
+  name: '企业微信助手',
   slug: 'wecom-assistant',
   description: '',
   enabled: true,
   isDefault: true,
   systemPrompt: '',
+  libraryAccessLevel: 1,
   visibleLibraryKeys: ['contract'],
   includeUngrouped: false,
   includeFailedParseDocuments: false,
@@ -20,12 +25,12 @@ const BOT: BotDefinition = {
 };
 
 const LIBRARIES: DocumentLibrary[] = [
-  { key: 'ungrouped', label: '未分组', createdAt: '2026-04-03T18:00:00.000Z', isDefault: true },
-  { key: 'contract', label: '合同协议', createdAt: '2026-04-03T18:00:00.000Z' },
-  { key: 'resume', label: '人才简历', createdAt: '2026-04-03T18:00:00.000Z' },
+  { key: 'ungrouped', label: '未分组', permissionLevel: 2, createdAt: '2026-04-03T18:00:00.000Z', isDefault: true },
+  { key: 'contract', label: '合同协议', permissionLevel: 1, createdAt: '2026-04-03T18:00:00.000Z' },
+  { key: 'resume', label: '人才简历', permissionLevel: 0, createdAt: '2026-04-03T18:00:00.000Z' },
 ];
 
-test('filterLibrariesForBot should only keep authorized libraries', () => {
+test('filterLibrariesForBot should only keep libraries at or above the bot access level', () => {
   const result = filterLibrariesForBot(BOT, LIBRARIES);
   assert.deepEqual(result.map((item) => item.key), ['contract']);
 });
@@ -81,6 +86,8 @@ test('filterDocumentsForBot should drop documents outside visible libraries and 
 });
 
 test('isMemoryDocumentVisibleToBot should use bot library scope and failed parse policy', () => {
+  const visibleLibraryKeys = new Set(['contract']);
+
   assert.equal(isMemoryDocumentVisibleToBot(BOT, {
     id: 'doc-1',
     libraryKeys: ['contract'],
@@ -92,7 +99,7 @@ test('isMemoryDocumentVisibleToBot should use bot library scope and failed parse
     parseStage: 'detailed',
     detailParseStatus: 'succeeded',
     fingerprint: 'fp-1',
-  }), true);
+  }, visibleLibraryKeys), true);
 
   assert.equal(isMemoryDocumentVisibleToBot(BOT, {
     id: 'doc-2',
@@ -105,7 +112,7 @@ test('isMemoryDocumentVisibleToBot should use bot library scope and failed parse
     parseStage: 'detailed',
     detailParseStatus: 'succeeded',
     fingerprint: 'fp-2',
-  }), false);
+  }, visibleLibraryKeys), false);
 
   assert.equal(isMemoryDocumentVisibleToBot(BOT, {
     id: 'doc-3',
@@ -118,5 +125,5 @@ test('isMemoryDocumentVisibleToBot should use bot library scope and failed parse
     parseStage: 'detailed',
     detailParseStatus: 'failed',
     fingerprint: 'fp-3',
-  }), false);
+  }, visibleLibraryKeys), false);
 });

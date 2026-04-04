@@ -3,9 +3,19 @@ import type { BotDefinition } from './bot-definitions.js';
 import type { ParsedDocument } from './document-parser.js';
 import type { OpenClawMemoryDocumentState } from './openclaw-memory-changes.js';
 
-function buildVisibleLibraryKeySet(bot: BotDefinition) {
-  const keys = new Set(bot.visibleLibraryKeys);
-  if (bot.includeUngrouped) keys.add(UNGROUPED_LIBRARY_KEY);
+export function buildVisibleLibraryKeySet(bot: BotDefinition, libraries: DocumentLibrary[]) {
+  const explicitKeys = new Set(bot.visibleLibraryKeys);
+  const hasExplicitFilter = explicitKeys.size > 0;
+  const keys = new Set<string>();
+
+  for (const library of libraries) {
+    if (!library) continue;
+    if (library.key === UNGROUPED_LIBRARY_KEY && !bot.includeUngrouped) continue;
+    if ((library.permissionLevel ?? 0) < (bot.libraryAccessLevel ?? 0)) continue;
+    if (hasExplicitFilter && !explicitKeys.has(library.key)) continue;
+    keys.add(library.key);
+  }
+
   return keys;
 }
 
@@ -16,12 +26,12 @@ function isFailedDocument(input: { parseStatus?: string; detailParseStatus?: str
 }
 
 export function isLibraryVisibleToBot(bot: BotDefinition, library: DocumentLibrary) {
-  const visibleKeys = buildVisibleLibraryKeySet(bot);
-  return visibleKeys.has(library.key);
+  return buildVisibleLibraryKeySet(bot, [library]).has(library.key);
 }
 
 export function filterLibrariesForBot(bot: BotDefinition, libraries: DocumentLibrary[]) {
-  return libraries.filter((library) => isLibraryVisibleToBot(bot, library));
+  const visibleKeys = buildVisibleLibraryKeySet(bot, libraries);
+  return libraries.filter((library) => visibleKeys.has(library.key));
 }
 
 export function isDocumentVisibleToBot(
@@ -43,13 +53,20 @@ export function filterDocumentsForBot(
   return documents.filter((document) => isDocumentVisibleToBot(bot, document, libraries));
 }
 
-export function isMemoryDocumentVisibleToBot(bot: BotDefinition, document: OpenClawMemoryDocumentState) {
+export function isMemoryDocumentVisibleToBot(
+  bot: BotDefinition,
+  document: OpenClawMemoryDocumentState,
+  visibleLibraryKeys: Set<string>,
+) {
   if (!bot.enabled) return false;
   if (!bot.includeFailedParseDocuments && isFailedDocument(document)) return false;
-  const visibleKeys = buildVisibleLibraryKeySet(bot);
-  return document.libraryKeys.some((key) => visibleKeys.has(key));
+  return document.libraryKeys.some((key) => visibleLibraryKeys.has(key));
 }
 
-export function filterMemoryDocumentsForBot(bot: BotDefinition, documents: OpenClawMemoryDocumentState[]) {
-  return documents.filter((document) => isMemoryDocumentVisibleToBot(bot, document));
+export function filterMemoryDocumentsForBot(
+  bot: BotDefinition,
+  documents: OpenClawMemoryDocumentState[],
+  visibleLibraryKeys: Set<string>,
+) {
+  return documents.filter((document) => isMemoryDocumentVisibleToBot(bot, document, visibleLibraryKeys));
 }

@@ -10,6 +10,7 @@ export type DocumentLibrary = {
   key: string;
   label: string;
   description?: string;
+  permissionLevel: number;
   createdAt: string;
   isDefault?: boolean;
   sourceCategoryKey?: BizCategory;
@@ -37,10 +38,30 @@ async function readLibrariesFile() {
   try {
     const raw = await fs.readFile(LIBRARIES_FILE, 'utf8');
     const parsed = JSON.parse(raw) as { items?: DocumentLibrary[] };
-    return Array.isArray(parsed.items) ? parsed.items : [];
+    return Array.isArray(parsed.items)
+      ? parsed.items.map((item) => normalizeLibrary(item))
+      : [];
   } catch {
     return [] as DocumentLibrary[];
   }
+}
+
+function normalizePermissionLevel(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
+}
+
+function normalizeLibrary(input: Partial<DocumentLibrary> & Pick<DocumentLibrary, 'key' | 'label' | 'createdAt'>) {
+  return {
+    key: String(input.key || '').trim(),
+    label: String(input.label || '').trim(),
+    description: String(input.description || '').trim() || undefined,
+    permissionLevel: normalizePermissionLevel(input.permissionLevel),
+    createdAt: String(input.createdAt || '').trim() || new Date().toISOString(),
+    isDefault: input.isDefault === true,
+    sourceCategoryKey: input.sourceCategoryKey,
+  } satisfies DocumentLibrary;
 }
 
 async function writeLibrariesFile(items: DocumentLibrary[]) {
@@ -48,9 +69,10 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
   await fs.writeFile(
     LIBRARIES_FILE,
     JSON.stringify({
-      items: items
-        .filter((item) => !item.isDefault)
-        .map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => rest),
+      items: items.map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => ({
+        ...rest,
+        permissionLevel: normalizePermissionLevel(rest.permissionLevel),
+      })),
     }, null, 2),
     'utf8',
   );
@@ -62,12 +84,14 @@ function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumen
     {
       key: UNGROUPED_LIBRARY_KEY,
       label: UNGROUPED_LIBRARY_LABEL,
+      permissionLevel: 0,
       createdAt,
       isDefault: true,
     } satisfies DocumentLibrary,
     ...(Object.entries(categories) as Array<[BizCategory, { label: string }]>).map(([key, value]) => ({
       key,
       label: value.label || key,
+      permissionLevel: 0,
       createdAt,
       isDefault: true,
       sourceCategoryKey: key,
@@ -76,14 +100,20 @@ function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumen
 }
 
 function mergeLibraries(...groups: DocumentLibrary[][]) {
-  const merged: DocumentLibrary[] = [];
+  const merged = new Map<string, DocumentLibrary>();
   for (const group of groups) {
     for (const item of group) {
-      if (merged.some((existing) => existing.key === item.key)) continue;
-      merged.push(item);
+      const normalized = normalizeLibrary(item);
+      const existing = merged.get(normalized.key);
+      merged.set(normalized.key, existing ? {
+        ...existing,
+        ...normalized,
+        isDefault: normalized.isDefault || existing.isDefault,
+        sourceCategoryKey: normalized.sourceCategoryKey || existing.sourceCategoryKey,
+      } : normalized);
     }
   }
-  return merged;
+  return [...merged.values()];
 }
 
 export function documentMatchesLibrary(item: ParsedDocument, library: DocumentLibrary) {
@@ -112,17 +142,18 @@ export async function loadDocumentLibraries() {
       acc.push({
         key,
         label: key,
+        permissionLevel: 0,
         createdAt: new Date().toISOString(),
       });
       return acc;
     }, []);
 
   const defaultLibraries = buildDefaultLibraries(categoryConfig.categories, categoryConfig.updatedAt);
-  const merged = mergeLibraries(defaultLibraries, stored, derived);
+  const merged = mergeLibraries(defaultLibraries, derived, stored);
   return merged.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 }
 
-export async function createDocumentLibrary(input: { name: string; description?: string }) {
+export async function createDocumentLibrary(input: { name: string; description?: string; permissionLevel?: number }) {
   const label = String(input.name || '').trim();
   if (!label) throw new Error('library name is required');
 
@@ -136,12 +167,47 @@ export async function createDocumentLibrary(input: { name: string; description?:
     key: slugifyLibraryName(label),
     label,
     description: String(input.description || '').trim() || undefined,
+    permissionLevel: normalizePermissionLevel(input.permissionLevel),
     createdAt: new Date().toISOString(),
   };
 
   await writeLibrariesFile([...current, created]);
   const nextLibraries = await loadDocumentLibraries();
   return nextLibraries.find((item) => item.key === created.key) || created;
+}
+
+export async function updateDocumentLibrary(
+  key: string,
+  input: { label?: string; description?: string; permissionLevel?: number },
+) {
+  const current = await loadDocumentLibraries();
+  const target = current.find((item) => item.key === key);
+  if (!target) {
+    throw new Error('library not found');
+  }
+
+  const label = String(input.label ?? target.label).trim();
+  if (!label) {
+    throw new Error('library name is required');
+  }
+
+  const duplicate = current.find((item) => item.key !== key && item.label === label);
+  if (duplicate) {
+    throw new Error('library already exists');
+  }
+
+  const nextItems = current.map((item) => (item.key === key
+    ? normalizeLibrary({
+        ...item,
+        label,
+        description: input.description ?? item.description,
+        permissionLevel: input.permissionLevel ?? item.permissionLevel,
+      })
+    : item));
+
+  await writeLibrariesFile(nextItems);
+  const nextLibraries = await loadDocumentLibraries();
+  return nextLibraries.find((item) => item.key === key) || target;
 }
 
 export async function deleteDocumentLibrary(key: string) {

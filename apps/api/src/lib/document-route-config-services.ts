@@ -2,6 +2,7 @@ import {
   createDocumentLibrary,
   deleteDocumentLibrary,
   loadDocumentLibraries,
+  updateDocumentLibrary,
 } from './document-libraries.js';
 import {
   loadDocumentCategoryConfig,
@@ -36,8 +37,17 @@ export async function saveConfiguredDocumentCategories(
   return { config, exists, files };
 }
 
-export async function createManagedDocumentLibrary(input: { name: string; description?: string }) {
+export async function createManagedDocumentLibrary(input: { name: string; description?: string; permissionLevel?: number }) {
   const library = await createDocumentLibrary(input);
+  const libraries = await loadDocumentLibraries();
+  return { library, libraries };
+}
+
+export async function updateManagedDocumentLibrary(
+  key: string,
+  input: { label?: string; description?: string; permissionLevel?: number },
+) {
+  const library = await updateDocumentLibrary(key, input);
   const libraries = await loadDocumentLibraries();
   return { library, libraries };
 }

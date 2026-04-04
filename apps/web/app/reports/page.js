@@ -2,9 +2,11 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import BotConfigPanel from '../components/BotConfigPanel';
+import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
-import ReportResultsPanel from '../components/ReportResultsPanel';
 import Sidebar from '../components/Sidebar';
+import { createBot, fetchBots, updateBot } from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
   copyGeneratedReportLink,
@@ -19,7 +21,11 @@ import {
   formatTemplateUploadSourceTypeLabel,
   inferTemplateUploadSourceType,
 } from '../lib/report-template-uploads.mjs';
-import { normalizeDatasourceResponse, normalizeReportsResponse } from '../lib/types';
+import {
+  normalizeDatasourceResponse,
+  normalizeDocumentLibrariesResponse,
+  normalizeReportsResponse,
+} from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
 
 function formatDateTime(value) {
@@ -139,7 +145,7 @@ function SingleReportActions({ item }) {
         按表格下载
       </button>
       <button className="ghost-btn" type="button" onClick={() => void downloadGeneratedReportAs(item, 'ppt')}>
-        按PPT下载
+        按 PPT 下载
       </button>
       <button className="ghost-btn" type="button" onClick={() => void downloadGeneratedReportAs(item, 'text')}>
         按纯文字下载
@@ -152,20 +158,23 @@ function ReportsPageContent() {
   const searchParams = useSearchParams();
   const generatedId = searchParams.get('generated') || '';
   const fileInputRef = useRef(null);
-  const hasAutoSelectedReportRef = useRef(false);
   const [data, setData] = useState(null);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
   const [generatedReport, setGeneratedReport] = useState(null);
-  const [selectedReportId, setSelectedReportId] = useState('');
   const [templateDraft, setTemplateDraft] = useState({
     label: '',
     description: '',
     link: '',
   });
   const [templateFile, setTemplateFile] = useState(null);
+  const [botItems, setBotItems] = useState([]);
+  const [botManageEnabled, setBotManageEnabled] = useState(false);
+  const [botLoading, setBotLoading] = useState(false);
+  const [documentLibraries, setDocumentLibraries] = useState([]);
+  const [reportModeConstraints, setReportModeConstraints] = useState('');
 
   async function loadReports() {
     try {
@@ -184,8 +193,29 @@ function ReportsPageContent() {
     }
   }
 
+  async function loadBotManagement() {
+    try {
+      setBotLoading(true);
+      const [botsPayload, librariesResponse] = await Promise.all([
+        fetchBots(),
+        fetch(buildApiUrl('/api/documents/libraries'), { cache: 'no-store' }),
+      ]);
+      const librariesPayload = normalizeDocumentLibrariesResponse(await librariesResponse.json());
+      setBotItems(Array.isArray(botsPayload?.items) ? botsPayload.items : []);
+      setBotManageEnabled(Boolean(botsPayload?.manageEnabled));
+      setDocumentLibraries(Array.isArray(librariesPayload?.items) ? librariesPayload.items : []);
+    } catch {
+      setBotItems([]);
+      setBotManageEnabled(false);
+      setDocumentLibraries([]);
+    } finally {
+      setBotLoading(false);
+    }
+  }
+
   useEffect(() => {
     void loadReports();
+    void loadBotManagement();
 
     async function loadDatasources() {
       try {
@@ -220,31 +250,20 @@ function ReportsPageContent() {
     setGeneratedReport(outputRecords.find((item) => item.id === generatedId) || null);
   }, [generatedId, outputRecords]);
 
-  useEffect(() => {
-    if (generatedId) return;
-
-    if (!outputRecords.length) {
-      hasAutoSelectedReportRef.current = false;
-      setSelectedReportId('');
-      return;
-    }
-
-    if (selectedReportId) {
-      if (!outputRecords.some((item) => item.id === selectedReportId)) {
-        setSelectedReportId(outputRecords[0].id);
-      }
-      hasAutoSelectedReportRef.current = true;
-      return;
-    }
-
-    if (!hasAutoSelectedReportRef.current) {
-      setSelectedReportId(outputRecords[0].id);
-      hasAutoSelectedReportRef.current = true;
-    }
-  }, [generatedId, outputRecords, selectedReportId]);
-
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
+  }
+
+  async function createBotDefinition(payload) {
+    const json = await createBot(payload);
+    await loadBotManagement();
+    return json?.item || null;
+  }
+
+  async function updateBotDefinition(botId, payload) {
+    const json = await updateBot(botId, payload);
+    await loadBotManagement();
+    return json?.item || null;
   }
 
   async function deleteTemplate(item) {
@@ -279,9 +298,7 @@ function ReportsPageContent() {
       setMessage('');
       const response = await fetch(
         `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}`)}?templateKey=${encodeURIComponent(item.templateKey)}`,
-        {
-          method: 'DELETE',
-        },
+        { method: 'DELETE' },
       );
       const json = await response.json();
       if (!response.ok) throw new Error(json?.error || 'delete template reference failed');
@@ -350,10 +367,7 @@ function ReportsPageContent() {
         formData.append('file', templateFile);
         const uploadResponse = await fetch(
           `${buildApiUrl('/api/reports/template-reference')}?templateKey=${encodeURIComponent(createdTemplate.key)}`,
-          {
-            method: 'POST',
-            body: formData,
-          },
+          { method: 'POST', body: formData },
         );
         const uploadJson = await uploadResponse.json();
         if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template reference failed');
@@ -440,7 +454,7 @@ function ReportsPageContent() {
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>这里只保留两个模块：用户上传的模板、已生成的报表。模板上传不再手动分类，系统会按文件或链接自动识别。</p>
+            <p>报表中心保留模板治理和输出机器人配置。已生成报表继续放在首页右侧面板查看。</p>
           </div>
         </header>
 
@@ -534,14 +548,30 @@ function ReportsPageContent() {
               )}
             </section>
 
-            <ReportResultsPanel
-              title="已生成的报表"
-              description="统一查看所有已生成报表，并继续分享、下载或查看详情。"
-              items={outputRecords}
-              selectedReportId={selectedReportId}
-              onSelectReport={setSelectedReportId}
-              className="reports-results-panel"
-            />
+            <section className="card documents-card reports-bot-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>输出机器人配置</h3>
+                  <p>支持多个机器人并行、多个第三方并行，同一第三方下也可以配置多个机器人。</p>
+                </div>
+                <FullIntelligenceModeButton
+                  systemConstraints={reportModeConstraints}
+                  onSystemConstraintsChange={setReportModeConstraints}
+                  onAccessStateChange={loadBotManagement}
+                  showSystemConstraints={false}
+                />
+              </div>
+              <div className="bot-config-inline-wrap">
+                <BotConfigPanel
+                  items={botItems}
+                  libraries={documentLibraries}
+                  manageEnabled={botManageEnabled}
+                  loading={botLoading}
+                  onCreate={createBotDefinition}
+                  onUpdate={updateBotDefinition}
+                />
+              </div>
+            </section>
           </section>
         ) : null}
       </main>

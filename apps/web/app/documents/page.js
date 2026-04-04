@@ -17,6 +17,7 @@ import {
   reparseDocuments,
   reclusterUngroupedDocuments,
   saveDocumentGroups,
+  updateDocumentLibrary,
 } from './api';
 import DocumentFiltersBar from './DocumentFiltersBar';
 import DocumentsTable from './DocumentsTable';
@@ -52,6 +53,20 @@ const DEFAULT_SIDEBAR_SOURCES = [
   { name: '知识库分组', status: 'success' },
 ];
 
+function normalizePermissionLevel(value, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.floor(numeric));
+}
+
+function createLibrarySettingsDraft(library) {
+  return {
+    label: String(library?.label || library?.name || ''),
+    description: String(library?.description || ''),
+    permissionLevel: normalizePermissionLevel(library?.permissionLevel, 0),
+  };
+}
+
 export default function DocumentsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -67,10 +82,15 @@ export default function DocumentsPage() {
   const [reparseSubmittingId, setReparseSubmittingId] = useState('');
   const [libraryDrafts, setLibraryDrafts] = useState({});
   const [expandedLibraryEditorId, setExpandedLibraryEditorId] = useState('');
-  const [recentNewIds, setRecentNewIds] = useState([]);
+  const [recentNewIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const [libraryCreateDraft, setLibraryCreateDraft] = useState('');
+  const [libraryCreateDraft, setLibraryCreateDraft] = useState({
+    name: '',
+    permissionLevel: 0,
+  });
   const [libraryCreateSubmitting, setLibraryCreateSubmitting] = useState(false);
+  const [librarySettingsDrafts, setLibrarySettingsDrafts] = useState({});
+  const [librarySettingsSubmittingId, setLibrarySettingsSubmittingId] = useState('');
 
   const loadDocuments = async () => {
     try {
@@ -99,8 +119,8 @@ export default function DocumentsPage() {
   };
 
   useEffect(() => {
-    loadDocuments();
-    loadDatasources();
+    void loadDocuments();
+    void loadDatasources();
   }, []);
 
   const handlePrimaryScan = async () => {
@@ -170,20 +190,62 @@ export default function DocumentsPage() {
   };
 
   const handleCreateLibrary = async () => {
-    const name = libraryCreateDraft.trim();
+    const name = String(libraryCreateDraft.name || '').trim();
+    const permissionLevel = normalizePermissionLevel(libraryCreateDraft.permissionLevel, 0);
     if (!name || libraryCreateSubmitting) return;
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
-      const created = await createDocumentLibrary(name);
-      setLibraryCreateDraft('');
+      const created = await createDocumentLibrary(name, '', permissionLevel);
+      setLibraryCreateDraft({ name: '', permissionLevel: 0 });
       await loadDocuments();
       setActiveLibrary(created?.item?.key || 'all');
-      setScanMessage(`已新建知识库分组“${name}”`);
+      setScanMessage(`已新建知识库分组“${name}”，权限等级 L${permissionLevel}`);
     } catch {
       setScanMessage('新建知识库分组失败，请稍后重试');
     } finally {
       setLibraryCreateSubmitting(false);
+    }
+  };
+
+  const handleLibrarySettingChange = (libraryKey, patch) => {
+    setLibrarySettingsDrafts((current) => ({
+      ...current,
+      [libraryKey]: {
+        ...(current[libraryKey] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveLibrarySettings = async (libraryKey) => {
+    if (!libraryKey || librarySettingsSubmittingId) return;
+    const library = (data?.libraries || []).find((item) => item.key === libraryKey);
+    if (!library) return;
+    const draft = {
+      ...createLibrarySettingsDraft(library),
+      ...(librarySettingsDrafts[libraryKey] || {}),
+    };
+    const label = String(draft.label || '').trim();
+    if (!label) {
+      setScanMessage('知识库名称不能为空');
+      return;
+    }
+
+    try {
+      setLibrarySettingsSubmittingId(libraryKey);
+      setScanMessage('');
+      await updateDocumentLibrary(libraryKey, {
+        label,
+        description: String(draft.description || '').trim(),
+        permissionLevel: normalizePermissionLevel(draft.permissionLevel, 0),
+      });
+      await loadDocuments();
+      setScanMessage(`已更新知识库“${label}”的权限等级`);
+    } catch {
+      setScanMessage('更新知识库设置失败，请稍后重试');
+    } finally {
+      setLibrarySettingsSubmittingId('');
     }
   };
 
@@ -202,21 +264,21 @@ export default function DocumentsPage() {
     }
   };
 
-  const libraries = useMemo(() => {
-    const sorted = sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []);
-    return sorted.filter((library) => {
-      const count = getLibraryDocumentCount(library, data?.items || [], sorted);
-      return count > 0 || library.key === activeLibrary;
-    });
-  }, [activeLibrary, data]);
+  const libraries = useMemo(
+    () => sortLibrariesForDisplay(Array.isArray(data?.libraries) ? data.libraries : [], data?.items || []),
+    [data],
+  );
+
   const libraryLabelMap = useMemo(
     () => new Map(libraries.map((item) => [item.key, item.label])),
     [libraries],
   );
+
   const visibleItems = useMemo(
     () => buildVisibleItems(data?.items || []),
     [data],
   );
+
   const filteredItems = useMemo(
     () => buildFilteredItems({
       visibleItems,
@@ -228,10 +290,12 @@ export default function DocumentsPage() {
     }),
     [activeExtension, activeLibrary, keyword, libraries, libraryLabelMap, visibleItems],
   );
+
   const extensionSummary = useMemo(
     () => buildExtensionSummary(data?.byExtension),
     [data],
   );
+
   const parsedCount = data?.meta?.parsed || 0;
   const totalFiles = data?.totalFiles || 0;
   const parseRate = totalFiles ? `${Math.round((parsedCount / totalFiles) * 100)}%` : '0%';
@@ -266,12 +330,12 @@ export default function DocumentsPage() {
         <header className="topbar">
           <div>
             <h2>AI 知识库</h2>
-            <p>首次无法判断的文档会保留在未分组，右上角按钮只重扫未分组文档并尝试重新归组。</p>
+            <p>知识库权限等级用于控制机器人可见范围。0 为最高权限，数字越大权限越低。机器人等级为 N 时，可访问权限等级大于等于 N 的知识库。</p>
           </div>
           <div className="topbar-actions">
             <a className="ghost-btn" href="/#upload-document">上传文档</a>
-            <button className="ghost-btn" onClick={loadDocuments}>刷新</button>
-            <button className="primary-btn" onClick={handlePrimaryScan} disabled={scanLoading}>
+            <button className="ghost-btn" type="button" onClick={() => void loadDocuments()}>刷新</button>
+            <button className="primary-btn" type="button" onClick={() => void handlePrimaryScan()} disabled={scanLoading}>
               {scanLoading ? '处理中...' : '立即扫描未分组文档'}
             </button>
           </div>
@@ -294,6 +358,10 @@ export default function DocumentsPage() {
               onCreateDraftChange={setLibraryCreateDraft}
               onCreateLibrary={handleCreateLibrary}
               createSubmitting={libraryCreateSubmitting}
+              settingsDrafts={librarySettingsDrafts}
+              onSettingsChange={handleLibrarySettingChange}
+              onSaveSettings={handleSaveLibrarySettings}
+              settingsSubmittingId={librarySettingsSubmittingId}
             />
 
             <DocumentFiltersBar

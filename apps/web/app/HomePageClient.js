@@ -1,10 +1,9 @@
 'use client';
 
-import BotConfigPanel from './components/BotConfigPanel';
+import InsightPanel from './components/InsightPanel';
 import BotSelector from './components/BotSelector';
 import ChatPanel from './components/ChatPanel';
 import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
-import InsightPanel from './components/InsightPanel';
 import Sidebar from './components/Sidebar';
 import { useHomePageController } from './use-home-page-controller';
 
@@ -34,10 +33,7 @@ export default function HomePageClient({ initialModelState }) {
     assignIngestToSelectedLibrary,
     botItems,
     botLoading,
-    botManageEnabled,
     confirmTemplateOption,
-    createBotDefinition,
-    deleteReport,
     documentLibraries,
     documentTotal,
     groupSaving,
@@ -47,13 +43,12 @@ export default function HomePageClient({ initialModelState }) {
     refreshBots,
     reportCollapsed,
     reportItems,
-    reviseReport,
     runDocumentUpload,
     selectedBotId,
     selectedManualLibraries,
     selectedReportId,
-    setInput,
     setReportCollapsed,
+    setInput,
     setSelectedBotId,
     setSelectedManualLibraries,
     setSelectedReportId,
@@ -62,7 +57,8 @@ export default function HomePageClient({ initialModelState }) {
     submitCredentialForMessage,
     submitQuestion,
     systemConstraints,
-    updateBotDefinition,
+    deleteReport,
+    reviseReport,
     uploadInputRef,
     uploadLoading,
   } = useHomePageController();
@@ -88,16 +84,6 @@ export default function HomePageClient({ initialModelState }) {
               systemConstraints={systemConstraints}
               onSystemConstraintsChange={setSystemConstraints}
               onAccessStateChange={refreshBots}
-              botConfigSlot={(
-                <BotConfigPanel
-                  items={botItems}
-                  libraries={documentLibraries}
-                  manageEnabled={botManageEnabled}
-                  loading={botLoading}
-                  onCreate={createBotDefinition}
-                  onUpdate={updateBotDefinition}
-                />
-              )}
             />
           </div>
         </header>
@@ -124,7 +110,6 @@ export default function HomePageClient({ initialModelState }) {
               onSubmitCredential={submitCredentialForMessage}
               onConfirmTemplateOption={confirmTemplateOption}
             />
-
             <InsightPanel
               collapsed={reportCollapsed}
               onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}

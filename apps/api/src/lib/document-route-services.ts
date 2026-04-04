@@ -1,6 +1,7 @@
 export {
   saveConfiguredDocumentCategories,
   createManagedDocumentLibrary,
+  updateManagedDocumentLibrary,
   deleteManagedDocumentLibrary,
   saveConfirmedDocumentClassifications,
   saveAcceptedCategorySuggestions,

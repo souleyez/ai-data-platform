@@ -6,7 +6,7 @@ import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { REPO_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
 
-export type BotChannel = 'web' | 'wecom' | 'teams';
+export type BotChannel = 'web' | 'wecom' | 'teams' | 'qq' | 'feishu';
 
 export type BotChannelBinding = {
   channel: BotChannel;
@@ -24,6 +24,7 @@ export type BotDefinition = {
   enabled: boolean;
   isDefault: boolean;
   systemPrompt: string;
+  libraryAccessLevel: number;
   visibleLibraryKeys: string[];
   includeUngrouped: boolean;
   includeFailedParseDocuments: boolean;
@@ -49,7 +50,7 @@ export type PublicBotSummary = {
 const CONFIG_VERSION = 1;
 const DEFAULT_FILE = path.join(REPO_ROOT, 'config', 'bots.default.json');
 const STORAGE_FILE = path.join(STORAGE_CONFIG_DIR, 'bots.json');
-const CHANNELS: BotChannel[] = ['web', 'wecom', 'teams'];
+const CHANNELS: BotChannel[] = ['web', 'wecom', 'teams', 'qq', 'feishu'];
 
 function normalizeText(value: unknown) {
   return String(value || '').trim();
@@ -73,6 +74,12 @@ function normalizeTimestamp(value: unknown) {
 
 function uniqueList(values: unknown[]) {
   return [...new Set((values || []).map((item) => normalizeText(item)).filter(Boolean))];
+}
+
+function normalizeLibraryAccessLevel(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.floor(numeric));
 }
 
 function normalizeChannelBinding(value: unknown): BotChannelBinding | null {
@@ -111,6 +118,7 @@ function normalizeBotDefinition(value: unknown, fallbackId = ''): BotDefinition 
     enabled: source.enabled !== false,
     isDefault: source.isDefault === true,
     systemPrompt: normalizeText(source.systemPrompt),
+    libraryAccessLevel: normalizeLibraryAccessLevel(source.libraryAccessLevel),
     visibleLibraryKeys: uniqueList(Array.isArray(source.visibleLibraryKeys) ? source.visibleLibraryKeys : []),
     includeUngrouped: source.includeUngrouped !== false,
     includeFailedParseDocuments: source.includeFailedParseDocuments === true,
@@ -227,6 +235,7 @@ async function loadMergedConfig() {
       isDefault: true,
       enabled: true,
       includeUngrouped: true,
+      libraryAccessLevel: 0,
       channelBindings: [{ channel: 'web', enabled: true }],
       visibleLibraryKeys: [],
     }, 'default')], libraryKeys));

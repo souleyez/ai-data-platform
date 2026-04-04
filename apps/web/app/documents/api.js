@@ -36,11 +36,19 @@ export async function fetchDatasources() {
   return normalizeDatasourceResponse(payload);
 }
 
-export async function createDocumentLibrary(name, description = '') {
+export async function createDocumentLibrary(name, description = '', permissionLevel = 0) {
   return requestJson('/api/documents/libraries', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description }),
+    body: JSON.stringify({ name, description, permissionLevel }),
+  });
+}
+
+export async function updateDocumentLibrary(key, payload) {
+  return requestJson(`/api/documents/libraries/${encodeURIComponent(key)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }
 

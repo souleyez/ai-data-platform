@@ -52,14 +52,22 @@ export function buildBotIdentityContextBlock(input: {
 }) {
   if (!input.bot) return '';
 
+  const additionalLibraryFilter = input.bot.visibleLibraryKeys.length
+    ? input.bot.visibleLibraryKeys.join(' | ')
+    : 'none (access level only)';
+
   return [
     'Current bot identity:',
     `Bot name: ${input.bot.name}`,
     `Bot id: ${input.bot.id}`,
     `Current channel: ${input.channel}`,
-    `Visible libraries: ${input.bot.visibleLibraryKeys.join(' | ') || 'none'}`,
+    `Library access level: ${input.bot.libraryAccessLevel}`,
+    `Additional library filter: ${additionalLibraryFilter}`,
     `Include ungrouped: ${input.bot.includeUngrouped ? 'yes' : 'no'}`,
     `Include failed parse documents: ${input.bot.includeFailedParseDocuments ? 'yes' : 'no'}`,
+    input.bot.systemPrompt
+      ? `Bot-specific guidance: ${input.bot.systemPrompt}`
+      : 'Bot-specific guidance: none',
     'You must behave as this bot, and must not imply access to knowledge outside the visible libraries above.',
   ].join('\n');
 }

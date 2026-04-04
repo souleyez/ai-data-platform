@@ -10,6 +10,7 @@ import {
   acceptDocumentSuggestions,
   createManagedDocumentLibrary,
   deleteManagedDocumentLibrary,
+  updateManagedDocumentLibrary,
   saveAcceptedCategorySuggestions,
   saveConfiguredDocumentCategories,
   saveConfirmedDocumentClassifications,
@@ -163,7 +164,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/libraries', async (request, reply) => {
-    const body = (request.body || {}) as { name?: string; description?: string };
+    const body = (request.body || {}) as { name?: string; description?: string; permissionLevel?: number };
     const name = String(body.name || '').trim();
 
     if (!name) {
@@ -173,7 +174,11 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     let library;
     let libraries;
     try {
-      ({ library, libraries } = await createManagedDocumentLibrary({ name, description: body.description }));
+      ({ library, libraries } = await createManagedDocumentLibrary({
+        name,
+        description: body.description,
+        permissionLevel: body.permissionLevel,
+      }));
     } catch (error) {
       if (error instanceof Error && error.message === 'library already exists') {
         return reply.code(409).send({ error: 'library already exists', message: '知识库分组名称已存在' });
@@ -187,6 +192,36 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       item: library,
       items: libraries,
     };
+  });
+
+  app.patch('/documents/libraries/:key', async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const body = (request.body || {}) as { label?: string; description?: string; permissionLevel?: number };
+
+    try {
+      const { library, libraries } = await updateManagedDocumentLibrary(key, {
+        label: body.label,
+        description: body.description,
+        permissionLevel: body.permissionLevel,
+      });
+      return {
+        status: 'updated',
+        message: `已更新知识库“${library.label}”的访问级别。`,
+        item: library,
+        items: libraries,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'library not found') {
+        return reply.code(404).send({ error: 'library not found' });
+      }
+      if (error instanceof Error && error.message === 'library already exists') {
+        return reply.code(409).send({ error: 'library already exists', message: '知识库名称已存在' });
+      }
+      if (error instanceof Error && error.message === 'library name is required') {
+        return reply.code(400).send({ error: 'library name is required' });
+      }
+      throw error;
+    }
   });
 
   app.delete('/documents/libraries/:key', async (request, reply) => {
