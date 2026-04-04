@@ -95,17 +95,33 @@ export async function startWecomLongConnectionManager(logger: FastifyBaseLogger)
 
     client.on('message.text', async (frame: WsFrame) => {
       try {
+        const body = (frame.body || {}) as Record<string, unknown>;
+        const prompt = normalizeText((body.text as { content?: string } | undefined)?.content);
+        const senderId = normalizeText((body.from as { userid?: string } | undefined)?.userid);
+
+        logger.info({
+          externalBotId: item.externalBotId,
+          senderId,
+          promptLength: prompt.length,
+        }, 'received wecom long connection text message');
+
         const routeContext = await resolveWecomRouteContext(item.externalBotId);
         if (!routeContext) {
           logger.warn({ externalBotId: item.externalBotId }, 'no bot binding found for wecom long connection message');
           return;
         }
 
-        const body = (frame.body || {}) as Record<string, unknown>;
-        const prompt = normalizeText((body.text as { content?: string } | undefined)?.content);
         if (!prompt) return;
 
-        const senderId = normalizeText((body.from as { userid?: string } | undefined)?.userid);
+        logger.info({
+          externalBotId: item.externalBotId,
+          botId: routeContext.botId,
+          routeKey: routeContext.routeKey,
+          tenantId: routeContext.tenantId,
+          senderId,
+          promptLength: prompt.length,
+        }, 'routing wecom long connection text message');
+
         const result = await handleChannelIngress({
           channel: 'wecom',
           prompt,
@@ -117,7 +133,27 @@ export async function startWecomLongConnectionManager(logger: FastifyBaseLogger)
           sessionUser: senderId ? `wecom:${senderId}` : undefined,
         });
 
-        await replyText(client, frame, result.result.message?.content || 'success');
+        const replyContent = result.result.message?.content || 'success';
+
+        logger.info({
+          externalBotId: item.externalBotId,
+          botId: routeContext.botId,
+          senderId,
+          routeKind: result.result.orchestration?.routeKind || '',
+          libraryKeys: Array.isArray(result.result.libraries)
+            ? result.result.libraries.map((library) => library.key)
+            : [],
+          docMatches: Number(result.result.orchestration?.docMatches || 0),
+          replyLength: normalizeText(replyContent).length,
+        }, 'completed wecom long connection text message');
+
+        await replyText(client, frame, replyContent);
+
+        logger.info({
+          externalBotId: item.externalBotId,
+          botId: routeContext.botId,
+          senderId,
+        }, 'replied to wecom long connection text message');
       } catch (error) {
         logger.error({ externalBotId: item.externalBotId, error }, 'failed to handle wecom long connection text message');
       }
