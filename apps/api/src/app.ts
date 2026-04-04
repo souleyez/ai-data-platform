@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
 import { registerCapabilitiesRoutes } from './routes/capabilities.js';
+import { registerChannelRoutes } from './routes/channels.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerAccessKeyRoutes } from './routes/access-keys.js';
 import { registerAuditRoutes } from './routes/audit.js';
@@ -50,6 +51,7 @@ export function createApp() {
   app.register(registerAccessKeyRoutes, { prefix: '/api' });
   app.register(registerBotRoutes, { prefix: '/api' });
   app.register(registerCapabilitiesRoutes, { prefix: '/api' });
+  app.register(registerChannelRoutes, { prefix: '/api' });
   app.register(registerHealthRoutes, { prefix: '/api' });
   app.register(registerIntelligenceModeRoutes, { prefix: '/api' });
   app.register(registerAuditRoutes, { prefix: '/api' });
