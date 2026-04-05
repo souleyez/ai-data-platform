@@ -1,10 +1,12 @@
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
 import {
+  buildBotConfigurationMemoryContextBlock,
   buildBotIdentityContextBlock,
   buildSystemCapabilityContextBlock,
   buildUserConstraintsContextBlock,
 } from './chat-system-context.js';
-import { resolveBotDefinition } from './bot-definitions.js';
+import { listBotDefinitionsForManage, resolveBotDefinition } from './bot-definitions.js';
+import { loadDocumentLibraries } from './document-libraries.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
@@ -85,8 +87,12 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const chatHistory = normalizeHistory(input.chatHistory);
   const gatewayReachable = await isOpenClawGatewayReachable();
   const gatewayConfigured = gatewayReachable || isOpenClawGatewayConfigured();
-  const intelligence = await getIntelligenceModeStatus();
-  const botDefinition = await resolveBotDefinition(input.botId);
+  const [intelligence, botDefinition, configuredBots, documentLibraries] = await Promise.all([
+    getIntelligenceModeStatus(),
+    resolveBotDefinition(input.botId),
+    listBotDefinitionsForManage(),
+    loadDocumentLibraries(),
+  ]);
   const traceId = `trace_${Date.now()}`;
   const requestMode = input.mode || 'general';
   const existingState = requestMode === 'knowledge_output'
@@ -100,6 +106,11 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     buildBotIdentityContextBlock({
       bot: botDefinition,
       channel: 'web',
+    }),
+    buildBotConfigurationMemoryContextBlock({
+      mode: intelligence.mode,
+      bots: configuredBots,
+      libraries: documentLibraries,
     }),
     buildUserConstraintsContextBlock(input.systemConstraints),
   ].filter(Boolean);

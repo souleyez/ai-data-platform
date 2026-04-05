@@ -2,11 +2,12 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import BotConfigPanel from '../components/BotConfigPanel';
+import BotConversationGuide from '../components/BotConversationGuide';
+import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
 import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
 import Sidebar from '../components/Sidebar';
-import { createBot, fetchBots, updateBot } from '../home-api';
+import { fetchBots } from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
   copyGeneratedReportLink,
@@ -79,7 +80,7 @@ function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteR
           )}
         </div>
         <div className="report-upload-cell">
-          <span>模板名</span>
+          <span>模板名称</span>
           <strong>{item.templateLabel}</strong>
         </div>
         <div className="report-upload-cell">
@@ -193,7 +194,7 @@ function ReportsPageContent() {
     }
   }
 
-  async function loadBotManagement() {
+  async function loadBotContext() {
     try {
       setBotLoading(true);
       const [botsPayload, librariesResponse] = await Promise.all([
@@ -215,7 +216,7 @@ function ReportsPageContent() {
 
   useEffect(() => {
     void loadReports();
-    void loadBotManagement();
+    void loadBotContext();
 
     async function loadDatasources() {
       try {
@@ -252,18 +253,6 @@ function ReportsPageContent() {
 
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
-  }
-
-  async function createBotDefinition(payload) {
-    const json = await createBot(payload);
-    await loadBotManagement();
-    return json?.item || null;
-  }
-
-  async function updateBotDefinition(botId, payload) {
-    const json = await updateBot(botId, payload);
-    await loadBotManagement();
-    return json?.item || null;
   }
 
   async function deleteTemplate(item) {
@@ -454,7 +443,7 @@ function ReportsPageContent() {
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>报表中心保留模板治理和输出机器人配置。已生成报表继续放在首页右侧面板查看。</p>
+            <p>这里保留报表模板和输出机器人概览。已生成报表继续放在首页右侧面板查看。</p>
           </div>
         </header>
 
@@ -467,7 +456,7 @@ function ReportsPageContent() {
               <div className="panel-header">
                 <div>
                   <h3>用户上传的模板</h3>
-                  <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考，不再手动分类。</p>
+                  <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考。</p>
                 </div>
               </div>
 
@@ -475,7 +464,7 @@ function ReportsPageContent() {
                 <div className="capture-task-heading">
                   <div>
                     <h4>上传模板</h4>
-                    <p>保留模板名和说明即可，文件与网页链接二选一。</p>
+                    <p>保留模板名称和说明即可，文件与网页链接二选一。</p>
                   </div>
                 </div>
 
@@ -504,7 +493,7 @@ function ReportsPageContent() {
                   />
                   <input
                     className="filter-input"
-                    placeholder="或填写网页链接，如 https://example.com/template"
+                    placeholder="或填写网页链接，例如 https://example.com/template"
                     value={templateDraft.link}
                     onChange={(event) => setTemplateDraft((prev) => ({ ...prev, link: event.target.value }))}
                   />
@@ -523,7 +512,7 @@ function ReportsPageContent() {
                     ? `已选择文件：${templateFile.name}`
                     : templateDraft.link
                       ? `已填写链接：${templateDraft.link}`
-                      : '支持上传 Word、PPT、表格、图片，或直接填网页链接。'}
+                      : '支持上传 Word、PPT、表格、图片，或直接填写网页链接。'}
                 </div>
               </section>
 
@@ -551,26 +540,25 @@ function ReportsPageContent() {
             <section className="card documents-card reports-bot-panel">
               <div className="panel-header">
                 <div>
-                  <h3>输出机器人配置</h3>
-                  <p>支持多个机器人并行、多个第三方并行，同一第三方下也可以配置多个机器人。</p>
+                  <h3>已连接输出机器人</h3>
+                  <p>这里只显示已经接通第三方渠道的机器人。新增接入、权限设置和约束调整改在全智能模式中通过对话完成。</p>
                 </div>
                 <FullIntelligenceModeButton
                   systemConstraints={reportModeConstraints}
                   onSystemConstraintsChange={setReportModeConstraints}
-                  onAccessStateChange={loadBotManagement}
+                  onAccessStateChange={loadBotContext}
                   showSystemConstraints={false}
+                  botConfigSlot={(
+                    <BotConversationGuide
+                      items={botItems}
+                      libraries={documentLibraries}
+                      manageEnabled={botManageEnabled}
+                    />
+                  )}
                 />
               </div>
-              <div className="bot-config-inline-wrap">
-                <BotConfigPanel
-                  items={botItems}
-                  libraries={documentLibraries}
-                  manageEnabled={botManageEnabled}
-                  loading={botLoading}
-                  onCreate={createBotDefinition}
-                  onUpdate={updateBotDefinition}
-                />
-              </div>
+
+              <ConnectedBotsSummary items={botItems} />
             </section>
           </section>
         ) : null}

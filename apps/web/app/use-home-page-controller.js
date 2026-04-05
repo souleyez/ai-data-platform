@@ -2,14 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  createBot,
-  fetchBots,
   deleteReportOutput,
   fetchDatasources,
   fetchDocumentsSnapshot,
   fetchReportsSnapshot,
   reviseReportOutput,
-  updateBot,
 } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
@@ -35,21 +32,11 @@ function createLocalMessageId(prefix = 'assistant') {
 }
 
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
-const BOT_SELECTION_STORAGE_KEY = 'aidp_home_selected_bot_v1';
 
 function loadStoredSystemConstraints() {
   if (typeof window === 'undefined') return '';
   try {
     return String(window.localStorage.getItem(CHAT_CONSTRAINTS_STORAGE_KEY) || '').trim();
-  } catch {
-    return '';
-  }
-}
-
-function loadStoredBotId() {
-  if (typeof window === 'undefined') return '';
-  try {
-    return String(window.localStorage.getItem(BOT_SELECTION_STORAGE_KEY) || '').trim();
   } catch {
     return '';
   }
@@ -71,10 +58,6 @@ export function useHomePageController() {
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
-  const [botItems, setBotItems] = useState([]);
-  const [botManageEnabled, setBotManageEnabled] = useState(false);
-  const [botLoading, setBotLoading] = useState(false);
-  const [selectedBotId, setSelectedBotId] = useState(() => loadStoredBotId());
 
   async function loadDatasources() {
     try {
@@ -113,47 +96,10 @@ export function useHomePageController() {
     await Promise.all([loadDatasources(), loadDocumentSnapshot(), loadReports()]);
   }
 
-  async function loadBots(preferredBotId = '') {
-    setBotLoading(true);
-    try {
-      const json = await fetchBots();
-      const items = Array.isArray(json?.items) ? json.items : [];
-      setBotItems(items);
-      setBotManageEnabled(Boolean(json?.manageEnabled));
-      setSelectedBotId((prev) => {
-        const requested = String(preferredBotId || prev || '').trim();
-        if (requested && items.some((item) => item?.id === requested)) return requested;
-        const defaultItem = items.find((item) => item?.isDefault) || items[0] || null;
-        return String(defaultItem?.id || '');
-      });
-    } catch {
-      setBotItems([]);
-      setBotManageEnabled(false);
-      setSelectedBotId('');
-    } finally {
-      setBotLoading(false);
-    }
-  }
-
-  async function createBotDefinition(payload) {
-    const json = await createBot(payload);
-    const item = json?.item || null;
-    await loadBots(item?.id || '');
-    return item;
-  }
-
-  async function updateBotDefinition(botId, payload) {
-    const json = await updateBot(botId, payload);
-    const item = json?.item || null;
-    await loadBots(item?.id || botId || '');
-    return item;
-  }
-
   useEffect(() => {
     loadDatasources();
     loadDocumentSnapshot();
     loadReports();
-    loadBots();
   }, []);
 
   useEffect(() => {
@@ -168,19 +114,6 @@ export function useHomePageController() {
       // Ignore local persistence failures.
     }
   }, [systemConstraints]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (selectedBotId) {
-        window.localStorage.setItem(BOT_SELECTION_STORAGE_KEY, selectedBotId);
-      } else {
-        window.localStorage.removeItem(BOT_SELECTION_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore local persistence failures.
-    }
-  }, [selectedBotId]);
 
   useEffect(() => {
     if (!reportItems.length) {
@@ -254,7 +187,7 @@ export function useHomePageController() {
 
   const baseActionContext = {
     refreshHomeData,
-    selectedBotId,
+    selectedBotId: '',
     loadDocumentSnapshot,
     loadReports,
     setGroupSaving,
@@ -272,9 +205,6 @@ export function useHomePageController() {
   return {
     documentLibraries,
     documentTotal,
-    botItems,
-    botLoading,
-    botManageEnabled,
     groupSaving,
     input,
     isLoading,
@@ -283,7 +213,6 @@ export function useHomePageController() {
     reportItems,
     selectedReportId,
     selectedManualLibraries,
-    selectedBotId,
     systemConstraints,
     sidebarSources,
     uploadInputRef,
@@ -291,12 +220,8 @@ export function useHomePageController() {
     setInput,
     setReportCollapsed,
     setSelectedManualLibraries,
-    setSelectedBotId,
     setSelectedReportId,
     setSystemConstraints,
-    refreshBots: loadBots,
-    createBotDefinition,
-    updateBotDefinition,
     deleteReport,
     reviseReport,
     resetConversation,

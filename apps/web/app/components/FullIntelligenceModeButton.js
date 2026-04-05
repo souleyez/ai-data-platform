@@ -204,7 +204,7 @@ export default function FullIntelligenceModeButton({
               <div>
                 <strong>{initialized ? '输入全智能模式密钥' : '设置全智能模式密钥'}</strong>
                 <div className="mode-modal-subtitle">
-                  只有通过密钥验证后，才会开放系统限制和机器人治理入口。
+                  只有通过密钥验证后，才会开放系统限制和机器人对话式配置入口。
                 </div>
               </div>
               <button
@@ -257,7 +257,7 @@ export default function FullIntelligenceModeButton({
             ) : (
               <div className="mode-modal-body">
                 <div className="mode-modal-unlocked-banner">
-                  全智能模式已开启。这里的限制和治理入口只在全智能模式下开放编辑。
+                  全智能模式已开启。现在可以直接通过对话引导接入新机器人、设置文档权限等级和自然语言约束。
                 </div>
                 {showSystemConstraints ? (
                   <div className="chat-constraints-card mode-modal-constraints">

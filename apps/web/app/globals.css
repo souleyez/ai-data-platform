@@ -394,6 +394,73 @@ button, textarea { font: inherit; }
 .bot-config-inline-wrap {
   margin-top: 14px;
 }
+.connected-bot-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.connected-bot-list-compact {
+  margin-top: 0;
+}
+.connected-bot-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: rgba(255, 255, 255, 0.94);
+}
+.connected-bot-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.connected-bot-meta,
+.connected-bot-description,
+.connected-bot-guidance span {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.connected-bot-description {
+  margin: 0;
+}
+.connected-bot-guidance {
+  display: grid;
+  gap: 4px;
+}
+.connected-bot-guidance strong {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.bot-summary-empty {
+  margin-top: 14px;
+}
+.bot-conversation-guide {
+  display: grid;
+  gap: 12px;
+}
+.bot-conversation-guide-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: rgba(255, 255, 255, 0.94);
+}
+.bot-conversation-guide-card p {
+  margin: 0;
+  color: var(--subtle);
+  line-height: 1.7;
+}
+.bot-conversation-guide-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #334155;
+  line-height: 1.8;
+}
 .bot-channel-stack {
   display: grid;
   gap: 12px;

@@ -14,6 +14,22 @@ function normalizeConstraintText(value: string) {
     .join('\n');
 }
 
+function summarizeBotChannels(bot: BotDefinition) {
+  const channels = bot.channelBindings
+    .filter((binding) => binding.enabled)
+    .map((binding) => {
+      const suffix = binding.externalBotId || binding.routeKey || binding.tenantId || '';
+      return suffix ? `${binding.channel}(${suffix})` : binding.channel;
+    });
+  return channels.length ? channels.join(' | ') : 'none';
+}
+
+function summarizeBotPrompt(prompt: string) {
+  const normalized = normalizeConstraintText(prompt || '');
+  if (!normalized) return 'none';
+  return normalized.length > 200 ? `${normalized.slice(0, 200)}...` : normalized;
+}
+
 export function buildSystemCapabilityContextBlock(input: {
   mode: IntelligenceMode;
   capabilities: IntelligenceCapabilities;
@@ -33,6 +49,52 @@ export function buildSystemCapabilityContextBlock(input: {
     'Do not describe internal routing or orchestration. Answer naturally and act as if you understand the platform surface already.',
     'If no execution result is supplied by the host, never claim a system action has already been completed.',
   ].join('\n');
+}
+
+export function buildBotConfigurationMemoryContextBlock(input: {
+  mode: IntelligenceMode;
+  bots: BotDefinition[];
+  libraries: Array<{ key: string; label?: string; name?: string; permissionLevel?: number }>;
+}) {
+  const bots = Array.isArray(input.bots) ? input.bots.filter((item) => item.enabled) : [];
+  const libraries = Array.isArray(input.libraries) ? input.libraries : [];
+  const botLines = bots.length
+    ? bots.map((bot) => {
+      const visibleLibraries = bot.visibleLibraryKeys.length
+        ? bot.visibleLibraryKeys.join(' | ')
+        : 'access-level only';
+      return `- ${bot.name} [${bot.id}] | channels: ${summarizeBotChannels(bot)} | access level: L${bot.libraryAccessLevel}+ | visible libraries: ${visibleLibraries} | guidance: ${summarizeBotPrompt(bot.systemPrompt)}`;
+    })
+    : ['- No bots are configured yet.'];
+  const libraryLines = libraries.length
+    ? libraries
+      .map((library) => {
+        const label = library.label || library.name || library.key;
+        const level = Number.isFinite(Number(library.permissionLevel))
+          ? Math.max(0, Math.floor(Number(library.permissionLevel)))
+          : 0;
+        return `${label}=L${level}`;
+      })
+      .join(' | ')
+    : 'No knowledge libraries are configured yet.';
+
+  const lines = [
+    'Platform bot configuration memory:',
+    ...botLines,
+    `Knowledge library permission levels: ${libraryLines}`,
+  ];
+
+  if (input.mode === 'full') {
+    lines.push(
+      'In full mode, robot onboarding and permission changes should be handled conversationally instead of sending the user to a form.',
+      'If the user wants to connect or modify a bot, guide them step by step to collect: bot name, target channel, channel-specific identifiers or credentials, library access level, and natural-language constraints.',
+      'A bot with access level N may view knowledge libraries whose permissionLevel is greater than or equal to N. Level 0 can view all libraries.',
+      'After collecting the configuration, summarize it clearly for confirmation before assuming it will be persisted by the host.',
+      'Do not ask the user to fill a manual configuration form unless they explicitly request manual editing.',
+    );
+  }
+
+  return lines.join('\n');
 }
 
 export function buildUserConstraintsContextBlock(systemConstraints?: string) {

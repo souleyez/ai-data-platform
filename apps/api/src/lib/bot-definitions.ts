@@ -44,7 +44,9 @@ export type PublicBotSummary = {
   description: string;
   enabled: boolean;
   isDefault: boolean;
-  channelBindings: Array<{ channel: BotChannel; enabled: boolean }>;
+  libraryAccessLevel: number;
+  systemPromptSummary: string;
+  channelBindings: Array<{ channel: BotChannel; enabled: boolean; configured: boolean }>;
 };
 
 const CONFIG_VERSION = 1;
@@ -345,9 +347,14 @@ export function buildPublicBotSummary(bot: BotDefinition): PublicBotSummary {
     description: bot.description,
     enabled: bot.enabled,
     isDefault: bot.isDefault,
+    libraryAccessLevel: bot.libraryAccessLevel,
+    systemPromptSummary: bot.systemPrompt,
     channelBindings: bot.channelBindings.map((item) => ({
       channel: item.channel,
       enabled: item.enabled,
+      configured: item.channel === 'web'
+        ? item.enabled
+        : Boolean(item.enabled && (item.externalBotId || item.tenantId || item.routeKey)),
     })),
   };
 }

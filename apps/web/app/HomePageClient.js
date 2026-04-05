@@ -1,7 +1,6 @@
 'use client';
 
 import InsightPanel from './components/InsightPanel';
-import BotSelector from './components/BotSelector';
 import ChatPanel from './components/ChatPanel';
 import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
 import Sidebar from './components/Sidebar';
@@ -31,8 +30,6 @@ export default function HomePageClient({ initialModelState }) {
   const {
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
-    botItems,
-    botLoading,
     confirmTemplateOption,
     documentLibraries,
     documentTotal,
@@ -40,16 +37,13 @@ export default function HomePageClient({ initialModelState }) {
     input,
     isLoading,
     messages,
-    refreshBots,
     reportCollapsed,
     reportItems,
     runDocumentUpload,
-    selectedBotId,
     selectedManualLibraries,
     selectedReportId,
     setReportCollapsed,
     setInput,
-    setSelectedBotId,
     setSelectedManualLibraries,
     setSelectedReportId,
     setSystemConstraints,
@@ -74,16 +68,9 @@ export default function HomePageClient({ initialModelState }) {
             <span className="topbar-inline-note">{buildTopSummary(documentTotal, documentLibraries)}</span>
           </div>
           <div className="topbar-actions topbar-actions-bots">
-            <BotSelector
-              items={botItems}
-              value={selectedBotId}
-              onChange={setSelectedBotId}
-              loading={botLoading}
-            />
             <FullIntelligenceModeButton
               systemConstraints={systemConstraints}
               onSystemConstraintsChange={setSystemConstraints}
-              onAccessStateChange={refreshBots}
             />
           </div>
         </header>
