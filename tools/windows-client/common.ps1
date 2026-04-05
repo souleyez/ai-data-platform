@@ -24,6 +24,16 @@ $script:ClientLogsDir = Join-Path $script:ClientRoot 'logs'
 $script:ClientRuntimeDir = Join-Path $script:ClientRoot 'runtime'
 $script:ClientStatePath = Join-Path $script:ClientConfigDir 'client-state.json'
 
+function Get-DefaultClientProjectKey {
+  if ($env:AI_DATA_PLATFORM_CLIENT_PROJECT_KEY) {
+    return $env:AI_DATA_PLATFORM_CLIENT_PROJECT_KEY.Trim().ToLowerInvariant()
+  }
+  if ($env:CONTROL_PLANE_PROJECT_KEY) {
+    return $env:CONTROL_PLANE_PROJECT_KEY.Trim().ToLowerInvariant()
+  }
+  return 'windows-client'
+}
+
 function Ensure-ClientLayout {
   foreach ($path in @(
     $script:ClientRoot,
@@ -40,11 +50,12 @@ function Ensure-ClientLayout {
 
 function New-DefaultClientState {
   [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     bootstrapVersion = (Get-BootstrapVersion)
     bootstrapRoot = $script:BootstrapRoot
     bootstrapInstalledAt = ''
     channel = 'stable'
+    projectKey = (Get-DefaultClientProjectKey)
     controlPlaneBaseUrl = $env:CONTROL_PLANE_API_BASE_URL
     workspacePath = $script:RepoRoot
     currentReleasePath = ''
@@ -88,11 +99,13 @@ function Test-ClientStateProperty {
 function Ensure-ClientStateDefaults {
   param([Parameter(Mandatory)]$State)
 
-  if (-not (Test-ClientStateProperty -State $State -Name 'schemaVersion') -or -not $State.schemaVersion) { $State | Add-Member -NotePropertyName schemaVersion -NotePropertyValue 1 -Force }
+  if (-not (Test-ClientStateProperty -State $State -Name 'schemaVersion') -or [int]$State.schemaVersion -lt 2) { $State | Add-Member -NotePropertyName schemaVersion -NotePropertyValue 2 -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'bootstrapVersion')) { $State | Add-Member -NotePropertyName bootstrapVersion -NotePropertyValue (Get-BootstrapVersion) -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'bootstrapRoot')) { $State | Add-Member -NotePropertyName bootstrapRoot -NotePropertyValue $script:BootstrapRoot -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'bootstrapInstalledAt')) { $State | Add-Member -NotePropertyName bootstrapInstalledAt -NotePropertyValue '' -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'channel') -or -not $State.channel) { $State | Add-Member -NotePropertyName channel -NotePropertyValue 'stable' -Force }
+  if (-not (Test-ClientStateProperty -State $State -Name 'projectKey') -or -not $State.projectKey) { $State | Add-Member -NotePropertyName projectKey -NotePropertyValue (Get-DefaultClientProjectKey) -Force }
+  $State.projectKey = if ($State.projectKey) { ([string]$State.projectKey).Trim().ToLowerInvariant() } else { Get-DefaultClientProjectKey }
   if (-not (Test-ClientStateProperty -State $State -Name 'controlPlaneBaseUrl') -or $null -eq $State.controlPlaneBaseUrl) { $State | Add-Member -NotePropertyName controlPlaneBaseUrl -NotePropertyValue '' -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'workspacePath') -or $null -eq $State.workspacePath) { $State | Add-Member -NotePropertyName workspacePath -NotePropertyValue $script:RepoRoot -Force }
   if (-not (Test-ClientStateProperty -State $State -Name 'currentReleasePath') -or $null -eq $State.currentReleasePath) { $State | Add-Member -NotePropertyName currentReleasePath -NotePropertyValue '' -Force }
@@ -191,6 +204,64 @@ function Get-ControlPlaneBaseUrl {
   return $baseUrl.TrimEnd('/')
 }
 
+function Resolve-ClientProjectKey {
+  param(
+    [Parameter(Mandatory)]$State,
+    [string]$ProjectKey = ''
+  )
+
+  if ($ProjectKey) {
+    return $ProjectKey.Trim().ToLowerInvariant()
+  }
+
+  if ($State.projectKey) {
+    return [string]$State.projectKey
+  }
+
+  return Get-DefaultClientProjectKey
+}
+
+function Reset-ClientProjectScopedState {
+  param([Parameter(Mandatory)]$State)
+
+  $State.session = [pscustomobject]@{
+    token = ''
+    expiresAt = ''
+    validatedAt = ''
+  }
+  $State.lastAuth = $null
+  $State.lastPolicy = $null
+  $State.modelAccess = [pscustomobject]@{
+    mode = 'lease'
+    providers = @()
+  }
+  $State.modelLease = $null
+  $State.pendingRelease = $null
+  $State.download = $null
+  $State.backgroundUpdate = $null
+}
+
+function Set-ClientProjectKey {
+  param(
+    [Parameter(Mandatory)]$State,
+    [string]$ProjectKey = '',
+    [switch]$SkipReset
+  )
+
+  $resolvedProjectKey = Resolve-ClientProjectKey -State $State -ProjectKey $ProjectKey
+  $currentProjectKey = if ($State.projectKey) { [string]$State.projectKey } else { '' }
+  if ($currentProjectKey -ne $resolvedProjectKey) {
+    $State.projectKey = $resolvedProjectKey
+    if (-not $SkipReset) {
+      Reset-ClientProjectScopedState -State $State
+    }
+  } elseif (-not $State.projectKey) {
+    $State.projectKey = $resolvedProjectKey
+  }
+
+  return $resolvedProjectKey
+}
+
 function Resolve-ControlPlaneUrl {
   param(
     [Parameter(Mandatory)][string]$BaseUrl,
@@ -225,13 +296,17 @@ function Invoke-ControlPlaneJson {
     [string]$Method = 'GET',
     $Body = $null,
     [string]$SessionToken = '',
-    [string]$AdminToken = ''
+    [string]$AdminToken = '',
+    [string]$AdminSessionToken = ''
   )
 
   $uri = Resolve-ControlPlaneUrl -BaseUrl (Get-ControlPlaneBaseUrl -State $State) -Path $Path
   $headers = @{}
   if ($SessionToken) {
     $headers['Authorization'] = "Bearer $SessionToken"
+  }
+  if ($AdminSessionToken) {
+    $headers['X-Control-Plane-Admin-Session'] = $AdminSessionToken
   }
   if ($AdminToken) {
     $headers['X-Control-Plane-Admin-Token'] = $AdminToken

@@ -17,6 +17,7 @@ if (Test-Path $statusScript) {
   currentReleasePath = $state.currentReleasePath
   currentVersion = $state.currentVersion
   channel = $state.channel
+  projectKey = $state.projectKey
   phone = $state.phone
   sessionValid = (Test-SessionValid -State $state)
   modelAccess = $state.modelAccess

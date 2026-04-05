@@ -1,11 +1,13 @@
 param(
-  [Parameter(Mandatory = $true)][string]$Phone
+  [Parameter(Mandatory = $true)][string]$Phone,
+  [string]$ProjectKey = ''
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $state = Get-ClientState
+$effectiveProjectKey = Set-ClientProjectKey -State $state -ProjectKey $ProjectKey
 $reportedClientVersion = if ($state.currentVersion) { [string]$state.currentVersion } else { '' }
 $deviceFingerprint = Get-DeviceFingerprint
 $osVersion = try {
@@ -16,6 +18,7 @@ $osVersion = try {
 
 $result = Invoke-ControlPlaneJson -State $state -Path '/api/client/bootstrap/auth' -Method 'POST' -Body @{
   phone = $Phone
+  projectKey = $effectiveProjectKey
   deviceFingerprint = $deviceFingerprint
   deviceName = $env:COMPUTERNAME
   osVersion = $osVersion
@@ -39,6 +42,7 @@ Save-ClientState -State $state
 
 [pscustomobject]@{
   status = [string]$result.status
+  projectKey = [string]$state.projectKey
   user = $result.user
   device = $result.device
   session = $result.session

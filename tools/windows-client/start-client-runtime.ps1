@@ -1,5 +1,6 @@
 param(
-  [string]$Phone = ''
+  [string]$Phone = '',
+  [string]$ProjectKey = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,8 +44,10 @@ function Start-BackgroundUpdater {
 }
 
 $state = Get-ClientState
+Set-ClientProjectKey -State $state -ProjectKey $ProjectKey | Out-Null
+Save-ClientState -State $state
 if ($Phone) {
-  & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'auth-client.ps1') -Phone $Phone | Out-Null
+  & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'auth-client.ps1') -Phone $Phone -ProjectKey $ProjectKey | Out-Null
   $state = Get-ClientState
 }
 
@@ -76,6 +79,12 @@ if ($state.download -and [string]$state.download.status -eq 'completed' -and $st
 $startScript = Resolve-WorkspaceToolPath -State $state -RelativePath 'tools\start-local.ps1'
 if (-not (Test-Path $startScript)) {
   throw "Runtime start script not found: $startScript"
+}
+
+Write-Host ("Starting runtime for project '{0}'." -f [string]$state.projectKey)
+Write-Host ("Control plane: {0}" -f (Get-ControlPlaneBaseUrl -State $state))
+if ($modelAccessMode) {
+  Write-Host ("Model access mode: {0}" -f $modelAccessMode)
 }
 
 & powershell -ExecutionPolicy Bypass -File $startScript

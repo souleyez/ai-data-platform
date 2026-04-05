@@ -1,6 +1,7 @@
 param(
   [string]$WorkspacePath = '',
   [string]$ControlPlaneBaseUrl = '',
+  [string]$ProjectKey = '',
   [switch]$SkipOpenClawInstall,
   [switch]$SkipPrereqChecks,
   [switch]$RelaunchedAsAdmin,
@@ -63,6 +64,7 @@ function Start-ElevatedInstall {
     '-ExecutionPolicy', 'Bypass',
     '-File', $PSCommandPath,
     '-ControlPlaneBaseUrl', (Get-ControlPlaneBaseUrl -State $State),
+    '-ProjectKey', (Resolve-ClientProjectKey -State $State -ProjectKey $ProjectKey),
     '-ResultPath', $tempResultPath,
     '-RelaunchedAsAdmin'
   )
@@ -97,6 +99,7 @@ Ensure-ClientLayout
 Assert-WindowsSupported
 
 $state = Get-ClientState
+Set-ClientProjectKey -State $state -ProjectKey $ProjectKey | Out-Null
 $desiredDistro = if ($state.openClaw -and $state.openClaw.distro) {
   [string]$state.openClaw.distro
 } elseif ($env:OPENCLAW_WSL_DISTRO) {
@@ -154,6 +157,7 @@ Save-ClientState -State $state
 if ($preflight.status -in @('elevation_required', 'restart_required', 'manual_action_required', 'failed')) {
   Write-InstallResult -Payload ([pscustomobject]@{
     status = [string]$preflight.status
+    projectKey = [string]$state.projectKey
     clientRoot = $script:ClientRoot
     bootstrapRoot = $state.bootstrapRoot
     bootstrapVersion = $state.bootstrapVersion
@@ -162,6 +166,11 @@ if ($preflight.status -in @('elevation_required', 'restart_required', 'manual_ac
     controlPlaneBaseUrl = $state.controlPlaneBaseUrl
     openClawVersion = [string]$state.openClaw.version
     prerequisites = $preflight
+    validation = [pscustomobject]@{
+      projectKey = [string]$state.projectKey
+      controlPlaneBaseUrl = [string]$state.controlPlaneBaseUrl
+      readyForAuth = ($preflight.status -eq 'skipped')
+    }
   })
   return
 }
@@ -186,6 +195,7 @@ Save-ClientState -State $state
 
 Write-InstallResult -Payload ([pscustomobject]@{
   status = 'ok'
+  projectKey = [string]$state.projectKey
   clientRoot = $script:ClientRoot
   bootstrapRoot = $state.bootstrapRoot
   bootstrapVersion = $state.bootstrapVersion
@@ -195,4 +205,10 @@ Write-InstallResult -Payload ([pscustomobject]@{
   openClawVersion = [string]$state.openClaw.version
   openClawDistro = [string]$state.openClaw.distro
   prerequisites = $preflight
+  validation = [pscustomobject]@{
+    projectKey = [string]$state.projectKey
+    controlPlaneBaseUrl = [string]$state.controlPlaneBaseUrl
+    readyForAuth = $true
+    readyForRuntime = [bool]($state.workspacePath)
+  }
 })
