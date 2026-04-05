@@ -1,11 +1,13 @@
 param(
-  [string]$ProviderScope = ''
+  [string]$ProviderScope = '',
+  [string]$ProjectKey = ''
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $state = Get-ClientState
+$effectiveProjectKey = Set-ClientProjectKey -State $state -ProjectKey $ProjectKey
 if (-not (Test-SessionValid -State $state)) {
   throw 'No valid client session. Run auth-client.ps1 first.'
 }
@@ -26,6 +28,7 @@ $result = Invoke-ControlPlaneJson `
   -Method 'POST' `
   -SessionToken ([string]$state.session.token) `
   -Body @{
+    projectKey = $effectiveProjectKey
     providerScope = $ProviderScope
   }
 
@@ -40,6 +43,7 @@ Save-ClientState -State $state
 
 [pscustomobject]@{
   status = 'ok'
+  projectKey = [string]$state.projectKey
   providerScope = $ProviderScope
   lease = $state.modelLease
 } | ConvertTo-Json -Depth 10

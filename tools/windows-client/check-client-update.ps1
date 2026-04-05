@@ -1,7 +1,12 @@
+param(
+  [string]$ProjectKey = ''
+)
+
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $state = Get-ClientState
+$effectiveProjectKey = Set-ClientProjectKey -State $state -ProjectKey $ProjectKey
 if (-not (Test-SessionValid -State $state)) {
   throw 'No valid client session. Run auth-client.ps1 first.'
 }
@@ -15,6 +20,7 @@ Save-ClientState -State $state
 
 [pscustomobject]@{
   status = 'ok'
+  projectKey = $effectiveProjectKey
   currentVersion = if ($state.currentVersion) { $state.currentVersion } else { Get-DefaultClientVersion }
   channel = $state.channel
   policy = $policy.policy

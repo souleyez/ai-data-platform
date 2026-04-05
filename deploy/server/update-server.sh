@@ -5,10 +5,10 @@ PROJECT_DIR="${PROJECT_DIR:-/srv/ai-data-platform}"
 BRANCH="${BRANCH:-master}"
 REMOTE_NAME="${REMOTE_NAME:-origin}"
 INSTALL_CMD="${INSTALL_CMD:-corepack pnpm install --frozen-lockfile}"
-BUILD_PACKAGES="${BUILD_PACKAGES:-api control-plane-api control-plane-web web worker}"
-SERVICES="${SERVICES:-ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web ai-data-platform-control-plane-api ai-data-platform-control-plane-web}"
+BUILD_PACKAGES="${BUILD_PACKAGES:-api web worker}"
+SERVICES="${SERVICES:-ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3100/api/health}"
-CONTROL_PLANE_HEALTH_URL="${CONTROL_PLANE_HEALTH_URL:-http://127.0.0.1:3210/api/health}"
+CONTROL_PLANE_HEALTH_URL="${CONTROL_PLANE_HEALTH_URL:-}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-20}"
 HEALTH_RETRY_INTERVAL="${HEALTH_RETRY_INTERVAL:-2}"
 REMOTE_WORKTREE_MODE="${REMOTE_WORKTREE_MODE:-fail}"
@@ -185,7 +185,14 @@ wait_for_health() {
 
 install_systemd_units() {
   echo "==> Installing systemd units"
-  install -m 0644 deploy/server/systemd/*.service "$SYSTEMD_UNIT_DIR"/
+  for service in $SERVICES; do
+    local source_path="deploy/server/systemd/${service}.service"
+    if [[ ! -f "$source_path" ]]; then
+      echo "Systemd unit not found for service: $service" >&2
+      exit 1
+    fi
+    install -m 0644 "$source_path" "$SYSTEMD_UNIT_DIR"/
+  done
   systemctl daemon-reload
   systemctl enable $SERVICES >/dev/null 2>&1 || true
 }

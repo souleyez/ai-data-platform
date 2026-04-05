@@ -21,6 +21,7 @@ storage/config/retained-documents.json
 storage/config/model-config.json
 storage/config/access-keys.json
 storage/config/intelligence-mode.json
+storage/config/platform-integration.json
 storage/config/document-library-public-links.json
 storage/config/openclaw-memory-catalog.json
 storage/config/openclaw-memory-sync-status.json

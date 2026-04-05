@@ -4,17 +4,26 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
-    "test": "tsx --test test/**/*.test.ts"
+    "dev": "node -e \"console.error('Deprecated: legacy control-plane API is frozen. Use home/apps/platform-api. Run legacy:dev only for emergency reference work.'); process.exit(1)\"",
+    "build": "node -e \"console.error('Deprecated: legacy control-plane API is frozen. Use home/apps/platform-api. Run legacy:build only for emergency reference work.'); process.exit(1)\"",
+    "control-plane:import:file-state": "node -e \"console.error('Deprecated: control-plane state import has moved to home/apps/platform-api. Run legacy:control-plane:import:file-state only for emergency reference work.'); process.exit(1)\"",
+    "start": "node -e \"console.error('Deprecated: legacy control-plane API is frozen. Use home/apps/platform-api. Run legacy:start only for emergency reference work.'); process.exit(1)\"",
+    "test": "node -e \"console.error('Deprecated: legacy control-plane API is frozen. Run legacy:test only for emergency reference work.'); process.exit(1)\"",
+    "legacy:dev": "tsx watch src/server.ts",
+    "legacy:build": "tsc -p tsconfig.json",
+    "legacy:control-plane:import:file-state": "tsx src/lib/postgres/control-plane-import-file-state.ts",
+    "legacy:start": "node dist/server.js",
+    "legacy:test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
+    "@types/pg": "^8.20.0",
     "dotenv": "16.4.7",
-    "fastify": "5.2.1"
+    "fastify": "5.2.1",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "22.13.14",
+    "pg-mem": "^3.0.14",
     "tsx": "4.19.3",
     "typescript": "5.8.2"
   }

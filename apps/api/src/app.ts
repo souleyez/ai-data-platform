@@ -12,6 +12,7 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerIntelligenceModeRoutes } from './routes/intelligence-mode.js';
 import { registerModelConfigRoutes } from './routes/model-config.js';
 import { registerOperationsRoutes } from './routes/operations.js';
+import { registerPlatformIntegrationRoutes } from './routes/platform-integration.js';
 import { registerReportStandardsRoutes } from './routes/report-standards.js';
 import { registerReportRoutes } from './routes/reports.js';
 import { registerWebCaptureRoutes } from './routes/web-captures.js';
@@ -23,7 +24,10 @@ export function createApp() {
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', '*');
     reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Access-Key');
+    reply.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Access-Key, X-Home-Platform-Token',
+    );
 
     if (request.method === 'OPTIONS') {
       return reply.code(204).send();
@@ -63,6 +67,7 @@ export function createApp() {
   app.register(registerDocumentRoutes, { prefix: '/api' });
   app.register(registerReportRoutes, { prefix: '/api' });
   app.register(registerWebCaptureRoutes, { prefix: '/api' });
+  app.register(registerPlatformIntegrationRoutes);
 
   return app;
 }
