@@ -3,11 +3,12 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import BotConversationGuide from '../components/BotConversationGuide';
+import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
 import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
 import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
 import Sidebar from '../components/Sidebar';
-import { fetchBots } from '../home-api';
+import { fetchBots, updateBot } from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
   copyGeneratedReportLink,
@@ -253,6 +254,11 @@ function ReportsPageContent() {
 
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
+  }
+
+  async function saveConnectedBot(botId, payload) {
+    await updateBot(botId, payload);
+    await loadBotContext();
   }
 
   async function deleteTemplate(item) {
@@ -550,15 +556,20 @@ function ReportsPageContent() {
                   showSystemConstraints={false}
                   botConfigSlot={(
                     <BotConversationGuide
-                      items={botItems}
                       libraries={documentLibraries}
-                      manageEnabled={botManageEnabled}
                     />
                   )}
                 />
               </div>
 
               <ConnectedBotsSummary items={botItems} />
+              {botManageEnabled ? (
+                <ConnectedBotAccessEditor
+                  items={botItems}
+                  manageEnabled={botManageEnabled}
+                  onSave={saveConnectedBot}
+                />
+              ) : null}
             </section>
           </section>
         ) : null}

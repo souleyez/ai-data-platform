@@ -1,7 +1,5 @@
 'use client';
 
-import ConnectedBotsSummary from './ConnectedBotsSummary';
-
 function formatLibraryLevelList(libraries = []) {
   if (!Array.isArray(libraries) || !libraries.length) return '当前还没有可见知识库。';
   return libraries
@@ -16,9 +14,7 @@ function formatLibraryLevelList(libraries = []) {
 }
 
 export default function BotConversationGuide({
-  items = [],
   libraries = [],
-  manageEnabled = false,
 }) {
   return (
     <div className="bot-conversation-guide">
@@ -45,15 +41,10 @@ export default function BotConversationGuide({
       </div>
 
       <div className="bot-conversation-guide-card">
-        <strong>当前已连接机器人</strong>
-        <ConnectedBotsSummary
-          items={items}
-          compact
-          emptyTitle="还没有已连接的第三方机器人"
-          emptyText={manageEnabled
-            ? '直接在对话里提出接入需求，智能助手会按渠道、权限等级和约束逐步引导你。'
-            : '先用全智能模式密钥解锁，再通过对话接入新的机器人。'}
-        />
+        <strong>配置完成后会发生什么</strong>
+        <p>
+          机器人接入后，会自动出现在报表中心当前页，并且可以继续在这里微调默认状态、文档权限等级和自然语言约束。
+        </p>
       </div>
     </div>
   );

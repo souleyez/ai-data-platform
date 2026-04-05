@@ -438,6 +438,36 @@ button, textarea { font: inherit; }
 .bot-summary-empty {
   margin-top: 14px;
 }
+.connected-bot-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.connected-bot-editor-list {
+  display: grid;
+  gap: 12px;
+}
+.connected-bot-editor-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid #dbe7f5;
+  background: rgba(255, 255, 255, 0.94);
+}
+.connected-bot-editor-grid {
+  display: grid;
+  grid-template-columns: 160px 180px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.bot-toggle-editor {
+  height: 44px;
+  align-self: end;
+}
+.connected-bot-editor-prompt textarea {
+  min-height: 84px;
+}
 .bot-conversation-guide {
   display: grid;
   gap: 12px;
@@ -1733,6 +1763,7 @@ th { color: var(--subtle); font-weight: 600; }
   .bot-field-grid { grid-template-columns: 1fr; }
   .bot-field-span { grid-column: span 1; }
   .bot-binding-grid { grid-template-columns: 1fr; }
+  .connected-bot-editor-grid { grid-template-columns: 1fr; }
   .bot-toggle-wide { grid-column: span 1; }
   .library-inline-create { align-items: stretch; }
   .library-inline-create-name,
