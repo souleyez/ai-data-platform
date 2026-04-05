@@ -43,6 +43,13 @@ Primary runtime variables:
 - `OPENCLAW_GATEWAY_TOKEN`
 - `OPENCLAW_AGENT_ID`
 - `OPENCLAW_MODEL`
+- `HOME_PLATFORM_BASE_URL`
+- `HOME_PLATFORM_PROJECT_KEY`
+- `HOME_PLATFORM_PRINCIPAL_KEY`
+- `HOME_PLATFORM_PRINCIPAL_LABEL`
+- `HOME_PLATFORM_DEVICE_FINGERPRINT`
+- `HOME_PLATFORM_PROVIDER`
+- `HOME_PLATFORM_MODEL`
 - `MODEL_BRIDGE_HOST`
 - `MODEL_BRIDGE_PORT`
 - `DEEPSEEK_API_KEY`
@@ -55,6 +62,8 @@ Primary runtime variables:
 - `WORKER_SCAN_PATH`
 - `WORKER_DEEP_PARSE_PATH`
 - `API_BASE_URL`
+
+If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` will prefer the shared `home` platform model proxy and only fall back to local provider keys when the shared platform is unavailable.
 
 ## Deployment flow
 
