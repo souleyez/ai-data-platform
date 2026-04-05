@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 $runDir = Join-Path $root 'tmp\local-dev'
+$homePlatformTokenFile = Join-Path $runDir 'home-platform-token.txt'
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
 
 function Normalize-ProcessPathEnv {
@@ -19,6 +20,11 @@ function Normalize-ProcessPathEnv {
 }
 
 Normalize-ProcessPathEnv
+
+$homePlatformToken = ''
+if (Test-Path $homePlatformTokenFile) {
+  $homePlatformToken = (Get-Content $homePlatformTokenFile -Raw -ErrorAction SilentlyContinue).Trim()
+}
 
 function Wait-ForPort {
   param(
@@ -155,6 +161,7 @@ Start-NodeService `
   -PidFile (Join-Path $runDir 'api.pid') `
   -Port 3100 `
   -EnvVars @{
+    HOME_PLATFORM_TOKEN = $homePlatformToken
     ENABLE_PADDLE_UIE = '1'
     PADDLE_UIE_PYTHON_BIN = 'C:\Users\soulzyn\develop\python-envs\paddle-uie-runtime310\Scripts\python.exe'
   }

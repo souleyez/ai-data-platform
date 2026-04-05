@@ -13,8 +13,8 @@ param(
   [string]$RemoteWorktreeMode = 'fail',
   [switch]$PreflightOnly,
   [int]$HealthTimeout = 20,
-  [string]$Services = 'ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web ai-data-platform-control-plane-api ai-data-platform-control-plane-web',
-  [string]$BuildPackages = 'api control-plane-api control-plane-web web worker',
+  [string]$Services = 'ai-data-platform-model-bridge ai-data-platform-api ai-data-platform-worker ai-data-platform-web',
+  [string]$BuildPackages = 'api web worker',
   [string]$StashMessage = ''
 )
 

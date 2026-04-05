@@ -2,6 +2,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 $root = Split-Path -Parent $PSScriptRoot
 $runDir = Join-Path $root 'tmp\local-dev'
+$homePlatformTokenFile = Join-Path $runDir 'home-platform-token.txt'
 
 function Get-ServiceState {
   param(
@@ -35,3 +36,10 @@ function Get-ServiceState {
   Get-ServiceState -Name 'worker' -Port $null
   Get-ServiceState -Name 'web' -Port 3002
 ) | Format-Table -AutoSize
+
+$tokenConfigured = $false
+if (Test-Path $homePlatformTokenFile) {
+  $tokenConfigured = -not [string]::IsNullOrWhiteSpace((Get-Content $homePlatformTokenFile -Raw -ErrorAction SilentlyContinue))
+}
+
+Write-Output ("home platform token: {0}" -f ($(if ($tokenConfigured) { 'configured' } else { 'not configured' })))

@@ -1,5 +1,7 @@
+# Legacy migration reference only.
+# Do not install this unit for new environments. Shared platform services now live in `home`.
 [Unit]
-Description=AI Data Platform Control Plane Web
+Description=LEGACY AI Data Platform Control Plane Web
 After=network-online.target ai-data-platform-control-plane-api.service
 Wants=network-online.target
 
