@@ -17,6 +17,11 @@ function hasPlatformProxyConfigured() {
   return Boolean(env('HOME_PLATFORM_BASE_URL'));
 }
 
+function resolvePlatformBridgeMode() {
+  const mode = env('HOME_PLATFORM_BRIDGE_MODE', 'local-first').toLowerCase();
+  return mode === 'home-first' ? 'home-first' : 'local-first';
+}
+
 function isGatewayScopedModel(modelRef) {
   const normalized = String(modelRef || '').trim();
   return !normalized
@@ -318,7 +323,10 @@ function shouldFallback(response, payload) {
 async function handleChat(request, reply) {
   try {
     const body = await readBody(request);
-    if (hasPlatformProxyConfigured()) {
+    const platformConfigured = hasPlatformProxyConfigured();
+    const bridgeMode = resolvePlatformBridgeMode();
+
+    if (platformConfigured && bridgeMode === 'home-first') {
       try {
         const { response, payload } = await requestHomePlatformChat(body);
         return json(reply, response.status, payload);
@@ -329,21 +337,51 @@ async function handleChat(request, reply) {
       }
     }
 
-    const provider = resolveProvider(body.model);
-    let { response, payload } = await requestChatCompletion(provider, body);
+    let lastDirectFailure = null;
+    if (hasDirectProviderFallback()) {
+      try {
+        const provider = resolveProvider(body.model);
+        let { response, payload } = await requestChatCompletion(provider, body);
 
-    if (fallbackModel && shouldFallback(response, payload)) {
-      const fallbackProvider = resolveProvider(fallbackModel);
-      const fallbackResult = await requestChatCompletion(fallbackProvider, body);
-      response = fallbackResult.response;
-      payload = fallbackResult.payload;
+        if (fallbackModel && shouldFallback(response, payload)) {
+          const fallbackProvider = resolveProvider(fallbackModel);
+          const fallbackResult = await requestChatCompletion(fallbackProvider, body);
+          response = fallbackResult.response;
+          payload = fallbackResult.payload;
+        }
+
+        if (response.ok) {
+          return json(reply, response.status, payload);
+        }
+
+        lastDirectFailure = { response, payload };
+        if (!platformConfigured || bridgeMode === 'home-first') {
+          return json(reply, response.status, payload);
+        }
+      } catch (error) {
+        if (!platformConfigured || bridgeMode === 'home-first') {
+          throw error;
+        }
+      }
     }
 
-    if (!response.ok) {
-      return json(reply, response.status, payload);
+    if (platformConfigured) {
+      try {
+        const { response, payload } = await requestHomePlatformChat(body);
+        return json(reply, response.status, payload);
+      } catch (error) {
+        if (lastDirectFailure) {
+          return json(reply, lastDirectFailure.response.status, lastDirectFailure.payload);
+        }
+        throw error;
+      }
     }
 
-    return json(reply, response.status, payload);
+    if (lastDirectFailure) {
+      return json(reply, lastDirectFailure.response.status, lastDirectFailure.payload);
+    }
+
+    throw new Error('MODEL_BRIDGE_NO_PROVIDER_AVAILABLE');
   } catch (error) {
     return json(reply, 500, {
       error: 'model_bridge_error',
@@ -368,12 +406,13 @@ const server = http.createServer(async (request, reply) => {
 
   if (request.method === 'GET' && request.url === '/health') {
     try {
-      if (hasPlatformProxyConfigured()) {
+      const bridgeMode = resolvePlatformBridgeMode();
+      if (hasPlatformProxyConfigured() && (bridgeMode === 'home-first' || !hasDirectProviderFallback())) {
         const session = await bootstrapHomePlatformSession();
         return json(reply, 200, {
           status: 'ok',
           service: 'http-model-bridge',
-          mode: 'home-platform-preferred',
+          mode: bridgeMode === 'home-first' ? 'home-platform-preferred' : 'home-platform-required',
           projectKey: resolveHomePlatformProjectKey(),
           principalKey: resolveHomePlatformPrincipalKey(),
           model: resolveHomePlatformModel(''),
@@ -387,9 +426,10 @@ const server = http.createServer(async (request, reply) => {
       return json(reply, 200, {
         status: 'ok',
         service: 'http-model-bridge',
-        mode: 'direct-provider',
+        mode: hasPlatformProxyConfigured() ? 'local-provider-preferred' : 'direct-provider',
         provider: provider.providerKey,
         model: `${provider.providerKey}/${provider.model}`,
+        fallback: hasPlatformProxyConfigured() ? 'home-platform' : '',
       });
     } catch (error) {
       return json(reply, 500, {
@@ -402,7 +442,8 @@ const server = http.createServer(async (request, reply) => {
 
   if (request.method === 'GET' && request.url === '/v1/models') {
     try {
-      if (hasPlatformProxyConfigured()) {
+      const bridgeMode = resolvePlatformBridgeMode();
+      if (hasPlatformProxyConfigured() && (bridgeMode === 'home-first' || !hasDirectProviderFallback())) {
         const model = resolveHomePlatformModel('');
         return json(reply, 200, {
           object: 'list',

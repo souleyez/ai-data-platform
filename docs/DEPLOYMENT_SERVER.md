@@ -44,6 +44,7 @@ Primary runtime variables:
 - `OPENCLAW_AGENT_ID`
 - `OPENCLAW_MODEL`
 - `HOME_PLATFORM_BASE_URL`
+- `HOME_PLATFORM_BRIDGE_MODE`
 - `HOME_PLATFORM_PROJECT_KEY`
 - `HOME_PLATFORM_PRINCIPAL_KEY`
 - `HOME_PLATFORM_PRINCIPAL_LABEL`
@@ -63,7 +64,12 @@ Primary runtime variables:
 - `WORKER_DEEP_PARSE_PATH`
 - `API_BASE_URL`
 
-If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` will prefer the shared `home` platform model proxy and only fall back to local provider keys when the shared platform is unavailable.
+If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the shared `home` platform model proxy as a fallback path.
+
+- `HOME_PLATFORM_BRIDGE_MODE=local-first`
+  The default and recommended production mode. Local provider keys are used first. `home` is only used as a fallback.
+- `HOME_PLATFORM_BRIDGE_MODE=home-first`
+  Temporary test mode. `home` is used first, and local provider keys are only used as a fallback.
 
 ## Deployment flow
 
