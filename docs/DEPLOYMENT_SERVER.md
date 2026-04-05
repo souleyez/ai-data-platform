@@ -87,6 +87,68 @@ If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the 
 - `curl http://127.0.0.1:3100/api/health`
 - open the app frontend and verify the main user flows
 
+## Current production integration on `120.24.251.24`
+
+The current `120.24.251.24` deployment keeps the application in local-provider-first mode and uses `home` only as a fallback path for model access.
+
+### Runtime intent
+
+- local provider first
+- `home` shared platform as model fallback only
+- temporary tests may switch to `HOME_PLATFORM_BRIDGE_MODE=home-first`, but production should stay `local-first`
+
+### Server-specific manual override
+
+The current production server uses a `systemd` drop-in file that is not stored in this repository:
+
+- `/etc/systemd/system/ai-data-platform-model-bridge.service.d/home-platform.conf`
+
+It currently defines:
+
+```ini
+[Service]
+Environment="HOME_PLATFORM_BASE_URL=http://ad.goods-editor.com/platform-api/api"
+Environment="HOME_PLATFORM_BRIDGE_MODE=local-first"
+Environment="HOME_PLATFORM_PROJECT_KEY=ai-data-platform"
+Environment="HOME_PLATFORM_PRINCIPAL_KEY=server:120.24.251.24"
+Environment="HOME_PLATFORM_PRINCIPAL_LABEL=AI-120"
+Environment="HOME_PLATFORM_DEVICE_FINGERPRINT=bridge:120.24.251.24:18790"
+Environment="HOME_PLATFORM_PROVIDER=minimax"
+Environment="HOME_PLATFORM_MODEL=MiniMax-M2.7"
+```
+
+This drop-in is required because the 120 server uses the local model bridge service as the stable switching point. After recreating or replacing the server, restore this file, then run:
+
+1. `systemctl daemon-reload`
+2. `systemctl restart ai-data-platform-model-bridge.service`
+
+### Expected bridge health on 120
+
+In the normal production configuration, this command should show local-first mode:
+
+```bash
+curl http://127.0.0.1:18790/health
+```
+
+Expected shape:
+
+```json
+{
+  "status": "ok",
+  "service": "http-model-bridge",
+  "mode": "local-provider-preferred",
+  "provider": "minimax",
+  "model": "minimax/MiniMax-M2.7",
+  "fallback": "home-platform"
+}
+```
+
+That output means:
+
+- 120 uses its local MiniMax key first
+- if the local path fails, it can fall back to `home`
+- `home` is not the primary production dependency for model serving
+
 ## Remote deploy helper
 
 The repo keeps two deploy helpers:
