@@ -7,8 +7,8 @@ export async function registerHealthRoutes(app: FastifyInstance) {
     return {
       status: 'ok',
       service: 'ai-data-platform-api',
-      mode: 'local-dev',
-      readOnly: true,
+      mode: intelligence.mode,
+      readOnly: !intelligence.capabilities.canModifyLocalSystemFiles,
       intelligenceMode: intelligence.mode,
       capabilities: intelligence.capabilities,
       timestamp: new Date().toISOString(),
