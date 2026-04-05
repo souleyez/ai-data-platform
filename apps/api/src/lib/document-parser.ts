@@ -59,6 +59,10 @@ export type ParsedDocument = {
   detailParsedAt?: string;
   detailParseAttempts?: number;
   detailParseError?: string;
+  analysisEditedAt?: string;
+  manualSummary?: boolean;
+  manualStructuredProfile?: boolean;
+  manualEvidenceChunks?: boolean;
   schemaType?: 'generic' | 'contract' | 'resume' | 'paper' | 'formula' | 'technical' | 'report';
   structuredProfile?: Record<string, unknown>;
 };

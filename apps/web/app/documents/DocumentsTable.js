@@ -239,7 +239,11 @@ export default function DocumentsTable({
                   {renderParseStage(item, parseMethodLabels)}
                 </td>
                 <td className="summary-cell">{formatDocumentBusinessResult(item)}</td>
-                <td className="summary-cell excerpt-cell">{item.summary}</td>
+                <td className="summary-cell excerpt-cell">
+                  <a href={`/documents/${item.id}`} title="查看解析详情">
+                    {item.summary || '-'}
+                  </a>
+                </td>
               </tr>
             );
           })}

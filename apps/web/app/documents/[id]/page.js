@@ -1,4 +1,5 @@
 import Sidebar from '../../components/Sidebar';
+import DocumentAnalysisPanel from '../DocumentAnalysisPanel';
 import { buildBackendApiUrl, buildApiUrl } from '../../lib/config';
 import { sourceItems } from '../../lib/mock-data';
 import { getDocumentGroupLabel, getPrimaryCategoryLabel } from '../../lib/document-taxonomy';
@@ -140,6 +141,8 @@ export default async function DocumentPreviewPage({ params }) {
             </div>
           ) : null}
         </section>
+
+        <DocumentAnalysisPanel item={item} />
       </main>
     </div>
   );
