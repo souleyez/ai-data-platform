@@ -116,6 +116,8 @@ test('root and health endpoints should expose current intelligence mode', async 
   assert.equal(root.json().capabilities.canModifyLocalSystemFiles, true);
 
   assert.equal(health.statusCode, 200);
+  assert.equal(health.json().mode, 'full');
+  assert.equal(health.json().readOnly, false);
   assert.equal(health.json().intelligenceMode, 'full');
   assert.equal(health.json().capabilities.canModifyLocalSystemFiles, true);
 });
