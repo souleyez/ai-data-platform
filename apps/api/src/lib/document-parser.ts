@@ -10,6 +10,7 @@ import {
   type DocumentExtractionProfile,
   type DocumentLibraryContext,
 } from './document-extraction-governance.js';
+import { applyDocumentParseFeedback } from './document-parse-feedback.js';
 import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import {
@@ -2111,22 +2112,45 @@ export async function parseDocument(
       extractionProfile,
     );
     const groups = detectGroups(filePath, normalizedText, topicTags, config);
+    const feedbackLibraryKeys = options?.libraryContext?.keys?.length
+      ? options.libraryContext.keys
+      : [];
     const summary = summarize(normalizedText, '文档内容为空或暂未提取到文本。');
     const excerptText = excerpt(normalizedText, '文档内容为空或暂未提取到文本。');
     const inferredTitle = inferTitle(text, name);
 
     if (parseStage === 'quick') {
       const quickText = text.slice(0, 2400);
-      const contractFields = extractContractFields(quickText, category, extractionProfile);
-      const resumeFields = extractResumeFields(
-        quickText,
-        inferredTitle,
-        [],
-        [],
-        { force: shouldForceExtraction(extractionProfile, 'resume') },
-      );
-      const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(quickText, inferredTitle, topicTags, category, extractionProfile);
-      const orderFields = extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile);
+      const contractFields = applyDocumentParseFeedback({
+        libraryKeys: feedbackLibraryKeys,
+        schemaType: 'contract',
+        text: quickText,
+        fields: extractContractFields(quickText, category, extractionProfile),
+      });
+      const resumeFields = applyDocumentParseFeedback({
+        libraryKeys: feedbackLibraryKeys,
+        schemaType: 'resume',
+        text: quickText,
+        fields: extractResumeFields(
+          quickText,
+          inferredTitle,
+          [],
+          [],
+          { force: shouldForceExtraction(extractionProfile, 'resume') },
+        ),
+      });
+      const enterpriseGuidanceFields = applyDocumentParseFeedback({
+        libraryKeys: feedbackLibraryKeys,
+        schemaType: 'technical',
+        text: quickText,
+        fields: extractEnterpriseGuidanceFields(quickText, inferredTitle, topicTags, category, extractionProfile),
+      });
+      const orderFields = applyDocumentParseFeedback({
+        libraryKeys: feedbackLibraryKeys,
+        schemaType: 'order',
+        text: quickText,
+        fields: extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile),
+      });
       const schemaType = applyGovernedSchemaType(
         inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
         extractionProfile,
@@ -2176,17 +2200,37 @@ export async function parseDocument(
     }
 
     const evidenceChunks = splitEvidenceChunks(text);
-    const contractFields = extractContractFields(normalizedText, category, extractionProfile);
-    const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
-    const resumeFields = extractResumeFields(
+    const contractFields = applyDocumentParseFeedback({
+      libraryKeys: feedbackLibraryKeys,
+      schemaType: 'contract',
       text,
-      inferredTitle,
-      structured.entities,
-      structured.claims,
-      { force: shouldForceExtraction(extractionProfile, 'resume') },
-    );
-    const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile);
-    const orderFields = extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile);
+      fields: extractContractFields(normalizedText, category, extractionProfile),
+    });
+    const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
+    const resumeFields = applyDocumentParseFeedback({
+      libraryKeys: feedbackLibraryKeys,
+      schemaType: 'resume',
+      text,
+      fields: extractResumeFields(
+        text,
+        inferredTitle,
+        structured.entities,
+        structured.claims,
+        { force: shouldForceExtraction(extractionProfile, 'resume') },
+      ),
+    });
+    const enterpriseGuidanceFields = applyDocumentParseFeedback({
+      libraryKeys: feedbackLibraryKeys,
+      schemaType: 'technical',
+      text,
+      fields: extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile),
+    });
+    const orderFields = applyDocumentParseFeedback({
+      libraryKeys: feedbackLibraryKeys,
+      schemaType: 'order',
+      text,
+      fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile),
+    });
     const schemaType = applyGovernedSchemaType(
       inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
       extractionProfile,

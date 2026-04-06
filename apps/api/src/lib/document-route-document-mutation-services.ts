@@ -5,6 +5,7 @@ import { type BizCategory } from './document-config.js';
 import { type EvidenceChunk, refreshDerivedSchemaProfile, type ParsedDocument } from './document-parser.js';
 import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
+import { recordDocumentParseFeedback } from './document-parse-feedback.js';
 import { removeDocumentOverrides, saveDocumentOverride } from './document-overrides.js';
 import { removeDocumentsFromCache } from './document-store.js';
 import { buildDocumentId } from './document-store.js';
@@ -194,6 +195,17 @@ export async function updateDocumentAnalysisResult(
     memorySyncMode: 'immediate',
     memorySyncReason: 'document-analysis-manual-edit',
   });
+
+  if (input.structuredProfile !== undefined) {
+    const libraryKeys = updated.confirmedGroups?.length
+      ? updated.confirmedGroups
+      : updated.groups || [];
+    await recordDocumentParseFeedback({
+      libraryKeys,
+      schemaType: updated.schemaType,
+      structuredProfile: updated.structuredProfile,
+    }).catch(() => undefined);
+  }
 
   return updated;
 }
