@@ -136,6 +136,8 @@ export type TableRecordFieldRoles = {
   inventoryBeforeField?: string;
   inventoryAfterField?: string;
   inventoryRiskField?: string;
+  recommendationField?: string;
+  replenishmentPriorityField?: string;
 };
 
 export type TableRecordAlert = {
@@ -152,6 +154,9 @@ export type TableRecordInsightSummary = {
   lowMarginRowCount?: number;
   highRefundRowCount?: number;
   inventoryRiskRowCount?: number;
+  topRiskSkus?: string[];
+  priorityReplenishmentItems?: string[];
+  refundHotspots?: string[];
   alerts?: TableRecordAlert[];
 };
 
@@ -869,6 +874,8 @@ function buildRecordFieldRoles(columns: string[]) {
     inventoryBeforeField: findTableColumnByAliases(columns, ['inventory_before', 'stock_before', 'opening_stock']),
     inventoryAfterField: findTableColumnByAliases(columns, ['inventory_after', 'stock_after', 'closing_stock']),
     inventoryRiskField: findTableColumnByAliases(columns, ['inventory_risk', 'risk_flag', 'inventory_status']),
+    recommendationField: findTableColumnByAliases(columns, ['recommendation', 'replenishment', 'action']),
+    replenishmentPriorityField: findTableColumnByAliases(columns, ['replenishment_priority', 'priority']),
   };
 
   return Object.fromEntries(
@@ -894,6 +901,8 @@ function deriveRecordBusinessFields(
   const inventoryBefore = readRole(roles.inventoryBeforeField);
   const inventoryAfter = readRole(roles.inventoryAfterField);
   const inventoryStatus = readRole(roles.inventoryRiskField);
+  const recommendation = readRole(roles.recommendationField);
+  const replenishmentPriority = readRole(roles.replenishmentPriorityField);
 
   if (parsedPeriod?.normalized) derivedFields.period = parsedPeriod.normalized;
   else if (periodValue) derivedFields.period = periodValue;
@@ -913,11 +922,25 @@ function deriveRecordBusinessFields(
   if (inventoryBefore) derivedFields.inventoryBefore = inventoryBefore;
   if (inventoryAfter) derivedFields.inventoryAfter = inventoryAfter;
   if (inventoryStatus) derivedFields.inventoryStatus = inventoryStatus;
+  if (recommendation) derivedFields.recommendation = recommendation;
+  if (replenishmentPriority) derivedFields.replenishmentPriority = replenishmentPriority;
 
   return derivedFields;
 }
 
 function buildTopValueList(values: string[]) {
+  const counts = new Map<string, number>();
+  values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
+    .slice(0, 3)
+    .map(([value]) => value);
+}
+
+function buildTopValueCounts(values: string[]) {
   const counts = new Map<string, number>();
   values
     .map((value) => String(value || '').trim())
@@ -950,6 +973,9 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
   let lowMarginRowCount = 0;
   let highRefundRowCount = 0;
   let inventoryRiskRowCount = 0;
+  const riskSkuCandidates: string[] = [];
+  const replenishmentCandidates: string[] = [];
+  const refundHotspotCandidates: string[] = [];
 
   for (const row of recordRows) {
     const derived = row.derivedFields || {};
@@ -958,6 +984,11 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
     const grossAmount = parseCurrencyText(String(row.values?.gross_amount || ''));
     const refundAmount = parseCurrencyText(String(row.values?.refund_amount || ''));
     const inventoryStatus = String(derived.inventoryStatus || '').trim();
+    const sku = String(derived.sku || row.keyValue || '').trim();
+    const platform = String(derived.platform || '').trim();
+    const category = String(derived.category || '').trim();
+    const recommendation = String(derived.recommendation || '').trim();
+    const replenishmentPriority = String(derived.replenishmentPriority || '').trim();
 
     if (typeof grossMargin === 'number' && grossMargin <= 0.2) {
       lowMarginRowCount += 1;
@@ -972,6 +1003,9 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
 
     if (typeof refundAmount === 'number' && ((typeof grossAmount === 'number' && grossAmount > 0 && refundAmount / grossAmount >= 0.2) || (typeof netSales === 'number' && netSales > 0 && refundAmount / netSales >= 0.25))) {
       highRefundRowCount += 1;
+      if (platform || category) {
+        refundHotspotCandidates.push([platform, category].filter(Boolean).join(' / '));
+      }
       alerts.push({
         type: 'high_refund',
         rowNumber: row.rowNumber,
@@ -983,6 +1017,7 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
 
     if (inventoryStatus && !/^healthy$/i.test(inventoryStatus)) {
       inventoryRiskRowCount += 1;
+      if (sku) riskSkuCandidates.push(sku);
       alerts.push({
         type: 'inventory_risk',
         rowNumber: row.rowNumber,
@@ -990,6 +1025,13 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
         severity: /^understock|^overstock/i.test(inventoryStatus) ? 'high' : 'medium',
         message: `库存状态：${inventoryStatus}`,
       });
+    }
+
+    const shouldPrioritizeReplenishment = /^understock/i.test(inventoryStatus)
+      || /^P0|^P1/i.test(replenishmentPriority)
+      || /补货|replenish|restock/i.test(recommendation);
+    if (shouldPrioritizeReplenishment && sku) {
+      replenishmentCandidates.push(sku);
     }
   }
 
@@ -1002,6 +1044,12 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
   if (lowMarginRowCount) summary.lowMarginRowCount = lowMarginRowCount;
   if (highRefundRowCount) summary.highRefundRowCount = highRefundRowCount;
   if (inventoryRiskRowCount) summary.inventoryRiskRowCount = inventoryRiskRowCount;
+  const topRiskSkus = buildTopValueCounts(riskSkuCandidates);
+  const priorityReplenishmentItems = buildTopValueCounts(replenishmentCandidates);
+  const refundHotspots = buildTopValueCounts(refundHotspotCandidates);
+  if (topRiskSkus.length) summary.topRiskSkus = topRiskSkus;
+  if (priorityReplenishmentItems.length) summary.priorityReplenishmentItems = priorityReplenishmentItems;
+  if (refundHotspots.length) summary.refundHotspots = refundHotspots;
   if (alerts.length) summary.alerts = alerts.slice(0, 8);
   return Object.keys(summary).length ? summary : undefined;
 }

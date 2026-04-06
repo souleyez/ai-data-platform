@@ -63,6 +63,9 @@ test('parseDocument should include lightweight table summary for csv order docum
     '223.53',
   );
   assert.deepEqual((tableSummary?.recordInsights as Record<string, unknown>)?.topPlatforms, ['Douyin', 'Tmall', 'JD']);
+  assert.ok(
+    ((tableSummary?.recordInsights as Record<string, unknown>)?.refundHotspots as string[]).some((entry) => /Douyin|Tmall|手机配件|电脑外设/.test(entry)),
+  );
   assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.highRefundRowCount, 2);
   assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskRowCount, 4);
   assert.equal(
@@ -140,8 +143,24 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(sheets?.[1]?.recordKeyField, 'sku');
     assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.skuField, 'sku');
     assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.inventoryAfterField, 'inventory_after');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.replenishmentPriorityField, undefined);
     assert.ok(!('recordInsights' in (tableSummary || {})) || typeof (tableSummary?.recordInsights) === 'object');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
+});
+
+test('parseDocument should derive inventory-focused insight summaries from inventory snapshot tables', async () => {
+  const doc = await parseDocument(path.join(fixtureDir, 'order-inventory-snapshot-q1-2026.csv'));
+  const tableSummary = doc.structuredProfile?.tableSummary as Record<string, unknown> | undefined;
+  const recordInsights = tableSummary?.recordInsights as Record<string, unknown> | undefined;
+
+  assert.equal(doc.bizCategory, 'inventory');
+  assert.ok(tableSummary);
+  assert.ok(recordInsights);
+  assert.ok(Array.isArray(recordInsights?.topRiskSkus));
+  assert.ok((recordInsights?.topRiskSkus as string[]).length >= 1);
+  assert.ok(Array.isArray(recordInsights?.priorityReplenishmentItems));
+  assert.ok((recordInsights?.priorityReplenishmentItems as string[]).length >= 1);
+  assert.equal(typeof recordInsights?.inventoryRiskRowCount, 'number');
 });
