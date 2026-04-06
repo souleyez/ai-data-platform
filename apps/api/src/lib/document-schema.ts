@@ -268,6 +268,8 @@ export function refreshDerivedSchemaProfile(item: ParsedDocument): ParsedDocumen
     ...item,
     resumeFields: derived.resumeFields,
     schemaType: derived.schemaType,
-    structuredProfile: derived.structuredProfile,
+    structuredProfile: item.manualStructuredProfile && item.structuredProfile
+      ? item.structuredProfile
+      : derived.structuredProfile,
   };
 }

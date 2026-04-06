@@ -16,6 +16,7 @@ import {
   saveConfirmedDocumentClassifications,
   saveConfirmedDocumentGroups,
   saveIgnoredDocuments,
+  updateDocumentAnalysisResult,
 } from '../lib/document-route-services.js';
 import {
   buildAttachmentDisposition as buildDocumentAttachmentDisposition,
@@ -447,5 +448,27 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'document not found' });
     }
     return payload;
+  });
+
+  app.patch('/documents/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as {
+      summary?: unknown;
+      structuredProfile?: unknown;
+      evidenceChunks?: unknown;
+    };
+
+    try {
+      const item = await updateDocumentAnalysisResult(id, body);
+      return {
+        status: 'updated',
+        item,
+        message: '已更新解析结果并同步到知识记忆',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'document update failed';
+      const code = message === 'document not found' ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
   });
 }
