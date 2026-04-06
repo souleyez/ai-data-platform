@@ -469,6 +469,44 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
   return score;
 }
 
+function collectAliasProfileData(profile: Record<string, unknown>) {
+  const fieldTemplate =
+    profile.fieldTemplate && typeof profile.fieldTemplate === 'object'
+      ? (profile.fieldTemplate as Record<string, unknown>)
+      : null;
+  const fieldAliases =
+    fieldTemplate?.fieldAliases && typeof fieldTemplate.fieldAliases === 'object'
+      ? (fieldTemplate.fieldAliases as Record<string, unknown>)
+      : null;
+  const aliasMaps = [profile.focusedAliasFields, profile.aliasFields]
+    .filter((entry) => entry && typeof entry === 'object') as Array<Record<string, unknown>>;
+
+  const aliasNames = new Set<string>();
+  const aliasValues = new Set<string>();
+
+  for (const [canonicalField, aliasValue] of Object.entries(fieldAliases || {})) {
+    const normalizedAliasName = String(aliasValue || '').trim();
+    if (normalizedAliasName) aliasNames.add(normalizedAliasName.toLowerCase());
+
+    const canonicalValue = String(profile[canonicalField] || '').trim();
+    if (canonicalValue) aliasValues.add(canonicalValue.toLowerCase());
+  }
+
+  for (const aliasMap of aliasMaps) {
+    for (const [aliasName, aliasValue] of Object.entries(aliasMap)) {
+      const normalizedAliasName = String(aliasName || '').trim();
+      const normalizedAliasValue = String(aliasValue || '').trim();
+      if (normalizedAliasName) aliasNames.add(normalizedAliasName.toLowerCase());
+      if (normalizedAliasValue) aliasValues.add(normalizedAliasValue.toLowerCase());
+    }
+  }
+
+  return {
+    aliasNamesText: [...aliasNames].join(' '),
+    aliasValuesText: [...aliasValues].join(' '),
+  };
+}
+
 function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: TemplateTask) {
   const profile = item.structuredProfile || {};
   const haystack = JSON.stringify(profile).toLowerCase();
@@ -478,6 +516,14 @@ function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: Tem
   let score = 0;
   for (const token of tokens) {
     if (haystack.includes(token)) score += token.length >= 4 ? 4 : 2;
+  }
+
+  const { aliasNamesText, aliasValuesText } = collectAliasProfileData(profile as Record<string, unknown>);
+  if (aliasNamesText || aliasValuesText) {
+    for (const token of tokens) {
+      if (aliasNamesText.includes(token)) score += token.length >= 4 ? 8 : 4;
+      if (aliasValuesText.includes(token)) score += token.length >= 4 ? 5 : 3;
+    }
   }
 
   const profileText = JSON.stringify(profile);

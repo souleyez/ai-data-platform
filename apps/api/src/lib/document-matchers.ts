@@ -110,11 +110,48 @@ function scoreKeywordAgainstText(keyword: string, text: string) {
   return 1;
 }
 
+function collectStructuredAliasText(item: ParsedDocument) {
+  const profile = item.structuredProfile && typeof item.structuredProfile === 'object'
+    ? (item.structuredProfile as Record<string, unknown>)
+    : null;
+  if (!profile) return '';
+
+  const parts: string[] = [];
+  const fieldTemplate =
+    profile.fieldTemplate && typeof profile.fieldTemplate === 'object'
+      ? (profile.fieldTemplate as Record<string, unknown>)
+      : null;
+  const fieldAliases =
+    fieldTemplate?.fieldAliases && typeof fieldTemplate.fieldAliases === 'object'
+      ? (fieldTemplate.fieldAliases as Record<string, unknown>)
+      : null;
+
+  for (const [canonicalField, aliasName] of Object.entries(fieldAliases || {})) {
+    const normalizedAliasName = String(aliasName || '').trim();
+    const normalizedCanonicalValue = String(profile[canonicalField] || '').trim();
+    if (normalizedAliasName) parts.push(normalizedAliasName);
+    if (normalizedCanonicalValue) parts.push(normalizedCanonicalValue);
+  }
+
+  for (const aliasMap of [profile.focusedAliasFields, profile.aliasFields]) {
+    if (!aliasMap || typeof aliasMap !== 'object') continue;
+    for (const [aliasName, aliasValue] of Object.entries(aliasMap as Record<string, unknown>)) {
+      const normalizedAliasName = String(aliasName || '').trim();
+      const normalizedAliasValue = String(aliasValue || '').trim();
+      if (normalizedAliasName) parts.push(normalizedAliasName);
+      if (normalizedAliasValue) parts.push(normalizedAliasValue);
+    }
+  }
+
+  return parts.join(' ').toLowerCase();
+}
+
 function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptIntent: 'contract' | 'paper' | 'mixed') {
   const name = item.name.toLowerCase();
   const summary = item.summary.toLowerCase();
   const excerpt = item.excerpt.toLowerCase();
   const tags = (item.topicTags || []).join(' ').toLowerCase();
+  const aliasText = collectStructuredAliasText(item);
   const fieldText = [
     item.contractFields?.contractNo,
     item.contractFields?.paymentTerms,
@@ -133,6 +170,7 @@ function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptInte
     score += scoreKeywordAgainstText(keyword, excerpt);
     score += scoreKeywordAgainstText(keyword, tags) * 2;
     score += scoreKeywordAgainstText(keyword, fieldText) * 2;
+    score += scoreKeywordAgainstText(keyword, aliasText) * 3;
   }
 
   for (const keyword of CATEGORY_KEYWORDS[item.category] ?? []) {

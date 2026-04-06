@@ -19,6 +19,18 @@ export type DocumentVectorRecord = {
   metadata: Record<string, unknown>;
 };
 
+const PROFILE_FIELD_VECTOR_SKIP_SET = new Set([
+  'fieldTemplate',
+  'fieldDetails',
+  'focusedFieldDetails',
+  'focusedFieldEntries',
+  'focusedFields',
+  'aliasFieldDetails',
+  'focusedAliasFieldDetails',
+  'aliasFields',
+  'focusedAliasFields',
+]);
+
 function normalizeText(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -170,12 +182,58 @@ function buildFieldAliases(): Record<string, string[]> {
   };
 }
 
+function normalizeStringArray(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeText(entry)).filter(Boolean);
+  }
+  const normalized = normalizeText(value);
+  return normalized ? [normalized] : [];
+}
+
+function shouldSkipProfileFieldForVectorization(field: string) {
+  return PROFILE_FIELD_VECTOR_SKIP_SET.has(field);
+}
+
+function getLibraryFieldAliases(profile: Record<string, unknown>, field: string) {
+  const fieldTemplate =
+    profile.fieldTemplate && typeof profile.fieldTemplate === 'object'
+      ? (profile.fieldTemplate as Record<string, unknown>)
+      : null;
+  const fieldAliases =
+    fieldTemplate?.fieldAliases && typeof fieldTemplate.fieldAliases === 'object'
+      ? (fieldTemplate.fieldAliases as Record<string, unknown>)
+      : null;
+  return normalizeStringArray(fieldAliases?.[field]);
+}
+
+function getAliasValuesForField(profile: Record<string, unknown>, field: string, aliasNames: string[]) {
+  if (!aliasNames.length) return [];
+
+  const aliasSources = [profile.focusedAliasFields, profile.aliasFields]
+    .filter((entry) => entry && typeof entry === 'object') as Array<Record<string, unknown>>;
+
+  const values = new Set<string>();
+  for (const aliasName of aliasNames) {
+    for (const source of aliasSources) {
+      const aliasValue = normalizeText(source[aliasName]);
+      if (aliasValue) values.add(aliasValue);
+    }
+  }
+
+  return [...values];
+}
+
 function buildProfileFieldRecords(item: ParsedDocument, profile: Record<string, unknown>, baseMetadata: Record<string, unknown>) {
   const records: DocumentVectorRecord[] = [];
   const fieldAliases = buildFieldAliases();
 
   for (const [field, value] of Object.entries(profile)) {
+    if (shouldSkipProfileFieldForVectorization(field)) continue;
     if (value == null) continue;
+    const builtInAliases = fieldAliases[field] || [];
+    const libraryAliases = getLibraryFieldAliases(profile, field);
+    const aliasValues = getAliasValuesForField(profile, field, libraryAliases);
+    const allAliases = [...new Set([...builtInAliases, ...libraryAliases])];
 
     if (Array.isArray(value)) {
       const normalizedValues = value.map((entry) => normalizeText(entry)).filter(Boolean).slice(0, 8);
@@ -183,12 +241,21 @@ function buildProfileFieldRecords(item: ParsedDocument, profile: Record<string, 
       const record = buildRecord(
         item,
         'profile-field',
-        `${field} ${(fieldAliases[field] || []).join(' ')} ${item.schemaType || 'generic'} ${normalizedValues.join(' / ')}`,
+        [
+          field,
+          allAliases.join(' '),
+          item.schemaType || 'generic',
+          normalizedValues.join(' / '),
+          aliasValues.join(' / '),
+        ]
+          .filter(Boolean)
+          .join(' '),
         {
           ...baseMetadata,
           profileField: field,
           profileValueCount: normalizedValues.length,
-          profileAliases: fieldAliases[field] || [],
+          profileAliases: allAliases,
+          profileAliasValues: aliasValues,
         },
       );
       if (record) records.push(record);
@@ -201,11 +268,20 @@ function buildProfileFieldRecords(item: ParsedDocument, profile: Record<string, 
       const record = buildRecord(
         item,
         'profile-field',
-        `${field} ${(fieldAliases[field] || []).join(' ')} ${item.schemaType || 'generic'} ${compact}`,
+        [
+          field,
+          allAliases.join(' '),
+          item.schemaType || 'generic',
+          compact,
+          aliasValues.join(' / '),
+        ]
+          .filter(Boolean)
+          .join(' '),
         {
           ...baseMetadata,
           profileField: field,
-          profileAliases: fieldAliases[field] || [],
+          profileAliases: allAliases,
+          profileAliasValues: aliasValues,
         },
       );
       if (record) records.push(record);
@@ -217,11 +293,20 @@ function buildProfileFieldRecords(item: ParsedDocument, profile: Record<string, 
     const record = buildRecord(
       item,
       'profile-field',
-      `${field} ${(fieldAliases[field] || []).join(' ')} ${item.schemaType || 'generic'} ${normalized}`,
+      [
+        field,
+        allAliases.join(' '),
+        item.schemaType || 'generic',
+        normalized,
+        aliasValues.join(' / '),
+      ]
+        .filter(Boolean)
+        .join(' '),
       {
         ...baseMetadata,
         profileField: field,
-        profileAliases: fieldAliases[field] || [],
+        profileAliases: allAliases,
+        profileAliasValues: aliasValues,
       },
     );
     if (record) records.push(record);
