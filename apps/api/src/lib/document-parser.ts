@@ -114,7 +114,15 @@ export type TableSheetSummary = {
   columnCount: number;
   columns: string[];
   sampleRows: Array<Record<string, string>>;
+  recordKeyField?: string;
+  recordRows?: TableStructuredRow[];
   insights?: TableInsightSummary;
+};
+
+export type TableStructuredRow = {
+  rowNumber: number;
+  keyValue?: string;
+  values: Record<string, string>;
 };
 
 export type TableDateSummary = {
@@ -160,6 +168,8 @@ export type TableSummary = {
   sampleRows: Array<Record<string, string>>;
   sheetCount: number;
   primarySheetName?: string;
+  recordKeyField?: string;
+  recordRows?: TableStructuredRow[];
   sheets?: TableSheetSummary[];
   insights?: TableInsightSummary;
 };
@@ -768,6 +778,57 @@ function mapSampleRows(columns: string[], rows: string[][]) {
   });
 }
 
+function detectRecordKeyField(columns: string[], rows: string[][]) {
+  const preferredAliases = [
+    'order_id',
+    'sku',
+    'product_id',
+    'item_id',
+    'inventory_id',
+    'contract_no',
+    'document_no',
+    'id',
+  ];
+
+  for (const alias of preferredAliases) {
+    const matched = columns.find((column) => normalizeTableColumnKey(column) === alias);
+    if (matched) return matched;
+  }
+
+  for (const column of columns) {
+    const values = rows
+      .map((row) => normalizeTableCell(row[columns.indexOf(column)] || ''))
+      .filter(Boolean);
+    if (!values.length) continue;
+    const uniqueCount = new Set(values).size;
+    if (uniqueCount >= Math.max(2, Math.ceil(values.length * 0.9))) {
+      return column;
+    }
+  }
+
+  return undefined;
+}
+
+function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string) {
+  const recordKeyIndex = recordKeyField ? columns.findIndex((column) => column === recordKeyField) : -1;
+  return rows
+    .slice(0, 20)
+    .map((row, index) => {
+      const values: Record<string, string> = {};
+      columns.forEach((column, columnIndex) => {
+        values[column] = normalizeTableCell(row[columnIndex] || '');
+      });
+
+      const keyValue = recordKeyIndex >= 0 ? normalizeTableCell(row[recordKeyIndex] || '') : '';
+      return {
+        rowNumber: index + 1,
+        ...(keyValue ? { keyValue } : {}),
+        values,
+      } satisfies TableStructuredRow;
+    })
+    .filter((row) => Object.values(row.values).some(Boolean));
+}
+
 function buildTableSheetSummary(
   name: string,
   rows: unknown[][],
@@ -788,6 +849,8 @@ function buildTableSheetSummary(
     ? buildTableColumns(normalizedRows[0] || [], columnCount)
     : buildTableColumns([], columnCount);
   const insights = buildTableInsights(columns, dataRows);
+  const recordKeyField = detectRecordKeyField(columns, dataRows);
+  const recordRows = mapRecordRows(columns, dataRows, recordKeyField);
 
   return {
     name,
@@ -795,6 +858,8 @@ function buildTableSheetSummary(
     columnCount,
     columns,
     sampleRows: mapSampleRows(columns, dataRows),
+    ...(recordKeyField ? { recordKeyField } : {}),
+    ...(recordRows.length ? { recordRows } : {}),
     insights,
   };
 }
@@ -818,6 +883,8 @@ function buildWorkbookTableSummary(
     sampleRows: primarySheet.sampleRows,
     sheetCount: sheetSummaries.length,
     primarySheetName: primarySheet.name,
+    recordKeyField: primarySheet.recordKeyField,
+    recordRows: primarySheet.recordRows,
     sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
     insights: primarySheet.insights,
   };

@@ -18,6 +18,7 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.ok(tableSummary);
   assert.equal(tableSummary?.format, 'csv');
   assert.equal(tableSummary?.rowCount, 1000);
+  assert.equal(tableSummary?.recordKeyField, 'order_id');
   assert.deepEqual(tableSummary?.columns, [
     'order_id',
     'order_date',
@@ -44,6 +45,11 @@ test('parseDocument should include lightweight table summary for csv order docum
     'anomaly_note',
   ]);
   assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.order_id, 'ORD202602080001');
+  assert.equal((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.keyValue, 'ORD202602080001');
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.platform,
+    'Douyin',
+  );
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.min, '2026-01-01');
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.max, '2026-03-31');
   assert.equal(
@@ -95,11 +101,17 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(tableSummary?.format, 'xlsx');
     assert.equal(tableSummary?.sheetCount, 2);
     assert.equal(tableSummary?.primarySheetName, 'summary');
+    assert.equal(tableSummary?.recordKeyField, 'month');
     assert.deepEqual(tableSummary?.columns, ['month', 'platform', 'net_sales']);
     assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.platform, 'Douyin');
+    assert.equal(
+      ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.month,
+      '2026-01',
+    );
     assert.equal((tableSummary?.insights?.metricColumns as Array<Record<string, number>>)?.[0]?.column, 'net_sales');
     assert.equal(sheets?.[1]?.name, 'inventory');
     assert.deepEqual(sheets?.[1]?.columns, ['sku', 'inventory_after']);
+    assert.equal(sheets?.[1]?.recordKeyField, 'sku');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }

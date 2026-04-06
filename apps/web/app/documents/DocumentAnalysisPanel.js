@@ -77,7 +77,9 @@ function extractTableSummary(profile) {
     columns: Array.isArray(summary.columns) ? summary.columns.map((item) => String(item || '').trim()).filter(Boolean) : [],
     primarySheetName: String(summary.primarySheetName || '').trim(),
     sheetCount: typeof summary.sheetCount === 'number' ? summary.sheetCount : null,
+    recordKeyField: String(summary.recordKeyField || '').trim(),
     sampleRows: Array.isArray(summary.sampleRows) ? summary.sampleRows.slice(0, 3) : [],
+    recordRows: Array.isArray(summary.recordRows) ? summary.recordRows.slice(0, 5) : [],
   };
 }
 
@@ -448,6 +450,9 @@ export default function DocumentAnalysisPanel({ item: initialItem, feedbackSnaps
                   {tableSummary.primarySheetName ? (
                     <span className="source-chip">主表：{tableSummary.primarySheetName}</span>
                   ) : null}
+                  {tableSummary.recordKeyField ? (
+                    <span className="source-chip">主键列：{tableSummary.recordKeyField}</span>
+                  ) : null}
                 </div>
                 {tableSummary.columns.length ? (
                   <div className="preview-meta-line">列名：{tableSummary.columns.join(' / ')}</div>
@@ -456,6 +461,14 @@ export default function DocumentAnalysisPanel({ item: initialItem, feedbackSnaps
                   <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
                     {safeJsonStringify(tableSummary.sampleRows)}
                   </pre>
+                ) : null}
+                {tableSummary.recordRows.length ? (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div className="preview-meta-line">标准化记录行（前 5 行）</div>
+                    <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                      {safeJsonStringify(tableSummary.recordRows)}
+                    </pre>
+                  </div>
                 ) : null}
               </div>
             </section>
