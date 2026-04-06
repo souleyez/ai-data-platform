@@ -31,6 +31,23 @@ test('document extraction governance should resolve profile from library context
   assert.equal(profile?.fallbackSchemaType, 'contract');
 });
 
+test('document extraction governance should resolve xinshijie ioa library profile', () => {
+  const governance = loadDocumentExtractionGovernance();
+  const context = buildDocumentLibraryContext(
+    [
+      { key: 'xinshijie-ioa', label: '新世界IOA' },
+    ],
+    ['xinshijie-ioa'],
+  );
+
+  const profile = resolveDocumentExtractionProfile(governance, context);
+
+  assert.ok(profile);
+  assert.equal(profile?.id, 'xinshijie-ioa-guidance');
+  assert.equal(profile?.fieldSet, 'enterprise-guidance');
+  assert.equal(profile?.fallbackSchemaType, 'technical');
+});
+
 test('document extraction governance should upsert and remove library-specific override settings', async () => {
   const storageFile = path.join(process.cwd(), 'storage', 'config', 'document-extraction-governance.json');
   const previous = existsSync(storageFile) ? readFileSync(storageFile, 'utf8') : null;

@@ -125,8 +125,9 @@ export function loadDocumentExtractionGovernance() {
 
 async function writeDocumentExtractionGovernance(config: DocumentExtractionGovernanceConfig) {
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
+  const tempFile = `${DOCUMENT_EXTRACTION_GOVERNANCE_STORAGE_FILE}.tmp`;
   await fs.writeFile(
-    DOCUMENT_EXTRACTION_GOVERNANCE_STORAGE_FILE,
+    tempFile,
     JSON.stringify({
       version: config.version || 1,
       updatedAt: new Date().toISOString(),
@@ -134,6 +135,7 @@ async function writeDocumentExtractionGovernance(config: DocumentExtractionGover
     }, null, 2),
     'utf8',
   );
+  await fs.rename(tempFile, DOCUMENT_EXTRACTION_GOVERNANCE_STORAGE_FILE);
 }
 
 function normalizeLibraryOverrideProfileId(libraryKey: string) {

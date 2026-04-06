@@ -1721,6 +1721,33 @@ function applyGovernedSchemaType(
   return inferredSchemaType;
 }
 
+function applyGovernedSchemaTypeWithEnterpriseGuidance(
+  inferredSchemaType: ParsedDocument['schemaType'],
+  profile: DocumentExtractionProfile | null | undefined,
+  enterpriseGuidanceFields: ParsedDocument['enterpriseGuidanceFields'] | undefined,
+): ParsedDocument['schemaType'] {
+  const governed = applyGovernedSchemaType(inferredSchemaType, profile);
+  if (profile?.fieldSet !== 'enterprise-guidance') return governed;
+  if (!enterpriseGuidanceFields) return governed;
+  if (governed === 'resume' || governed === 'order') return governed;
+
+  const hasGuidanceSignal = Boolean(
+    enterpriseGuidanceFields.businessSystem
+    || enterpriseGuidanceFields.documentKind
+    || enterpriseGuidanceFields.applicableScope
+    || enterpriseGuidanceFields.operationEntry
+    || enterpriseGuidanceFields.approvalLevels?.length
+    || enterpriseGuidanceFields.policyFocus?.length
+    || enterpriseGuidanceFields.contacts?.length
+  );
+
+  if (hasGuidanceSignal && ['generic', 'contract', 'paper', 'report', 'technical'].includes(String(governed))) {
+    return 'technical';
+  }
+
+  return governed;
+}
+
 function mergeGovernedTopicTags(topicTags: string[], profile: DocumentExtractionProfile | null | undefined) {
   if (!profile) return topicTags;
 
@@ -1839,6 +1866,76 @@ function extractEnterpriseGuidanceFields(
         policyFocus,
         contacts,
       }
+    : undefined;
+}
+
+function refineEnterpriseGuidanceFields(
+  fields: ParsedDocument['enterpriseGuidanceFields'] | undefined,
+  input: {
+    text: string;
+    title: string;
+    topicTags: string[];
+    profile?: DocumentExtractionProfile | null;
+  },
+): ParsedDocument['enterpriseGuidanceFields'] | undefined {
+  const rawText = String(input.text || '');
+  const title = String(input.title || '');
+  const evidence = `${title} ${rawText} ${(input.topicTags || []).join(' ')}`.toLowerCase();
+  const forceGuidance = shouldForceExtraction(input.profile, 'enterprise-guidance');
+  const looksLikeXinshijieIoa = includesAnyText(evidence, [
+    '新世界ioa',
+    '新中ioa',
+    'ioa系统q&a',
+    'ioa应用技巧',
+    'ioa平台操作指引',
+    '固定资产',
+    'it政策',
+    'it守则',
+  ]);
+
+  if (!fields && !forceGuidance && !looksLikeXinshijieIoa) {
+    return undefined;
+  }
+
+  const nextFields: ParsedDocument['enterpriseGuidanceFields'] = {
+    ...(fields || {}),
+  };
+
+  if (!nextFields.businessSystem) {
+    if (/(?:新中|新世界)?i\s*oa|ioa/i.test(evidence)) nextFields.businessSystem = 'IOA';
+    else if (includesAnyText(evidence, ['固定资产', 'fixed asset'])) nextFields.businessSystem = 'fixed-assets';
+    else if (includesAnyText(evidence, ['it政策', 'it守则', 'it policy', 'it governance'])) nextFields.businessSystem = 'IT';
+  }
+
+  if (!nextFields.documentKind) {
+    if (/(?:q&a|faq|常见问题)/i.test(evidence)) nextFields.documentKind = 'faq';
+    else if (/(?:用户手册|manual|user guide)/i.test(evidence)) nextFields.documentKind = 'user-manual';
+    else if (/预算调整/i.test(evidence)) nextFields.documentKind = 'budget-adjustment';
+    else if (/审批流程|审批/i.test(evidence)) nextFields.documentKind = 'approval-flow';
+    else if (/应用技巧|操作指引|登录|入口/i.test(evidence)) nextFields.documentKind = 'operation-guide';
+    else if (/规范|制度|标准|政策|守则/i.test(evidence)) nextFields.documentKind = 'policy-standard';
+    else if (forceGuidance || looksLikeXinshijieIoa) nextFields.documentKind = 'guidance';
+  }
+
+  if (/(?:用户手册|manual|user guide)/i.test(title)) {
+    nextFields.documentKind = 'user-manual';
+  } else if (/(?:政策|守则|规范|制度|standard|policy)/i.test(title)) {
+    nextFields.documentKind = 'policy-standard';
+  }
+
+  nextFields.policyFocus = [...new Set([
+    ...(nextFields.policyFocus || []),
+    /规范|制度|标准|政策|守则/i.test(evidence) ? '企业规范' : '',
+    /审批流程|审批/i.test(evidence) ? '审批流程' : '',
+    /预算调整/i.test(evidence) ? '预算调整' : '',
+    /登录|入口|应用技巧|操作指引/i.test(evidence) ? '系统操作' : '',
+    /q&a|faq|常见问题/i.test(evidence) ? '常见问题' : '',
+    /固定资产|fixed asset/i.test(evidence) ? '资产管理' : '',
+    /it政策|it守则|it policy|it governance/i.test(evidence) ? 'IT治理' : '',
+  ].filter(Boolean))];
+
+  return Object.values(nextFields).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value))
+    ? nextFields
     : undefined;
 }
 
@@ -2143,7 +2240,15 @@ export async function parseDocument(
         libraryKeys: feedbackLibraryKeys,
         schemaType: 'technical',
         text: quickText,
-        fields: extractEnterpriseGuidanceFields(quickText, inferredTitle, topicTags, category, extractionProfile),
+        fields: refineEnterpriseGuidanceFields(
+          extractEnterpriseGuidanceFields(quickText, inferredTitle, topicTags, category, extractionProfile),
+          {
+            text: quickText,
+            title: inferredTitle,
+            topicTags,
+            profile: extractionProfile,
+          },
+        ),
       });
       const orderFields = applyDocumentParseFeedback({
         libraryKeys: feedbackLibraryKeys,
@@ -2151,9 +2256,10 @@ export async function parseDocument(
         text: quickText,
         fields: extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile),
       });
-      const schemaType = applyGovernedSchemaType(
+      const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
         inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
         extractionProfile,
+        enterpriseGuidanceFields,
       );
       return {
         path: filePath,
@@ -2223,7 +2329,15 @@ export async function parseDocument(
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'technical',
       text,
-      fields: extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile),
+      fields: refineEnterpriseGuidanceFields(
+        extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile),
+        {
+          text,
+          title: inferredTitle,
+          topicTags,
+          profile: extractionProfile,
+        },
+      ),
     });
     const orderFields = applyDocumentParseFeedback({
       libraryKeys: feedbackLibraryKeys,
@@ -2231,9 +2345,10 @@ export async function parseDocument(
       text,
       fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile),
     });
-    const schemaType = applyGovernedSchemaType(
+    const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
       inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
       extractionProfile,
+      enterpriseGuidanceFields,
     );
 
     return {

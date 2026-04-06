@@ -33,6 +33,14 @@
       "matchLibraryLabels": ["IOA", "企业规范", "制度规范", "系统指引"],
       "fieldSet": "enterprise-guidance",
       "fallbackSchemaType": "technical"
+    },
+    {
+      "id": "xinshijie-ioa-guidance",
+      "label": "新世界IOA企业规范提取模板",
+      "matchLibraryKeys": ["xinshijie-ioa", "xinshijieioa", "newworld-ioa", "新世界ioa", "新世界IOA"],
+      "matchLibraryLabels": ["新世界IOA", "新中IOA", "IOA问答", "企业规范"],
+      "fieldSet": "enterprise-guidance",
+      "fallbackSchemaType": "technical"
     }
   ]
 }
