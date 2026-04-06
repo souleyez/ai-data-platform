@@ -22,7 +22,17 @@ export type ChatOutput =
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
-        charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+        charts?: Array<{
+          title?: string;
+          items?: Array<{ label?: string; value?: number }>;
+          render?: {
+            renderer?: string;
+            chartType?: string;
+            svg?: string;
+            alt?: string;
+            generatedAt?: string;
+          } | null;
+        }>;
       } | null;
     };
 
@@ -314,6 +324,18 @@ function normalizeSections(value: unknown) {
     .filter((item) => item.title || item.body || item.bullets.length);
 }
 
+function normalizeChartRender(value: unknown) {
+  if (!isObject(value)) return null;
+  const renderer = sanitizeText(value.renderer);
+  const chartType = sanitizeText(value.chartType);
+  const svg = sanitizeText(value.svg);
+  const alt = sanitizeText(value.alt);
+  const generatedAt = sanitizeText(value.generatedAt);
+  return renderer || chartType || svg || alt || generatedAt
+    ? { renderer, chartType, svg, alt, generatedAt }
+    : null;
+}
+
 function normalizeCharts(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -329,8 +351,9 @@ function normalizeCharts(value: unknown) {
             }))
             .filter((entry) => entry.label)
         : [],
+      render: normalizeChartRender(item.render),
     }))
-    .filter((item) => item.title || item.items.length);
+    .filter((item) => item.title || item.items.length || item.render);
 }
 
 function normalizeObjectArray(value: unknown) {

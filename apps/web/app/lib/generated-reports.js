@@ -61,6 +61,18 @@ function normalizeChartItems(items) {
     : [];
 }
 
+function normalizeChartRender(render) {
+  if (!render) return null;
+  const svg = String(render?.svg || '');
+  const renderer = String(render?.renderer || '');
+  const chartType = String(render?.chartType || '');
+  const alt = String(render?.alt || '');
+  const generatedAt = String(render?.generatedAt || '');
+  return renderer || chartType || alt || generatedAt || svg
+    ? { renderer, chartType, alt, generatedAt, svg }
+    : null;
+}
+
 function normalizePage(page) {
   if (!page) return null;
   return {
@@ -88,8 +100,9 @@ function normalizePage(page) {
           .map((chart) => ({
             title: chart?.title || '',
             items: normalizeChartItems(chart?.items),
+            render: normalizeChartRender(chart?.render),
           }))
-          .filter((chart) => chart.title || chart.items.length)
+          .filter((chart) => chart.title || chart.items.length || chart.render)
       : [],
   };
 }
@@ -375,6 +388,13 @@ function buildPageHtml(item) {
 
   const charts = (item?.page?.charts || [])
     .map((chart) => {
+      if (chart?.render?.svg) {
+        return `
+        <section class="section">
+          ${chart.title ? `<h2>${escapeHtml(chart.title)}</h2>` : ''}
+          <div class="chart-svg">${chart.render.svg}</div>
+        </section>`;
+      }
       const maxValue = Math.max(...chart.items.map((entry) => normalizeNumber(entry.value)), 1);
       const rows = chart.items
         .map(
@@ -413,6 +433,8 @@ function buildPageHtml(item) {
     .section { margin-top: 24px; background: white; border-radius: 18px; padding: 18px 20px; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.06); }
     ul { margin: 10px 0 0 18px; }
     .chart { display: grid; gap: 10px; margin-top: 12px; }
+    .chart-svg { margin-top: 12px; }
+    .chart-svg svg { width: 100%; height: auto; display: block; }
     .bar-row { display: grid; grid-template-columns: 120px 1fr 56px; gap: 10px; align-items: center; }
     .bar-track { display: inline-flex; width: 100%; background: #e2e8f0; border-radius: 999px; overflow: hidden; height: 10px; }
     .bar-fill { display: inline-flex; background: linear-gradient(90deg, #0f766e, #14b8a6); height: 10px; }

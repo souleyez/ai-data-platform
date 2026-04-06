@@ -49,6 +49,7 @@ import {
   buildReportPlan,
   buildReportPlanContextBlock,
 } from './report-planner.js';
+import { attachDatavizRendersToOutput } from './report-dataviz.js';
 import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
@@ -545,9 +546,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const supplySkillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
     'references/supply-contract.md',
   ]);
-  const plannerSkillInstruction = requestedKind === 'page'
-    ? await loadWorkspaceSkillBundle('report-page-planner', [
-      'references/planning-contract.md',
+  const datavizSkillInstruction = requestedKind === 'page'
+    ? await loadWorkspaceSkillBundle('data-visualization-studio', [
+      'references/visualization_types.md',
     ])
     : '';
   const reportPlan = requestedKind === 'page'
@@ -561,7 +562,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : null;
   const reportPlanContext = reportPlan ? buildReportPlanContextBlock(reportPlan) : '';
-  const skillInstruction = [supplySkillInstruction, plannerSkillInstruction]
+  const skillInstruction = [supplySkillInstruction, datavizSkillInstruction]
     .filter(Boolean)
     .join('\n\n');
   const templateCatalogContext = buildTemplateCatalogContextBlock(
@@ -815,13 +816,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     }
   }
 
-  const finalOutput = output || buildKnowledgeFallbackOutput(
+  const rawFinalOutput = output || buildKnowledgeFallbackOutput(
     requestedKind,
     requestText,
     effectiveRetrieval.documents,
     activeEnvelope,
     resumeDisplayProfileResolution?.profiles || [],
   );
+  const finalOutput = await attachDatavizRendersToOutput(rawFinalOutput);
 
   return {
     libraries: resolvedLibraries,
