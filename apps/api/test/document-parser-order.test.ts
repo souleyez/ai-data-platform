@@ -14,6 +14,10 @@ test('parseDocument should classify ecommerce order csv as order schema', async 
   assert.equal(doc.schemaType, 'order');
   assert.ok((doc.topicTags || []).includes('订单分析'));
   assert.ok(doc.orderFields);
+  assert.equal(doc.orderFields?.orderCount, '1000');
+  assert.equal(doc.orderFields?.netSales, '￥414791.92');
+  assert.equal(doc.orderFields?.grossMargin, '46.86%');
+  assert.match(doc.orderFields?.platform || '', /Douyin/);
   assert.equal(doc.structuredProfile?.domain, 'order');
   assert.match(doc.excerpt, /Douyin|Tmall|JD/);
 });
@@ -27,9 +31,14 @@ test('parseDocument should classify order summary and inventory snapshot separat
   assert.equal(summaryDoc.schemaType, 'order');
   assert.ok((summaryDoc.topicTags || []).includes('渠道经营'));
   assert.ok(summaryDoc.orderFields);
+  assert.match(summaryDoc.orderFields?.platform || '', /Douyin|Tmall|JD/);
 
   assert.equal(inventoryDoc.parseMethod, 'csv-utf8');
   assert.equal(inventoryDoc.bizCategory, 'inventory');
   assert.equal(inventoryDoc.schemaType, 'report');
   assert.ok((inventoryDoc.topicTags || []).includes('库存管理'));
+  assert.equal(
+    inventoryDoc.structuredProfile?.tableSummary?.insights?.dimensionColumns?.find((entry) => entry.column === 'risk_flag')?.topValues?.[0]?.value,
+    'overstock_risk',
+  );
 });

@@ -76,6 +76,8 @@ test('document parse benchmark should keep core domains above baseline', async (
           assert.equal(doc.schemaType, 'order');
           assert.equal(doc.structuredProfile?.tableSummary?.rowCount, 1000);
           assert.ok((doc.structuredProfile?.tableSummary?.columns || []).includes('order_id'));
+          assert.equal(doc.orderFields?.orderCount, '1000');
+          assert.equal(doc.orderFields?.grossMargin, '46.86%');
         },
       },
     ];

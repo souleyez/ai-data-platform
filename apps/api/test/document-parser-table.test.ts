@@ -44,6 +44,20 @@ test('parseDocument should include lightweight table summary for csv order docum
     'anomaly_note',
   ]);
   assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.order_id, 'ORD202602080001');
+  assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.min, '2026-01-01');
+  assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.max, '2026-03-31');
+  assert.equal(
+    (tableSummary?.insights?.dimensionColumns as Array<Record<string, unknown>>)
+      ?.find((entry) => entry.column === 'platform')
+      ?.topValues?.[0]?.value,
+    'Douyin',
+  );
+  assert.equal(
+    (tableSummary?.insights?.metricColumns as Array<Record<string, number>>)
+      ?.find((entry) => entry.column === 'net_amount')
+      ?.sum,
+    414791.92,
+  );
 });
 
 test('parseDocument should include workbook sheet summaries for xlsx documents', async () => {
@@ -83,6 +97,7 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(tableSummary?.primarySheetName, 'summary');
     assert.deepEqual(tableSummary?.columns, ['month', 'platform', 'net_sales']);
     assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.platform, 'Douyin');
+    assert.equal((tableSummary?.insights?.metricColumns as Array<Record<string, number>>)?.[0]?.column, 'net_sales');
     assert.equal(sheets?.[1]?.name, 'inventory');
     assert.deepEqual(sheets?.[1]?.columns, ['sku', 'inventory_after']);
   } finally {

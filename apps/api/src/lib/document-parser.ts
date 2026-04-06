@@ -114,6 +114,42 @@ export type TableSheetSummary = {
   columnCount: number;
   columns: string[];
   sampleRows: Array<Record<string, string>>;
+  insights?: TableInsightSummary;
+};
+
+export type TableDateSummary = {
+  column: string;
+  min: string;
+  max: string;
+  distinctCount: number;
+  granularity: 'month' | 'date' | 'datetime';
+};
+
+export type TableMetricSummary = {
+  column: string;
+  kind: 'number' | 'currency' | 'percent';
+  nonEmptyCount: number;
+  min: number;
+  max: number;
+  sum: number;
+  avg: number;
+};
+
+export type TableDimensionValueSummary = {
+  value: string;
+  count: number;
+};
+
+export type TableDimensionSummary = {
+  column: string;
+  distinctCount: number;
+  topValues: TableDimensionValueSummary[];
+};
+
+export type TableInsightSummary = {
+  dateColumns?: TableDateSummary[];
+  metricColumns?: TableMetricSummary[];
+  dimensionColumns?: TableDimensionSummary[];
 };
 
 export type TableSummary = {
@@ -125,6 +161,7 @@ export type TableSummary = {
   sheetCount: number;
   primarySheetName?: string;
   sheets?: TableSheetSummary[];
+  insights?: TableInsightSummary;
 };
 
 export type StructuredEntity = {
@@ -567,6 +604,160 @@ function buildTableColumns(headerRow: string[], columnCount: number) {
   return columns;
 }
 
+function normalizeTableColumnKey(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function parseTableDateValue(value: string): { normalized: string; granularity: 'month' | 'date' | 'datetime' } | undefined {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+
+  let matched = text.match(/^(\d{4})[/-](\d{1,2})$/);
+  if (matched) {
+    const [, year, month] = matched;
+    return {
+      normalized: `${year}-${month.padStart(2, '0')}`,
+      granularity: 'month',
+    };
+  }
+
+  matched = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (matched) {
+    const [, year, month, day] = matched;
+    return {
+      normalized: `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`,
+      granularity: 'date',
+    };
+  }
+
+  matched = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (matched) {
+    const [, month, day, yearToken] = matched;
+    const normalizedYear = yearToken.length === 2 ? `20${yearToken}` : yearToken;
+    return {
+      normalized: `${normalizedYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`,
+      granularity: 'date',
+    };
+  }
+
+  matched = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (matched) {
+    const [, year, month, day, hour, minute, second = '00'] = matched;
+    return {
+      normalized: `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}:${second}`,
+      granularity: 'datetime',
+    };
+  }
+
+  return undefined;
+}
+
+function detectMetricKind(column: string, values: string[]) {
+  const key = normalizeTableColumnKey(column);
+  if (values.some((value) => /[%％]$/.test(value)) || /(margin|ratio|rate|percent|pct|毛利率|占比|比率|比例)/i.test(key)) {
+    return 'percent' as const;
+  }
+  if (values.some((value) => /[￥¥$]/.test(value)) || /(amount|sales|revenue|gmv|profit|price|金额|销售额|收入|利润|单价)/i.test(key)) {
+    return 'currency' as const;
+  }
+  return 'number' as const;
+}
+
+function parseTableNumericValue(value: string, kind: TableMetricSummary['kind']) {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  const cleaned = raw.replace(/[%％￥¥$,，]/g, '').trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(cleaned)) return undefined;
+  const numeric = Number(cleaned);
+  if (!Number.isFinite(numeric)) return undefined;
+  if (kind === 'percent' && /[%％]$/.test(raw)) {
+    return numeric / 100;
+  }
+  return numeric;
+}
+
+function buildTableInsights(columns: string[], rows: string[][]): TableInsightSummary | undefined {
+  if (!columns.length || !rows.length) return undefined;
+
+  const dateColumns: TableDateSummary[] = [];
+  const metricColumns: TableMetricSummary[] = [];
+  const dimensionColumns: TableDimensionSummary[] = [];
+
+  columns.forEach((column, index) => {
+    const values = rows
+      .map((row) => normalizeTableCell(row[index] || ''))
+      .filter(Boolean);
+    if (!values.length) return;
+
+    const dateValues = values
+      .map((value) => parseTableDateValue(value))
+      .filter((value): value is { normalized: string; granularity: 'month' | 'date' | 'datetime' } => Boolean(value));
+    if (dateValues.length >= Math.max(2, Math.ceil(values.length * 0.6))) {
+      const normalizedDates = [...new Set(dateValues.map((entry) => entry.normalized))].sort();
+      const granularity = dateValues.every((entry) => entry.granularity === 'month')
+        ? 'month'
+        : dateValues.some((entry) => entry.granularity === 'datetime')
+          ? 'datetime'
+          : 'date';
+      dateColumns.push({
+        column,
+        min: normalizedDates[0],
+        max: normalizedDates[normalizedDates.length - 1],
+        distinctCount: normalizedDates.length,
+        granularity,
+      });
+      return;
+    }
+
+    const metricKind = detectMetricKind(column, values);
+    const numericValues = values
+      .map((value) => parseTableNumericValue(value, metricKind))
+      .filter((value): value is number => Number.isFinite(value));
+    if (numericValues.length >= Math.max(2, Math.ceil(values.length * 0.7))) {
+      const sum = numericValues.reduce((accumulator, value) => accumulator + value, 0);
+      metricColumns.push({
+        column,
+        kind: metricKind,
+        nonEmptyCount: numericValues.length,
+        min: Number(Math.min(...numericValues).toFixed(4)),
+        max: Number(Math.max(...numericValues).toFixed(4)),
+        sum: Number(sum.toFixed(4)),
+        avg: Number((sum / numericValues.length).toFixed(4)),
+      });
+      return;
+    }
+
+    const counts = new Map<string, number>();
+    values.forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+    const distinctCount = counts.size;
+    const key = normalizeTableColumnKey(column);
+    const isKnownDimension = /(platform|platform_focus|channel|category|类目|品类|warehouse|仓|risk|priority|recommendation|region)/i.test(key);
+    if (
+      distinctCount >= 2
+      && (distinctCount <= Math.min(12, Math.max(4, Math.ceil(values.length * 0.25))) || isKnownDimension)
+    ) {
+      const topValues = [...counts.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
+        .slice(0, 5)
+        .map(([value, count]) => ({ value, count }));
+      dimensionColumns.push({
+        column,
+        distinctCount,
+        topValues,
+      });
+    }
+  });
+
+  const insights: TableInsightSummary = {};
+  if (dateColumns.length) insights.dateColumns = dateColumns;
+  if (metricColumns.length) insights.metricColumns = metricColumns;
+  if (dimensionColumns.length) insights.dimensionColumns = dimensionColumns;
+  return Object.keys(insights).length ? insights : undefined;
+}
+
 function mapSampleRows(columns: string[], rows: string[][]) {
   return rows.slice(0, 5).map((row) => {
     const record: Record<string, string> = {};
@@ -596,6 +787,7 @@ function buildTableSheetSummary(
   const columns = headerLike
     ? buildTableColumns(normalizedRows[0] || [], columnCount)
     : buildTableColumns([], columnCount);
+  const insights = buildTableInsights(columns, dataRows);
 
   return {
     name,
@@ -603,6 +795,7 @@ function buildTableSheetSummary(
     columnCount,
     columns,
     sampleRows: mapSampleRows(columns, dataRows),
+    insights,
   };
 }
 
@@ -626,6 +819,7 @@ function buildWorkbookTableSummary(
     sheetCount: sheetSummaries.length,
     primarySheetName: primarySheet.name,
     sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
+    insights: primarySheet.insights,
   };
 }
 
@@ -2062,18 +2256,111 @@ function refineEnterpriseGuidanceFields(
     : undefined;
 }
 
+function findTableDateSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
+  const aliasSet = new Set(aliases.map(normalizeTableColumnKey));
+  return (tableSummary?.insights?.dateColumns || []).find((entry) => aliasSet.has(normalizeTableColumnKey(entry.column)));
+}
+
+function findTableMetricSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
+  const metrics = tableSummary?.insights?.metricColumns || [];
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeTableColumnKey(alias);
+    const matched = metrics.find((entry) => normalizeTableColumnKey(entry.column) === normalizedAlias);
+    if (matched) return matched;
+  }
+  return undefined;
+}
+
+function findTableDimensionSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
+  const dimensions = tableSummary?.insights?.dimensionColumns || [];
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeTableColumnKey(alias);
+    const matched = dimensions.find((entry) => normalizeTableColumnKey(entry.column) === normalizedAlias);
+    if (matched) return matched;
+  }
+  return undefined;
+}
+
+function formatMetricValue(value: number, kind: TableMetricSummary['kind']) {
+  if (!Number.isFinite(value)) return '';
+  if (kind === 'currency') return `￥${value.toFixed(2)}`;
+  if (kind === 'percent') {
+    const percent = Math.abs(value) <= 1.5 ? value * 100 : value;
+    return `${percent.toFixed(2).replace(/\.00$/, '')}%`;
+  }
+  if (Number.isInteger(value)) return String(Math.round(value));
+  return value.toFixed(2).replace(/\.00$/, '');
+}
+
+function formatDateRange(dateSummary: TableDateSummary | undefined) {
+  if (!dateSummary) return '';
+  return dateSummary.min === dateSummary.max
+    ? dateSummary.min
+    : `${dateSummary.min} 至 ${dateSummary.max}`;
+}
+
+function derivePlatformFromTableSummary(tableSummary: TableSummary | undefined) {
+  const platformSummary = findTableDimensionSummary(tableSummary, ['platform', 'platform_focus', 'channel']);
+  if (!platformSummary?.topValues?.length) return '';
+  return platformSummary.topValues.slice(0, 3).map((entry) => entry.value).join(' / ');
+}
+
+function deriveTopCategoryFromTableSummary(tableSummary: TableSummary | undefined) {
+  const categorySummary = findTableDimensionSummary(tableSummary, ['category', 'category_name', '类目', '品类']);
+  return categorySummary?.topValues?.[0]?.value || '';
+}
+
+function deriveInventoryStatusFromTableSummary(tableSummary: TableSummary | undefined) {
+  const riskSummary = findTableDimensionSummary(tableSummary, ['risk_flag', 'inventory_risk']);
+  if (riskSummary?.topValues?.length) {
+    return riskSummary.topValues[0].value;
+  }
+
+  const inventoryIndex = findTableMetricSummary(tableSummary, ['inventory_index']);
+  if (inventoryIndex) {
+    if (inventoryIndex.avg >= 1.3) return 'overstock_risk';
+    if (inventoryIndex.avg <= 0.8) return 'understock_risk';
+    return 'healthy';
+  }
+
+  const daysOfCover = findTableMetricSummary(tableSummary, ['days_of_cover']);
+  if (daysOfCover) {
+    if (daysOfCover.avg >= 90) return 'overstock_risk';
+    if (daysOfCover.avg <= 20) return 'understock_risk';
+    return 'healthy';
+  }
+
+  return '';
+}
+
+function deriveReplenishmentActionFromTableSummary(tableSummary: TableSummary | undefined, inventoryStatus: string) {
+  const recommendation = findTableDimensionSummary(tableSummary, ['recommendation', 'replenishment']);
+  if (recommendation?.topValues?.length) {
+    return recommendation.topValues[0].value;
+  }
+
+  const priority = findTableDimensionSummary(tableSummary, ['replenishment_priority']);
+  const topPriority = priority?.topValues?.[0]?.value || '';
+  if (/^P0|^P1/i.test(topPriority)) return '优先补货';
+  if (inventoryStatus === 'overstock_risk') return '放缓补货';
+  if (inventoryStatus === 'understock_risk') return '加速补货';
+  return '';
+}
+
 function extractOrderFields(
   text: string,
   title: string,
   bizCategory: ParsedDocument['bizCategory'],
   topicTags: string[],
   profile?: DocumentExtractionProfile | null,
+  tableSummary?: TableSummary,
 ): ParsedDocument['orderFields'] | undefined {
   if (bizCategory !== 'order' && !shouldForceExtraction(profile, 'order')) return undefined;
 
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
-  const platform = [
+
+  const textPlatform = [
     /(tmall|天猫)/i.test(evidence) ? 'tmall' : '',
     /(jd|京东)/i.test(evidence) ? 'jd' : '',
     /(douyin|抖音)/i.test(evidence) ? 'douyin' : '',
@@ -2082,14 +2369,36 @@ function extractOrderFields(
     /(wechatmall|小程序)/i.test(evidence) ? 'wechatmall' : '',
   ].find(Boolean) || '';
 
-  const period = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
-    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim();
-  const orderCount = normalized.match(/(?:订单量|订单数|order_count)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim();
-  const netSales = normalized.match(/(?:净销售额|销售额|gmv|net_sales)[:：]?\s*([￥¥]?[0-9,.万亿%]+)/i)?.[1]?.trim();
-  const grossMargin = normalized.match(/(?:毛利率|gross_margin)[:：]?\s*([0-9.]+%?)/i)?.[1]?.trim();
-  const topCategory = normalized.match(/(?:重点品类|top\s*category|品类|类目)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim();
-  const inventoryStatus = /(库存|days_of_cover|safety_stock)/i.test(evidence) ? 'inventory-related' : '';
-  const replenishmentAction = /(备货|补货|restock|replenishment)/i.test(evidence) ? 'replenishment-needed' : '';
+  const textPeriod = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
+    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim()
+    || '';
+  const textOrderCount = normalized.match(/(?:订单量|订单数|order_count)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim() || '';
+  const textNetSales = normalized.match(/(?:净销售额|销售额|gmv|net_sales)[:：]?\s*([￥¥]?[0-9,.万亿%]+)/i)?.[1]?.trim() || '';
+  const textGrossMargin = normalized.match(/(?:毛利率|gross_margin)[:：]?\s*([0-9.]+%?)/i)?.[1]?.trim() || '';
+  const textTopCategory = normalized.match(/(?:重点品类|top\s*category|品类|类目)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim() || '';
+  const textInventoryStatus = /(库存|days_of_cover|safety_stock)/i.test(evidence) ? 'inventory-related' : '';
+  const textReplenishmentAction = /(备货|补货|restock|replenishment)/i.test(evidence) ? 'replenishment-needed' : '';
+
+  const orderCountMetric = findTableMetricSummary(tableSummary, ['order_count']);
+  const netSalesMetric = findTableMetricSummary(tableSummary, ['net_amount', 'net_sales', 'revenue', 'gross_amount']);
+  const grossMarginMetric = findTableMetricSummary(tableSummary, ['gross_margin']);
+  const grossProfitMetric = findTableMetricSummary(tableSummary, ['gross_profit']);
+  const period = formatDateRange(findTableDateSummary(tableSummary, ['month', 'date', 'order_date', 'snapshot_date', 'period'])) || textPeriod;
+  const platform = derivePlatformFromTableSummary(tableSummary) || textPlatform;
+  const orderCount = orderCountMetric
+    ? formatMetricValue(orderCountMetric.sum, 'number')
+    : ((tableSummary?.rowCount && (tableSummary.columns || []).some((column) => normalizeTableColumnKey(column) === 'order_id'))
+      ? String(tableSummary.rowCount)
+      : textOrderCount);
+  const netSales = netSalesMetric ? formatMetricValue(netSalesMetric.sum, netSalesMetric.kind) : textNetSales;
+  const grossMargin = grossMarginMetric
+    ? formatMetricValue(grossMarginMetric.avg, 'percent')
+    : (grossProfitMetric && netSalesMetric && netSalesMetric.sum
+      ? formatMetricValue(grossProfitMetric.sum / netSalesMetric.sum, 'percent')
+      : textGrossMargin);
+  const topCategory = deriveTopCategoryFromTableSummary(tableSummary) || textTopCategory;
+  const inventoryStatus = deriveInventoryStatusFromTableSummary(tableSummary) || textInventoryStatus;
+  const replenishmentAction = deriveReplenishmentActionFromTableSummary(tableSummary, inventoryStatus) || textReplenishmentAction;
 
   const hasAnyValue = Boolean(
     period
@@ -2403,7 +2712,7 @@ export async function parseDocument(
         libraryKeys: feedbackLibraryKeys,
         schemaType: 'order',
         text: quickText,
-        fields: extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile),
+        fields: extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
       });
       const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
         inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
@@ -2493,7 +2802,7 @@ export async function parseDocument(
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'order',
       text,
-      fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile),
+      fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
     });
     const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
       inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
