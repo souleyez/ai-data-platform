@@ -78,6 +78,16 @@ function buildLibrarySettingsDraft(library, draft) {
       : (Array.isArray(library?.extractionSettings?.preferredFieldKeys)
         ? library.extractionSettings.preferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
         : []),
+    extractionRequiredFieldKeys: Array.isArray(draft?.extractionRequiredFieldKeys)
+      ? draft.extractionRequiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : (Array.isArray(library?.extractionSettings?.requiredFieldKeys)
+        ? library.extractionSettings.requiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+        : []),
+    extractionFieldAliases: draft?.extractionFieldAliases && typeof draft.extractionFieldAliases === 'object'
+      ? draft.extractionFieldAliases
+      : (library?.extractionSettings?.fieldAliases && typeof library.extractionSettings.fieldAliases === 'object'
+        ? library.extractionSettings.fieldAliases
+        : {}),
   };
 }
 
@@ -254,6 +264,12 @@ export default function DocumentsPage() {
         extractionPreferredFieldKeys: Array.isArray(draft.extractionPreferredFieldKeys)
           ? draft.extractionPreferredFieldKeys
           : [],
+        extractionRequiredFieldKeys: Array.isArray(draft.extractionRequiredFieldKeys)
+          ? draft.extractionRequiredFieldKeys
+          : [],
+        extractionFieldAliases: draft.extractionFieldAliases && typeof draft.extractionFieldAliases === 'object'
+          ? draft.extractionFieldAliases
+          : {},
       });
       await loadDocuments();
       setScanMessage(`已更新知识库“${label}”的权限等级`);

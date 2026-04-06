@@ -81,6 +81,48 @@ function extractTableSummary(profile) {
   };
 }
 
+function extractFieldTemplate(profile) {
+  const template = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.fieldTemplate
+    : null;
+  if (!template || typeof template !== 'object' || Array.isArray(template)) return null;
+
+  return {
+    fieldSet: String(template.fieldSet || '').trim(),
+    preferredFieldKeys: Array.isArray(template.preferredFieldKeys)
+      ? template.preferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    requiredFieldKeys: Array.isArray(template.requiredFieldKeys)
+      ? template.requiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    fieldAliases: template.fieldAliases && typeof template.fieldAliases === 'object' && !Array.isArray(template.fieldAliases)
+      ? template.fieldAliases
+      : {},
+  };
+}
+
+function extractFocusedFieldEntries(profile) {
+  const entries = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.focusedFieldEntries
+    : null;
+  if (!Array.isArray(entries)) return [];
+
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      return {
+        key: String(entry.key || '').trim(),
+        alias: String(entry.alias || '').trim(),
+        required: Boolean(entry.required),
+        value: entry.value,
+        confidence: typeof entry.confidence === 'number' ? entry.confidence : null,
+        source: String(entry.source || '').trim(),
+        evidenceChunkId: String(entry.evidenceChunkId || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
 export default function DocumentAnalysisPanel({ item: initialItem }) {
   const [item, setItem] = useState(initialItem);
   const [editing, setEditing] = useState(false);
@@ -98,6 +140,14 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
   );
   const tableSummary = useMemo(
     () => extractTableSummary(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
+  const fieldTemplate = useMemo(
+    () => extractFieldTemplate(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
+  const focusedFieldEntries = useMemo(
+    () => extractFocusedFieldEntries(item?.structuredProfile || {}),
     [item?.structuredProfile],
   );
   const detailMeta = useMemo(() => ([
@@ -204,6 +254,40 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
 
           <section>
             <h4 style={{ marginBottom: 8 }}>字段置信度与来源</h4>
+            {fieldTemplate?.preferredFieldKeys?.length ? (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+                <div className="message-refs">
+                  <span className="source-chip">字段模板：{fieldTemplate.fieldSet || '-'}</span>
+                  <span className="source-chip">重点字段：{fieldTemplate.preferredFieldKeys.length}</span>
+                  <span className="source-chip">必填字段：{fieldTemplate.requiredFieldKeys.length}</span>
+                </div>
+                {focusedFieldEntries.length ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {focusedFieldEntries.map((entry, index) => (
+                      <div key={`${entry.key}-${index}`} className="bot-summary-card">
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                            <strong>{index + 1}. {entry.alias || entry.key}</strong>
+                            <div className="message-refs">
+                              {entry.required ? <span className="source-chip">必填</span> : null}
+                              {entry.confidence != null ? (
+                                <span className="source-chip">置信度：{Math.round(entry.confidence * 100)}%</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="preview-meta-line">{formatFieldValue(entry.value)}</div>
+                          <div className="message-refs">
+                            <span className="source-chip">字段键：{entry.key}</span>
+                            {entry.source ? <span className="source-chip">来源：{entry.source}</span> : null}
+                            {entry.evidenceChunkId ? <span className="source-chip">证据块：{entry.evidenceChunkId}</span> : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {fieldDetails.length ? (
               <div style={{ display: 'grid', gap: 10 }}>
                 {fieldDetails.map((entry) => (

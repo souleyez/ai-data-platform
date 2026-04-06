@@ -56,6 +56,8 @@ export async function updateManagedDocumentLibrary(
     extractionFieldSet?: string;
     extractionFallbackSchemaType?: string;
     extractionPreferredFieldKeys?: string[];
+    extractionRequiredFieldKeys?: string[];
+    extractionFieldAliases?: Record<string, string>;
   },
 ) {
   const library = await updateDocumentLibrary(key, input);
@@ -65,6 +67,8 @@ export async function updateManagedDocumentLibrary(
     fieldSet: input.extractionFieldSet,
     fallbackSchemaType: input.extractionFallbackSchemaType,
     preferredFieldKeys: input.extractionPreferredFieldKeys,
+    requiredFieldKeys: input.extractionRequiredFieldKeys,
+    fieldAliases: input.extractionFieldAliases,
   });
   const libraries = await loadDocumentLibraries();
   return { library, libraries };

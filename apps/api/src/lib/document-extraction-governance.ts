@@ -99,6 +99,8 @@ export type DocumentExtractionProfile = {
   fieldSet: DocumentExtractionFieldSet;
   fallbackSchemaType?: DocumentGovernedSchemaType;
   preferredFieldKeys?: DocumentExtractionFieldKey[];
+  requiredFieldKeys?: DocumentExtractionFieldKey[];
+  fieldAliases?: Partial<Record<DocumentExtractionFieldKey, string>>;
 };
 
 export type DocumentExtractionGovernanceConfig = {
@@ -112,6 +114,8 @@ export type DocumentLibraryExtractionSettings = {
   fieldSet?: DocumentExtractionFieldSet;
   fallbackSchemaType?: DocumentGovernedSchemaType;
   preferredFieldKeys?: DocumentExtractionFieldKey[];
+  requiredFieldKeys?: DocumentExtractionFieldKey[];
+  fieldAliases?: Partial<Record<DocumentExtractionFieldKey, string>>;
 };
 
 function readJsonObject(filePath: string) {
@@ -164,6 +168,44 @@ function normalizePreferredFieldKeys(fieldSet: DocumentExtractionFieldSet, value
   )];
 }
 
+function normalizeRequiredFieldKeys(
+  fieldSet: DocumentExtractionFieldSet,
+  preferredFieldKeys: DocumentExtractionFieldKey[] | undefined,
+  value: unknown,
+) {
+  const allowed = new Set(
+    Array.isArray(preferredFieldKeys) && preferredFieldKeys.length
+      ? preferredFieldKeys
+      : DOCUMENT_EXTRACTION_FIELD_KEYS_BY_SET[fieldSet],
+  );
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,\n]/)
+      : [];
+
+  return [...new Set(
+    rawValues
+      .map((item) => normalizeString(item))
+      .filter(Boolean)
+      .filter((item): item is DocumentExtractionFieldKey => allowed.has(item as DocumentExtractionFieldKey)),
+  )];
+}
+
+function normalizeFieldAliases(fieldSet: DocumentExtractionFieldSet, value: unknown) {
+  const allowed = new Set(DOCUMENT_EXTRACTION_FIELD_KEYS_BY_SET[fieldSet]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+  const aliases = Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, alias]) => [normalizeString(key), normalizeString(alias)])
+      .filter(([key, alias]) => key && alias && !/^[?？]+$/.test(alias))
+      .filter(([key]) => allowed.has(key as DocumentExtractionFieldKey)),
+  ) as Partial<Record<DocumentExtractionFieldKey, string>>;
+
+  return Object.keys(aliases).length ? aliases : undefined;
+}
+
 function hasOwnProperty(value: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -179,12 +221,37 @@ function shouldPreserveDefaultPreferredFieldKeys(
     && incoming.preferredFieldKeys.length === 0;
 }
 
+function shouldPreserveDefaultRequiredFieldKeys(
+  existing: DocumentExtractionProfile,
+  incoming: DocumentExtractionProfile,
+) {
+  return !incoming.id.startsWith('library-')
+    && Array.isArray(existing.requiredFieldKeys)
+    && existing.requiredFieldKeys.length > 0
+    && Array.isArray(incoming.requiredFieldKeys)
+    && incoming.requiredFieldKeys.length === 0;
+}
+
+function shouldPreserveDefaultFieldAliases(
+  existing: DocumentExtractionProfile,
+  incoming: DocumentExtractionProfile,
+) {
+  return !incoming.id.startsWith('library-')
+    && existing.fieldAliases
+    && Object.keys(existing.fieldAliases).length > 0
+    && incoming.fieldAliases
+    && Object.keys(incoming.fieldAliases).length === 0;
+}
+
 function normalizeProfile(input: unknown): DocumentExtractionProfile | null {
   if (!input || typeof input !== 'object') return null;
   const value = input as Record<string, unknown>;
   const id = normalizeString(value.id);
   const fieldSet = normalizeFieldSet(value.fieldSet);
   if (!id || !fieldSet) return null;
+  const preferredFieldKeys = hasOwnProperty(value, 'preferredFieldKeys')
+    ? normalizePreferredFieldKeys(fieldSet, value.preferredFieldKeys)
+    : undefined;
 
   return {
     id,
@@ -193,8 +260,12 @@ function normalizeProfile(input: unknown): DocumentExtractionProfile | null {
     matchLibraryLabels: normalizeStringList(value.matchLibraryLabels),
     fieldSet,
     fallbackSchemaType: normalizeSchemaType(value.fallbackSchemaType),
-    preferredFieldKeys: hasOwnProperty(value, 'preferredFieldKeys')
-      ? normalizePreferredFieldKeys(fieldSet, value.preferredFieldKeys)
+    preferredFieldKeys,
+    requiredFieldKeys: hasOwnProperty(value, 'requiredFieldKeys')
+      ? normalizeRequiredFieldKeys(fieldSet, preferredFieldKeys, value.requiredFieldKeys)
+      : undefined,
+    fieldAliases: hasOwnProperty(value, 'fieldAliases')
+      ? normalizeFieldAliases(fieldSet, value.fieldAliases)
       : undefined,
   };
 }
@@ -242,6 +313,12 @@ export function loadDocumentExtractionGovernance() {
       preferredFieldKeys: shouldPreserveDefaultPreferredFieldKeys(existing, profile)
         ? existing.preferredFieldKeys
         : (profile.preferredFieldKeys ?? existing.preferredFieldKeys),
+      requiredFieldKeys: shouldPreserveDefaultRequiredFieldKeys(existing, profile)
+        ? existing.requiredFieldKeys
+        : (profile.requiredFieldKeys ?? existing.requiredFieldKeys),
+      fieldAliases: shouldPreserveDefaultFieldAliases(existing, profile)
+        ? existing.fieldAliases
+        : (profile.fieldAliases ?? existing.fieldAliases),
     });
   }
 
@@ -307,6 +384,8 @@ export function getDocumentLibraryExtractionSettings(
     fieldSet: override.fieldSet,
     fallbackSchemaType: override.fallbackSchemaType,
     preferredFieldKeys: override.preferredFieldKeys,
+    requiredFieldKeys: override.requiredFieldKeys,
+    fieldAliases: override.fieldAliases,
   } satisfies DocumentLibraryExtractionSettings;
 }
 
@@ -327,6 +406,8 @@ export async function updateLibraryDocumentExtractionSettings(
     fieldSet?: string;
     fallbackSchemaType?: string;
     preferredFieldKeys?: string[];
+    requiredFieldKeys?: string[];
+    fieldAliases?: Record<string, string>;
   },
 ) {
   const key = normalizeString(input.key);
@@ -343,6 +424,12 @@ export async function updateLibraryDocumentExtractionSettings(
   const requestedPreferredFieldKeys = Array.isArray(input.preferredFieldKeys)
     ? input.preferredFieldKeys.map((item) => normalizeString(item)).filter(Boolean)
     : [];
+  const requestedRequiredFieldKeys = Array.isArray(input.requiredFieldKeys)
+    ? input.requiredFieldKeys.map((item) => normalizeString(item)).filter(Boolean)
+    : [];
+  const requestedFieldAliases = input.fieldAliases && typeof input.fieldAliases === 'object'
+    ? input.fieldAliases
+    : {};
   const requestedReset = normalizeString(input.fieldSet).toLowerCase() === 'auto'
     && normalizeString(input.fallbackSchemaType).toLowerCase() === 'auto';
   const nextProfiles = current.profiles.filter((profile) => profile.id !== overrideId);
@@ -357,6 +444,23 @@ export async function updateLibraryDocumentExtractionSettings(
           : (existingOverride?.preferredFieldKeys || []),
       )
     : [];
+  const nextRequiredFieldKeys = nextFieldSet
+    ? normalizeRequiredFieldKeys(
+        nextFieldSet,
+        nextPreferredFieldKeys,
+        requestedRequiredFieldKeys.length
+          ? requestedRequiredFieldKeys
+          : (existingOverride?.requiredFieldKeys || []),
+      )
+    : [];
+  const nextFieldAliases = nextFieldSet
+    ? normalizeFieldAliases(
+        nextFieldSet,
+        Object.keys(requestedFieldAliases).length
+          ? requestedFieldAliases
+          : (existingOverride?.fieldAliases || {}),
+      )
+    : undefined;
 
   if (nextFieldSet || fallbackSchemaType) {
     nextProfiles.push({
@@ -367,6 +471,8 @@ export async function updateLibraryDocumentExtractionSettings(
       fieldSet: nextFieldSet || 'contract',
       fallbackSchemaType,
       preferredFieldKeys: nextPreferredFieldKeys,
+      requiredFieldKeys: nextRequiredFieldKeys,
+      fieldAliases: nextFieldAliases,
     });
   }
 

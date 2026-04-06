@@ -190,12 +190,22 @@ function buildCommonFieldDetails(input: {
 
 function buildFocusedFieldPayload(
   fieldDetails: Record<string, StructuredFieldDetail>,
-  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys'>,
+  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys' | 'requiredFieldKeys' | 'fieldAliases'>,
 ) {
   const preferredFieldKeys = Array.isArray(extractionProfile?.preferredFieldKeys)
     ? extractionProfile.preferredFieldKeys.filter(Boolean)
     : [];
   if (!preferredFieldKeys.length) return {};
+  const preferredFieldKeySet = new Set<string>(preferredFieldKeys);
+  const requiredFieldKeys = Array.isArray(extractionProfile?.requiredFieldKeys)
+    ? extractionProfile.requiredFieldKeys.filter((key) => preferredFieldKeySet.has(key))
+    : [];
+  const fieldAliases = extractionProfile?.fieldAliases && typeof extractionProfile.fieldAliases === 'object'
+    ? Object.fromEntries(
+        Object.entries(extractionProfile.fieldAliases)
+          .filter(([key, value]) => preferredFieldKeySet.has(key) && String(value || '').trim()),
+      )
+    : undefined;
 
   const focusedFieldDetails = Object.fromEntries(
     preferredFieldKeys
@@ -207,13 +217,29 @@ function buildFocusedFieldPayload(
     Object.entries(focusedFieldDetails).map(([key, value]) => [key, value.value]),
   );
 
+  const focusedFieldEntries = preferredFieldKeys.map((key) => {
+    const detail = focusedFieldDetails[key];
+    return {
+      key,
+      alias: fieldAliases?.[key] || '',
+      required: requiredFieldKeys.includes(key),
+      value: detail?.value,
+      confidence: detail?.confidence ?? null,
+      source: detail?.source || '',
+      evidenceChunkId: detail?.evidenceChunkId || '',
+    };
+  });
+
   return {
     fieldTemplate: {
       fieldSet: extractionProfile?.fieldSet,
       preferredFieldKeys,
+      requiredFieldKeys,
+      fieldAliases,
     },
     focusedFieldDetails,
     focusedFields,
+    focusedFieldEntries,
   };
 }
 
@@ -228,7 +254,7 @@ export function buildStructuredProfile(input: {
   resumeFields?: ResumeFields;
   evidenceChunks?: EvidenceChunk[];
   tableSummary?: TableSummary;
-  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys'>;
+  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys' | 'requiredFieldKeys' | 'fieldAliases'>;
 }) {
   const evidence = `${input.title} ${input.summary} ${input.topicTags.join(' ')}`.toLowerCase();
   const base = {
@@ -581,6 +607,8 @@ export function deriveSchemaProfile(input: {
       extractionProfile: profile ? {
         fieldSet: profile.fieldSet,
         preferredFieldKeys: profile.preferredFieldKeys,
+        requiredFieldKeys: profile.requiredFieldKeys,
+        fieldAliases: profile.fieldAliases,
       } : undefined,
     }),
   };

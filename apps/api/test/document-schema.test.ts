@@ -34,7 +34,7 @@ test('refreshDerivedSchemaProfile should preserve manually edited structured pro
   assert.equal(refreshed.schemaType, 'contract');
 });
 
-test('buildStructuredProfile should include contract field metadata details', () => {
+test('buildStructuredProfile should include contract field metadata details and focused field template metadata', () => {
   const profile = buildStructuredProfile({
     schemaType: 'contract',
     title: '采购合同',
@@ -61,6 +61,12 @@ test('buildStructuredProfile should include contract field metadata details', ()
     extractionProfile: {
       fieldSet: 'contract',
       preferredFieldKeys: ['partyA', 'partyB', 'amount'],
+      requiredFieldKeys: ['partyA', 'amount'],
+      fieldAliases: {
+        partyA: '甲方',
+        partyB: '乙方',
+        amount: '合同金额',
+      },
     },
   });
 
@@ -80,8 +86,13 @@ test('buildStructuredProfile should include contract field metadata details', ()
   assert.equal(profile.fieldDetails.amount?.evidenceChunkId, 'chunk-1');
   assert.equal(profile.fieldTemplate?.fieldSet, 'contract');
   assert.deepEqual(profile.fieldTemplate?.preferredFieldKeys, ['partyA', 'partyB', 'amount']);
+  assert.deepEqual(profile.fieldTemplate?.requiredFieldKeys, ['partyA', 'amount']);
+  assert.equal(profile.fieldTemplate?.fieldAliases?.partyA, '甲方');
   assert.equal(profile.focusedFields?.partyA, '广州轻工集团');
   assert.equal(profile.focusedFieldDetails?.amount?.value, '￥120000');
+  assert.equal(profile.focusedFieldEntries?.[0]?.key, 'partyA');
+  assert.equal(profile.focusedFieldEntries?.[0]?.alias, '甲方');
+  assert.equal(profile.focusedFieldEntries?.[0]?.required, true);
 });
 
 test('buildStructuredProfile should include enterprise guidance fields for technical documents', () => {

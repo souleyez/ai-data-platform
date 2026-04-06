@@ -29,7 +29,9 @@ test('document extraction governance should resolve profile from library context
   assert.equal(profile?.id, 'contract-standard');
   assert.equal(profile?.fieldSet, 'contract');
   assert.equal(profile?.fallbackSchemaType, 'contract');
-  assert.ok(profile?.preferredFieldKeys?.includes('partyA'));
+  assert.deepEqual(profile?.preferredFieldKeys, ['partyA', 'partyB', 'amount', 'signDate', 'paymentTerms']);
+  assert.deepEqual(profile?.requiredFieldKeys, ['partyA', 'partyB', 'amount']);
+  assert.equal(profile?.fieldAliases?.partyA, '甲方');
 });
 
 test('document extraction governance should resolve xinshijie ioa library profile', () => {
@@ -47,6 +49,8 @@ test('document extraction governance should resolve xinshijie ioa library profil
   assert.equal(profile?.id, 'xinshijie-ioa-guidance');
   assert.equal(profile?.fieldSet, 'enterprise-guidance');
   assert.equal(profile?.fallbackSchemaType, 'technical');
+  assert.deepEqual(profile?.requiredFieldKeys, ['businessSystem', 'documentKind', 'operationEntry']);
+  assert.equal(profile?.fieldAliases?.approvalLevels, '审批层级');
 });
 
 test('document extraction governance should upsert and remove library-specific override settings', async () => {
@@ -60,6 +64,11 @@ test('document extraction governance should upsert and remove library-specific o
       fieldSet: 'enterprise-guidance',
       fallbackSchemaType: 'technical',
       preferredFieldKeys: ['businessSystem', 'policyFocus'],
+      requiredFieldKeys: ['businessSystem'],
+      fieldAliases: {
+        businessSystem: '业务系统',
+        policyFocus: '规范重点',
+      },
     });
 
     let config = loadDocumentExtractionGovernance();
@@ -72,12 +81,17 @@ test('document extraction governance should upsert and remove library-specific o
     assert.equal(settings.fieldSet, 'enterprise-guidance');
     assert.equal(settings.fallbackSchemaType, 'technical');
     assert.deepEqual(settings.preferredFieldKeys, ['businessSystem', 'policyFocus']);
+    assert.deepEqual(settings.requiredFieldKeys, ['businessSystem']);
+    assert.equal(settings.fieldAliases?.businessSystem, '业务系统');
+    assert.equal(settings.fieldAliases?.policyFocus, '规范重点');
 
     const attached = attachDocumentExtractionSettings([
       { key: 'custom-guidance-library', label: '自定义指导库' },
     ], config);
     assert.equal(attached[0]?.extractionSettings?.fieldSet, 'enterprise-guidance');
     assert.deepEqual(attached[0]?.extractionSettings?.preferredFieldKeys, ['businessSystem', 'policyFocus']);
+    assert.deepEqual(attached[0]?.extractionSettings?.requiredFieldKeys, ['businessSystem']);
+    assert.equal(attached[0]?.extractionSettings?.fieldAliases?.policyFocus, '规范重点');
 
     await updateLibraryDocumentExtractionSettings({
       key: 'custom-guidance-library',

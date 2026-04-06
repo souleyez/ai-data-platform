@@ -204,6 +204,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       extractionFieldSet?: string;
       extractionFallbackSchemaType?: string;
       extractionPreferredFieldKeys?: string[];
+      extractionRequiredFieldKeys?: string[];
+      extractionFieldAliases?: Record<string, string>;
     };
 
     try {
@@ -214,6 +216,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         extractionFieldSet: body.extractionFieldSet,
         extractionFallbackSchemaType: body.extractionFallbackSchemaType,
         extractionPreferredFieldKeys: body.extractionPreferredFieldKeys,
+        extractionRequiredFieldKeys: body.extractionRequiredFieldKeys,
+        extractionFieldAliases: body.extractionFieldAliases,
       });
       return {
         status: 'updated',
