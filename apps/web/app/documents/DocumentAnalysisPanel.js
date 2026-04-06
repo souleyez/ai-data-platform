@@ -78,6 +78,9 @@ function extractTableSummary(profile) {
     primarySheetName: String(summary.primarySheetName || '').trim(),
     sheetCount: typeof summary.sheetCount === 'number' ? summary.sheetCount : null,
     recordKeyField: String(summary.recordKeyField || '').trim(),
+    recordFieldRoles: summary.recordFieldRoles && typeof summary.recordFieldRoles === 'object' && !Array.isArray(summary.recordFieldRoles)
+      ? summary.recordFieldRoles
+      : {},
     sampleRows: Array.isArray(summary.sampleRows) ? summary.sampleRows.slice(0, 3) : [],
     recordRows: Array.isArray(summary.recordRows) ? summary.recordRows.slice(0, 5) : [],
   };
@@ -456,6 +459,11 @@ export default function DocumentAnalysisPanel({ item: initialItem, feedbackSnaps
                 </div>
                 {tableSummary.columns.length ? (
                   <div className="preview-meta-line">列名：{tableSummary.columns.join(' / ')}</div>
+                ) : null}
+                {Object.keys(tableSummary.recordFieldRoles || {}).length ? (
+                  <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {safeJsonStringify(tableSummary.recordFieldRoles)}
+                  </pre>
                 ) : null}
                 {tableSummary.sampleRows.length ? (
                   <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>

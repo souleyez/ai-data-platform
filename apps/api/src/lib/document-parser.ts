@@ -115,14 +115,32 @@ export type TableSheetSummary = {
   columns: string[];
   sampleRows: Array<Record<string, string>>;
   recordKeyField?: string;
+  recordFieldRoles?: TableRecordFieldRoles;
   recordRows?: TableStructuredRow[];
   insights?: TableInsightSummary;
+};
+
+export type TableRecordFieldRoles = {
+  periodField?: string;
+  platformField?: string;
+  categoryField?: string;
+  skuField?: string;
+  orderCountField?: string;
+  quantityField?: string;
+  netSalesField?: string;
+  grossAmountField?: string;
+  grossProfitField?: string;
+  grossMarginField?: string;
+  inventoryBeforeField?: string;
+  inventoryAfterField?: string;
+  inventoryRiskField?: string;
 };
 
 export type TableStructuredRow = {
   rowNumber: number;
   keyValue?: string;
   values: Record<string, string>;
+  derivedFields?: Record<string, string>;
 };
 
 export type TableDateSummary = {
@@ -169,6 +187,7 @@ export type TableSummary = {
   sheetCount: number;
   primarySheetName?: string;
   recordKeyField?: string;
+  recordFieldRoles?: TableRecordFieldRoles;
   recordRows?: TableStructuredRow[];
   sheets?: TableSheetSummary[];
   insights?: TableInsightSummary;
@@ -809,7 +828,75 @@ function detectRecordKeyField(columns: string[], rows: string[][]) {
   return undefined;
 }
 
-function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string) {
+function findTableColumnByAliases(columns: string[], aliases: string[]) {
+  const aliasSet = new Set(aliases.map(normalizeTableColumnKey));
+  return columns.find((column) => aliasSet.has(normalizeTableColumnKey(column)));
+}
+
+function buildRecordFieldRoles(columns: string[]) {
+  const roles: TableRecordFieldRoles = {
+    periodField: findTableColumnByAliases(columns, ['month', 'date', 'order_date', 'snapshot_date', 'period']),
+    platformField: findTableColumnByAliases(columns, ['platform', 'platform_focus', 'channel']),
+    categoryField: findTableColumnByAliases(columns, ['category', 'category_name', '类目', '品类']),
+    skuField: findTableColumnByAliases(columns, ['sku', 'sku_id', 'product_id', 'item_id']),
+    orderCountField: findTableColumnByAliases(columns, ['order_count', 'orders', 'units_sold']),
+    quantityField: findTableColumnByAliases(columns, ['quantity', 'qty', 'count']),
+    netSalesField: findTableColumnByAliases(columns, ['net_amount', 'net_sales', 'revenue', 'gmv']),
+    grossAmountField: findTableColumnByAliases(columns, ['gross_amount', 'sales_amount']),
+    grossProfitField: findTableColumnByAliases(columns, ['gross_profit', 'profit']),
+    grossMarginField: findTableColumnByAliases(columns, ['gross_margin', 'margin', 'profit_rate']),
+    inventoryBeforeField: findTableColumnByAliases(columns, ['inventory_before', 'stock_before', 'opening_stock']),
+    inventoryAfterField: findTableColumnByAliases(columns, ['inventory_after', 'stock_after', 'closing_stock']),
+    inventoryRiskField: findTableColumnByAliases(columns, ['inventory_risk', 'risk_flag', 'inventory_status']),
+  };
+
+  return Object.fromEntries(
+    Object.entries(roles).filter(([, value]) => String(value || '').trim()),
+  ) as TableRecordFieldRoles;
+}
+
+function deriveRecordBusinessFields(
+  rowValues: Record<string, string>,
+  roles: TableRecordFieldRoles,
+) {
+  const derivedFields: Record<string, string> = {};
+  const readRole = (columnName?: string) => (columnName ? normalizeTableCell(rowValues[columnName] || '') : '');
+  const periodValue = readRole(roles.periodField);
+  const parsedPeriod = parseTableDateValue(periodValue);
+  const platform = readRole(roles.platformField);
+  const category = readRole(roles.categoryField);
+  const sku = readRole(roles.skuField);
+  const orderCount = readRole(roles.orderCountField) || readRole(roles.quantityField);
+  const netSales = readRole(roles.netSalesField) || readRole(roles.grossAmountField);
+  const grossMarginDirect = readRole(roles.grossMarginField);
+  const grossProfit = readRole(roles.grossProfitField);
+  const inventoryBefore = readRole(roles.inventoryBeforeField);
+  const inventoryAfter = readRole(roles.inventoryAfterField);
+  const inventoryStatus = readRole(roles.inventoryRiskField);
+
+  if (parsedPeriod?.normalized) derivedFields.period = parsedPeriod.normalized;
+  else if (periodValue) derivedFields.period = periodValue;
+  if (platform) derivedFields.platform = platform;
+  if (category) derivedFields.category = category;
+  if (sku) derivedFields.sku = sku;
+  if (orderCount) derivedFields.orderCount = orderCount;
+  if (netSales) derivedFields.netSales = netSales;
+  if (grossMarginDirect) derivedFields.grossMargin = grossMarginDirect;
+  else if (grossProfit && netSales) {
+    const grossProfitValue = parseTableNumericValue(grossProfit, 'currency');
+    const netSalesValue = parseTableNumericValue(netSales, /%/.test(netSales) ? 'percent' : 'currency');
+    if (grossProfitValue && netSalesValue) {
+      derivedFields.grossMargin = `${((grossProfitValue / netSalesValue) * 100).toFixed(2)}%`;
+    }
+  }
+  if (inventoryBefore) derivedFields.inventoryBefore = inventoryBefore;
+  if (inventoryAfter) derivedFields.inventoryAfter = inventoryAfter;
+  if (inventoryStatus) derivedFields.inventoryStatus = inventoryStatus;
+
+  return derivedFields;
+}
+
+function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string, recordFieldRoles: TableRecordFieldRoles = {}) {
   const recordKeyIndex = recordKeyField ? columns.findIndex((column) => column === recordKeyField) : -1;
   return rows
     .slice(0, 20)
@@ -820,10 +907,12 @@ function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: str
       });
 
       const keyValue = recordKeyIndex >= 0 ? normalizeTableCell(row[recordKeyIndex] || '') : '';
+      const derivedFields = deriveRecordBusinessFields(values, recordFieldRoles);
       return {
         rowNumber: index + 1,
         ...(keyValue ? { keyValue } : {}),
         values,
+        ...(Object.keys(derivedFields).length ? { derivedFields } : {}),
       } satisfies TableStructuredRow;
     })
     .filter((row) => Object.values(row.values).some(Boolean));
@@ -850,7 +939,8 @@ function buildTableSheetSummary(
     : buildTableColumns([], columnCount);
   const insights = buildTableInsights(columns, dataRows);
   const recordKeyField = detectRecordKeyField(columns, dataRows);
-  const recordRows = mapRecordRows(columns, dataRows, recordKeyField);
+  const recordFieldRoles = buildRecordFieldRoles(columns);
+  const recordRows = mapRecordRows(columns, dataRows, recordKeyField, recordFieldRoles);
 
   return {
     name,
@@ -859,6 +949,7 @@ function buildTableSheetSummary(
     columns,
     sampleRows: mapSampleRows(columns, dataRows),
     ...(recordKeyField ? { recordKeyField } : {}),
+    ...(Object.keys(recordFieldRoles).length ? { recordFieldRoles } : {}),
     ...(recordRows.length ? { recordRows } : {}),
     insights,
   };
@@ -884,6 +975,7 @@ function buildWorkbookTableSummary(
     sheetCount: sheetSummaries.length,
     primarySheetName: primarySheet.name,
     recordKeyField: primarySheet.recordKeyField,
+    recordFieldRoles: primarySheet.recordFieldRoles,
     recordRows: primarySheet.recordRows,
     sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
     insights: primarySheet.insights,

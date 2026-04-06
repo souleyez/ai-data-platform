@@ -19,6 +19,9 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.equal(tableSummary?.format, 'csv');
   assert.equal(tableSummary?.rowCount, 1000);
   assert.equal(tableSummary?.recordKeyField, 'order_id');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.periodField, 'order_date');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.platformField, 'platform');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.netSalesField, 'net_amount');
   assert.deepEqual(tableSummary?.columns, [
     'order_id',
     'order_date',
@@ -49,6 +52,14 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.equal(
     ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.platform,
     'Douyin',
+  );
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.period,
+    '2026-02-08',
+  );
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.netSales,
+    '223.53',
   );
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.min, '2026-01-01');
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.max, '2026-03-31');
@@ -102,16 +113,25 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(tableSummary?.sheetCount, 2);
     assert.equal(tableSummary?.primarySheetName, 'summary');
     assert.equal(tableSummary?.recordKeyField, 'month');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.periodField, 'month');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.platformField, 'platform');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.netSalesField, 'net_sales');
     assert.deepEqual(tableSummary?.columns, ['month', 'platform', 'net_sales']);
     assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.platform, 'Douyin');
     assert.equal(
       ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.month,
       '2026-01',
     );
+    assert.equal(
+      ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.period,
+      '2026-01',
+    );
     assert.equal((tableSummary?.insights?.metricColumns as Array<Record<string, number>>)?.[0]?.column, 'net_sales');
     assert.equal(sheets?.[1]?.name, 'inventory');
     assert.deepEqual(sheets?.[1]?.columns, ['sku', 'inventory_after']);
     assert.equal(sheets?.[1]?.recordKeyField, 'sku');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.skuField, 'sku');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.inventoryAfterField, 'inventory_after');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
