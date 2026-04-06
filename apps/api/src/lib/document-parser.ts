@@ -117,6 +117,7 @@ export type TableSheetSummary = {
   recordKeyField?: string;
   recordFieldRoles?: TableRecordFieldRoles;
   recordRows?: TableStructuredRow[];
+  recordInsights?: TableRecordInsightSummary;
   insights?: TableInsightSummary;
 };
 
@@ -129,11 +130,29 @@ export type TableRecordFieldRoles = {
   quantityField?: string;
   netSalesField?: string;
   grossAmountField?: string;
+  refundAmountField?: string;
   grossProfitField?: string;
   grossMarginField?: string;
   inventoryBeforeField?: string;
   inventoryAfterField?: string;
   inventoryRiskField?: string;
+};
+
+export type TableRecordAlert = {
+  type: 'low_margin' | 'high_refund' | 'inventory_risk';
+  rowNumber: number;
+  keyValue?: string;
+  severity: 'medium' | 'high';
+  message: string;
+};
+
+export type TableRecordInsightSummary = {
+  topPlatforms?: string[];
+  topCategories?: string[];
+  lowMarginRowCount?: number;
+  highRefundRowCount?: number;
+  inventoryRiskRowCount?: number;
+  alerts?: TableRecordAlert[];
 };
 
 export type TableStructuredRow = {
@@ -189,6 +208,7 @@ export type TableSummary = {
   recordKeyField?: string;
   recordFieldRoles?: TableRecordFieldRoles;
   recordRows?: TableStructuredRow[];
+  recordInsights?: TableRecordInsightSummary;
   sheets?: TableSheetSummary[];
   insights?: TableInsightSummary;
 };
@@ -843,6 +863,7 @@ function buildRecordFieldRoles(columns: string[]) {
     quantityField: findTableColumnByAliases(columns, ['quantity', 'qty', 'count']),
     netSalesField: findTableColumnByAliases(columns, ['net_amount', 'net_sales', 'revenue', 'gmv']),
     grossAmountField: findTableColumnByAliases(columns, ['gross_amount', 'sales_amount']),
+    refundAmountField: findTableColumnByAliases(columns, ['refund_amount', 'refund_total', 'refund']),
     grossProfitField: findTableColumnByAliases(columns, ['gross_profit', 'profit']),
     grossMarginField: findTableColumnByAliases(columns, ['gross_margin', 'margin', 'profit_rate']),
     inventoryBeforeField: findTableColumnByAliases(columns, ['inventory_before', 'stock_before', 'opening_stock']),
@@ -896,6 +917,95 @@ function deriveRecordBusinessFields(
   return derivedFields;
 }
 
+function buildTopValueList(values: string[]) {
+  const counts = new Map<string, number>();
+  values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
+    .slice(0, 3)
+    .map(([value]) => value);
+}
+
+function parsePercentText(value: string) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  const numeric = parseTableNumericValue(text, 'percent');
+  return typeof numeric === 'number' ? numeric : undefined;
+}
+
+function parseCurrencyText(value: string) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  const numeric = parseTableNumericValue(text, 'currency');
+  return typeof numeric === 'number' ? numeric : undefined;
+}
+
+function buildRecordInsights(recordRows: TableStructuredRow[]) {
+  if (!recordRows.length) return undefined;
+
+  const alerts: TableRecordAlert[] = [];
+  let lowMarginRowCount = 0;
+  let highRefundRowCount = 0;
+  let inventoryRiskRowCount = 0;
+
+  for (const row of recordRows) {
+    const derived = row.derivedFields || {};
+    const grossMargin = parsePercentText(String(derived.grossMargin || ''));
+    const netSales = parseCurrencyText(String(derived.netSales || ''));
+    const grossAmount = parseCurrencyText(String(row.values?.gross_amount || ''));
+    const refundAmount = parseCurrencyText(String(row.values?.refund_amount || ''));
+    const inventoryStatus = String(derived.inventoryStatus || '').trim();
+
+    if (typeof grossMargin === 'number' && grossMargin <= 0.2) {
+      lowMarginRowCount += 1;
+      alerts.push({
+        type: 'low_margin',
+        rowNumber: row.rowNumber,
+        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
+        severity: grossMargin <= 0.12 ? 'high' : 'medium',
+        message: `毛利率偏低：${(grossMargin * 100).toFixed(2)}%`,
+      });
+    }
+
+    if (typeof refundAmount === 'number' && ((typeof grossAmount === 'number' && grossAmount > 0 && refundAmount / grossAmount >= 0.2) || (typeof netSales === 'number' && netSales > 0 && refundAmount / netSales >= 0.25))) {
+      highRefundRowCount += 1;
+      alerts.push({
+        type: 'high_refund',
+        rowNumber: row.rowNumber,
+        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
+        severity: 'high',
+        message: `退款金额偏高：${refundAmount.toFixed(2)}`,
+      });
+    }
+
+    if (inventoryStatus && !/^healthy$/i.test(inventoryStatus)) {
+      inventoryRiskRowCount += 1;
+      alerts.push({
+        type: 'inventory_risk',
+        rowNumber: row.rowNumber,
+        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
+        severity: /^understock|^overstock/i.test(inventoryStatus) ? 'high' : 'medium',
+        message: `库存状态：${inventoryStatus}`,
+      });
+    }
+  }
+
+  const topPlatforms = buildTopValueList(recordRows.map((row) => String(row.derivedFields?.platform || '')));
+  const topCategories = buildTopValueList(recordRows.map((row) => String(row.derivedFields?.category || '')));
+
+  const summary: TableRecordInsightSummary = {};
+  if (topPlatforms.length) summary.topPlatforms = topPlatforms;
+  if (topCategories.length) summary.topCategories = topCategories;
+  if (lowMarginRowCount) summary.lowMarginRowCount = lowMarginRowCount;
+  if (highRefundRowCount) summary.highRefundRowCount = highRefundRowCount;
+  if (inventoryRiskRowCount) summary.inventoryRiskRowCount = inventoryRiskRowCount;
+  if (alerts.length) summary.alerts = alerts.slice(0, 8);
+  return Object.keys(summary).length ? summary : undefined;
+}
+
 function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string, recordFieldRoles: TableRecordFieldRoles = {}) {
   const recordKeyIndex = recordKeyField ? columns.findIndex((column) => column === recordKeyField) : -1;
   return rows
@@ -941,6 +1051,7 @@ function buildTableSheetSummary(
   const recordKeyField = detectRecordKeyField(columns, dataRows);
   const recordFieldRoles = buildRecordFieldRoles(columns);
   const recordRows = mapRecordRows(columns, dataRows, recordKeyField, recordFieldRoles);
+  const recordInsights = buildRecordInsights(recordRows);
 
   return {
     name,
@@ -951,6 +1062,7 @@ function buildTableSheetSummary(
     ...(recordKeyField ? { recordKeyField } : {}),
     ...(Object.keys(recordFieldRoles).length ? { recordFieldRoles } : {}),
     ...(recordRows.length ? { recordRows } : {}),
+    ...(recordInsights ? { recordInsights } : {}),
     insights,
   };
 }
@@ -977,6 +1089,7 @@ function buildWorkbookTableSummary(
     recordKeyField: primarySheet.recordKeyField,
     recordFieldRoles: primarySheet.recordFieldRoles,
     recordRows: primarySheet.recordRows,
+    recordInsights: primarySheet.recordInsights,
     sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
     insights: primarySheet.insights,
   };

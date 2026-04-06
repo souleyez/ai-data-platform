@@ -81,6 +81,9 @@ function extractTableSummary(profile) {
     recordFieldRoles: summary.recordFieldRoles && typeof summary.recordFieldRoles === 'object' && !Array.isArray(summary.recordFieldRoles)
       ? summary.recordFieldRoles
       : {},
+    recordInsights: summary.recordInsights && typeof summary.recordInsights === 'object' && !Array.isArray(summary.recordInsights)
+      ? summary.recordInsights
+      : {},
     sampleRows: Array.isArray(summary.sampleRows) ? summary.sampleRows.slice(0, 3) : [],
     recordRows: Array.isArray(summary.recordRows) ? summary.recordRows.slice(0, 5) : [],
   };
@@ -463,6 +466,11 @@ export default function DocumentAnalysisPanel({ item: initialItem, feedbackSnaps
                 {Object.keys(tableSummary.recordFieldRoles || {}).length ? (
                   <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
                     {safeJsonStringify(tableSummary.recordFieldRoles)}
+                  </pre>
+                ) : null}
+                {Object.keys(tableSummary.recordInsights || {}).length ? (
+                  <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {safeJsonStringify(tableSummary.recordInsights)}
                   </pre>
                 ) : null}
                 {tableSummary.sampleRows.length ? (

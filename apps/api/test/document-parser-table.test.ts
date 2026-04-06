@@ -22,6 +22,7 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.periodField, 'order_date');
   assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.platformField, 'platform');
   assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.netSalesField, 'net_amount');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.refundAmountField, 'refund_amount');
   assert.deepEqual(tableSummary?.columns, [
     'order_id',
     'order_date',
@@ -60,6 +61,13 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.equal(
     ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.netSales,
     '223.53',
+  );
+  assert.deepEqual((tableSummary?.recordInsights as Record<string, unknown>)?.topPlatforms, ['Douyin', 'Tmall', 'JD']);
+  assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.highRefundRowCount, 2);
+  assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskRowCount, 4);
+  assert.equal(
+    ((tableSummary?.recordInsights as Record<string, unknown>)?.alerts as Array<Record<string, string>>)?.[0]?.type,
+    'high_refund',
   );
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.min, '2026-01-01');
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.max, '2026-03-31');
@@ -132,6 +140,7 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(sheets?.[1]?.recordKeyField, 'sku');
     assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.skuField, 'sku');
     assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.inventoryAfterField, 'inventory_after');
+    assert.ok(!('recordInsights' in (tableSummary || {})) || typeof (tableSummary?.recordInsights) === 'object');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
