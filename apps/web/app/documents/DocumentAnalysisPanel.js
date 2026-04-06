@@ -64,6 +64,23 @@ function extractFieldDetails(profile) {
     .sort((left, right) => left.key.localeCompare(right.key, 'zh-CN'));
 }
 
+function extractTableSummary(profile) {
+  const summary = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.tableSummary
+    : null;
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
+
+  return {
+    format: String(summary.format || '').trim(),
+    rowCount: typeof summary.rowCount === 'number' ? summary.rowCount : null,
+    columnCount: typeof summary.columnCount === 'number' ? summary.columnCount : null,
+    columns: Array.isArray(summary.columns) ? summary.columns.map((item) => String(item || '').trim()).filter(Boolean) : [],
+    primarySheetName: String(summary.primarySheetName || '').trim(),
+    sheetCount: typeof summary.sheetCount === 'number' ? summary.sheetCount : null,
+    sampleRows: Array.isArray(summary.sampleRows) ? summary.sampleRows.slice(0, 3) : [],
+  };
+}
+
 export default function DocumentAnalysisPanel({ item: initialItem }) {
   const [item, setItem] = useState(initialItem);
   const [editing, setEditing] = useState(false);
@@ -79,13 +96,18 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
     () => extractFieldDetails(item?.structuredProfile || {}),
     [item?.structuredProfile],
   );
+  const tableSummary = useMemo(
+    () => extractTableSummary(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
   const detailMeta = useMemo(() => ([
     { label: '深度解析状态', value: item?.detailParseStatus || '-' },
     { label: '最近解析时间', value: formatDateTime(item?.detailParsedAt) },
     { label: '手工编辑时间', value: formatDateTime(item?.analysisEditedAt) },
     { label: '证据块数量', value: String(evidenceCount) },
     { label: '字段元数据数量', value: String(fieldDetails.length) },
-  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.detailParseStatus, item?.detailParsedAt]);
+    { label: '表格摘要', value: tableSummary ? '已提取' : '无' },
+  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.detailParseStatus, item?.detailParsedAt, tableSummary]);
 
   function handleStartEdit() {
     setSummaryDraft(String(item?.summary || ''));
@@ -142,7 +164,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
       <div className="panel-header">
         <div>
           <h3>解析结果</h3>
-          <p>查看摘要、结构化结果和证据块；必要时可手工修正，帮助后续问答与输出更准确。</p>
+          <p>查看摘要、结构化结果、字段置信度和证据块；必要时可手工修正，帮助后续问答与输出更准确。</p>
         </div>
         {!editing ? (
           <button type="button" className="ghost-btn" onClick={handleStartEdit}>
@@ -208,6 +230,33 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
               <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 中补充。</div>
             )}
           </section>
+
+          {tableSummary ? (
+            <section>
+              <h4 style={{ marginBottom: 8 }}>表格摘要</h4>
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div className="message-refs">
+                  <span className="source-chip">格式：{tableSummary.format || '-'}</span>
+                  <span className="source-chip">数据行：{tableSummary.rowCount == null ? '-' : tableSummary.rowCount}</span>
+                  <span className="source-chip">列数：{tableSummary.columnCount == null ? '-' : tableSummary.columnCount}</span>
+                  {tableSummary.sheetCount ? (
+                    <span className="source-chip">工作表：{tableSummary.sheetCount}</span>
+                  ) : null}
+                  {tableSummary.primarySheetName ? (
+                    <span className="source-chip">主表：{tableSummary.primarySheetName}</span>
+                  ) : null}
+                </div>
+                {tableSummary.columns.length ? (
+                  <div className="preview-meta-line">列名：{tableSummary.columns.join(' / ')}</div>
+                ) : null}
+                {tableSummary.sampleRows.length ? (
+                  <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {safeJsonStringify(tableSummary.sampleRows)}
+                  </pre>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           <section>
             <h4 style={{ marginBottom: 8 }}>结构化结果</h4>

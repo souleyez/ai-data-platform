@@ -108,6 +108,25 @@ export type EvidenceChunk = {
   title?: string;
 };
 
+export type TableSheetSummary = {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  columns: string[];
+  sampleRows: Array<Record<string, string>>;
+};
+
+export type TableSummary = {
+  format: 'csv' | 'xlsx';
+  rowCount: number;
+  columnCount: number;
+  columns: string[];
+  sampleRows: Array<Record<string, string>>;
+  sheetCount: number;
+  primarySheetName?: string;
+  sheets?: TableSheetSummary[];
+};
+
 export type StructuredEntity = {
   text: string;
   type: 'ingredient' | 'strain' | 'audience' | 'benefit' | 'dose' | 'organization' | 'metric' | 'identifier' | 'term';
@@ -504,6 +523,110 @@ function flattenSpreadsheetRows(rows: unknown[][]) {
     .map((row) => row.map((cell) => String(cell ?? '').trim()).filter(Boolean).join(' | '))
     .filter(Boolean)
     .join('\n');
+}
+
+function normalizeTableCell(value: unknown) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function trimTrailingEmptyCells(row: string[]) {
+  const next = row.slice();
+  while (next.length && !next[next.length - 1]) {
+    next.pop();
+  }
+  return next;
+}
+
+function normalizeTableRows(rows: unknown[][]) {
+  return rows
+    .map((row) => trimTrailingEmptyCells((Array.isArray(row) ? row : []).map(normalizeTableCell)))
+    .filter((row) => row.some(Boolean));
+}
+
+function looksLikeHeaderRow(row: string[]) {
+  const cells = row.filter(Boolean);
+  if (!cells.length) return false;
+  const textLikeCount = cells.filter((cell) => /[A-Za-z_\u4e00-\u9fff]/.test(cell)).length;
+  const numericLikeCount = cells.filter((cell) => /^[0-9.,%:/-]+$/.test(cell)).length;
+  const uniqueCount = new Set(cells.map((cell) => cell.toLowerCase())).size;
+  return textLikeCount >= Math.max(1, Math.ceil(cells.length / 2))
+    && numericLikeCount < Math.ceil(cells.length / 2)
+    && uniqueCount >= Math.max(1, cells.length - 1);
+}
+
+function buildTableColumns(headerRow: string[], columnCount: number) {
+  const seen = new Map<string, number>();
+  const columns: string[] = [];
+  for (let index = 0; index < columnCount; index += 1) {
+    const raw = normalizeTableCell(headerRow[index] || '');
+    const base = raw || `column_${index + 1}`;
+    const duplicateCount = seen.get(base) || 0;
+    seen.set(base, duplicateCount + 1);
+    columns.push(duplicateCount ? `${base}_${duplicateCount + 1}` : base);
+  }
+  return columns;
+}
+
+function mapSampleRows(columns: string[], rows: string[][]) {
+  return rows.slice(0, 5).map((row) => {
+    const record: Record<string, string> = {};
+    columns.forEach((column, index) => {
+      record[column] = normalizeTableCell(row[index] || '');
+    });
+    return record;
+  });
+}
+
+function buildTableSheetSummary(
+  name: string,
+  rows: unknown[][],
+): TableSheetSummary | undefined {
+  const normalizedRows = normalizeTableRows(rows);
+  if (!normalizedRows.length) return undefined;
+
+  const headerLike = looksLikeHeaderRow(normalizedRows[0] || []);
+  const dataRows = headerLike ? normalizedRows.slice(1) : normalizedRows;
+  const columnCount = Math.max(
+    ...(headerLike ? [normalizedRows[0]?.length || 0] : dataRows.map((row) => row.length)),
+    0,
+  );
+
+  if (!columnCount) return undefined;
+
+  const columns = headerLike
+    ? buildTableColumns(normalizedRows[0] || [], columnCount)
+    : buildTableColumns([], columnCount);
+
+  return {
+    name,
+    rowCount: dataRows.length,
+    columnCount,
+    columns,
+    sampleRows: mapSampleRows(columns, dataRows),
+  };
+}
+
+function buildWorkbookTableSummary(
+  format: 'csv' | 'xlsx',
+  sheets: Array<{ name: string; rows: unknown[][] }>,
+): TableSummary | undefined {
+  const sheetSummaries = sheets
+    .map((sheet) => buildTableSheetSummary(sheet.name, sheet.rows))
+    .filter((sheet): sheet is TableSheetSummary => Boolean(sheet));
+
+  if (!sheetSummaries.length) return undefined;
+
+  const [primarySheet] = sheetSummaries;
+  return {
+    format,
+    rowCount: sheetSummaries.reduce((sum, sheet) => sum + sheet.rowCount, 0),
+    columnCount: primarySheet.columnCount,
+    columns: primarySheet.columns,
+    sampleRows: primarySheet.sampleRows,
+    sheetCount: sheetSummaries.length,
+    primarySheetName: primarySheet.name,
+    sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
+  };
 }
 
 async function buildPreprocessedImageVariants(filePath: string) {
@@ -2001,7 +2124,20 @@ async function extractText(filePath: string, ext: string) {
       : ext === '.md'
         ? `markdown-${encoding}`
         : `csv-${encoding}`;
-    return { status: 'parsed' as const, text: content, parseMethod };
+    let tableSummary: TableSummary | undefined;
+    if (ext === '.csv') {
+      try {
+        const { read, utils } = await import('xlsx');
+        const workbook = read(content, { type: 'string', raw: false });
+        tableSummary = buildWorkbookTableSummary('csv', workbook.SheetNames.map((sheetName) => ({
+          name: sheetName,
+          rows: utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false }) as unknown[][],
+        })));
+      } catch {
+        tableSummary = undefined;
+      }
+    }
+    return { status: 'parsed' as const, text: content, parseMethod, tableSummary };
   }
 
   if (ext === '.json') {
@@ -2030,18 +2166,29 @@ async function extractText(filePath: string, ext: string) {
   }
 
   if (ext === '.xlsx' || ext === '.xls') {
-    const { readFile, utils } = await import('xlsx');
-    const workbook = readFile(filePath);
+    const xlsx = await import('xlsx');
+    const workbook = xlsx.default?.readFile
+      ? xlsx.default.readFile(filePath)
+      : xlsx.read(await fs.readFile(filePath), { type: 'buffer', raw: false });
+    const { utils } = xlsx;
+    const sheetRows = workbook.SheetNames.map((sheetName) => ({
+      name: sheetName,
+      rows: utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false }) as unknown[][],
+    }));
     const text = workbook.SheetNames
       .map((sheetName) => {
-        const sheet = workbook.Sheets[sheetName];
-        const rows = utils.sheet_to_json(sheet, { header: 1, raw: false }) as unknown[][];
+        const rows = sheetRows.find((entry) => entry.name === sheetName)?.rows || [];
         const body = flattenSpreadsheetRows(rows.slice(0, 80));
         return [`# ${sheetName}`, body].filter(Boolean).join('\n');
       })
       .filter(Boolean)
       .join('\n\n');
-    return { status: 'parsed' as const, text, parseMethod: 'xlsx-sheet-reader' };
+    return {
+      status: 'parsed' as const,
+      text,
+      parseMethod: 'xlsx-sheet-reader',
+      tableSummary: buildWorkbookTableSummary('xlsx', sheetRows),
+    };
   }
 
   if (IMAGE_EXTENSIONS.has(ext)) {
@@ -2100,7 +2247,7 @@ export async function parseDocument(
   const extractionProfile = resolveDocumentExtractionProfile(extractionGovernance, options?.libraryContext);
 
   try {
-    const { status, text, parseMethod: hintedMethod } = await extractText(filePath, ext);
+    const { status, text, parseMethod: hintedMethod, tableSummary } = await extractText(filePath, ext);
     const parseMethod = inferParseMethod(ext, text, hintedMethod);
     const normalizedText = normalizeText(text);
     const category = detectCategory(filePath, normalizedText);
@@ -2148,6 +2295,7 @@ export async function parseDocument(
           topicTags,
           summary: unsupportedSummary,
           evidenceChunks: [],
+          tableSummary,
         }),
       };
     }
@@ -2200,6 +2348,7 @@ export async function parseDocument(
           topicTags,
           summary: fallbackSummary,
           evidenceChunks: [],
+          tableSummary,
         }),
       };
     }
@@ -2301,6 +2450,7 @@ export async function parseDocument(
           orderFields,
           resumeFields,
           evidenceChunks: [],
+          tableSummary,
         }),
       };
     }
@@ -2391,6 +2541,7 @@ export async function parseDocument(
         orderFields,
         resumeFields,
         evidenceChunks,
+        tableSummary,
       }),
     };
   } catch {
@@ -2441,6 +2592,7 @@ export async function parseDocument(
         topicTags,
         summary: fallbackSummary,
         evidenceChunks: [],
+        tableSummary: undefined,
       }),
     };
   }

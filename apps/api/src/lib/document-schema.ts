@@ -1,4 +1,4 @@
-import type { EvidenceChunk, ParsedDocument, ResumeFields } from './document-parser.js';
+import type { EvidenceChunk, ParsedDocument, ResumeFields, TableSummary } from './document-parser.js';
 import {
   loadDocumentExtractionGovernance,
   resolveDocumentExtractionProfile,
@@ -197,6 +197,7 @@ export function buildStructuredProfile(input: {
   orderFields?: ParsedDocument['orderFields'];
   resumeFields?: ResumeFields;
   evidenceChunks?: EvidenceChunk[];
+  tableSummary?: TableSummary;
 }) {
   const evidence = `${input.title} ${input.summary} ${input.topicTags.join(' ')}`.toLowerCase();
   const base = {
@@ -204,6 +205,7 @@ export function buildStructuredProfile(input: {
     summary: input.summary,
     topicTags: input.topicTags.slice(0, 8),
     fieldDetails: buildCommonFieldDetails(input),
+    ...(input.tableSummary ? { tableSummary: input.tableSummary } : {}),
   };
 
   if (input.schemaType === 'contract') {
@@ -511,6 +513,7 @@ export function deriveSchemaProfile(input: {
   resumeFields?: ResumeFields;
   evidenceChunks?: EvidenceChunk[];
   libraryContext?: DocumentLibraryContext;
+  tableSummary?: TableSummary;
 }) {
   const { topicTags, profile } = mergeGovernedTopicTags(input.topicTags, input.libraryContext);
   const schemaType = applyGovernedSchemaType(
@@ -539,6 +542,7 @@ export function deriveSchemaProfile(input: {
       orderFields: input.orderFields,
       resumeFields: input.resumeFields,
       evidenceChunks: input.evidenceChunks,
+      tableSummary: input.tableSummary,
     }),
   };
 }
@@ -560,6 +564,7 @@ export function refreshDerivedSchemaProfile(item: ParsedDocument): ParsedDocumen
       keys: item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [],
       labels: item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [],
     },
+    tableSummary: item.structuredProfile?.tableSummary as TableSummary | undefined,
   });
 
   return {
