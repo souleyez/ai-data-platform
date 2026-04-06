@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { buildKnowledgeContext } from './knowledge-evidence.js';
 import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
 import {
@@ -5,6 +6,7 @@ import {
   type KnowledgeLibraryRef,
 } from './knowledge-supply.js';
 import type { BotDefinition } from './bot-definitions.js';
+import { buildDocumentId } from './document-store.js';
 import {
   buildOpenClawMemorySelectionContextBlock,
   loadOpenClawMemorySelectionState,
@@ -20,6 +22,7 @@ export type GeneralKnowledgeDispatchResult = {
   libraries: KnowledgeLibraryRef[];
   content: string;
   output: ChatOutput;
+  references: Array<{ id: string; name: string; path: string }>;
   intent: 'general';
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
@@ -60,6 +63,26 @@ async function runCloudChatWithSearchFallback(input: {
     chatHistory,
     contextBlocks: fallbackContext ? [...contextBlocks, fallbackContext] : contextBlocks,
   });
+}
+
+function buildAnswerReferences(documents: Array<{ path?: string; title?: string; name?: string }>) {
+  const references: Array<{ id: string; name: string; path: string }> = [];
+  const seen = new Set<string>();
+
+  for (const item of documents || []) {
+    const filePath = String(item?.path || '').trim();
+    if (!filePath) continue;
+    const id = buildDocumentId(filePath);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    references.push({
+      id,
+      name: String(item?.title || item?.name || path.basename(filePath)).trim() || id,
+      path: filePath,
+    });
+  }
+
+  return references.slice(0, 6);
 }
 
 export async function runGeneralKnowledgeAwareChat(input: {
@@ -112,6 +135,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     buildOpenClawMemorySelectionContextBlock(memorySelection),
     knowledgeContext,
   ].filter(Boolean);
+  const references = buildAnswerReferences(supply.effectiveRetrieval.documents);
 
   const confirmation = input.skipTemplateConfirmation
     ? null
@@ -134,6 +158,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       libraries: supply.libraries,
       content,
       output: { type: 'answer', content },
+      references,
       intent: 'general',
       mode: 'openclaw',
       debug: {
@@ -166,6 +191,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     libraries: supply.libraries,
     content: cloud.content,
     output: { type: 'answer', content: cloud.content },
+    references,
     intent: 'general',
     mode: 'openclaw',
     debug: {

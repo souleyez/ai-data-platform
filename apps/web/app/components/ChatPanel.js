@@ -14,12 +14,83 @@ function sanitizeReadableText(content) {
     .trim();
 }
 
-function renderParagraphs(content) {
+const HIGHLIGHT_PATTERN = /《[^》\n]{1,40}》|“[^”\n]{1,40}”|"[^"\n]{1,40}"|【[^】\n]{1,40}】|\b\d+(?:\.\d+)?(?:%|GB|MB|KB|ms|s|m|h)\b|\d+(?:\.\d+)?(?:元|年|月|日|周|天|次|份|条|星)|(?:结论|重点|建议|风险|下一步|注意|说明|结果|原因|方案|状态|动作|引用|时间|满意度|评分|星级)(?:[:：])/g;
+
+function splitLongParagraph(part) {
+  const compact = String(part || '').replace(/\n+/g, ' ').trim();
+  if (!compact) return [];
+  if (compact.length <= 120) return [compact];
+
+  const sentences = compact
+    .split(/(?<=[。！？!?；;])/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (sentences.length < 2) return [compact];
+
+  const segments = [];
+  let current = '';
+  for (const sentence of sentences) {
+    if (!current) {
+      current = sentence;
+      continue;
+    }
+    if ((current + sentence).length > 90) {
+      segments.push(current.trim());
+      current = sentence;
+      continue;
+    }
+    current += sentence;
+  }
+  if (current.trim()) segments.push(current.trim());
+  return segments.length ? segments : [compact];
+}
+
+function buildDisplayParagraphs(content) {
   return sanitizeReadableText(content)
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part, index) => <p key={`paragraph-${index}`}>{part}</p>);
+    .flatMap((part) => {
+      if (/\n/.test(part)) {
+        return part
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+      }
+      return splitLongParagraph(part);
+    });
+}
+
+function renderHighlightedText(part, role) {
+  if (role !== 'assistant') return part;
+  const text = String(part || '');
+  const matches = Array.from(text.matchAll(HIGHLIGHT_PATTERN));
+  if (!matches.length) return text;
+
+  const nodes = [];
+  let cursor = 0;
+  matches.forEach((match, index) => {
+    const highlighted = match[0];
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      nodes.push(<span key={`plain-${index}`}>{text.slice(cursor, start)}</span>);
+    }
+    nodes.push(<span className="message-highlight" key={`highlight-${index}`}>{highlighted}</span>);
+    cursor = start + highlighted.length;
+  });
+  if (cursor < text.length) {
+    nodes.push(<span key="plain-tail">{text.slice(cursor)}</span>);
+  }
+  return nodes;
+}
+
+function renderParagraphs(content, role) {
+  return buildDisplayParagraphs(content).map((part, index) => (
+    <p className="message-paragraph" key={`paragraph-${index}`}>
+      {renderHighlightedText(part, role)}
+    </p>
+  ));
 }
 
 function FormulaTable({ table }) {
@@ -191,7 +262,7 @@ export default function ChatPanel({
             {message.role === 'assistant' && <div className="avatar">AI</div>}
             <div className={`bubble ${message.role === 'user' ? 'user-bubble' : ''}`}>
               {message.title ? <strong>{message.title}</strong> : null}
-              <div className="message-content-block">{renderParagraphs(message.content)}</div>
+              <div className="message-content-block">{renderParagraphs(message.content, message.role)}</div>
               {message.table ? <FormulaTable table={message.table} /> : null}
 
               {message.confirmation ? (

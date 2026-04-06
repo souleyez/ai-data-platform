@@ -6,6 +6,7 @@ import {
   buildUserConstraintsContextBlock,
 } from './chat-system-context.js';
 import { listBotDefinitionsForManage, resolveBotDefinition } from './bot-definitions.js';
+import { recordDocumentAnswerUsage } from './document-answer-usage.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
@@ -130,6 +131,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let routeKind = 'general';
   let evidenceMode: string | null = null;
   let savedReport: Record<string, unknown> | null = null;
+  let references: Array<{ id: string; name: string; path?: string }> = [];
   let guard = {
     requiresConfirmation: false,
     reason: '',
@@ -183,6 +185,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         intent = result.intent;
         mode = result.mode;
         conversationState = result.conversationState;
+        references = result.references || [];
         debug = result.debug || null;
         routeKind = result.routeKind || 'general';
         evidenceMode = result.evidenceMode || null;
@@ -206,6 +209,19 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         reason: '',
       };
       confirmation = null;
+    }
+  }
+
+  if (routeKind === 'general' && output.type === 'answer' && references.length) {
+    try {
+      await recordDocumentAnswerUsage({
+        traceId,
+        botId: botDefinition?.id || '',
+        sessionUser: input.sessionUser || '',
+        references,
+      });
+    } catch (error) {
+      console.warn(`[chat:answer-usage] trace=${traceId} reason=${summarizeError(error)}`);
     }
   }
 
@@ -241,7 +257,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       content,
       output,
       meta: mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用',
-      references: [],
+      references,
       confirmation,
     },
     sources: [],

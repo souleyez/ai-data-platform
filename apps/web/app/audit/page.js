@@ -117,7 +117,7 @@ export default function AuditPage() {
             <StatCard
               label="建议清理原件"
               value={summary ? String(summary.staleDocs.filter((item) => item.cleanupRecommended).length + summary.staleCaptures.filter((item) => item.cleanupRecommended).length) : '-'}
-              subtle={`超过 ${summary?.staleDays || 90} 天且报表无引用`}
+              subtle={`超过 ${summary?.staleDays || 90} 天且问答/报表无引用`}
             />
             <StatCard
               label="相似原件待清理"
@@ -187,7 +187,7 @@ export default function AuditPage() {
                   <th>库龄</th>
                   <th>存储状态</th>
                   <th>清理原因</th>
-                  <th>引用状态</th>
+                  <th>引用次数</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -205,7 +205,7 @@ export default function AuditPage() {
                           ? `长期低引用（>${summary?.staleDays || 90} 天）`
                           : '-'}
                     </td>
-                    <td>{item.referencedByReports ? '报表已引用' : '报表无引用'}</td>
+                    <td>{`总 ${item.referenceCount || 0} · 问答 ${item.answerReferenceCount || 0} · 报表 ${item.reportReferenceCount || 0}`}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {item.cleanupRecommended ? (
@@ -255,7 +255,7 @@ export default function AuditPage() {
                   <th>状态</th>
                   <th>库龄</th>
                   <th>存储状态</th>
-                  <th>引用状态</th>
+                  <th>引用次数</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -266,7 +266,7 @@ export default function AuditPage() {
                     <td>{item.captureStatus === 'paused' ? '已停采' : '采集中'}</td>
                     <td>{item.ageDays} 天</td>
                     <td>{renderStorageState(item.storageState)}</td>
-                    <td>{item.referencedByReports ? '报表已引用' : '报表无引用'}</td>
+                    <td>{`总 ${item.referenceCount || 0} · 问答 ${item.answerReferenceCount || 0} · 报表 ${item.reportReferenceCount || 0}`}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {item.captureStatus !== 'paused' ? (
