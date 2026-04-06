@@ -21,7 +21,8 @@ export type DocumentCategoryConfig = {
 };
 
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
-const CONFIG_FILE = path.join(CONFIG_DIR, 'document-categories.json');
+const RUNTIME_CONFIG_FILE = path.join(CONFIG_DIR, 'document-categories.json');
+const DEFAULT_CONFIG_FILE = path.join(REPO_ROOT, 'config', 'document-categories.default.json');
 
 function looksLikeWindowsAbsolutePath(value: string) {
   return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]/.test(value);
@@ -122,49 +123,76 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
   };
 }
 
-export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
-  const defaultScanRoot = normalizeConfiguredScanRoot(fallbackScanRoot) || normalizeConfiguredScanRoot(STORAGE_FILES_DIR) || STORAGE_FILES_DIR;
-
-  try {
-    const raw = await fs.readFile(CONFIG_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
-    const effectiveScanRoot = normalizeConfiguredScanRoot(parsed.scanRoot || fallbackScanRoot || '') || defaultScanRoot;
-    const effectiveScanRoots = normalizeScanRoots(
-      Array.isArray(parsed.scanRoots) ? parsed.scanRoots : (parsed.scanRoot ? [parsed.scanRoot] : []),
-      effectiveScanRoot,
-    );
-    const defaults = buildDefault(effectiveScanRoot);
-    const parsedCustomCategories = Array.isArray(parsed.customCategories) ? parsed.customCategories : [];
-    const mergedCustomCategories = defaults.customCategories.map((defaultItem) => {
-      const existing = parsedCustomCategories.find((item) => item.key === defaultItem.key);
-      if (!existing) return defaultItem;
-
-      return {
-        ...defaultItem,
-        ...existing,
-        keywords: Array.from(new Set([...(defaultItem.keywords || []), ...((existing.keywords || []).map(String))])),
-      };
-    });
-
-    for (const item of parsedCustomCategories) {
-      if (!mergedCustomCategories.some((existing) => existing.key === item.key)) {
-        mergedCustomCategories.push(item);
-      }
-    }
+export function mergeDocumentCategoryConfig(
+  defaults: DocumentCategoryConfig,
+  parsed: Partial<DocumentCategoryConfig>,
+  fallbackScanRoot: string,
+) {
+  const effectiveScanRoot = normalizeConfiguredScanRoot(parsed.scanRoot || defaults.scanRoot || fallbackScanRoot || '')
+    || normalizeConfiguredScanRoot(defaults.scanRoot || fallbackScanRoot || '')
+    || fallbackScanRoot;
+  const effectiveScanRoots = normalizeScanRoots(
+    Array.isArray(parsed.scanRoots)
+      ? parsed.scanRoots
+      : Array.isArray(defaults.scanRoots) && defaults.scanRoots.length
+        ? defaults.scanRoots
+        : (parsed.scanRoot ? [parsed.scanRoot] : [effectiveScanRoot]),
+    effectiveScanRoot,
+  );
+  const parsedCustomCategories = Array.isArray(parsed.customCategories) ? parsed.customCategories : [];
+  const mergedCustomCategories = defaults.customCategories.map((defaultItem) => {
+    const existing = parsedCustomCategories.find((item) => item.key === defaultItem.key);
+    if (!existing) return defaultItem;
 
     return {
-      ...defaults,
-      ...parsed,
-      scanRoot: effectiveScanRoots[0] || effectiveScanRoot,
-      scanRoots: effectiveScanRoots,
-      categories: {
-        ...defaults.categories,
-        ...(parsed.categories || {}),
-      },
-      customCategories: mergedCustomCategories,
-    } satisfies DocumentCategoryConfig;
+      ...defaultItem,
+      ...existing,
+      keywords: Array.from(new Set([...(defaultItem.keywords || []), ...((existing.keywords || []).map(String))])),
+    };
+  });
+
+  for (const item of parsedCustomCategories) {
+    if (!mergedCustomCategories.some((existing) => existing.key === item.key)) {
+      mergedCustomCategories.push(item);
+    }
+  }
+
+  return {
+    ...defaults,
+    ...parsed,
+    scanRoot: effectiveScanRoots[0] || effectiveScanRoot,
+    scanRoots: effectiveScanRoots,
+    categories: {
+      ...defaults.categories,
+      ...(parsed.categories || {}),
+    },
+    customCategories: mergedCustomCategories,
+    updatedAt: parsed.updatedAt || defaults.updatedAt,
+  } satisfies DocumentCategoryConfig;
+}
+
+async function loadDefaultDocumentCategoryConfig(defaultScanRoot: string) {
+  const builtInDefaults = buildDefault(defaultScanRoot);
+
+  try {
+    const raw = await fs.readFile(DEFAULT_CONFIG_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
+    return mergeDocumentCategoryConfig(builtInDefaults, parsed, defaultScanRoot);
   } catch {
-    return buildDefault(defaultScanRoot);
+    return builtInDefaults;
+  }
+}
+
+export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
+  const defaultScanRoot = normalizeConfiguredScanRoot(fallbackScanRoot) || normalizeConfiguredScanRoot(STORAGE_FILES_DIR) || STORAGE_FILES_DIR;
+  const defaults = await loadDefaultDocumentCategoryConfig(defaultScanRoot);
+
+  try {
+    const raw = await fs.readFile(RUNTIME_CONFIG_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
+    return mergeDocumentCategoryConfig(defaults, parsed, defaultScanRoot);
+  } catch {
+    return defaults;
   }
 }
 
@@ -191,7 +219,7 @@ export async function saveDocumentCategoryConfig(scanRoot: string, input: Partia
   };
 
   await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
+  await fs.writeFile(RUNTIME_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
   return next;
 }
 

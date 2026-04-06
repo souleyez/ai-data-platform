@@ -14,6 +14,7 @@ storage/files/
 storage/control-plane/
 storage/web-captures/
 storage/config/document-overrides.json
+storage/config/document-categories.json
 storage/config/document-libraries.json
 storage/config/report-center.json
 storage/config/audit-center.json
