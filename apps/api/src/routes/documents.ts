@@ -16,6 +16,7 @@ import {
   saveConfirmedDocumentClassifications,
   saveConfirmedDocumentGroups,
   saveIgnoredDocuments,
+  clearDocumentAnalysisFeedback,
   updateDocumentAnalysisResult,
 } from '../lib/document-route-services.js';
 import {
@@ -473,14 +474,37 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     };
 
     try {
-      const item = await updateDocumentAnalysisResult(id, body);
+      const result = await updateDocumentAnalysisResult(id, body);
       return {
         status: 'updated',
-        item,
+        item: result.item,
+        feedbackSnapshot: result.feedbackSnapshot,
         message: '已更新解析结果并同步到知识记忆',
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'document update failed';
+      const code = message === 'document not found' ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/documents/:id/parse-feedback/clear', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { fieldName?: unknown };
+
+    try {
+      const result = await clearDocumentAnalysisFeedback(id, body);
+      return {
+        status: result.changed ? 'cleared' : 'unchanged',
+        feedbackSnapshot: result.snapshot,
+        clearedFieldCount: result.clearedFieldCount,
+        clearedLibraryCount: result.clearedLibraryCount,
+        message: result.changed
+          ? '已清理解析反馈并同步更新。'
+          : '当前没有可清理的解析反馈。',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'document feedback clear failed';
       const code = message === 'document not found' ? 404 : 400;
       return reply.code(code).send({ error: message });
     }

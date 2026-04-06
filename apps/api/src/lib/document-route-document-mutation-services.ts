@@ -5,7 +5,11 @@ import { type BizCategory } from './document-config.js';
 import { type EvidenceChunk, refreshDerivedSchemaProfile, type ParsedDocument } from './document-parser.js';
 import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
-import { recordDocumentParseFeedback } from './document-parse-feedback.js';
+import {
+  clearDocumentParseFeedback,
+  getDocumentParseFeedbackSnapshot,
+  recordDocumentParseFeedback,
+} from './document-parse-feedback.js';
 import { removeDocumentOverrides, saveDocumentOverride } from './document-overrides.js';
 import { removeDocumentsFromCache } from './document-store.js';
 import { buildDocumentId } from './document-store.js';
@@ -13,7 +17,7 @@ import { dedupeDocuments, sortDocumentsByRecency } from './document-scan-runtime
 import { buildPreviewItemFromDocument } from './ingest-feedback.js';
 import { removeRetainedDocument } from './retained-documents.js';
 import { STORAGE_FILES_DIR } from './paths.js';
-import { loadIndexedDocumentMap } from './document-route-loaders.js';
+import { loadIndexedDocumentById, loadIndexedDocumentMap } from './document-route-loaders.js';
 
 const VALID_BIZ_CATEGORIES: BizCategory[] = ['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'];
 
@@ -207,5 +211,36 @@ export async function updateDocumentAnalysisResult(
     }).catch(() => undefined);
   }
 
-  return updated;
+  return {
+    item: updated,
+    feedbackSnapshot: getDocumentParseFeedbackSnapshot({
+      libraryKeys: updated.confirmedGroups?.length ? updated.confirmedGroups : updated.groups || [],
+      schemaType: updated.schemaType,
+      text: updated.fullText || `${updated.title || ''}\n${updated.summary || ''}`,
+    }),
+  };
+}
+
+export async function clearDocumentAnalysisFeedback(
+  id: string,
+  input?: {
+    fieldName?: unknown;
+  },
+) {
+  const { found } = await loadIndexedDocumentById(id);
+  if (!found) {
+    throw new Error('document not found');
+  }
+
+  const libraryKeys = found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [];
+  const result = await clearDocumentParseFeedback({
+    libraryKeys,
+    schemaType: found.schemaType,
+    fieldName: input?.fieldName === undefined ? undefined : String(input.fieldName || '').trim(),
+  });
+
+  return {
+    ...result,
+    item: found,
+  };
 }

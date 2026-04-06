@@ -42,6 +42,38 @@ type RecordInput = {
   structuredProfile?: Record<string, unknown> | null;
 };
 
+type SnapshotInput = {
+  feedback?: DocumentParseFeedbackStore;
+  libraryKeys: string[];
+  schemaType?: string;
+  text?: string;
+};
+
+type ClearInput = {
+  libraryKeys: string[];
+  schemaType?: string;
+  fieldName?: string;
+  feedback?: DocumentParseFeedbackStore;
+};
+
+export type DocumentParseFeedbackSnapshotField = {
+  name: string;
+  values: string[];
+  valueCount: number;
+  matchedValues: string[];
+  matchedValueCount: number;
+};
+
+export type DocumentParseFeedbackSnapshot = {
+  schemaType: DocumentParseFeedbackSchemaType;
+  libraryKeys: string[];
+  updatedAt: string;
+  fieldCount: number;
+  totalValueCount: number;
+  matchedFieldCount: number;
+  fields: DocumentParseFeedbackSnapshotField[];
+};
+
 const DOCUMENT_PARSE_FEEDBACK_FILE = path.join(STORAGE_CONFIG_DIR, 'document-parse-feedback.json');
 const CONFIG_VERSION = 1;
 
@@ -227,6 +259,41 @@ function collectVisibleFeedbackValues(
   return aggregated;
 }
 
+function buildFeedbackSnapshot(input: SnapshotInput) {
+  const schemaType = normalizeSchemaType(input.schemaType);
+  const libraryKeys = normalizeLibraryKeys(input.libraryKeys);
+  if (!schemaType || !libraryKeys.length) return null;
+
+  const feedback = input.feedback || loadDocumentParseFeedback();
+  const visibleValues = collectVisibleFeedbackValues(feedback, libraryKeys, schemaType);
+  const normalizedText = normalizeTextForMatch(String(input.text || ''));
+  const fields = Object.entries(visibleValues)
+    .map(([name, values]) => {
+      const matchedValues = values.filter((value) => {
+        const normalizedValue = normalizeTextForMatch(value);
+        return normalizedValue && normalizedText.includes(normalizedValue);
+      });
+      return {
+        name,
+        values,
+        valueCount: values.length,
+        matchedValues,
+        matchedValueCount: matchedValues.length,
+      } satisfies DocumentParseFeedbackSnapshotField;
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+
+  return {
+    schemaType,
+    libraryKeys,
+    updatedAt: feedback.updatedAt,
+    fieldCount: fields.length,
+    totalValueCount: fields.reduce((sum, field) => sum + field.valueCount, 0),
+    matchedFieldCount: fields.filter((field) => field.matchedValueCount > 0).length,
+    fields,
+  } satisfies DocumentParseFeedbackSnapshot;
+}
+
 export function loadDocumentParseFeedback() {
   return existsSync(DOCUMENT_PARSE_FEEDBACK_FILE)
     ? normalizeStore(readJsonObject(DOCUMENT_PARSE_FEEDBACK_FILE))
@@ -291,6 +358,13 @@ export function applyDocumentParseFeedback<T extends Record<string, unknown>>(in
   });
 }
 
+export function getDocumentParseFeedbackSnapshot(input: SnapshotInput) {
+  return buildFeedbackSnapshot({
+    ...input,
+    feedback: input.feedback || loadDocumentParseFeedback(),
+  });
+}
+
 export async function recordDocumentParseFeedback(input: RecordInput) {
   const schemaType = normalizeSchemaType(input.schemaType);
   const libraryKeys = normalizeLibraryKeys(input.libraryKeys);
@@ -322,4 +396,101 @@ export async function recordDocumentParseFeedback(input: RecordInput) {
   if (!changed) return false;
   await saveDocumentParseFeedback(next);
   return true;
+}
+
+export async function clearDocumentParseFeedback(input: ClearInput) {
+  const schemaType = normalizeSchemaType(input.schemaType);
+  const libraryKeys = normalizeLibraryKeys(input.libraryKeys);
+  if (!schemaType || !libraryKeys.length) {
+    return {
+      changed: false,
+      clearedFieldCount: 0,
+      clearedLibraryCount: 0,
+      snapshot: null,
+    };
+  }
+
+  const fieldName = normalizeText(input.fieldName);
+  const current = input.feedback || loadDocumentParseFeedback();
+  const next: DocumentParseFeedbackStore = {
+    ...current,
+    libraries: { ...current.libraries },
+  };
+  let changed = false;
+  let clearedLibraryCount = 0;
+  let clearedFieldCount = 0;
+
+  for (const libraryKey of libraryKeys) {
+    const library = next.libraries[libraryKey];
+    const schema = library?.schemas?.[schemaType];
+    if (!library || !schema) continue;
+
+    if (fieldName) {
+      if (!Object.prototype.hasOwnProperty.call(schema.fields, fieldName)) continue;
+      const nextFields = { ...schema.fields };
+      delete nextFields[fieldName];
+      clearedFieldCount += 1;
+      changed = true;
+
+      if (Object.keys(nextFields).length) {
+        next.libraries[libraryKey] = {
+          schemas: {
+            ...library.schemas,
+            [schemaType]: {
+              fields: nextFields,
+            },
+          },
+        };
+      } else {
+        const nextSchemas = { ...library.schemas };
+        delete nextSchemas[schemaType];
+        if (Object.keys(nextSchemas).length) {
+          next.libraries[libraryKey] = { schemas: nextSchemas };
+        } else {
+          delete next.libraries[libraryKey];
+        }
+        clearedLibraryCount += 1;
+      }
+      continue;
+    }
+
+    const nextSchemas = { ...library.schemas };
+    delete nextSchemas[schemaType];
+    clearedFieldCount += Object.keys(schema.fields || {}).length;
+    clearedLibraryCount += 1;
+    changed = true;
+
+    if (Object.keys(nextSchemas).length) {
+      next.libraries[libraryKey] = { schemas: nextSchemas };
+    } else {
+      delete next.libraries[libraryKey];
+    }
+  }
+
+  if (!changed) {
+    return {
+      changed: false,
+      clearedFieldCount: 0,
+      clearedLibraryCount: 0,
+      snapshot: buildFeedbackSnapshot({
+        feedback: current,
+        libraryKeys,
+        schemaType,
+      }),
+    };
+  }
+
+  if (!input.feedback) {
+    await saveDocumentParseFeedback(next);
+  }
+  return {
+    changed: true,
+    clearedFieldCount,
+    clearedLibraryCount,
+    snapshot: buildFeedbackSnapshot({
+      feedback: next,
+      libraryKeys,
+      schemaType,
+    }),
+  };
 }

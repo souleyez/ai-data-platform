@@ -123,10 +123,38 @@ function extractFocusedFieldEntries(profile) {
     .filter(Boolean);
 }
 
-export default function DocumentAnalysisPanel({ item: initialItem }) {
+function extractFeedbackSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+
+  return {
+    schemaType: String(snapshot.schemaType || '').trim(),
+    updatedAt: String(snapshot.updatedAt || '').trim(),
+    fieldCount: typeof snapshot.fieldCount === 'number' ? snapshot.fieldCount : 0,
+    totalValueCount: typeof snapshot.totalValueCount === 'number' ? snapshot.totalValueCount : 0,
+    matchedFieldCount: typeof snapshot.matchedFieldCount === 'number' ? snapshot.matchedFieldCount : 0,
+    fields: Array.isArray(snapshot.fields)
+      ? snapshot.fields
+        .map((field) => {
+          if (!field || typeof field !== 'object' || Array.isArray(field)) return null;
+          return {
+            name: String(field.name || '').trim(),
+            values: Array.isArray(field.values) ? field.values.map((item) => String(item || '').trim()).filter(Boolean) : [],
+            valueCount: typeof field.valueCount === 'number' ? field.valueCount : 0,
+            matchedValues: Array.isArray(field.matchedValues) ? field.matchedValues.map((item) => String(item || '').trim()).filter(Boolean) : [],
+            matchedValueCount: typeof field.matchedValueCount === 'number' ? field.matchedValueCount : 0,
+          };
+        })
+        .filter(Boolean)
+      : [],
+  };
+}
+
+export default function DocumentAnalysisPanel({ item: initialItem, feedbackSnapshot: initialFeedbackSnapshot }) {
   const [item, setItem] = useState(initialItem);
+  const [feedbackSnapshot, setFeedbackSnapshot] = useState(extractFeedbackSnapshot(initialFeedbackSnapshot));
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [clearingFeedback, setClearingFeedback] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [summaryDraft, setSummaryDraft] = useState(String(initialItem?.summary || ''));
@@ -200,6 +228,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
       }
 
       setItem(data?.item || item);
+      setFeedbackSnapshot(extractFeedbackSnapshot(data?.feedbackSnapshot || feedbackSnapshot));
       setEditing(false);
       setNotice(data?.message || '解析结果已更新');
     } catch (saveError) {
@@ -209,12 +238,37 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
     }
   }
 
+  async function handleClearFeedback(fieldName) {
+    setClearingFeedback(String(fieldName || '__all__'));
+    setError('');
+    setNotice('');
+
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(item.id)}/parse-feedback/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fieldName ? { fieldName } : {}),
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        throw new Error(data?.error || '清理解析反馈失败');
+      }
+
+      setFeedbackSnapshot(extractFeedbackSnapshot(data?.feedbackSnapshot || null));
+      setNotice(data?.message || '已清理解析反馈');
+    } catch (clearError) {
+      setError(clearError instanceof Error ? clearError.message : '清理解析反馈失败');
+    } finally {
+      setClearingFeedback('');
+    }
+  }
+
   return (
     <section className="card documents-card">
       <div className="panel-header">
         <div>
           <h3>解析结果</h3>
-          <p>查看摘要、结构化结果、字段置信度和证据块；必要时可手工修正，帮助后续问答与输出更准确。</p>
+          <p>查看摘要、结构化结果、字段置信度、证据块，以及当前知识库的解析反馈回流状态。</p>
         </div>
         {!editing ? (
           <button type="button" className="ghost-btn" onClick={handleStartEdit}>
@@ -252,6 +306,70 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
             </div>
           </section>
 
+          {feedbackSnapshot ? (
+            <section>
+              <h4 style={{ marginBottom: 8 }}>解析反馈回流</h4>
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div className="message-refs">
+                    <span className="source-chip">反馈字段：{feedbackSnapshot.fieldCount}</span>
+                    <span className="source-chip">反馈值：{feedbackSnapshot.totalValueCount}</span>
+                    <span className="source-chip">当前文档命中：{feedbackSnapshot.matchedFieldCount}</span>
+                    <span className="source-chip">更新时间：{formatDateTime(feedbackSnapshot.updatedAt)}</span>
+                  </div>
+                  {feedbackSnapshot.fieldCount ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={clearingFeedback === '__all__'}
+                      onClick={() => handleClearFeedback('')}
+                    >
+                      {clearingFeedback === '__all__' ? '清理中...' : '清理当前库反馈'}
+                    </button>
+                  ) : null}
+                </div>
+
+                {feedbackSnapshot.fieldCount ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {feedbackSnapshot.fields.map((field) => {
+                      const alias = fieldTemplate?.fieldAliases?.[field.name] || field.name;
+                      return (
+                        <div key={field.name} className="bot-summary-card">
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <strong>{alias}</strong>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                <div className="message-refs">
+                                  <span className="source-chip">字段键：{field.name}</span>
+                                  <span className="source-chip">反馈值：{field.valueCount}</span>
+                                  {field.matchedValueCount ? <span className="source-chip">命中：{field.matchedValueCount}</span> : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="ghost-btn"
+                                  disabled={clearingFeedback === field.name}
+                                  onClick={() => handleClearFeedback(field.name)}
+                                >
+                                  {clearingFeedback === field.name ? '清理中...' : '清理字段反馈'}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="preview-meta-line">反馈值：{field.values.length ? field.values.join(' / ') : '-'}</div>
+                            {field.matchedValues.length ? (
+                              <div className="preview-meta-line">当前文档命中：{field.matchedValues.join(' / ')}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="preview-meta-line">当前知识库还没有可复用的解析反馈。</div>
+                )}
+              </div>
+            </section>
+          ) : null}
+
           <section>
             <h4 style={{ marginBottom: 8 }}>字段置信度与来源</h4>
             {fieldTemplate?.preferredFieldKeys?.length ? (
@@ -288,6 +406,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
                 ) : null}
               </div>
             ) : null}
+
             {fieldDetails.length ? (
               <div style={{ display: 'grid', gap: 10 }}>
                 {fieldDetails.map((entry) => (
@@ -311,7 +430,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
                 ))}
               </div>
             ) : (
-              <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 中补充。</div>
+              <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 里补充。</div>
             )}
           </section>
 

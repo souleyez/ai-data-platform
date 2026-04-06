@@ -26,6 +26,7 @@ export default async function DocumentPreviewPage({ params }) {
 
   let item = null;
   let meta = null;
+  let feedbackSnapshot = null;
 
   try {
     const response = await fetch(
@@ -37,6 +38,7 @@ export default async function DocumentPreviewPage({ params }) {
       const json = await response.json();
       item = json?.item || null;
       meta = json?.meta || null;
+      feedbackSnapshot = json?.feedbackSnapshot || null;
     }
   } catch {
     item = null;
@@ -142,7 +144,7 @@ export default async function DocumentPreviewPage({ params }) {
           ) : null}
         </section>
 
-        <DocumentAnalysisPanel item={item} />
+        <DocumentAnalysisPanel item={item} feedbackSnapshot={feedbackSnapshot} />
       </main>
     </div>
   );
