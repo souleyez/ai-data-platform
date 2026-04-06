@@ -29,6 +29,7 @@ test('document extraction governance should resolve profile from library context
   assert.equal(profile?.id, 'contract-standard');
   assert.equal(profile?.fieldSet, 'contract');
   assert.equal(profile?.fallbackSchemaType, 'contract');
+  assert.ok(profile?.preferredFieldKeys?.includes('partyA'));
 });
 
 test('document extraction governance should resolve xinshijie ioa library profile', () => {
@@ -58,6 +59,7 @@ test('document extraction governance should upsert and remove library-specific o
       label: '自定义指导库',
       fieldSet: 'enterprise-guidance',
       fallbackSchemaType: 'technical',
+      preferredFieldKeys: ['businessSystem', 'policyFocus'],
     });
 
     let config = loadDocumentExtractionGovernance();
@@ -69,11 +71,13 @@ test('document extraction governance should upsert and remove library-specific o
     assert.equal(settings.profileId, 'library-custom-guidance-library');
     assert.equal(settings.fieldSet, 'enterprise-guidance');
     assert.equal(settings.fallbackSchemaType, 'technical');
+    assert.deepEqual(settings.preferredFieldKeys, ['businessSystem', 'policyFocus']);
 
     const attached = attachDocumentExtractionSettings([
       { key: 'custom-guidance-library', label: '自定义指导库' },
     ], config);
     assert.equal(attached[0]?.extractionSettings?.fieldSet, 'enterprise-guidance');
+    assert.deepEqual(attached[0]?.extractionSettings?.preferredFieldKeys, ['businessSystem', 'policyFocus']);
 
     await updateLibraryDocumentExtractionSettings({
       key: 'custom-guidance-library',

@@ -16,7 +16,7 @@ test('parseDocument should apply contract library fallback schema and fields', a
     '签订日期：2026-04-01',
     '生效日期：2026-04-02',
     '金额：￥120000',
-    '服务期：12个月',
+    '服务期限：12个月',
   ].join('\n');
 
   try {
@@ -34,6 +34,15 @@ test('parseDocument should apply contract library fallback schema and fields', a
     assert.equal(contractDoc.contractFields?.partyB, '广州廉明建筑有限公司');
     assert.equal(contractDoc.structuredProfile?.partyA, '广州轻工集团');
     assert.equal(contractDoc.structuredProfile?.effectiveDate, '2026-04-02');
+    assert.equal(contractDoc.structuredProfile?.fieldTemplate?.fieldSet, 'contract');
+    assert.deepEqual(contractDoc.structuredProfile?.fieldTemplate?.preferredFieldKeys, [
+      'partyA',
+      'partyB',
+      'amount',
+      'signDate',
+      'paymentTerms',
+    ]);
+    assert.equal(contractDoc.structuredProfile?.focusedFields?.partyA, contractDoc.structuredProfile?.partyA);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

@@ -2554,6 +2554,7 @@ export async function parseDocument(
   const defaultDetailAttempts = parseStage === 'detailed' ? 1 : 0;
   const extractionGovernance = loadDocumentExtractionGovernance();
   const extractionProfile = resolveDocumentExtractionProfile(extractionGovernance, options?.libraryContext);
+  const structuredExtractionProfile = extractionProfile ?? undefined;
 
   try {
     const { status, text, parseMethod: hintedMethod, tableSummary } = await extractText(filePath, ext);
@@ -2605,6 +2606,7 @@ export async function parseDocument(
           summary: unsupportedSummary,
           evidenceChunks: [],
           tableSummary,
+          extractionProfile: structuredExtractionProfile,
         }),
       };
     }
@@ -2658,6 +2660,7 @@ export async function parseDocument(
           summary: fallbackSummary,
           evidenceChunks: [],
           tableSummary,
+          extractionProfile: structuredExtractionProfile,
         }),
       };
     }
@@ -2760,6 +2763,7 @@ export async function parseDocument(
           resumeFields,
           evidenceChunks: [],
           tableSummary,
+          extractionProfile: structuredExtractionProfile,
         }),
       };
     }
@@ -2851,6 +2855,7 @@ export async function parseDocument(
         resumeFields,
         evidenceChunks,
         tableSummary,
+        extractionProfile: structuredExtractionProfile,
       }),
     };
   } catch {
@@ -2902,6 +2907,7 @@ export async function parseDocument(
         summary: fallbackSummary,
         evidenceChunks: [],
         tableSummary: undefined,
+        extractionProfile: structuredExtractionProfile,
       }),
     };
   }

@@ -203,6 +203,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       permissionLevel?: number;
       extractionFieldSet?: string;
       extractionFallbackSchemaType?: string;
+      extractionPreferredFieldKeys?: string[];
     };
 
     try {
@@ -212,6 +213,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         permissionLevel: body.permissionLevel,
         extractionFieldSet: body.extractionFieldSet,
         extractionFallbackSchemaType: body.extractionFallbackSchemaType,
+        extractionPreferredFieldKeys: body.extractionPreferredFieldKeys,
       });
       return {
         status: 'updated',

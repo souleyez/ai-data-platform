@@ -8,7 +8,8 @@
       "matchLibraryKeys": ["contract", "合同", "合同协议", "协议"],
       "matchLibraryLabels": ["合同", "合同协议", "协议"],
       "fieldSet": "contract",
-      "fallbackSchemaType": "contract"
+      "fallbackSchemaType": "contract",
+      "preferredFieldKeys": ["partyA", "partyB", "amount", "signDate", "paymentTerms"]
     },
     {
       "id": "resume-standard",
@@ -16,7 +17,8 @@
       "matchLibraryKeys": ["resume", "简历", "人才简历", "候选人"],
       "matchLibraryLabels": ["简历", "人才简历", "候选人"],
       "fieldSet": "resume",
-      "fallbackSchemaType": "resume"
+      "fallbackSchemaType": "resume",
+      "preferredFieldKeys": ["candidateName", "targetRole", "latestCompany", "yearsOfExperience", "skills"]
     },
     {
       "id": "order-standard",
@@ -24,7 +26,8 @@
       "matchLibraryKeys": ["order", "订单", "订单分析", "销售订单"],
       "matchLibraryLabels": ["订单", "订单分析", "销售订单"],
       "fieldSet": "order",
-      "fallbackSchemaType": "order"
+      "fallbackSchemaType": "order",
+      "preferredFieldKeys": ["period", "platform", "orderCount", "netSales", "grossMargin", "inventoryStatus"]
     },
     {
       "id": "ioa-guidance",
@@ -32,7 +35,8 @@
       "matchLibraryKeys": ["ioa", "ioa-guidance", "enterprise-guidance", "企业规范", "制度规范", "系统指引"],
       "matchLibraryLabels": ["IOA", "企业规范", "制度规范", "系统指引"],
       "fieldSet": "enterprise-guidance",
-      "fallbackSchemaType": "technical"
+      "fallbackSchemaType": "technical",
+      "preferredFieldKeys": ["businessSystem", "documentKind", "applicableScope", "operationEntry", "policyFocus"]
     },
     {
       "id": "xinshijie-ioa-guidance",
@@ -40,7 +44,8 @@
       "matchLibraryKeys": ["xinshijie-ioa", "xinshijieioa", "newworld-ioa", "新世界ioa", "新世界IOA"],
       "matchLibraryLabels": ["新世界IOA", "新中IOA", "IOA问答", "企业规范"],
       "fieldSet": "enterprise-guidance",
-      "fallbackSchemaType": "technical"
+      "fallbackSchemaType": "technical",
+      "preferredFieldKeys": ["businessSystem", "documentKind", "applicableScope", "operationEntry", "approvalLevels", "policyFocus", "contacts"]
     }
   ]
 }

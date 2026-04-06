@@ -73,6 +73,11 @@ function buildLibrarySettingsDraft(library, draft) {
     extractionFallbackSchemaType: typeof draft?.extractionFallbackSchemaType === 'string'
       ? draft.extractionFallbackSchemaType
       : String(library?.extractionSettings?.fallbackSchemaType || 'auto'),
+    extractionPreferredFieldKeys: Array.isArray(draft?.extractionPreferredFieldKeys)
+      ? draft.extractionPreferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : (Array.isArray(library?.extractionSettings?.preferredFieldKeys)
+        ? library.extractionSettings.preferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+        : []),
   };
 }
 
@@ -246,6 +251,9 @@ export default function DocumentsPage() {
         permissionLevel: normalizePermissionLevel(draft.permissionLevel, 0),
         extractionFieldSet: String(draft.extractionFieldSet || 'auto'),
         extractionFallbackSchemaType: String(draft.extractionFallbackSchemaType || 'auto'),
+        extractionPreferredFieldKeys: Array.isArray(draft.extractionPreferredFieldKeys)
+          ? draft.extractionPreferredFieldKeys
+          : [],
       });
       await loadDocuments();
       setScanMessage(`已更新知识库“${label}”的权限等级`);

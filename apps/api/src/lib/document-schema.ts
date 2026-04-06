@@ -3,6 +3,7 @@ import {
   loadDocumentExtractionGovernance,
   resolveDocumentExtractionProfile,
   type DocumentLibraryContext,
+  type DocumentExtractionProfile,
 } from './document-extraction-governance.js';
 
 export function includesAnyText(text: string, keywords: string[]) {
@@ -187,6 +188,35 @@ function buildCommonFieldDetails(input: {
   return details;
 }
 
+function buildFocusedFieldPayload(
+  fieldDetails: Record<string, StructuredFieldDetail>,
+  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys'>,
+) {
+  const preferredFieldKeys = Array.isArray(extractionProfile?.preferredFieldKeys)
+    ? extractionProfile.preferredFieldKeys.filter(Boolean)
+    : [];
+  if (!preferredFieldKeys.length) return {};
+
+  const focusedFieldDetails = Object.fromEntries(
+    preferredFieldKeys
+      .map((key) => [key, fieldDetails[key]])
+      .filter((entry) => entry[1]),
+  ) as Record<string, StructuredFieldDetail>;
+
+  const focusedFields = Object.fromEntries(
+    Object.entries(focusedFieldDetails).map(([key, value]) => [key, value.value]),
+  );
+
+  return {
+    fieldTemplate: {
+      fieldSet: extractionProfile?.fieldSet,
+      preferredFieldKeys,
+    },
+    focusedFieldDetails,
+    focusedFields,
+  };
+}
+
 export function buildStructuredProfile(input: {
   schemaType: ParsedDocument['schemaType'];
   title: string;
@@ -198,6 +228,7 @@ export function buildStructuredProfile(input: {
   resumeFields?: ResumeFields;
   evidenceChunks?: EvidenceChunk[];
   tableSummary?: TableSummary;
+  extractionProfile?: Pick<DocumentExtractionProfile, 'fieldSet' | 'preferredFieldKeys'>;
 }) {
   const evidence = `${input.title} ${input.summary} ${input.topicTags.join(' ')}`.toLowerCase();
   const base = {
@@ -248,6 +279,7 @@ export function buildStructuredProfile(input: {
       paymentTerms: input.contractFields?.paymentTerms || '',
       duration: input.contractFields?.duration || '',
       fieldDetails,
+      ...buildFocusedFieldPayload(fieldDetails, input.extractionProfile),
     };
   }
 
@@ -329,6 +361,7 @@ export function buildStructuredProfile(input: {
       projectHighlights: fallbackProjects,
       itProjectHighlights: fallbackItProjects,
       fieldDetails,
+      ...buildFocusedFieldPayload(fieldDetails, input.extractionProfile),
     };
   }
 
@@ -385,6 +418,7 @@ export function buildStructuredProfile(input: {
       policyFocus: input.enterpriseGuidanceFields?.policyFocus || [],
       contacts: input.enterpriseGuidanceFields?.contacts || [],
       fieldDetails,
+      ...buildFocusedFieldPayload(fieldDetails, input.extractionProfile),
     };
   }
 
@@ -429,6 +463,7 @@ export function buildStructuredProfile(input: {
       replenishmentAction: input.orderFields?.replenishmentAction || '',
       focus: input.topicTags.slice(0, 4),
       fieldDetails,
+      ...buildFocusedFieldPayload(fieldDetails, input.extractionProfile),
     };
   }
 
@@ -543,6 +578,10 @@ export function deriveSchemaProfile(input: {
       resumeFields: input.resumeFields,
       evidenceChunks: input.evidenceChunks,
       tableSummary: input.tableSummary,
+      extractionProfile: profile ? {
+        fieldSet: profile.fieldSet,
+        preferredFieldKeys: profile.preferredFieldKeys,
+      } : undefined,
     }),
   };
 }

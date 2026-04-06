@@ -8,6 +8,83 @@ const DOCUMENT_EXTRACTION_GOVERNANCE_STORAGE_FILE = path.join(STORAGE_CONFIG_DIR
 
 export type DocumentGovernedSchemaType = 'contract' | 'resume' | 'technical' | 'order';
 export type DocumentExtractionFieldSet = 'contract' | 'resume' | 'enterprise-guidance' | 'order';
+export type DocumentExtractionFieldKey =
+  | 'contractNo'
+  | 'partyA'
+  | 'partyB'
+  | 'amount'
+  | 'signDate'
+  | 'effectiveDate'
+  | 'paymentTerms'
+  | 'duration'
+  | 'candidateName'
+  | 'targetRole'
+  | 'currentRole'
+  | 'yearsOfExperience'
+  | 'education'
+  | 'major'
+  | 'expectedCity'
+  | 'expectedSalary'
+  | 'latestCompany'
+  | 'companies'
+  | 'skills'
+  | 'highlights'
+  | 'projectHighlights'
+  | 'itProjectHighlights'
+  | 'businessSystem'
+  | 'documentKind'
+  | 'applicableScope'
+  | 'operationEntry'
+  | 'approvalLevels'
+  | 'policyFocus'
+  | 'contacts'
+  | 'period'
+  | 'platform'
+  | 'orderCount'
+  | 'netSales'
+  | 'grossMargin'
+  | 'topCategory'
+  | 'inventoryStatus'
+  | 'replenishmentAction';
+
+export const DOCUMENT_EXTRACTION_FIELD_KEYS_BY_SET: Record<DocumentExtractionFieldSet, DocumentExtractionFieldKey[]> = {
+  contract: ['contractNo', 'partyA', 'partyB', 'amount', 'signDate', 'effectiveDate', 'paymentTerms', 'duration'],
+  resume: [
+    'candidateName',
+    'targetRole',
+    'currentRole',
+    'yearsOfExperience',
+    'education',
+    'major',
+    'expectedCity',
+    'expectedSalary',
+    'latestCompany',
+    'companies',
+    'skills',
+    'highlights',
+    'projectHighlights',
+    'itProjectHighlights',
+  ],
+  'enterprise-guidance': [
+    'businessSystem',
+    'documentKind',
+    'applicableScope',
+    'operationEntry',
+    'approvalLevels',
+    'policyFocus',
+    'contacts',
+  ],
+  order: [
+    'period',
+    'platform',
+    'orderCount',
+    'netSales',
+    'grossMargin',
+    'topCategory',
+    'inventoryStatus',
+    'replenishmentAction',
+  ],
+};
 
 export type DocumentLibraryContext = {
   keys: string[];
@@ -21,6 +98,7 @@ export type DocumentExtractionProfile = {
   matchLibraryLabels: string[];
   fieldSet: DocumentExtractionFieldSet;
   fallbackSchemaType?: DocumentGovernedSchemaType;
+  preferredFieldKeys?: DocumentExtractionFieldKey[];
 };
 
 export type DocumentExtractionGovernanceConfig = {
@@ -33,6 +111,7 @@ export type DocumentLibraryExtractionSettings = {
   profileId?: string;
   fieldSet?: DocumentExtractionFieldSet;
   fallbackSchemaType?: DocumentGovernedSchemaType;
+  preferredFieldKeys?: DocumentExtractionFieldKey[];
 };
 
 function readJsonObject(filePath: string) {
@@ -69,6 +148,37 @@ function normalizeSchemaType(value: unknown) {
     : undefined;
 }
 
+function normalizePreferredFieldKeys(fieldSet: DocumentExtractionFieldSet, value: unknown) {
+  const allowed = new Set(DOCUMENT_EXTRACTION_FIELD_KEYS_BY_SET[fieldSet]);
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,\n]/)
+      : [];
+
+  return [...new Set(
+    rawValues
+      .map((item) => normalizeString(item))
+      .filter(Boolean)
+      .filter((item): item is DocumentExtractionFieldKey => allowed.has(item as DocumentExtractionFieldKey)),
+  )];
+}
+
+function hasOwnProperty(value: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function shouldPreserveDefaultPreferredFieldKeys(
+  existing: DocumentExtractionProfile,
+  incoming: DocumentExtractionProfile,
+) {
+  return !incoming.id.startsWith('library-')
+    && Array.isArray(existing.preferredFieldKeys)
+    && existing.preferredFieldKeys.length > 0
+    && Array.isArray(incoming.preferredFieldKeys)
+    && incoming.preferredFieldKeys.length === 0;
+}
+
 function normalizeProfile(input: unknown): DocumentExtractionProfile | null {
   if (!input || typeof input !== 'object') return null;
   const value = input as Record<string, unknown>;
@@ -83,6 +193,9 @@ function normalizeProfile(input: unknown): DocumentExtractionProfile | null {
     matchLibraryLabels: normalizeStringList(value.matchLibraryLabels),
     fieldSet,
     fallbackSchemaType: normalizeSchemaType(value.fallbackSchemaType),
+    preferredFieldKeys: hasOwnProperty(value, 'preferredFieldKeys')
+      ? normalizePreferredFieldKeys(fieldSet, value.preferredFieldKeys)
+      : undefined,
   };
 }
 
@@ -112,8 +225,24 @@ export function loadDocumentExtractionGovernance() {
   );
 
   const profileMap = new Map<string, DocumentExtractionProfile>();
-  for (const profile of [...defaultConfig.profiles, ...storageConfig.profiles]) {
+  for (const profile of defaultConfig.profiles) {
     profileMap.set(profile.id, profile);
+  }
+
+  for (const profile of storageConfig.profiles) {
+    const existing = profileMap.get(profile.id);
+    if (!existing) {
+      profileMap.set(profile.id, profile);
+      continue;
+    }
+
+    profileMap.set(profile.id, {
+      ...existing,
+      ...profile,
+      preferredFieldKeys: shouldPreserveDefaultPreferredFieldKeys(existing, profile)
+        ? existing.preferredFieldKeys
+        : (profile.preferredFieldKeys ?? existing.preferredFieldKeys),
+    });
   }
 
   return {
@@ -177,6 +306,7 @@ export function getDocumentLibraryExtractionSettings(
     profileId: override.id,
     fieldSet: override.fieldSet,
     fallbackSchemaType: override.fallbackSchemaType,
+    preferredFieldKeys: override.preferredFieldKeys,
   } satisfies DocumentLibraryExtractionSettings;
 }
 
@@ -196,6 +326,7 @@ export async function updateLibraryDocumentExtractionSettings(
     label: string;
     fieldSet?: string;
     fallbackSchemaType?: string;
+    preferredFieldKeys?: string[];
   },
 ) {
   const key = normalizeString(input.key);
@@ -209,12 +340,23 @@ export async function updateLibraryDocumentExtractionSettings(
   const existingOverride = current.profiles.find((profile) => profile.id === overrideId);
   const fieldSet = normalizeOptionalFieldSet(input.fieldSet);
   const fallbackSchemaType = normalizeOptionalSchemaType(input.fallbackSchemaType);
+  const requestedPreferredFieldKeys = Array.isArray(input.preferredFieldKeys)
+    ? input.preferredFieldKeys.map((item) => normalizeString(item)).filter(Boolean)
+    : [];
   const requestedReset = normalizeString(input.fieldSet).toLowerCase() === 'auto'
     && normalizeString(input.fallbackSchemaType).toLowerCase() === 'auto';
   const nextProfiles = current.profiles.filter((profile) => profile.id !== overrideId);
   const nextFieldSet = requestedReset
     ? undefined
     : (fieldSet || existingOverride?.fieldSet || inferFieldSetFromSchemaType(fallbackSchemaType));
+  const nextPreferredFieldKeys = nextFieldSet
+    ? normalizePreferredFieldKeys(
+        nextFieldSet,
+        requestedPreferredFieldKeys.length
+          ? requestedPreferredFieldKeys
+          : (existingOverride?.preferredFieldKeys || []),
+      )
+    : [];
 
   if (nextFieldSet || fallbackSchemaType) {
     nextProfiles.push({
@@ -224,6 +366,7 @@ export async function updateLibraryDocumentExtractionSettings(
       matchLibraryLabels: [label.toLowerCase()],
       fieldSet: nextFieldSet || 'contract',
       fallbackSchemaType,
+      preferredFieldKeys: nextPreferredFieldKeys,
     });
   }
 

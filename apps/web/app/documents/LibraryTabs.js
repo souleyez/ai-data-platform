@@ -16,10 +16,21 @@ const EXTRACTION_SCHEMA_OPTIONS = [
   { value: 'order', label: 'order' },
 ];
 
+const EXTRACTION_FIELD_KEY_OPTIONS = {
+  contract: ['contractNo', 'partyA', 'partyB', 'amount', 'signDate', 'effectiveDate', 'paymentTerms', 'duration'],
+  resume: ['candidateName', 'targetRole', 'currentRole', 'yearsOfExperience', 'education', 'major', 'expectedCity', 'expectedSalary', 'latestCompany', 'companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'],
+  'enterprise-guidance': ['businessSystem', 'documentKind', 'applicableScope', 'operationEntry', 'approvalLevels', 'policyFocus', 'contacts'],
+  order: ['period', 'platform', 'orderCount', 'netSales', 'grossMargin', 'topCategory', 'inventoryStatus', 'replenishmentAction'],
+};
+
 function normalizePermissionLevel(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(0, Math.floor(numeric));
+}
+
+function buildPreferredFieldOptions(fieldSet) {
+  return EXTRACTION_FIELD_KEY_OPTIONS[String(fieldSet || '')] || [];
 }
 
 export default function LibraryTabs({
@@ -41,6 +52,8 @@ export default function LibraryTabs({
   onSaveSettings,
   settingsSubmittingId,
 }) {
+  const preferredFieldOptions = buildPreferredFieldOptions(activeLibrarySettingsDraft?.extractionFieldSet);
+
   return (
     <section className="workbench-toolbar card">
       <div className="library-toolbar-head">
@@ -98,7 +111,7 @@ export default function LibraryTabs({
         <div className="library-settings-inline">
           <div className="library-settings-inline-head">
             <strong>当前知识库设置</strong>
-            <span className="bot-config-subtle">这里仅补充知识库权限等级和说明，不改原有文档中心结构。</span>
+            <span className="bot-config-subtle">这里补充知识库权限、解析模板和重点字段，不改原有文档中心结构。</span>
           </div>
           <div className="library-settings-inline-grid">
             <label className="bot-field">
@@ -126,6 +139,7 @@ export default function LibraryTabs({
                 value={String(activeLibrarySettingsDraft.extractionFieldSet || 'auto')}
                 onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
                   extractionFieldSet: event.target.value,
+                  extractionPreferredFieldKeys: [],
                 })}
               >
                 {EXTRACTION_FIELD_SET_OPTIONS.map((option) => (
@@ -145,6 +159,37 @@ export default function LibraryTabs({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
+            </label>
+            <label className="bot-field bot-field-span">
+              <span>重点提取字段</span>
+              {preferredFieldOptions.length ? (
+                <div className="bot-channel-tags">
+                  {preferredFieldOptions.map((fieldKey) => {
+                    const selected = Array.isArray(activeLibrarySettingsDraft.extractionPreferredFieldKeys)
+                      && activeLibrarySettingsDraft.extractionPreferredFieldKeys.includes(fieldKey);
+                    return (
+                      <label key={fieldKey} className={`bot-channel-chip ${selected ? 'active' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(event) => {
+                            const current = Array.isArray(activeLibrarySettingsDraft.extractionPreferredFieldKeys)
+                              ? activeLibrarySettingsDraft.extractionPreferredFieldKeys
+                              : [];
+                            const next = event.target.checked
+                              ? [...new Set([...current, fieldKey])]
+                              : current.filter((item) => item !== fieldKey);
+                            onSettingsChange(activeLibraryRecord.key, { extractionPreferredFieldKeys: next });
+                          }}
+                        />
+                        <span>{fieldKey}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span className="bot-config-subtle">先选择提取模板，再指定重点字段。</span>
+              )}
             </label>
             <label className="bot-field bot-field-span">
               <span>描述</span>
