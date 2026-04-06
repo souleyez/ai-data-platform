@@ -1,4 +1,5 @@
 import { loadDocumentCategoryConfig } from './document-config.js';
+import { attachDocumentExtractionSettings, loadDocumentExtractionGovernance } from './document-extraction-governance.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import {
   buildDocumentLibrariesPayload,
@@ -11,22 +12,24 @@ import { loadDocumentStateSnapshot } from './document-route-loaders.js';
 
 export async function loadDocumentLibrariesPayload() {
   const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-  const [{ items }, libraries] = await Promise.all([
+  const [{ items }, libraries, extractionGovernance] = await Promise.all([
     loadParsedDocuments(200, false, config.scanRoots),
     loadDocumentLibraries(),
+    Promise.resolve(loadDocumentExtractionGovernance()),
   ]);
 
   return buildDocumentLibrariesPayload({
     items,
-    libraries,
+    libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
   });
 }
 
 export async function loadDocumentsIndexRoutePayload() {
   const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
-  const [libraries, memorySync] = await Promise.all([
+  const [libraries, memorySync, extractionGovernance] = await Promise.all([
     loadDocumentLibraries(),
     readOpenClawMemorySyncStatus(),
+    Promise.resolve(loadDocumentExtractionGovernance()),
   ]);
 
   return buildDocumentsIndexPayload({
@@ -36,16 +39,17 @@ export async function loadDocumentsIndexRoutePayload() {
     totalFiles,
     items,
     cacheHit,
-    libraries,
+    libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
     memorySync,
   });
 }
 
 export async function loadDocumentsOverviewRoutePayload() {
   const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
-  const [libraries, memorySync] = await Promise.all([
+  const [libraries, memorySync, extractionGovernance] = await Promise.all([
     loadDocumentLibraries(),
     readOpenClawMemorySyncStatus(),
+    Promise.resolve(loadDocumentExtractionGovernance()),
   ]);
 
   return buildDocumentsOverviewPayload({
@@ -55,7 +59,7 @@ export async function loadDocumentsOverviewRoutePayload() {
     totalFiles,
     items,
     cacheHit,
-    libraries,
+    libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
     memorySync,
   });
 }

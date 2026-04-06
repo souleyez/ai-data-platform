@@ -197,13 +197,21 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
 
   app.patch('/documents/libraries/:key', async (request, reply) => {
     const { key } = request.params as { key: string };
-    const body = (request.body || {}) as { label?: string; description?: string; permissionLevel?: number };
+    const body = (request.body || {}) as {
+      label?: string;
+      description?: string;
+      permissionLevel?: number;
+      extractionFieldSet?: string;
+      extractionFallbackSchemaType?: string;
+    };
 
     try {
       const { library, libraries } = await updateManagedDocumentLibrary(key, {
         label: body.label,
         description: body.description,
         permissionLevel: body.permissionLevel,
+        extractionFieldSet: body.extractionFieldSet,
+        extractionFallbackSchemaType: body.extractionFallbackSchemaType,
       });
       return {
         status: 'updated',

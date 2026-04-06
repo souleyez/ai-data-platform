@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
 
@@ -26,6 +27,12 @@ export type DocumentExtractionGovernanceConfig = {
   version: number;
   updatedAt: string;
   profiles: DocumentExtractionProfile[];
+};
+
+export type DocumentLibraryExtractionSettings = {
+  profileId?: string;
+  fieldSet?: DocumentExtractionFieldSet;
+  fallbackSchemaType?: DocumentGovernedSchemaType;
 };
 
 function readJsonObject(filePath: string) {
@@ -114,6 +121,134 @@ export function loadDocumentExtractionGovernance() {
     updatedAt: storageConfig.updatedAt || defaultConfig.updatedAt,
     profiles: [...profileMap.values()],
   } satisfies DocumentExtractionGovernanceConfig;
+}
+
+async function writeDocumentExtractionGovernance(config: DocumentExtractionGovernanceConfig) {
+  await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
+  await fs.writeFile(
+    DOCUMENT_EXTRACTION_GOVERNANCE_STORAGE_FILE,
+    JSON.stringify({
+      version: config.version || 1,
+      updatedAt: new Date().toISOString(),
+      profiles: config.profiles,
+    }, null, 2),
+    'utf8',
+  );
+}
+
+function normalizeLibraryOverrideProfileId(libraryKey: string) {
+  return `library-${normalizeString(libraryKey).toLowerCase()}`;
+}
+
+function normalizeOptionalFieldSet(value: unknown) {
+  const normalized = normalizeString(value);
+  if (!normalized || normalized === 'auto') return undefined;
+  return normalizeFieldSet(normalized) || undefined;
+}
+
+function normalizeOptionalSchemaType(value: unknown) {
+  const normalized = normalizeString(value);
+  if (!normalized || normalized === 'auto') return undefined;
+  return normalizeSchemaType(normalized);
+}
+
+function inferFieldSetFromSchemaType(
+  schemaType?: DocumentGovernedSchemaType,
+): DocumentExtractionFieldSet | undefined {
+  if (schemaType === 'contract') return 'contract';
+  if (schemaType === 'resume') return 'resume';
+  if (schemaType === 'technical') return 'enterprise-guidance';
+  if (schemaType === 'order') return 'order';
+  return undefined;
+}
+
+export function getDocumentLibraryExtractionSettings(
+  config: DocumentExtractionGovernanceConfig,
+  library: { key: string; label: string },
+) {
+  const overrideId = normalizeLibraryOverrideProfileId(library.key);
+  const override = config.profiles.find((profile) => profile.id === overrideId)
+    || config.profiles.find((profile) => profile.matchLibraryKeys.includes(normalizeString(library.key).toLowerCase()));
+
+  if (!override) return {} satisfies DocumentLibraryExtractionSettings;
+  return {
+    profileId: override.id,
+    fieldSet: override.fieldSet,
+    fallbackSchemaType: override.fallbackSchemaType,
+  } satisfies DocumentLibraryExtractionSettings;
+}
+
+export function attachDocumentExtractionSettings<T extends { key: string; label: string }>(
+  libraries: T[],
+  config = loadDocumentExtractionGovernance(),
+) {
+  return libraries.map((library) => ({
+    ...library,
+    extractionSettings: getDocumentLibraryExtractionSettings(config, library),
+  }));
+}
+
+export async function updateLibraryDocumentExtractionSettings(
+  input: {
+    key: string;
+    label: string;
+    fieldSet?: string;
+    fallbackSchemaType?: string;
+  },
+) {
+  const key = normalizeString(input.key);
+  const label = normalizeString(input.label);
+  if (!key || !label) {
+    throw new Error('library key and label are required');
+  }
+
+  const current = loadDocumentExtractionGovernance();
+  const overrideId = normalizeLibraryOverrideProfileId(key);
+  const existingOverride = current.profiles.find((profile) => profile.id === overrideId);
+  const fieldSet = normalizeOptionalFieldSet(input.fieldSet);
+  const fallbackSchemaType = normalizeOptionalSchemaType(input.fallbackSchemaType);
+  const requestedReset = normalizeString(input.fieldSet).toLowerCase() === 'auto'
+    && normalizeString(input.fallbackSchemaType).toLowerCase() === 'auto';
+  const nextProfiles = current.profiles.filter((profile) => profile.id !== overrideId);
+  const nextFieldSet = requestedReset
+    ? undefined
+    : (fieldSet || existingOverride?.fieldSet || inferFieldSetFromSchemaType(fallbackSchemaType));
+
+  if (nextFieldSet || fallbackSchemaType) {
+    nextProfiles.push({
+      id: overrideId,
+      label: `${label} 提取模板`,
+      matchLibraryKeys: [key.toLowerCase()],
+      matchLibraryLabels: [label.toLowerCase()],
+      fieldSet: nextFieldSet || 'contract',
+      fallbackSchemaType,
+    });
+  }
+
+  const nextConfig = {
+    version: current.version || 1,
+    updatedAt: new Date().toISOString(),
+    profiles: nextProfiles,
+  } satisfies DocumentExtractionGovernanceConfig;
+
+  await writeDocumentExtractionGovernance(nextConfig);
+  return nextConfig;
+}
+
+export async function deleteLibraryDocumentExtractionSettings(libraryKey: string) {
+  const key = normalizeString(libraryKey);
+  if (!key) return;
+
+  const current = loadDocumentExtractionGovernance();
+  const overrideId = normalizeLibraryOverrideProfileId(key);
+  const nextProfiles = current.profiles.filter((profile) => profile.id !== overrideId);
+  if (nextProfiles.length === current.profiles.length) return;
+
+  await writeDocumentExtractionGovernance({
+    version: current.version || 1,
+    updatedAt: new Date().toISOString(),
+    profiles: nextProfiles,
+  });
 }
 
 export function buildDocumentLibraryContext(

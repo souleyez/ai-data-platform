@@ -5,6 +5,10 @@ import {
   updateDocumentLibrary,
 } from './document-libraries.js';
 import {
+  deleteLibraryDocumentExtractionSettings,
+  updateLibraryDocumentExtractionSettings,
+} from './document-extraction-governance.js';
+import {
   loadDocumentCategoryConfig,
   saveDocumentCategoryConfig,
   type BizCategory,
@@ -45,9 +49,21 @@ export async function createManagedDocumentLibrary(input: { name: string; descri
 
 export async function updateManagedDocumentLibrary(
   key: string,
-  input: { label?: string; description?: string; permissionLevel?: number },
+  input: {
+    label?: string;
+    description?: string;
+    permissionLevel?: number;
+    extractionFieldSet?: string;
+    extractionFallbackSchemaType?: string;
+  },
 ) {
   const library = await updateDocumentLibrary(key, input);
+  await updateLibraryDocumentExtractionSettings({
+    key: library.key,
+    label: library.label,
+    fieldSet: input.extractionFieldSet,
+    fallbackSchemaType: input.extractionFallbackSchemaType,
+  });
   const libraries = await loadDocumentLibraries();
   return { library, libraries };
 }
@@ -65,6 +81,7 @@ export async function deleteManagedDocumentLibrary(key: string) {
   }
 
   await deleteDocumentLibrary(key);
+  await deleteLibraryDocumentExtractionSettings(key);
   const nextLibraries = await loadDocumentLibraries();
   return { deleted: found, libraries: nextLibraries };
 }

@@ -1,5 +1,21 @@
 'use client';
 
+const EXTRACTION_FIELD_SET_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'contract', label: '合同' },
+  { value: 'resume', label: '简历' },
+  { value: 'enterprise-guidance', label: '企业规范' },
+  { value: 'order', label: '订单' },
+];
+
+const EXTRACTION_SCHEMA_OPTIONS = [
+  { value: 'auto', label: '自动' },
+  { value: 'contract', label: 'contract' },
+  { value: 'resume', label: 'resume' },
+  { value: 'technical', label: 'technical' },
+  { value: 'order', label: 'order' },
+];
+
 function normalizePermissionLevel(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -103,6 +119,32 @@ export default function LibraryTabs({
                   permissionLevel: normalizePermissionLevel(event.target.value),
                 })}
               />
+            </label>
+            <label className="bot-field">
+              <span>提取模板</span>
+              <select
+                value={String(activeLibrarySettingsDraft.extractionFieldSet || 'auto')}
+                onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                  extractionFieldSet: event.target.value,
+                })}
+              >
+                {EXTRACTION_FIELD_SET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="bot-field">
+              <span>回退结构</span>
+              <select
+                value={String(activeLibrarySettingsDraft.extractionFallbackSchemaType || 'auto')}
+                onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                  extractionFallbackSchemaType: event.target.value,
+                })}
+              >
+                {EXTRACTION_SCHEMA_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
             <label className="bot-field bot-field-span">
               <span>描述</span>

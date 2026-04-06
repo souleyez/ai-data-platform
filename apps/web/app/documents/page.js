@@ -67,6 +67,12 @@ function buildLibrarySettingsDraft(library, draft) {
       draft?.permissionLevel ?? library?.permissionLevel ?? 0,
       0,
     ),
+    extractionFieldSet: typeof draft?.extractionFieldSet === 'string'
+      ? draft.extractionFieldSet
+      : String(library?.extractionSettings?.fieldSet || 'auto'),
+    extractionFallbackSchemaType: typeof draft?.extractionFallbackSchemaType === 'string'
+      ? draft.extractionFallbackSchemaType
+      : String(library?.extractionSettings?.fallbackSchemaType || 'auto'),
   };
 }
 
@@ -238,6 +244,8 @@ export default function DocumentsPage() {
         label,
         description: String(draft.description || '').trim(),
         permissionLevel: normalizePermissionLevel(draft.permissionLevel, 0),
+        extractionFieldSet: String(draft.extractionFieldSet || 'auto'),
+        extractionFallbackSchemaType: String(draft.extractionFallbackSchemaType || 'auto'),
       });
       await loadDocuments();
       setScanMessage(`已更新知识库“${label}”的权限等级`);
