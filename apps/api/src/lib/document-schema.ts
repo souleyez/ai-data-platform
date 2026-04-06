@@ -230,6 +230,61 @@ function buildFocusedFieldPayload(
     };
   });
 
+  const aliasFieldEntries = new Map<string, {
+    key: string;
+    alias: string;
+    required: boolean;
+    value: unknown;
+    confidence: number | null;
+    source: string;
+    evidenceChunkId: string;
+  }>();
+  const orderedAliasKeys = [...preferredFieldKeys, ...Object.keys(fieldAliases || {})];
+
+  for (const key of orderedAliasKeys) {
+    if (!preferredFieldKeySet.has(key) && !(fieldAliases && key in fieldAliases)) continue;
+    const alias = String(fieldAliases?.[key] || '').trim();
+    const detail = fieldDetails[key];
+    const isRequired = requiredFieldKeys.includes(key as (typeof requiredFieldKeys)[number]);
+    if (!alias || !detail || alias === key || aliasFieldEntries.has(alias)) continue;
+    aliasFieldEntries.set(alias, {
+      key,
+      alias,
+      required: isRequired,
+      value: detail.value,
+      confidence: detail.confidence ?? null,
+      source: detail.source || '',
+      evidenceChunkId: detail.evidenceChunkId || '',
+    });
+  }
+
+  const aliasFieldDetails = Object.fromEntries(
+    [...aliasFieldEntries.entries()].map(([alias, entry]) => [
+      alias,
+      {
+        value: entry.value,
+        confidence: entry.confidence ?? 0,
+        source: entry.source as StructuredFieldSource,
+        evidenceChunkId: entry.evidenceChunkId || undefined,
+      } satisfies StructuredFieldDetail,
+    ]),
+  ) as Record<string, StructuredFieldDetail>;
+
+  const aliasFields = Object.fromEntries(
+    [...aliasFieldEntries.entries()].map(([alias, entry]) => [alias, entry.value]),
+  );
+
+  const focusedAliasFieldDetails = Object.fromEntries(
+    [...aliasFieldEntries.entries()]
+      .filter(([, entry]) => preferredFieldKeySet.has(entry.key))
+      .map(([alias]) => [alias, aliasFieldDetails[alias]])
+      .filter((entry) => entry[1]),
+  ) as Record<string, StructuredFieldDetail>;
+
+  const focusedAliasFields = Object.fromEntries(
+    Object.entries(focusedAliasFieldDetails).map(([alias, detail]) => [alias, detail.value]),
+  );
+
   return {
     fieldTemplate: {
       fieldSet: extractionProfile?.fieldSet,
@@ -237,8 +292,12 @@ function buildFocusedFieldPayload(
       requiredFieldKeys,
       fieldAliases,
     },
+    aliasFieldDetails,
+    aliasFields,
     focusedFieldDetails,
     focusedFields,
+    focusedAliasFieldDetails,
+    focusedAliasFields,
     focusedFieldEntries,
   };
 }

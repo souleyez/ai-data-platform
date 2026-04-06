@@ -51,7 +51,7 @@ test('filterDocumentsByTimeRange should honor recent time windows inside a libra
 test('filterDocumentsByContentFocus should prefer company and project focused resume documents', () => {
   const projectResume = makeDocument({
     title: 'IT 项目简历',
-    summary: '候选人在多家公司参与 ERP、接口平台和数据中台项目。',
+    summary: '候选人参与过 ERP、API 平台和数据中台项目。',
     structuredProfile: {
       companies: ['甲公司', '乙公司'],
       projectHighlights: ['ERP 实施', 'API 平台建设'],
@@ -149,9 +149,60 @@ test('buildKnowledgeContext should honor compact limits for lighter output promp
     },
   );
 
-  assert.match(context, /文档 1: 订单汇总 B|文档 1: 订单汇总 A/);
-  assert.doesNotMatch(context, /文档 2:/);
+  assert.match(context, /Document 1: 订单汇总 [AB]/);
+  assert.doesNotMatch(context, /Document 2:/);
   assert.doesNotMatch(context, /excerpt-a/);
   assert.doesNotMatch(context, /2\. A risk inventory/);
   assert.doesNotMatch(context, /2\. evidence-a-2/);
+});
+
+test('buildKnowledgeContext should surface library field aliases in structured supply text', () => {
+  const context = buildKnowledgeContext(
+    '基于合同协议知识库回答甲方和签约金额分别是什么',
+    [{ key: 'contract', label: '合同协议' }],
+    {
+      documents: [
+        makeDocument({
+          path: 'C:/tmp/1700000000300-contract-a.md',
+          name: 'contract-a.md',
+          title: '合同 A',
+          category: 'contract',
+          bizCategory: 'contract',
+          schemaType: 'contract',
+          parseStage: 'detailed',
+          detailParseStatus: 'succeeded',
+          summary: '这是一份合同摘要。',
+          structuredProfile: {
+            partyA: '广州轻工集团',
+            amount: '￥120000',
+            fieldTemplate: {
+              fieldSet: 'contract',
+              preferredFieldKeys: ['partyA', 'amount'],
+              requiredFieldKeys: ['partyA'],
+              fieldAliases: {
+                partyA: '甲方',
+                amount: '签约金额',
+              },
+            },
+            focusedAliasFields: {
+              甲方: '广州轻工集团',
+              签约金额: '￥120000',
+            },
+            aliasFields: {
+              甲方: '广州轻工集团',
+              签约金额: '￥120000',
+            },
+          },
+        }),
+      ],
+      evidenceMatches: [],
+    },
+  );
+
+  assert.match(context, /fieldTemplate:/);
+  assert.match(context, /partyA->甲方/);
+  assert.match(context, /focusedAliases:/);
+  assert.match(context, /aliasValues:/);
+  assert.match(context, /甲方=广州轻工集团/);
+  assert.match(context, /签约金额=￥120000/);
 });

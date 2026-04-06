@@ -311,6 +311,33 @@ function buildStructuredProfileFacts(item: ParsedDocument) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return [];
   const preferredKeys = resolveStructuredProfileKeys(item);
   const facts: string[] = [];
+  const focusedAliasFields = (
+    (profile as Record<string, unknown>).focusedAliasFields
+    && typeof (profile as Record<string, unknown>).focusedAliasFields === 'object'
+    && !Array.isArray((profile as Record<string, unknown>).focusedAliasFields)
+      ? (profile as Record<string, unknown>).focusedAliasFields as Record<string, unknown>
+      : null
+  ) || (
+    (profile as Record<string, unknown>).aliasFields
+    && typeof (profile as Record<string, unknown>).aliasFields === 'object'
+    && !Array.isArray((profile as Record<string, unknown>).aliasFields)
+      ? (profile as Record<string, unknown>).aliasFields as Record<string, unknown>
+      : null
+  );
+
+  if (focusedAliasFields) {
+    for (const [alias, raw] of Object.entries(focusedAliasFields)) {
+      if (facts.length >= 6) break;
+      if (Array.isArray(raw)) {
+        const values = sanitizeList(raw, 40, 4);
+        if (values.length) facts.push(`${sanitizeFact(alias, 40)}: ${values.join(', ')}`);
+        continue;
+      }
+      const text = sanitizeFact(raw, 120);
+      if (text) facts.push(`${sanitizeFact(alias, 40)}: ${text}`);
+    }
+  }
+
   for (const key of preferredKeys) {
     const raw = (profile as Record<string, unknown>)[key];
     if (Array.isArray(raw)) {

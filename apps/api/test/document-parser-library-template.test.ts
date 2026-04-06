@@ -46,6 +46,14 @@ test('parseDocument should apply contract library fallback schema and focused fi
     assert.deepEqual(contractDoc.structuredProfile?.fieldTemplate?.requiredFieldKeys, ['partyA', 'partyB', 'amount']);
     assert.equal(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.partyA, '甲方');
     assert.equal(contractDoc.structuredProfile?.focusedFields?.partyA, contractDoc.structuredProfile?.partyA);
+
+    const partyAAlias = String(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.partyA || '');
+    const amountAlias = String(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.amount || '');
+
+    assert.equal(contractDoc.structuredProfile?.aliasFields?.[partyAAlias], contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.focusedAliasFields?.[partyAAlias], contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.aliasFieldDetails?.[partyAAlias]?.value, contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.focusedAliasFieldDetails?.[amountAlias]?.value, contractDoc.structuredProfile?.amount);
     assert.equal(contractDoc.structuredProfile?.focusedFieldDetails?.amount?.value, '￥120000');
     assert.equal(contractDoc.structuredProfile?.focusedFieldEntries?.[0]?.key, 'partyA');
     assert.equal(contractDoc.structuredProfile?.focusedFieldEntries?.[0]?.alias, '甲方');
