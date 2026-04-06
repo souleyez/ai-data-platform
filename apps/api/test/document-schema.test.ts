@@ -42,7 +42,11 @@ test('buildStructuredProfile should include contract field metadata details', ()
     summary: '合同摘要',
     contractFields: {
       contractNo: 'HT-2026-018',
-      amount: '¥120000',
+      partyA: '广州轻工集团',
+      partyB: '广州廉明建筑有限公司',
+      amount: '￥120000',
+      signDate: '2026-04-01',
+      effectiveDate: '2026-04-02',
       paymentTerms: '签约后 7 日内付款',
       duration: '12 个月',
     },
@@ -50,18 +54,24 @@ test('buildStructuredProfile should include contract field metadata details', ()
       {
         id: 'chunk-1',
         order: 0,
-        text: '合同编号 HT-2026-018，合同金额 ¥120000，签约后 7 日内付款。',
-        charLength: 36,
+        text: '合同编号 HT-2026-018，甲方广州轻工集团，乙方广州廉明建筑有限公司，合同金额 ￥120000，签约后 7 日内付款。',
+        charLength: 65,
       },
     ],
   });
 
   assert.equal(profile.contractNo, 'HT-2026-018');
-  assert.equal(profile.amount, '¥120000');
+  assert.equal(profile.partyA, '广州轻工集团');
+  assert.equal(profile.partyB, '广州廉明建筑有限公司');
+  assert.equal(profile.amount, '￥120000');
+  assert.equal(profile.signDate, '2026-04-01');
+  assert.equal(profile.effectiveDate, '2026-04-02');
   assert.ok(profile.fieldDetails);
   assert.equal(profile.fieldDetails.contractNo?.source, 'rule');
   assert.equal(profile.fieldDetails.contractNo?.value, 'HT-2026-018');
   assert.equal(profile.fieldDetails.contractNo?.evidenceChunkId, 'chunk-1');
+  assert.equal(profile.fieldDetails.partyA?.value, '广州轻工集团');
+  assert.equal(profile.fieldDetails.partyB?.value, '广州廉明建筑有限公司');
   assert.equal(profile.fieldDetails.amount?.source, 'rule');
   assert.equal(profile.fieldDetails.amount?.evidenceChunkId, 'chunk-1');
 });
@@ -110,7 +120,7 @@ test('buildStructuredProfile should include order fields for order documents', (
       period: 'Q1 2026',
       platform: 'tmall',
       orderCount: '1280',
-      netSales: '¥325000',
+      netSales: '￥325000',
       grossMargin: '32%',
       topCategory: 'Consumer Electronics',
       inventoryStatus: 'inventory-related',
@@ -120,8 +130,8 @@ test('buildStructuredProfile should include order fields for order documents', (
       {
         id: 'chunk-1',
         order: 0,
-        text: 'Q1 2026 order summary. Tmall order count 1280, net sales ¥325000, gross margin 32%.',
-        charLength: 85,
+        text: 'Q1 2026 order summary. Tmall order count 1280, net sales ￥325000, gross margin 32%.',
+        charLength: 86,
       },
     ],
   });
@@ -129,6 +139,6 @@ test('buildStructuredProfile should include order fields for order documents', (
   assert.equal(profile.domain, 'order');
   assert.equal(profile.platform, 'tmall');
   assert.equal(profile.orderCount, '1280');
-  assert.equal(profile.netSales, '¥325000');
+  assert.equal(profile.netSales, '￥325000');
   assert.equal(profile.fieldDetails.platform?.value, 'tmall');
 });

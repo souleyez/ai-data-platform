@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-06T18:30:00.000Z",
+  "profiles": [
+    {
+      "id": "contract-standard",
+      "label": "合同协议提取模板",
+      "matchLibraryKeys": ["contract", "合同", "合同协议", "协议"],
+      "matchLibraryLabels": ["合同", "合同协议", "协议"],
+      "fieldSet": "contract",
+      "fallbackSchemaType": "contract"
+    },
+    {
+      "id": "resume-standard",
+      "label": "简历提取模板",
+      "matchLibraryKeys": ["resume", "简历", "人才简历", "候选人"],
+      "matchLibraryLabels": ["简历", "人才简历", "候选人"],
+      "fieldSet": "resume",
+      "fallbackSchemaType": "resume"
+    },
+    {
+      "id": "order-standard",
+      "label": "订单分析提取模板",
+      "matchLibraryKeys": ["order", "订单", "订单分析", "销售订单"],
+      "matchLibraryLabels": ["订单", "订单分析", "销售订单"],
+      "fieldSet": "order",
+      "fallbackSchemaType": "order"
+    },
+    {
+      "id": "ioa-guidance",
+      "label": "IOA与企业规范提取模板",
+      "matchLibraryKeys": ["ioa", "ioa-guidance", "enterprise-guidance", "企业规范", "制度规范", "系统指引"],
+      "matchLibraryLabels": ["IOA", "企业规范", "制度规范", "系统指引"],
+      "fieldSet": "enterprise-guidance",
+      "fallbackSchemaType": "technical"
+    }
+  ]
+}

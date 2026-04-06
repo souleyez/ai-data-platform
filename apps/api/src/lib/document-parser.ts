@@ -4,6 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
+import {
+  loadDocumentExtractionGovernance,
+  resolveDocumentExtractionProfile,
+  type DocumentExtractionProfile,
+  type DocumentLibraryContext,
+} from './document-extraction-governance.js';
 import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import {
@@ -44,7 +50,11 @@ export type ParsedDocument = {
   ignored?: boolean;
   contractFields?: {
     contractNo?: string;
+    partyA?: string;
+    partyB?: string;
     amount?: string;
+    signDate?: string;
+    effectiveDate?: string;
     paymentTerms?: string;
     duration?: string;
   };
@@ -142,6 +152,7 @@ export type ResumeFields = {
 
 export type ParseDocumentOptions = {
   stage?: 'quick' | 'detailed';
+  libraryContext?: DocumentLibraryContext;
 };
 
 const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
@@ -1525,12 +1536,18 @@ function extractResumeItProjectHighlights(text: string, skills: string[] = []) {
   return [...new Set((filtered.length ? filtered : projectHighlights).slice(0, 6))];
 }
 
-function extractResumeFields(text: string, title: string, entities: StructuredEntity[] = [], claims: StructuredClaim[] = []): ResumeFields | undefined {
+function extractResumeFields(
+  text: string,
+  title: string,
+  entities: StructuredEntity[] = [],
+  claims: StructuredClaim[] = [],
+  options?: { force?: boolean },
+): ResumeFields | undefined {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   const titleText = String(title || '').trim();
   const evidence = `${titleText} ${normalized}`.toLowerCase();
   const looksLikeResume = RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()));
-  if (!looksLikeResume) return undefined;
+  if (!looksLikeResume && options?.force !== true) return undefined;
   const labelMap = extractResumeLabelMap(text);
   const byLabel = (...labels: string[]) => {
     for (const label of labels) {
@@ -1684,14 +1701,51 @@ function detectGroups(filePath: string, text: string, topicTags: string[], confi
     .map((group) => group.key);
 }
 
-function extractContractFields(text: string, category: string) {
-  if (category !== 'contract') return undefined;
+function shouldForceExtraction(profile: DocumentExtractionProfile | null | undefined, fieldSet: DocumentExtractionProfile['fieldSet']) {
+  return profile?.fieldSet === fieldSet;
+}
+
+function applyGovernedSchemaType(
+  inferredSchemaType: ParsedDocument['schemaType'],
+  profile: DocumentExtractionProfile | null | undefined,
+): ParsedDocument['schemaType'] {
+  if (!profile?.fallbackSchemaType) return inferredSchemaType;
+  if (inferredSchemaType === profile.fallbackSchemaType) return inferredSchemaType;
+
+  if (profile.fallbackSchemaType === 'contract' && inferredSchemaType === 'generic') return 'contract';
+  if (profile.fallbackSchemaType === 'resume' && inferredSchemaType === 'generic') return 'resume';
+  if (profile.fallbackSchemaType === 'order' && ['generic', 'report'].includes(String(inferredSchemaType))) return 'order';
+  if (profile.fallbackSchemaType === 'technical' && inferredSchemaType === 'generic') return 'technical';
+
+  return inferredSchemaType;
+}
+
+function mergeGovernedTopicTags(topicTags: string[], profile: DocumentExtractionProfile | null | undefined) {
+  if (!profile) return topicTags;
+
+  const governedTags = profile.fieldSet === 'contract'
+    ? ['合同']
+    : profile.fieldSet === 'resume'
+      ? ['人才简历']
+      : profile.fieldSet === 'order'
+        ? ['订单分析']
+        : ['企业规范'];
+
+  return [...new Set([...topicTags, ...governedTags])];
+}
+
+function extractContractFields(text: string, category: string, profile?: DocumentExtractionProfile | null) {
+  if (category !== 'contract' && !shouldForceExtraction(profile, 'contract')) return undefined;
   const normalized = text.replace(/\s+/g, ' ');
+  const partyA = normalized.match(/(?:甲方|发包方|采购方|委托方)[:：]?\s*(.+?)(?=(?:乙方|承包方|供应商|服务方|受托方|签订日期|签约日期|生效日期|金额|付款方式|付款条款|服务期|合同期|期限|$))/i)?.[1]?.trim();
+  const partyB = normalized.match(/(?:乙方|承包方|供应商|服务方|受托方)[:：]?\s*(.+?)(?=(?:签订日期|签约日期|生效日期|金额|付款方式|付款条款|服务期|合同期|期限|$))/i)?.[1]?.trim();
+  const signDate = normalized.match(/(?:签订日期|签约日期|签订时间|合同签订日)[:：]?\s*([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}日?)/i)?.[1]?.trim();
+  const effectiveDate = normalized.match(/(?:生效日期|生效时间|起始日期|开始日期)[:：]?\s*([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}日?)/i)?.[1]?.trim();
   const contractNo = normalized.match(/(合同编号|编号)[:：]?\s*([A-Za-z0-9-]+)/)?.[2];
   const amount = normalized.match(/(金额|合同金额)[:：]?\s*([￥¥]?[0-9,.]+[万千元]*)/)?.[2];
   const paymentTerms = normalized.match(/(付款方式|付款条款)[:：]?\s*([^。；;]+)/)?.[2];
   const duration = normalized.match(/(期限|服务期|合同期)[:：]?\s*(.*?)(?:违约责任|备注|付款条款|$|[。；;])/ )?.[2]?.trim();
-  return { contractNo, amount, paymentTerms, duration };
+  return { contractNo, partyA, partyB, amount, signDate, effectiveDate, paymentTerms, duration };
 }
 
 function collectNormalizedMatches(text: string, pattern: RegExp) {
@@ -1707,8 +1761,9 @@ function extractEnterpriseGuidanceFields(
   title: string,
   topicTags: string[],
   category: string,
+  profile?: DocumentExtractionProfile | null,
 ): ParsedDocument['enterpriseGuidanceFields'] | undefined {
-  if (category !== 'technical') return undefined;
+  if (category !== 'technical' && !shouldForceExtraction(profile, 'enterprise-guidance')) return undefined;
 
   const rawText = String(text || '');
   const normalized = rawText.replace(/\s+/g, ' ').trim();
@@ -1791,8 +1846,9 @@ function extractOrderFields(
   title: string,
   bizCategory: ParsedDocument['bizCategory'],
   topicTags: string[],
+  profile?: DocumentExtractionProfile | null,
 ): ParsedDocument['orderFields'] | undefined {
-  if (bizCategory !== 'order') return undefined;
+  if (bizCategory !== 'order' && !shouldForceExtraction(profile, 'order')) return undefined;
 
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
@@ -1942,6 +1998,8 @@ export async function parseDocument(
   const defaultDetailQueuedAt = parseStage === 'quick' ? now : undefined;
   const defaultDetailParsedAt = parseStage === 'detailed' ? now : undefined;
   const defaultDetailAttempts = parseStage === 'detailed' ? 1 : 0;
+  const extractionGovernance = loadDocumentExtractionGovernance();
+  const extractionProfile = resolveDocumentExtractionProfile(extractionGovernance, options?.libraryContext);
 
   try {
     const { status, text, parseMethod: hintedMethod } = await extractText(filePath, ext);
@@ -1952,9 +2010,15 @@ export async function parseDocument(
     const unsupportedSummary = UNSUPPORTED_PARSE_SUMMARY;
 
     if (status === 'unsupported') {
-      const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+      const topicTags = mergeGovernedTopicTags(
+        detectTopicTags(buildEvidence(filePath), category, bizCategory),
+        extractionProfile,
+      );
       const groups = detectGroups(filePath, '', topicTags, config);
-      const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
+      const schemaType = applyGovernedSchemaType(
+        inferSchemaType(category, bizCategory, undefined, topicTags),
+        extractionProfile,
+      );
       return {
         path: filePath,
         name,
@@ -1991,9 +2055,15 @@ export async function parseDocument(
     }
 
     if (status === 'error') {
-      const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+      const topicTags = mergeGovernedTopicTags(
+        detectTopicTags(buildEvidence(filePath), category, bizCategory),
+        extractionProfile,
+      );
       const groups = detectGroups(filePath, '', topicTags, config);
-      const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
+      const schemaType = applyGovernedSchemaType(
+        inferSchemaType(category, bizCategory, undefined, topicTags),
+        extractionProfile,
+      );
       const fallbackSummary = IMAGE_EXTENSIONS.has(ext)
         ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
         : (topicTags.length
@@ -2036,17 +2106,31 @@ export async function parseDocument(
       };
     }
 
-    const topicTags = detectTopicTags(`${name} ${normalizedText}`, category, bizCategory);
+    const topicTags = mergeGovernedTopicTags(
+      detectTopicTags(`${name} ${normalizedText}`, category, bizCategory),
+      extractionProfile,
+    );
     const groups = detectGroups(filePath, normalizedText, topicTags, config);
     const summary = summarize(normalizedText, '文档内容为空或暂未提取到文本。');
     const excerptText = excerpt(normalizedText, '文档内容为空或暂未提取到文本。');
     const inferredTitle = inferTitle(text, name);
 
     if (parseStage === 'quick') {
-      const resumeFields = extractResumeFields(text.slice(0, 2400), inferredTitle);
-      const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text.slice(0, 2400), inferredTitle, topicTags, category);
-      const orderFields = extractOrderFields(text.slice(0, 2400), inferredTitle, bizCategory, topicTags);
-      const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
+      const quickText = text.slice(0, 2400);
+      const contractFields = extractContractFields(quickText, category, extractionProfile);
+      const resumeFields = extractResumeFields(
+        quickText,
+        inferredTitle,
+        [],
+        [],
+        { force: shouldForceExtraction(extractionProfile, 'resume') },
+      );
+      const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(quickText, inferredTitle, topicTags, category, extractionProfile);
+      const orderFields = extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile);
+      const schemaType = applyGovernedSchemaType(
+        inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
+        extractionProfile,
+      );
       return {
         path: filePath,
         name,
@@ -2065,6 +2149,7 @@ export async function parseDocument(
         claims: [],
         intentSlots: {},
         resumeFields,
+        contractFields,
         enterpriseGuidanceFields,
         orderFields,
         riskLevel: detectRiskLevel(normalizedText, category),
@@ -2081,6 +2166,7 @@ export async function parseDocument(
           title: inferredTitle,
           topicTags,
           summary,
+          contractFields,
           enterpriseGuidanceFields,
           orderFields,
           resumeFields,
@@ -2090,12 +2176,21 @@ export async function parseDocument(
     }
 
     const evidenceChunks = splitEvidenceChunks(text);
-    const contractFields = extractContractFields(normalizedText, category);
+    const contractFields = extractContractFields(normalizedText, category, extractionProfile);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
-    const resumeFields = extractResumeFields(text, inferredTitle, structured.entities, structured.claims);
-    const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category);
-    const orderFields = extractOrderFields(text, inferredTitle, bizCategory, topicTags);
-    const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
+    const resumeFields = extractResumeFields(
+      text,
+      inferredTitle,
+      structured.entities,
+      structured.claims,
+      { force: shouldForceExtraction(extractionProfile, 'resume') },
+    );
+    const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile);
+    const orderFields = extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile);
+    const schemaType = applyGovernedSchemaType(
+      inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
+      extractionProfile,
+    );
 
     return {
       path: filePath,
@@ -2142,9 +2237,15 @@ export async function parseDocument(
   } catch {
     const category = detectCategory(filePath);
     const bizCategory = detectBizCategory(filePath, category, '', config);
-    const topicTags = detectTopicTags(buildEvidence(filePath), category, bizCategory);
+    const topicTags = mergeGovernedTopicTags(
+      detectTopicTags(buildEvidence(filePath), category, bizCategory),
+      extractionProfile,
+    );
     const groups = detectGroups(filePath, '', topicTags, config);
-    const schemaType = inferSchemaType(category, bizCategory, undefined, topicTags);
+    const schemaType = applyGovernedSchemaType(
+      inferSchemaType(category, bizCategory, undefined, topicTags),
+      extractionProfile,
+    );
     const fallbackSummary = topicTags.length
       ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
       : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';

@@ -1,4 +1,9 @@
 import type { EvidenceChunk, ParsedDocument, ResumeFields } from './document-parser.js';
+import {
+  loadDocumentExtractionGovernance,
+  resolveDocumentExtractionProfile,
+  type DocumentLibraryContext,
+} from './document-extraction-governance.js';
 
 export function includesAnyText(text: string, keywords: string[]) {
   const haystack = String(text || '').toLowerCase();
@@ -78,6 +83,39 @@ export type StructuredFieldDetail = {
   source: StructuredFieldSource;
   evidenceChunkId?: string;
 };
+
+function applyGovernedSchemaType(
+  inferredSchemaType: ParsedDocument['schemaType'],
+  fallbackSchemaType?: 'contract' | 'resume' | 'technical' | 'order',
+): ParsedDocument['schemaType'] {
+  if (!fallbackSchemaType || inferredSchemaType === fallbackSchemaType) return inferredSchemaType;
+  if (fallbackSchemaType === 'contract' && inferredSchemaType === 'generic') return 'contract';
+  if (fallbackSchemaType === 'resume' && inferredSchemaType === 'generic') return 'resume';
+  if (fallbackSchemaType === 'order' && ['generic', 'report'].includes(String(inferredSchemaType))) return 'order';
+  if (fallbackSchemaType === 'technical' && inferredSchemaType === 'generic') return 'technical';
+  return inferredSchemaType;
+}
+
+function mergeGovernedTopicTags(
+  topicTags: string[],
+  libraryContext?: DocumentLibraryContext,
+) {
+  const profile = resolveDocumentExtractionProfile(loadDocumentExtractionGovernance(), libraryContext);
+  if (!profile) return { topicTags, profile };
+
+  const governedTags = profile.fieldSet === 'contract'
+    ? ['合同']
+    : profile.fieldSet === 'resume'
+      ? ['人才简历']
+      : profile.fieldSet === 'order'
+        ? ['订单分析']
+        : ['企业规范'];
+
+  return {
+    topicTags: [...new Set([...(topicTags || []), ...governedTags])],
+    profile,
+  };
+}
 
 function clampConfidence(value: number) {
   const numeric = Number(value);
@@ -174,8 +212,20 @@ export function buildStructuredProfile(input: {
       ...(createFieldDetail(input.contractFields?.contractNo, 0.94, 'rule', input.evidenceChunks)
         ? { contractNo: createFieldDetail(input.contractFields?.contractNo, 0.94, 'rule', input.evidenceChunks)! }
         : {}),
+      ...(createFieldDetail(input.contractFields?.partyA, 0.88, 'rule', input.evidenceChunks)
+        ? { partyA: createFieldDetail(input.contractFields?.partyA, 0.88, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.partyB, 0.88, 'rule', input.evidenceChunks)
+        ? { partyB: createFieldDetail(input.contractFields?.partyB, 0.88, 'rule', input.evidenceChunks)! }
+        : {}),
       ...(createFieldDetail(input.contractFields?.amount, 0.86, 'rule', input.evidenceChunks)
         ? { amount: createFieldDetail(input.contractFields?.amount, 0.86, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.signDate, 0.82, 'rule', input.evidenceChunks)
+        ? { signDate: createFieldDetail(input.contractFields?.signDate, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.effectiveDate, 0.8, 'rule', input.evidenceChunks)
+        ? { effectiveDate: createFieldDetail(input.contractFields?.effectiveDate, 0.8, 'rule', input.evidenceChunks)! }
         : {}),
       ...(createFieldDetail(input.contractFields?.paymentTerms, 0.78, 'rule', input.evidenceChunks)
         ? { paymentTerms: createFieldDetail(input.contractFields?.paymentTerms, 0.78, 'rule', input.evidenceChunks)! }
@@ -188,7 +238,11 @@ export function buildStructuredProfile(input: {
     return {
       ...base,
       contractNo: input.contractFields?.contractNo || '',
+      partyA: input.contractFields?.partyA || '',
+      partyB: input.contractFields?.partyB || '',
       amount: input.contractFields?.amount || '',
+      signDate: input.contractFields?.signDate || '',
+      effectiveDate: input.contractFields?.effectiveDate || '',
       paymentTerms: input.contractFields?.paymentTerms || '',
       duration: input.contractFields?.duration || '',
       fieldDetails,
@@ -230,6 +284,12 @@ export function buildStructuredProfile(input: {
       ...(createFieldDetail(input.resumeFields?.major, 0.8, 'rule', input.evidenceChunks)
         ? { major: createFieldDetail(input.resumeFields?.major, 0.8, 'rule', input.evidenceChunks)! }
         : {}),
+      ...(createFieldDetail(input.resumeFields?.expectedCity, 0.76, 'rule', input.evidenceChunks)
+        ? { expectedCity: createFieldDetail(input.resumeFields?.expectedCity, 0.76, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.expectedSalary, 0.74, 'rule', input.evidenceChunks)
+        ? { expectedSalary: createFieldDetail(input.resumeFields?.expectedSalary, 0.74, 'rule', input.evidenceChunks)! }
+        : {}),
       ...(createFieldDetail(input.resumeFields?.latestCompany, 0.84, 'rule', input.evidenceChunks)
         ? { latestCompany: createFieldDetail(input.resumeFields?.latestCompany, 0.84, 'rule', input.evidenceChunks)! }
         : {}),
@@ -258,6 +318,8 @@ export function buildStructuredProfile(input: {
       yearsOfExperience: input.resumeFields?.yearsOfExperience || '',
       education: input.resumeFields?.education || '',
       major: input.resumeFields?.major || '',
+      expectedCity: input.resumeFields?.expectedCity || '',
+      expectedSalary: input.resumeFields?.expectedSalary || '',
       latestCompany: input.resumeFields?.latestCompany || '',
       companies,
       skills: input.resumeFields?.skills || [],
@@ -448,23 +510,29 @@ export function deriveSchemaProfile(input: {
   orderFields?: ParsedDocument['orderFields'];
   resumeFields?: ResumeFields;
   evidenceChunks?: EvidenceChunk[];
+  libraryContext?: DocumentLibraryContext;
 }) {
-  const schemaType = inferSchemaType(
-    input.category,
-    input.bizCategory,
-    input.resumeFields,
-    input.topicTags,
-    input.title,
-    input.summary,
+  const { topicTags, profile } = mergeGovernedTopicTags(input.topicTags, input.libraryContext);
+  const schemaType = applyGovernedSchemaType(
+    inferSchemaType(
+      input.category,
+      input.bizCategory,
+      input.resumeFields,
+      topicTags,
+      input.title,
+      input.summary,
+    ),
+    profile?.fallbackSchemaType,
   );
 
   return {
+    topicTags,
     schemaType,
     resumeFields: input.resumeFields,
     structuredProfile: buildStructuredProfile({
       schemaType,
       title: input.title,
-      topicTags: input.topicTags,
+      topicTags,
       summary: input.summary,
       contractFields: input.contractFields,
       enterpriseGuidanceFields: input.enterpriseGuidanceFields,
@@ -488,10 +556,15 @@ export function refreshDerivedSchemaProfile(item: ParsedDocument): ParsedDocumen
     orderFields: item.orderFields,
     resumeFields: item.resumeFields,
     evidenceChunks: item.evidenceChunks,
+    libraryContext: {
+      keys: item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [],
+      labels: item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [],
+    },
   });
 
   return {
     ...item,
+    topicTags: derived.topicTags,
     resumeFields: derived.resumeFields,
     schemaType: derived.schemaType,
     structuredProfile: item.manualStructuredProfile && item.structuredProfile

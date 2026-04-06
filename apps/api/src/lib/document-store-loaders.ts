@@ -2,6 +2,8 @@ import { refreshDerivedSchemaProfile, type ParsedDocument } from './document-par
 import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
 import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
+import { loadDocumentLibraries } from './document-libraries.js';
+import { buildDocumentLibraryContext, type DocumentLibraryContext } from './document-extraction-governance.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 import {
   DEFAULT_SCAN_DIR,
@@ -116,12 +118,26 @@ export async function mergeParsedDocumentsForPaths(
   }
 
   const effectiveParseStage = options?.parseStage || 'detailed';
+  const libraries = await loadDocumentLibraries();
+  const libraryContextByPath = new Map<string, DocumentLibraryContext>();
+  for (const filePath of normalizedPaths) {
+    const cachedItem = cache.items.find((item) => item.path === filePath);
+    if (!cachedItem) continue;
+    const libraryContext = buildDocumentLibraryContext(
+      libraries,
+      cachedItem.confirmedGroups?.length ? cachedItem.confirmedGroups : cachedItem.groups || [],
+    );
+    if (libraryContext) {
+      libraryContextByPath.set(filePath, libraryContext);
+    }
+  }
   const reparsedItems = await parseDocumentFiles(
     normalizedPaths.filter((filePath) => files.includes(filePath)),
     activeScanRoots,
     {
       cloudEnhancement: options?.cloudEnhancement ?? false,
       parseStage: effectiveParseStage,
+      libraryContextByPath,
     },
   );
 

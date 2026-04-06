@@ -1,6 +1,7 @@
 import type { DocumentCategoryConfig } from './document-config.js';
 import type { DocumentLibrary } from './document-libraries.js';
 import { UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
+import { buildDocumentLibraryContext } from './document-extraction-governance.js';
 import { saveDocumentOverride } from './document-overrides.js';
 import type { ParsedDocument } from './document-parser.js';
 import { parseDocument } from './document-parser.js';
@@ -131,6 +132,7 @@ export async function ingestDocumentFiles(input: {
   metrics?: Partial<DocumentIngestMetrics>;
 }) {
   const preferredLibraryKeys = uniq(input.preferredLibraryKeys || []);
+  const libraryContext = buildDocumentLibraryContext(input.libraries, preferredLibraryKeys);
   const ingestItems: IngestPreviewItem[] = [];
   const parsedItems: ParsedDocument[] = [];
   const confirmedLibraryKeys = new Set<string>();
@@ -146,7 +148,10 @@ export async function ingestDocumentFiles(input: {
   for (const file of input.files) {
     let parsed: ParsedDocument | null = null;
     try {
-      parsed = await parseDocument(file.path, input.documentConfig, { stage: 'quick' });
+      parsed = await parseDocument(file.path, input.documentConfig, {
+        stage: 'quick',
+        libraryContext,
+      });
     } catch {
       parsed = null;
     }
