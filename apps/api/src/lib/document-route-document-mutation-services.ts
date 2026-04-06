@@ -45,13 +45,20 @@ function normalizeEvidenceChunks(value: unknown): EvidenceChunk[] {
     if (!text) return acc;
 
     const title = String((entry as { title?: unknown }).title ?? '').trim();
+    const sectionTitle = String((entry as { sectionTitle?: unknown }).sectionTitle ?? '').trim();
+    const regionHint = String((entry as { regionHint?: unknown }).regionHint ?? '').trim();
+    const pageValue = Number((entry as { page?: unknown }).page);
+    const page = Number.isFinite(pageValue) && pageValue >= 1 ? Math.trunc(pageValue) : undefined;
     const id = String((entry as { id?: unknown }).id ?? '').trim() || `manual-evidence-${index + 1}`;
     acc.push({
       id,
       order: acc.length + 1,
       text,
       charLength: text.length,
-      ...(title ? { title } : {}),
+      ...(page ? { page } : {}),
+      ...(sectionTitle ? { sectionTitle } : {}),
+      ...(title || sectionTitle ? { title: title || sectionTitle } : {}),
+      ...(regionHint ? { regionHint } : {}),
     });
     return acc;
   }, []);

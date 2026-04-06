@@ -48,6 +48,25 @@ export type ParsedDocument = {
     paymentTerms?: string;
     duration?: string;
   };
+  enterpriseGuidanceFields?: {
+    businessSystem?: string;
+    documentKind?: string;
+    applicableScope?: string;
+    operationEntry?: string;
+    approvalLevels?: string[];
+    policyFocus?: string[];
+    contacts?: string[];
+  };
+  orderFields?: {
+    period?: string;
+    platform?: string;
+    orderCount?: string;
+    netSales?: string;
+    grossMargin?: string;
+    topCategory?: string;
+    inventoryStatus?: string;
+    replenishmentAction?: string;
+  };
   retentionStatus?: 'structured-only';
   retainedAt?: string;
   originalDeletedAt?: string;
@@ -63,7 +82,7 @@ export type ParsedDocument = {
   manualSummary?: boolean;
   manualStructuredProfile?: boolean;
   manualEvidenceChunks?: boolean;
-  schemaType?: 'generic' | 'contract' | 'resume' | 'paper' | 'formula' | 'technical' | 'report';
+  schemaType?: 'generic' | 'contract' | 'resume' | 'paper' | 'formula' | 'technical' | 'report' | 'order';
   structuredProfile?: Record<string, unknown>;
 };
 
@@ -72,6 +91,9 @@ export type EvidenceChunk = {
   order: number;
   text: string;
   charLength: number;
+  page?: number;
+  sectionTitle?: string;
+  regionHint?: string;
   title?: string;
 };
 
@@ -259,7 +281,7 @@ function isStrictDoseCandidate(value: string) {
   return mantissa > 0 && mantissa <= 20 && exponent >= 6 && exponent <= 12;
 }
 
-function splitEvidenceChunks(text: string): EvidenceChunk[] {
+function splitEvidenceChunksLegacy(text: string): EvidenceChunk[] {
   const normalized = String(text || '').replace(/\r/g, '').trim();
   if (!normalized) return [];
 
@@ -317,6 +339,147 @@ function splitEvidenceChunks(text: string): EvidenceChunk[] {
   return chunks.slice(0, 12);
 }
 
+function inferSectionTitle(block: string) {
+  const lines = String(block || '')
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!lines.length) return undefined;
+
+  const [firstLine, secondLine = ''] = lines;
+  if (/^#{1,6}\s+/.test(firstLine)) {
+    return firstLine.replace(/^#{1,6}\s+/, '').trim() || undefined;
+  }
+
+  if (secondLine && /^[=-]{3,}$/.test(secondLine) && firstLine.length <= 80) {
+    return firstLine;
+  }
+
+  if (
+    /^(?:第[\d一二三四五六七八九十百零]+[章节部分条款]|(?:\d+|[一二三四五六七八九十]+)[.、．)）])\s*/.test(firstLine) &&
+    firstLine.length <= 80
+  ) {
+    return firstLine;
+  }
+
+  if (firstLine.length <= 40 && /[:：]$/.test(firstLine)) {
+    return firstLine.replace(/[:：]+$/, '').trim() || undefined;
+  }
+
+  return undefined;
+}
+
+function isHeadingOnlyBlock(block: string, sectionTitle: string | undefined) {
+  if (!sectionTitle) return false;
+  const normalized = String(block || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  if (normalized === sectionTitle) return true;
+  if (normalized === `# ${sectionTitle}` || normalized === `## ${sectionTitle}`) return true;
+  return normalized.length <= Math.max(sectionTitle.length + 10, 60) && !/[。.!?；;]/.test(normalized);
+}
+
+function slugifyRegionHint(value: string | undefined) {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return normalized || '';
+}
+
+function buildRegionHint(page: number, sectionTitle: string | undefined) {
+  const pageHint = `page-${page}`;
+  const sectionSlug = slugifyRegionHint(sectionTitle);
+  if (!sectionSlug) return `${pageHint}:body`;
+  return `${pageHint}:${sectionSlug}`;
+}
+
+function createEvidenceChunk(
+  chunks: EvidenceChunk[],
+  text: string,
+  page: number,
+  sectionTitle: string | undefined,
+) {
+  const normalizedText = String(text || '').trim();
+  if (normalizedText.length < 40 || chunks.length >= 12) return;
+
+  chunks.push({
+    id: `chunk-${chunks.length + 1}`,
+    order: chunks.length,
+    text: normalizedText,
+    charLength: normalizedText.length,
+    page,
+    ...(sectionTitle ? { sectionTitle, title: sectionTitle } : {}),
+    regionHint: buildRegionHint(page, sectionTitle),
+  });
+}
+
+function splitEvidenceChunks(text: string): EvidenceChunk[] {
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!normalized) return [];
+
+  const rawPages = normalized.includes('\f')
+    ? normalized.split(/\f+/).map((item) => item.trim()).filter(Boolean)
+    : [normalized];
+
+  const chunks: EvidenceChunk[] = [];
+  const maxChunkLength = 420;
+
+  for (const [pageIndex, rawPage] of rawPages.entries()) {
+    let currentSectionTitle: string | undefined;
+    const pageNumber = pageIndex + 1;
+    const rawBlocks = rawPage
+      .split(/\n{2,}/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const sourceBlocks = rawBlocks.length
+      ? rawBlocks
+      : rawPage
+          .split(/(?<=[銆傦紒锛?!?])\s+|\n+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+    for (const block of sourceBlocks) {
+      const detectedSectionTitle = inferSectionTitle(block);
+      if (detectedSectionTitle) {
+        currentSectionTitle = detectedSectionTitle;
+      }
+
+      if (isHeadingOnlyBlock(block, detectedSectionTitle)) {
+        continue;
+      }
+
+      const normalizedBlock = block.replace(/\s+/g, ' ').trim();
+      if (normalizedBlock.length <= maxChunkLength) {
+        createEvidenceChunk(chunks, normalizedBlock, pageNumber, currentSectionTitle);
+        continue;
+      }
+
+      let cursor = 0;
+      while (cursor < normalizedBlock.length && chunks.length < 12) {
+        let next = Math.min(cursor + maxChunkLength, normalizedBlock.length);
+        if (next < normalizedBlock.length) {
+          const window = normalizedBlock.slice(cursor, next);
+          const softCut = Math.max(
+            window.lastIndexOf('。'),
+            window.lastIndexOf('；'),
+            window.lastIndexOf('. '),
+            window.lastIndexOf('; '),
+          );
+          if (softCut >= 120) next = cursor + softCut + 1;
+        }
+
+        const piece = normalizedBlock.slice(cursor, next).trim();
+        createEvidenceChunk(chunks, piece, pageNumber, currentSectionTitle);
+        cursor = next;
+      }
+    }
+  }
+
+  return chunks.slice(0, 12);
+}
+
 function stripHtmlTags(text: string) {
   return text
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -331,6 +494,75 @@ function flattenSpreadsheetRows(rows: unknown[][]) {
     .join('\n');
 }
 
+async function buildPreprocessedImageVariants(filePath: string) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-ocr-image-'));
+  const pythonScript = [
+    'import json, os, sys',
+    'from pathlib import Path',
+    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
+    'try:',
+    '    from PIL import Image, ImageOps, ImageFilter',
+    'except Exception:',
+    '    print(json.dumps({"ok": False, "variants": []}, ensure_ascii=False))',
+    '    sys.exit(0)',
+    'source = Path(sys.argv[1])',
+    'target_dir = Path(sys.argv[2])',
+    'target_dir.mkdir(parents=True, exist_ok=True)',
+    'image = Image.open(source)',
+    'image = ImageOps.exif_transpose(image)',
+    'base = image.convert("L")',
+    'variants = []',
+    'def save_variant(name, variant):',
+    '    output = target_dir / name',
+    '    variant.save(output)',
+    '    variants.append(str(output))',
+    'width, height = base.size',
+    'scale = 2 if max(width, height) < 1800 else 1',
+    'if scale > 1:',
+    '    resized = base.resize((max(1, width * scale), max(1, height * scale)))',
+    'else:',
+    '    resized = base.copy()',
+    'save_variant("gray.png", resized)',
+    'enhanced = ImageOps.autocontrast(resized)',
+    'save_variant("gray-autocontrast.png", enhanced)',
+    'denoised = enhanced.filter(ImageFilter.MedianFilter(size=3))',
+    'save_variant("gray-denoised.png", denoised)',
+    'thresholded = denoised.point(lambda pixel: 255 if pixel > 170 else 0)',
+    'save_variant("bw-threshold.png", thresholded)',
+    'inverted = ImageOps.invert(thresholded)',
+    'save_variant("bw-inverted.png", inverted)',
+    'print(json.dumps({"ok": True, "variants": variants}, ensure_ascii=False))',
+  ].join('\n');
+
+  try {
+    for (const candidate of getPythonCommandCandidates()) {
+      try {
+        const { stdout } = await execFileAsync(candidate, ['-c', pythonScript, filePath, tempDir], {
+          maxBuffer: 8 * 1024 * 1024,
+          env: buildAugmentedEnv(),
+        });
+        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; variants?: string[] };
+        if (parsed.ok && Array.isArray(parsed.variants) && parsed.variants.length) {
+          return {
+            tempDir,
+            variants: parsed.variants.map((item) => String(item || '').trim()).filter(Boolean),
+          };
+        }
+      } catch {
+        // try next python interpreter
+      }
+    }
+  } catch {
+    // fall through to cleanup + empty result
+  }
+
+  await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+  return {
+    tempDir: '',
+    variants: [] as string[],
+  };
+}
+
 async function extractImageTextWithTesseract(filePath: string) {
   const env = buildAugmentedEnv();
   const candidates = [
@@ -342,24 +574,38 @@ async function extractImageTextWithTesseract(filePath: string) {
   const psmCandidates = ['6', '3'];
 
   return withTemporaryAsciiCopy(filePath, async (inputPath) => {
-    for (const command of candidates) {
-      for (const language of languageCandidates) {
-        for (const psm of psmCandidates) {
-          try {
-            const { stdout } = await execFileAsync(command, [inputPath, 'stdout', '--psm', psm, '-l', language], {
-              maxBuffer: 16 * 1024 * 1024,
-              env,
-            });
-            const text = normalizeText(String(stdout || ''));
-            if (text) return text;
-          } catch {
-            // Try the next OCR configuration.
+    const preprocessed = await buildPreprocessedImageVariants(inputPath);
+    const variantPaths = [inputPath, ...preprocessed.variants];
+    let bestText = '';
+
+    try {
+      for (const variantPath of variantPaths) {
+        for (const command of candidates) {
+          for (const language of languageCandidates) {
+            for (const psm of psmCandidates) {
+              try {
+                const { stdout } = await execFileAsync(command, [variantPath, 'stdout', '--psm', psm, '-l', language], {
+                  maxBuffer: 16 * 1024 * 1024,
+                  env,
+                });
+                const text = normalizeText(String(stdout || ''));
+                if (text.length > bestText.length) {
+                  bestText = text;
+                }
+              } catch {
+                // Try the next OCR configuration.
+              }
+            }
           }
         }
       }
+    } finally {
+      if (preprocessed.tempDir) {
+        await fs.rm(preprocessed.tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
 
-    return '';
+    return bestText;
   });
 }
 
@@ -481,7 +727,7 @@ async function extractPdfTextWithPyPdf(filePath: string) {
     '    sys.exit(0)',
     'try:',
     '    reader = PdfReader(sys.argv[1])',
-    '    text = "\\n".join((page.extract_text() or "") for page in reader.pages)',
+    '    text = "\\f".join((page.extract_text() or "") for page in reader.pages)',
     '    print(json.dumps({"ok": True, "text": text}, ensure_ascii=False))',
     'except Exception as exc:',
     '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
@@ -519,7 +765,7 @@ async function extractPdfInfoWithPyPdf(filePath: string) {
     '    sys.exit(0)',
     'try:',
     '    reader = PdfReader(sys.argv[1])',
-    '    text = "\\n".join((page.extract_text() or "") for page in reader.pages)',
+    '    text = "\\f".join((page.extract_text() or "") for page in reader.pages)',
     '    print(json.dumps({"ok": True, "text": text, "pageCount": len(reader.pages)}, ensure_ascii=False))',
     'except Exception as exc:',
     '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
@@ -633,7 +879,7 @@ async function extractPdfTextWithTesseractRender(filePath: string) {
     '        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="ignore")',
     '        if result.returncode == 0 and result.stdout.strip():',
     '            texts.append(result.stdout.strip())',
-    '    print(json.dumps({"ok": True, "text": "\\n\\n".join(texts)}, ensure_ascii=False))',
+    '    print(json.dumps({"ok": True, "text": "\\f".join(texts)}, ensure_ascii=False))',
     'except Exception as exc:',
     '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
     'finally:',
@@ -1089,6 +1335,9 @@ function scoreHints(evidence: string, hints: string[]) {
 export function detectCategory(filePath: string, text = '') {
   const evidence = buildEvidence(filePath, text);
   if (RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'resume';
+  if (includesAnyText(evidence, ['ioa', '审批', '操作指引', '应用技巧', '预算调整', 'q&a', 'faq'])) {
+    return 'technical';
+  }
   const scores = {
     contract: scoreHints(evidence, CATEGORY_HINTS.contract),
     technical: scoreHints(evidence, CATEGORY_HINTS.technical),
@@ -1400,6 +1649,11 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
 
   const normalized = text.toLowerCase();
   const tagRules: Array<[string, KeywordRule[]]> = [
+    ['企业规范', ['规范', '制度', '标准', '合规']],
+    ['审批流程', ['审批', '流程', '申请', '节点']],
+    ['预算调整', ['预算调整', '预算', '调整']],
+    ['系统操作', ['操作指引', '应用技巧', '登录', '入口', '路径']],
+    ['常见问题', [/\bq&a\b/i, /\bfaq\b/i, '常见问题']],
     ['设备接入', ['接入', /\bdevice\b/i, '协议']],
     ['边缘计算', ['边缘', /\bedge\b/i]],
     ['数据采集', ['采集', /\bcollector\b/i]],
@@ -1438,6 +1692,151 @@ function extractContractFields(text: string, category: string) {
   const paymentTerms = normalized.match(/(付款方式|付款条款)[:：]?\s*([^。；;]+)/)?.[2];
   const duration = normalized.match(/(期限|服务期|合同期)[:：]?\s*(.*?)(?:违约责任|备注|付款条款|$|[。；;])/ )?.[2]?.trim();
   return { contractNo, amount, paymentTerms, duration };
+}
+
+function collectNormalizedMatches(text: string, pattern: RegExp) {
+  return [...new Set(
+    [...String(text || '').matchAll(pattern)]
+      .map((match) => String(match[1] || match[0] || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean),
+  )];
+}
+
+function extractEnterpriseGuidanceFields(
+  text: string,
+  title: string,
+  topicTags: string[],
+  category: string,
+): ParsedDocument['enterpriseGuidanceFields'] | undefined {
+  if (category !== 'technical') return undefined;
+
+  const rawText = String(text || '');
+  const normalized = rawText.replace(/\s+/g, ' ').trim();
+  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
+  const looksLikeGuidance = includesAnyText(evidence, [
+    'ioa',
+    '流程',
+    '审批',
+    '指引',
+    '规范',
+    '制度',
+    'q&a',
+    'faq',
+    '预算调整',
+    '登录',
+    '应用技巧',
+  ]);
+  if (!looksLikeGuidance) return undefined;
+
+  const businessSystem = /(?:新中)?i\s*oa|ioa系统|ioa/i.test(evidence)
+    ? 'IOA'
+    : includesAnyText(evidence, ['erp']) ? 'ERP' : '';
+
+  const documentKind = /(?:q&a|faq|常见问题)/i.test(evidence)
+    ? 'faq'
+    : /预算调整/i.test(evidence)
+      ? 'budget-adjustment'
+      : /审批流程|审批/i.test(evidence)
+        ? 'approval-flow'
+        : /应用技巧|操作指引|登录|入口/i.test(evidence)
+          ? 'operation-guide'
+          : /规范|制度|标准/i.test(evidence)
+            ? 'policy-standard'
+            : 'guidance';
+
+  const applicableScope = normalized.match(/(?:适用范围|适用对象|适用于)[:：]?\s*([^。；;\n]{2,120})/i)?.[1]?.trim();
+  const operationEntry = normalized.match(/(?:操作路径|进入路径|入口|登录方式|系统登录|登录地址|访问地址)[:：]?\s*([^。；;\n]{2,160})/i)?.[1]?.trim();
+  const contacts = collectNormalizedMatches(
+    rawText,
+    /(?:支持联系方式|联系人|联系方式|技术支持|支持邮箱|咨询电话)[:：]?\s*([^\n。；;]{2,80})/gi,
+  ).slice(0, 4);
+  const approvalLevels = collectNormalizedMatches(
+    rawText,
+    /((?:一级|二级|三级|四级)?审批(?:节点|层级)?|部门负责人|分管领导|财务负责人|总经理|集团审批)/gi,
+  ).slice(0, 6);
+
+  const policyFocus = [...new Set([
+    /规范|制度|标准/i.test(evidence) ? '企业规范' : '',
+    /审批流程|审批/i.test(evidence) ? '审批流程' : '',
+    /预算调整/i.test(evidence) ? '预算调整' : '',
+    /登录|入口|应用技巧|操作指引/i.test(evidence) ? '系统操作' : '',
+    /q&a|faq|常见问题/i.test(evidence) ? '常见问题' : '',
+  ].filter(Boolean))];
+
+  const hasAnyValue = Boolean(
+    businessSystem
+    || documentKind
+    || applicableScope
+    || operationEntry
+    || approvalLevels.length
+    || policyFocus.length
+    || contacts.length
+  );
+
+  return hasAnyValue
+    ? {
+        businessSystem,
+        documentKind,
+        applicableScope,
+        operationEntry,
+        approvalLevels,
+        policyFocus,
+        contacts,
+      }
+    : undefined;
+}
+
+function extractOrderFields(
+  text: string,
+  title: string,
+  bizCategory: ParsedDocument['bizCategory'],
+  topicTags: string[],
+): ParsedDocument['orderFields'] | undefined {
+  if (bizCategory !== 'order') return undefined;
+
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
+  const platform = [
+    /(tmall|天猫)/i.test(evidence) ? 'tmall' : '',
+    /(jd|京东)/i.test(evidence) ? 'jd' : '',
+    /(douyin|抖音)/i.test(evidence) ? 'douyin' : '',
+    /(pinduoduo|拼多多)/i.test(evidence) ? 'pinduoduo' : '',
+    /(kuaishou|快手)/i.test(evidence) ? 'kuaishou' : '',
+    /(wechatmall|小程序)/i.test(evidence) ? 'wechatmall' : '',
+  ].find(Boolean) || '';
+
+  const period = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
+    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim();
+  const orderCount = normalized.match(/(?:订单量|订单数|order_count)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim();
+  const netSales = normalized.match(/(?:净销售额|销售额|gmv|net_sales)[:：]?\s*([￥¥]?[0-9,.万亿%]+)/i)?.[1]?.trim();
+  const grossMargin = normalized.match(/(?:毛利率|gross_margin)[:：]?\s*([0-9.]+%?)/i)?.[1]?.trim();
+  const topCategory = normalized.match(/(?:重点品类|top\s*category|品类|类目)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim();
+  const inventoryStatus = /(库存|days_of_cover|safety_stock)/i.test(evidence) ? 'inventory-related' : '';
+  const replenishmentAction = /(备货|补货|restock|replenishment)/i.test(evidence) ? 'replenishment-needed' : '';
+
+  const hasAnyValue = Boolean(
+    period
+    || platform
+    || orderCount
+    || netSales
+    || grossMargin
+    || topCategory
+    || inventoryStatus
+    || replenishmentAction
+  );
+
+  return hasAnyValue
+    ? {
+        period,
+        platform,
+        orderCount,
+        netSales,
+        grossMargin,
+        topCategory,
+        inventoryStatus,
+        replenishmentAction,
+      }
+    : undefined;
 }
 
 async function extractText(filePath: string, ext: string) {
@@ -1586,6 +1985,7 @@ export async function parseDocument(
           title: path.parse(name).name,
           topicTags,
           summary: unsupportedSummary,
+          evidenceChunks: [],
         }),
       };
     }
@@ -1631,6 +2031,7 @@ export async function parseDocument(
           title: path.parse(name).name,
           topicTags,
           summary: fallbackSummary,
+          evidenceChunks: [],
         }),
       };
     }
@@ -1643,6 +2044,8 @@ export async function parseDocument(
 
     if (parseStage === 'quick') {
       const resumeFields = extractResumeFields(text.slice(0, 2400), inferredTitle);
+      const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text.slice(0, 2400), inferredTitle, topicTags, category);
+      const orderFields = extractOrderFields(text.slice(0, 2400), inferredTitle, bizCategory, topicTags);
       const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
       return {
         path: filePath,
@@ -1662,6 +2065,8 @@ export async function parseDocument(
         claims: [],
         intentSlots: {},
         resumeFields,
+        enterpriseGuidanceFields,
+        orderFields,
         riskLevel: detectRiskLevel(normalizedText, category),
         topicTags,
         groups,
@@ -1676,7 +2081,10 @@ export async function parseDocument(
           title: inferredTitle,
           topicTags,
           summary,
+          enterpriseGuidanceFields,
+          orderFields,
           resumeFields,
+          evidenceChunks: [],
         }),
       };
     }
@@ -1685,6 +2093,8 @@ export async function parseDocument(
     const contractFields = extractContractFields(normalizedText, category);
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
     const resumeFields = extractResumeFields(text, inferredTitle, structured.entities, structured.claims);
+    const enterpriseGuidanceFields = extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category);
+    const orderFields = extractOrderFields(text, inferredTitle, bizCategory, topicTags);
     const schemaType = inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary);
 
     return {
@@ -1705,6 +2115,8 @@ export async function parseDocument(
       claims: structured.claims,
       intentSlots: structured.intentSlots,
       resumeFields,
+      enterpriseGuidanceFields,
+      orderFields,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
       groups,
@@ -1721,7 +2133,10 @@ export async function parseDocument(
         topicTags,
         summary,
         contractFields,
+        enterpriseGuidanceFields,
+        orderFields,
         resumeFields,
+        evidenceChunks,
       }),
     };
   } catch {
@@ -1765,6 +2180,7 @@ export async function parseDocument(
         title: path.parse(name).name,
         topicTags,
         summary: fallbackSummary,
+        evidenceChunks: [],
       }),
     };
   }

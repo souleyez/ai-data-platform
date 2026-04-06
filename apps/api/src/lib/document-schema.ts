@@ -1,4 +1,4 @@
-import type { ParsedDocument, ResumeFields } from './document-parser.js';
+import type { EvidenceChunk, ParsedDocument, ResumeFields } from './document-parser.js';
 
 export function includesAnyText(text: string, keywords: string[]) {
   const haystack = String(text || '').toLowerCase();
@@ -53,7 +53,8 @@ export function inferSchemaType(
     )
   );
   if (hasResumeHint || hasStrongResumeFields) return 'resume' as const;
-  if (bizCategory === 'order' || bizCategory === 'inventory') return 'report' as const;
+  if (bizCategory === 'order') return 'order' as const;
+  if (bizCategory === 'inventory') return 'report' as const;
   if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
   if (topicTags.includes('奶粉配方')) return 'formula' as const;
   if (
@@ -69,28 +70,128 @@ export function inferSchemaType(
   return 'generic' as const;
 }
 
+export type StructuredFieldSource = 'rule' | 'derived' | 'manual' | 'ocr';
+
+export type StructuredFieldDetail = {
+  value: unknown;
+  confidence: number;
+  source: StructuredFieldSource;
+  evidenceChunkId?: string;
+};
+
+function clampConfidence(value: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(1, Number(numeric.toFixed(2))));
+}
+
+function hasStructuredValue(value: unknown) {
+  if (Array.isArray(value)) return value.some((item) => String(item || '').trim());
+  return String(value ?? '').trim().length > 0;
+}
+
+function normalizeStructuredValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+  }
+  return String(value ?? '').trim();
+}
+
+function findEvidenceChunkId(evidenceChunks: EvidenceChunk[] | undefined, value: unknown) {
+  if (!Array.isArray(evidenceChunks) || !evidenceChunks.length || !hasStructuredValue(value)) {
+    return undefined;
+  }
+
+  const candidates = Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter((item) => item.length >= 2)
+    : [String(value || '').trim()].filter((item) => item.length >= 2);
+
+  for (const candidate of candidates) {
+    const matched = evidenceChunks.find((chunk) => String(chunk.text || '').includes(candidate));
+    if (matched?.id) return matched.id;
+  }
+
+  return undefined;
+}
+
+function createFieldDetail(
+  value: unknown,
+  confidence: number,
+  source: StructuredFieldSource,
+  evidenceChunks?: EvidenceChunk[],
+) {
+  if (!hasStructuredValue(value)) return null;
+  return {
+    value: normalizeStructuredValue(value),
+    confidence: clampConfidence(confidence),
+    source,
+    evidenceChunkId: findEvidenceChunkId(evidenceChunks, value),
+  } satisfies StructuredFieldDetail;
+}
+
+function buildCommonFieldDetails(input: {
+  title: string;
+  topicTags: string[];
+  summary: string;
+  evidenceChunks?: EvidenceChunk[];
+}) {
+  const details: Record<string, StructuredFieldDetail> = {};
+  const titleDetail = createFieldDetail(input.title, 0.98, 'rule', input.evidenceChunks);
+  const summaryDetail = createFieldDetail(input.summary, 0.82, 'derived', input.evidenceChunks);
+  const topicTagsDetail = createFieldDetail(input.topicTags, 0.76, 'rule', input.evidenceChunks);
+
+  if (titleDetail) details.title = titleDetail;
+  if (summaryDetail) details.summary = summaryDetail;
+  if (topicTagsDetail) details.topicTags = topicTagsDetail;
+
+  return details;
+}
+
 export function buildStructuredProfile(input: {
   schemaType: ParsedDocument['schemaType'];
   title: string;
   topicTags: string[];
   summary: string;
   contractFields?: ParsedDocument['contractFields'];
+  enterpriseGuidanceFields?: ParsedDocument['enterpriseGuidanceFields'];
+  orderFields?: ParsedDocument['orderFields'];
   resumeFields?: ResumeFields;
+  evidenceChunks?: EvidenceChunk[];
 }) {
   const evidence = `${input.title} ${input.summary} ${input.topicTags.join(' ')}`.toLowerCase();
   const base = {
     title: input.title,
     summary: input.summary,
     topicTags: input.topicTags.slice(0, 8),
+    fieldDetails: buildCommonFieldDetails(input),
   };
 
   if (input.schemaType === 'contract') {
+    const fieldDetails = {
+      ...base.fieldDetails,
+      ...(createFieldDetail(input.contractFields?.contractNo, 0.94, 'rule', input.evidenceChunks)
+        ? { contractNo: createFieldDetail(input.contractFields?.contractNo, 0.94, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.amount, 0.86, 'rule', input.evidenceChunks)
+        ? { amount: createFieldDetail(input.contractFields?.amount, 0.86, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.paymentTerms, 0.78, 'rule', input.evidenceChunks)
+        ? { paymentTerms: createFieldDetail(input.contractFields?.paymentTerms, 0.78, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.contractFields?.duration, 0.76, 'rule', input.evidenceChunks)
+        ? { duration: createFieldDetail(input.contractFields?.duration, 0.76, 'rule', input.evidenceChunks)! }
+        : {}),
+    };
+
     return {
       ...base,
       contractNo: input.contractFields?.contractNo || '',
       amount: input.contractFields?.amount || '',
       paymentTerms: input.contractFields?.paymentTerms || '',
       duration: input.contractFields?.duration || '',
+      fieldDetails,
     };
   }
 
@@ -109,6 +210,45 @@ export function buildStructuredProfile(input: {
       : input.resumeFields?.latestCompany
         ? [input.resumeFields.latestCompany]
         : [];
+    const fieldDetails = {
+      ...base.fieldDetails,
+      ...(createFieldDetail(input.resumeFields?.candidateName, isLikelyResumePersonName(String(input.resumeFields?.candidateName || '')) ? 0.9 : 0.68, 'rule', input.evidenceChunks)
+        ? { candidateName: createFieldDetail(input.resumeFields?.candidateName, isLikelyResumePersonName(String(input.resumeFields?.candidateName || '')) ? 0.9 : 0.68, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.targetRole, 0.82, 'rule', input.evidenceChunks)
+        ? { targetRole: createFieldDetail(input.resumeFields?.targetRole, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.currentRole, 0.82, 'rule', input.evidenceChunks)
+        ? { currentRole: createFieldDetail(input.resumeFields?.currentRole, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.yearsOfExperience, 0.78, 'rule', input.evidenceChunks)
+        ? { yearsOfExperience: createFieldDetail(input.resumeFields?.yearsOfExperience, 0.78, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.education, 0.84, 'rule', input.evidenceChunks)
+        ? { education: createFieldDetail(input.resumeFields?.education, 0.84, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.major, 0.8, 'rule', input.evidenceChunks)
+        ? { major: createFieldDetail(input.resumeFields?.major, 0.8, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.latestCompany, 0.84, 'rule', input.evidenceChunks)
+        ? { latestCompany: createFieldDetail(input.resumeFields?.latestCompany, 0.84, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(companies, 0.76, 'derived', input.evidenceChunks)
+        ? { companies: createFieldDetail(companies, 0.76, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.resumeFields?.skills || [], 0.74, 'derived', input.evidenceChunks)
+        ? { skills: createFieldDetail(input.resumeFields?.skills || [], 0.74, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(highlights, 0.68, 'derived', input.evidenceChunks)
+        ? { highlights: createFieldDetail(highlights, 0.68, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(fallbackProjects, 0.66, 'derived', input.evidenceChunks)
+        ? { projectHighlights: createFieldDetail(fallbackProjects, 0.66, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(fallbackItProjects, 0.64, 'derived', input.evidenceChunks)
+        ? { itProjectHighlights: createFieldDetail(fallbackItProjects, 0.64, 'derived', input.evidenceChunks)! }
+        : {}),
+    };
 
     return {
       ...base,
@@ -124,6 +264,7 @@ export function buildStructuredProfile(input: {
       highlights,
       projectHighlights: fallbackProjects,
       itProjectHighlights: fallbackItProjects,
+      fieldDetails,
     };
   }
 
@@ -144,10 +285,86 @@ export function buildStructuredProfile(input: {
   }
 
   if (input.schemaType === 'technical') {
+    const fieldDetails = {
+      ...base.fieldDetails,
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.businessSystem, 0.88, 'rule', input.evidenceChunks)
+        ? { businessSystem: createFieldDetail(input.enterpriseGuidanceFields?.businessSystem, 0.88, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.documentKind, 0.84, 'rule', input.evidenceChunks)
+        ? { documentKind: createFieldDetail(input.enterpriseGuidanceFields?.documentKind, 0.84, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.applicableScope, 0.8, 'rule', input.evidenceChunks)
+        ? { applicableScope: createFieldDetail(input.enterpriseGuidanceFields?.applicableScope, 0.8, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.operationEntry, 0.82, 'rule', input.evidenceChunks)
+        ? { operationEntry: createFieldDetail(input.enterpriseGuidanceFields?.operationEntry, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.approvalLevels || [], 0.76, 'derived', input.evidenceChunks)
+        ? { approvalLevels: createFieldDetail(input.enterpriseGuidanceFields?.approvalLevels || [], 0.76, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.policyFocus || [], 0.74, 'derived', input.evidenceChunks)
+        ? { policyFocus: createFieldDetail(input.enterpriseGuidanceFields?.policyFocus || [], 0.74, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.enterpriseGuidanceFields?.contacts || [], 0.72, 'rule', input.evidenceChunks)
+        ? { contacts: createFieldDetail(input.enterpriseGuidanceFields?.contacts || [], 0.72, 'rule', input.evidenceChunks)! }
+        : {}),
+    };
     return {
       ...base,
       domain: 'technical',
       focus: input.topicTags.slice(0, 4),
+      businessSystem: input.enterpriseGuidanceFields?.businessSystem || '',
+      documentKind: input.enterpriseGuidanceFields?.documentKind || '',
+      applicableScope: input.enterpriseGuidanceFields?.applicableScope || '',
+      operationEntry: input.enterpriseGuidanceFields?.operationEntry || '',
+      approvalLevels: input.enterpriseGuidanceFields?.approvalLevels || [],
+      policyFocus: input.enterpriseGuidanceFields?.policyFocus || [],
+      contacts: input.enterpriseGuidanceFields?.contacts || [],
+      fieldDetails,
+    };
+  }
+
+  if (input.schemaType === 'order') {
+    const fieldDetails = {
+      ...base.fieldDetails,
+      ...(createFieldDetail(input.orderFields?.period, 0.8, 'rule', input.evidenceChunks)
+        ? { period: createFieldDetail(input.orderFields?.period, 0.8, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.platform, 0.88, 'rule', input.evidenceChunks)
+        ? { platform: createFieldDetail(input.orderFields?.platform, 0.88, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.orderCount, 0.82, 'rule', input.evidenceChunks)
+        ? { orderCount: createFieldDetail(input.orderFields?.orderCount, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.netSales, 0.82, 'rule', input.evidenceChunks)
+        ? { netSales: createFieldDetail(input.orderFields?.netSales, 0.82, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.grossMargin, 0.78, 'rule', input.evidenceChunks)
+        ? { grossMargin: createFieldDetail(input.orderFields?.grossMargin, 0.78, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.topCategory, 0.74, 'rule', input.evidenceChunks)
+        ? { topCategory: createFieldDetail(input.orderFields?.topCategory, 0.74, 'rule', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.inventoryStatus, 0.68, 'derived', input.evidenceChunks)
+        ? { inventoryStatus: createFieldDetail(input.orderFields?.inventoryStatus, 0.68, 'derived', input.evidenceChunks)! }
+        : {}),
+      ...(createFieldDetail(input.orderFields?.replenishmentAction, 0.68, 'derived', input.evidenceChunks)
+        ? { replenishmentAction: createFieldDetail(input.orderFields?.replenishmentAction, 0.68, 'derived', input.evidenceChunks)! }
+        : {}),
+    };
+    return {
+      ...base,
+      domain: 'order',
+      period: input.orderFields?.period || '',
+      platform: input.orderFields?.platform || '',
+      orderCount: input.orderFields?.orderCount || '',
+      netSales: input.orderFields?.netSales || '',
+      grossMargin: input.orderFields?.grossMargin || '',
+      topCategory: input.orderFields?.topCategory || '',
+      inventoryStatus: input.orderFields?.inventoryStatus || '',
+      replenishmentAction: input.orderFields?.replenishmentAction || '',
+      focus: input.topicTags.slice(0, 4),
+      fieldDetails,
     };
   }
 
@@ -227,7 +444,10 @@ export function deriveSchemaProfile(input: {
   topicTags: string[];
   summary: string;
   contractFields?: ParsedDocument['contractFields'];
+  enterpriseGuidanceFields?: ParsedDocument['enterpriseGuidanceFields'];
+  orderFields?: ParsedDocument['orderFields'];
   resumeFields?: ResumeFields;
+  evidenceChunks?: EvidenceChunk[];
 }) {
   const schemaType = inferSchemaType(
     input.category,
@@ -247,7 +467,10 @@ export function deriveSchemaProfile(input: {
       topicTags: input.topicTags,
       summary: input.summary,
       contractFields: input.contractFields,
+      enterpriseGuidanceFields: input.enterpriseGuidanceFields,
+      orderFields: input.orderFields,
       resumeFields: input.resumeFields,
+      evidenceChunks: input.evidenceChunks,
     }),
   };
 }
@@ -261,7 +484,10 @@ export function refreshDerivedSchemaProfile(item: ParsedDocument): ParsedDocumen
     topicTags: item.topicTags || [],
     summary: item.summary || '',
     contractFields: item.contractFields,
+    enterpriseGuidanceFields: item.enterpriseGuidanceFields,
+    orderFields: item.orderFields,
     resumeFields: item.resumeFields,
+    evidenceChunks: item.evidenceChunks,
   });
 
   return {

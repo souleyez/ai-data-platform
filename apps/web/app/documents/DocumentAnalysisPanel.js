@@ -34,6 +34,36 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function formatFieldValue(value) {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item || '').trim()).filter(Boolean);
+    return items.length ? items.join(' / ') : '-';
+  }
+  const text = String(value ?? '').trim();
+  return text || '-';
+}
+
+function extractFieldDetails(profile) {
+  const details = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.fieldDetails
+    : null;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return [];
+
+  return Object.entries(details)
+    .map(([key, value]) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+      return {
+        key,
+        value: value.value,
+        confidence: typeof value.confidence === 'number' ? value.confidence : null,
+        source: String(value.source || '').trim(),
+        evidenceChunkId: String(value.evidenceChunkId || '').trim(),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.key.localeCompare(right.key, 'zh-CN'));
+}
+
 export default function DocumentAnalysisPanel({ item: initialItem }) {
   const [item, setItem] = useState(initialItem);
   const [editing, setEditing] = useState(false);
@@ -45,12 +75,17 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
   const [evidenceDraft, setEvidenceDraft] = useState(safeJsonStringify(initialItem?.evidenceChunks || []));
 
   const evidenceCount = Array.isArray(item?.evidenceChunks) ? item.evidenceChunks.length : 0;
+  const fieldDetails = useMemo(
+    () => extractFieldDetails(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
   const detailMeta = useMemo(() => ([
     { label: '深度解析状态', value: item?.detailParseStatus || '-' },
     { label: '最近解析时间', value: formatDateTime(item?.detailParsedAt) },
     { label: '手工编辑时间', value: formatDateTime(item?.analysisEditedAt) },
     { label: '证据块数量', value: String(evidenceCount) },
-  ]), [evidenceCount, item?.analysisEditedAt, item?.detailParseStatus, item?.detailParsedAt]);
+    { label: '字段元数据数量', value: String(fieldDetails.length) },
+  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.detailParseStatus, item?.detailParsedAt]);
 
   function handleStartEdit() {
     setSummaryDraft(String(item?.summary || ''));
@@ -146,6 +181,35 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
           </section>
 
           <section>
+            <h4 style={{ marginBottom: 8 }}>字段置信度与来源</h4>
+            {fieldDetails.length ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {fieldDetails.map((entry) => (
+                  <div key={entry.key} className="bot-summary-card">
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                        <strong>{entry.key}</strong>
+                        <span className="source-chip">
+                          置信度：{entry.confidence == null ? '-' : `${Math.round(entry.confidence * 100)}%`}
+                        </span>
+                      </div>
+                      <div className="preview-meta-line">{formatFieldValue(entry.value)}</div>
+                      <div className="message-refs">
+                        <span className="source-chip">来源：{entry.source || '-'}</span>
+                        {entry.evidenceChunkId ? (
+                          <span className="source-chip">证据块：{entry.evidenceChunkId}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 中补充。</div>
+            )}
+          </section>
+
+          <section>
             <h4 style={{ marginBottom: 8 }}>结构化结果</h4>
             <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
               {safeJsonStringify(item?.structuredProfile || {})}
@@ -175,7 +239,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
             <span>结构化结果 JSON</span>
             <textarea
               className="chat-constraints-input"
-              rows={14}
+              rows={16}
               value={structuredDraft}
               onChange={(event) => setStructuredDraft(event.target.value)}
               spellCheck={false}
@@ -186,7 +250,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
             <span>证据块 JSON</span>
             <textarea
               className="chat-constraints-input"
-              rows={14}
+              rows={16}
               value={evidenceDraft}
               onChange={(event) => setEvidenceDraft(event.target.value)}
               spellCheck={false}
