@@ -202,6 +202,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       label?: string;
       description?: string;
       permissionLevel?: number;
+      knowledgePagesEnabled?: boolean;
+      knowledgePagesMode?: 'none' | 'overview' | 'topics';
       extractionFieldSet?: string;
       extractionFallbackSchemaType?: string;
       extractionPreferredFieldKeys?: string[];
@@ -214,6 +216,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         label: body.label,
         description: body.description,
         permissionLevel: body.permissionLevel,
+        knowledgePagesEnabled: body.knowledgePagesEnabled,
+        knowledgePagesMode: body.knowledgePagesMode,
         extractionFieldSet: body.extractionFieldSet,
         extractionFallbackSchemaType: body.extractionFallbackSchemaType,
         extractionPreferredFieldKeys: body.extractionPreferredFieldKeys,

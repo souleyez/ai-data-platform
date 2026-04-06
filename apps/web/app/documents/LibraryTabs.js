@@ -16,6 +16,12 @@ const EXTRACTION_SCHEMA_OPTIONS = [
   { value: 'order', label: 'order' },
 ];
 
+const KNOWLEDGE_PAGE_MODE_OPTIONS = [
+  { value: 'none', label: '关闭' },
+  { value: 'overview', label: '概览' },
+  { value: 'topics', label: '专题' },
+];
+
 const EXTRACTION_FIELD_KEY_OPTIONS = {
   contract: ['contractNo', 'partyA', 'partyB', 'amount', 'signDate', 'effectiveDate', 'paymentTerms', 'duration'],
   resume: ['candidateName', 'targetRole', 'currentRole', 'yearsOfExperience', 'education', 'major', 'expectedCity', 'expectedSalary', 'latestCompany', 'companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'],
@@ -211,6 +217,38 @@ export default function LibraryTabs({
                 })}
               >
                 {EXTRACTION_FIELD_SET_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="bot-field">
+              <span>知识页</span>
+              <label className="bot-channel-chip active" style={{ width: 'fit-content' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(activeLibrarySettingsDraft.knowledgePagesEnabled)}
+                  onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                    knowledgePagesEnabled: event.target.checked,
+                    knowledgePagesMode: event.target.checked
+                      ? (String(activeLibrarySettingsDraft.knowledgePagesMode || '') === 'topics' ? 'topics' : 'overview')
+                      : 'none',
+                  })}
+                />
+                <span>启用库级知识页</span>
+              </label>
+            </label>
+
+            <label className="bot-field">
+              <span>知识页模式</span>
+              <select
+                value={String(activeLibrarySettingsDraft.knowledgePagesMode || 'none')}
+                onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                  knowledgePagesMode: event.target.value,
+                  knowledgePagesEnabled: event.target.value !== 'none',
+                })}
+              >
+                {KNOWLEDGE_PAGE_MODE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>

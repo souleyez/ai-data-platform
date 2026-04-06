@@ -67,6 +67,12 @@ function buildLibrarySettingsDraft(library, draft) {
       draft?.permissionLevel ?? library?.permissionLevel ?? 0,
       0,
     ),
+    knowledgePagesEnabled: draft?.knowledgePagesEnabled === undefined
+      ? Boolean(library?.knowledgePagesEnabled)
+      : Boolean(draft.knowledgePagesEnabled),
+    knowledgePagesMode: typeof draft?.knowledgePagesMode === 'string'
+      ? draft.knowledgePagesMode
+      : String(library?.knowledgePagesMode || (library?.knowledgePagesEnabled ? 'overview' : 'none')),
     extractionFieldSet: typeof draft?.extractionFieldSet === 'string'
       ? draft.extractionFieldSet
       : String(library?.extractionSettings?.fieldSet || 'auto'),
@@ -259,6 +265,8 @@ export default function DocumentsPage() {
         label,
         description: String(draft.description || '').trim(),
         permissionLevel: normalizePermissionLevel(draft.permissionLevel, 0),
+        knowledgePagesEnabled: Boolean(draft.knowledgePagesEnabled),
+        knowledgePagesMode: String(draft.knowledgePagesMode || 'none'),
         extractionFieldSet: String(draft.extractionFieldSet || 'auto'),
         extractionFallbackSchemaType: String(draft.extractionFallbackSchemaType || 'auto'),
         extractionPreferredFieldKeys: Array.isArray(draft.extractionPreferredFieldKeys)

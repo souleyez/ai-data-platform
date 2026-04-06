@@ -8,6 +8,7 @@ import {
   deleteLibraryDocumentExtractionSettings,
   updateLibraryDocumentExtractionSettings,
 } from './document-extraction-governance.js';
+import { syncLibraryKnowledgePagesForLibraryKeys } from './library-knowledge-pages.js';
 import {
   loadDocumentCategoryConfig,
   saveDocumentCategoryConfig,
@@ -53,6 +54,8 @@ export async function updateManagedDocumentLibrary(
     label?: string;
     description?: string;
     permissionLevel?: number;
+    knowledgePagesEnabled?: boolean;
+    knowledgePagesMode?: 'none' | 'overview' | 'topics';
     extractionFieldSet?: string;
     extractionFallbackSchemaType?: string;
     extractionPreferredFieldKeys?: string[];
@@ -70,6 +73,7 @@ export async function updateManagedDocumentLibrary(
     requiredFieldKeys: input.extractionRequiredFieldKeys,
     fieldAliases: input.extractionFieldAliases,
   });
+  await syncLibraryKnowledgePagesForLibraryKeys([library.key], 'library-settings-update').catch(() => undefined);
   const libraries = await loadDocumentLibraries();
   return { library, libraries };
 }

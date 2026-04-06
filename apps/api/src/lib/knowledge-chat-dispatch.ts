@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { buildKnowledgeContext } from './knowledge-evidence.js';
+import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
 import {
   prepareKnowledgeSupply,
@@ -130,9 +131,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
       },
     )
     : '';
+  const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(supply.libraries);
   const fullContextBlocks = [
     ...systemContextBlocks,
     buildOpenClawMemorySelectionContextBlock(memorySelection),
+    libraryKnowledgePagesContext,
     knowledgeContext,
   ].filter(Boolean);
   const references = buildAnswerReferences(supply.effectiveRetrieval.documents);

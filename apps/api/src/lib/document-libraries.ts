@@ -11,6 +11,8 @@ export type DocumentLibrary = {
   label: string;
   description?: string;
   permissionLevel: number;
+  knowledgePagesEnabled?: boolean;
+  knowledgePagesMode?: 'none' | 'overview' | 'topics';
   createdAt: string;
   isDefault?: boolean;
   sourceCategoryKey?: BizCategory;
@@ -52,12 +54,26 @@ function normalizePermissionLevel(value: unknown) {
   return Math.max(0, Math.floor(numeric));
 }
 
+function normalizeKnowledgePagesMode(value: unknown, enabled?: unknown) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const enabledFlag = enabled === undefined ? undefined : Boolean(enabled);
+
+  if (enabledFlag === false) return 'none' as const;
+  if (normalized === 'overview' || normalized === 'topics') return normalized;
+  if (normalized === 'none') return 'none' as const;
+  if (enabledFlag === true) return 'overview' as const;
+  return 'none' as const;
+}
+
 function normalizeLibrary(input: Partial<DocumentLibrary> & Pick<DocumentLibrary, 'key' | 'label' | 'createdAt'>) {
+  const knowledgePagesMode = normalizeKnowledgePagesMode(input.knowledgePagesMode, input.knowledgePagesEnabled);
   return {
     key: String(input.key || '').trim(),
     label: String(input.label || '').trim(),
     description: String(input.description || '').trim() || undefined,
     permissionLevel: normalizePermissionLevel(input.permissionLevel),
+    knowledgePagesEnabled: knowledgePagesMode !== 'none',
+    knowledgePagesMode,
     createdAt: String(input.createdAt || '').trim() || new Date().toISOString(),
     isDefault: input.isDefault === true,
     sourceCategoryKey: input.sourceCategoryKey,
@@ -72,6 +88,8 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
       items: items.map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => ({
         ...rest,
         permissionLevel: normalizePermissionLevel(rest.permissionLevel),
+        knowledgePagesEnabled: Boolean(rest.knowledgePagesEnabled),
+        knowledgePagesMode: normalizeKnowledgePagesMode(rest.knowledgePagesMode, rest.knowledgePagesEnabled),
       })),
     }, null, 2),
     'utf8',
@@ -168,6 +186,8 @@ export async function createDocumentLibrary(input: { name: string; description?:
     label,
     description: String(input.description || '').trim() || undefined,
     permissionLevel: normalizePermissionLevel(input.permissionLevel),
+    knowledgePagesEnabled: false,
+    knowledgePagesMode: 'none',
     createdAt: new Date().toISOString(),
   };
 
@@ -178,7 +198,13 @@ export async function createDocumentLibrary(input: { name: string; description?:
 
 export async function updateDocumentLibrary(
   key: string,
-  input: { label?: string; description?: string; permissionLevel?: number },
+  input: {
+    label?: string;
+    description?: string;
+    permissionLevel?: number;
+    knowledgePagesEnabled?: boolean;
+    knowledgePagesMode?: 'none' | 'overview' | 'topics';
+  },
 ) {
   const current = await loadDocumentLibraries();
   const target = current.find((item) => item.key === key);
@@ -202,6 +228,8 @@ export async function updateDocumentLibrary(
         label,
         description: input.description ?? item.description,
         permissionLevel: input.permissionLevel ?? item.permissionLevel,
+        knowledgePagesEnabled: input.knowledgePagesEnabled ?? item.knowledgePagesEnabled,
+        knowledgePagesMode: input.knowledgePagesMode ?? item.knowledgePagesMode,
       })
     : item));
 

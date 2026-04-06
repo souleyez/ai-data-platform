@@ -1,4 +1,5 @@
 import { buildKnowledgeContext } from './knowledge-evidence.js';
+import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import type { RetrievalResult } from './document-retrieval.js';
 import {
   buildKnowledgeFallbackOutput,
@@ -630,6 +631,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : '';
   const memorySelectionContext = buildOpenClawMemorySelectionContextBlock(memorySelection);
+  const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(resolvedLibraries);
 
   let output: ChatOutput | null = null;
   let executionStage = 'composer-model';
@@ -744,6 +746,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           reportPlanContext,
           resumeDisplayProfileContext,
           templateCatalogContext,
+          libraryKnowledgePagesContext,
           buildKnowledgeContext(requestText, resolvedLibraries, effectiveRetrieval, {
             timeRange: input.timeRange,
             contentFocus: input.contentFocus,
@@ -898,6 +901,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
         'references/output-contract.md',
       ])
       : '';
+    const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(libraries);
     const cloud = await runOpenClawChat({
       prompt: requestText,
       sessionUser: input.sessionUser,
@@ -916,6 +920,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
         }),
         buildOpenClawMemorySelectionContextBlock(memorySelection),
         buildKnowledgeCatalogSelectionDetailBlock(memorySelection),
+        libraryKnowledgePagesContext,
         effectiveRetrieval?.documents.length
           ? buildKnowledgeContext(requestText, libraries, effectiveRetrieval, {
             timeRange: input.timeRange,
