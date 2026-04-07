@@ -18,6 +18,7 @@ import {
   upsertWebCaptureTask,
   type WebCaptureCrawlMode,
 } from './web-capture.js';
+import { ingestWebCaptureTaskDocument } from './datasource-web-ingest.js';
 import { buildDatabaseExecutionPlan, buildDatabaseRunSummaryItems } from './datasource-database-connector.js';
 import { getDatasourceCredentialSecret } from './datasource-credentials.js';
 import { buildErpExecutionPlan, buildErpRunSummaryItems } from './datasource-erp-connector.js';
@@ -64,6 +65,26 @@ function getDefinitionCrawlMode(definition: DatasourceDefinition): WebCaptureCra
   const configured = String(definition.config?.crawlMode || '').trim().toLowerCase();
   if (configured === 'listing-detail') return 'listing-detail';
   return definition.kind === 'web_discovery' ? 'listing-detail' : 'single-page';
+}
+
+function buildWebCaptureRunSummary(baseSummary: string, metrics?: {
+  total?: number;
+  successCount?: number;
+  failedCount?: number;
+  groupedCount?: number;
+  unsupportedCount?: number;
+  parseFailedCount?: number;
+  invalidCount?: number;
+}) {
+  const fragments = [
+    Number(metrics?.total || 0) > 0 ? `入库 ${Number(metrics?.successCount || 0)}/${Number(metrics?.total || 0)}` : '',
+    Number(metrics?.groupedCount || 0) > 0 ? `自动分组 ${Number(metrics?.groupedCount || 0)}` : '',
+    Number(metrics?.unsupportedCount || 0) > 0 ? `不支持 ${Number(metrics?.unsupportedCount || 0)}` : '',
+    Number(metrics?.parseFailedCount || 0) > 0 ? `解析失败 ${Number(metrics?.parseFailedCount || 0)}` : '',
+    Number(metrics?.invalidCount || 0) > 0 ? `无效路径 ${Number(metrics?.invalidCount || 0)}` : '',
+  ].filter(Boolean);
+
+  return [String(baseSummary || '').trim(), fragments.join(' | ')].filter(Boolean).join(' ');
 }
 
 async function findLinkedWebTask(definition: DatasourceDefinition) {
@@ -279,10 +300,47 @@ export async function runDatasourceDefinition(id: string) {
     notes: definition.notes,
   });
 
+  const webIngest = task.lastStatus === 'success'
+    ? await ingestWebCaptureTaskDocument({
+        task,
+        targetLibraries: syncedDefinition.targetLibraries,
+      })
+    : null;
   const run = buildDatasourceRunFromWebCaptureTask(task);
   if (run) {
     run.datasourceId = syncedDefinition.id;
-    run.libraryKeys = syncedDefinition.targetLibraries.map((item) => item.key);
+    run.documentIds = webIngest?.ingestResult.parsedItems.map((item) => item.path) || [];
+    run.ingestedCount = webIngest?.ingestResult.summary.successCount || 0;
+    run.failedCount = webIngest
+      ? webIngest.ingestResult.summary.failedCount
+      : (task.lastStatus === 'error' ? 1 : 0);
+    run.unsupportedCount = webIngest?.ingestResult.metrics.unsupportedCount || 0;
+    run.groupedCount = webIngest?.ingestResult.metrics.groupedCount || 0;
+    run.ungroupedCount = webIngest?.ingestResult.metrics.ungroupedCount || 0;
+    run.libraryKeys = webIngest?.ingestResult.confirmedLibraryKeys?.length
+      ? webIngest.ingestResult.confirmedLibraryKeys
+      : syncedDefinition.targetLibraries.map((item) => item.key);
+    run.summary = buildWebCaptureRunSummary(task.lastSummary || '', webIngest ? {
+      total: webIngest.ingestResult.summary.total,
+      successCount: webIngest.ingestResult.summary.successCount,
+      failedCount: webIngest.ingestResult.summary.failedCount,
+      groupedCount: webIngest.ingestResult.metrics.groupedCount,
+      unsupportedCount: webIngest.ingestResult.metrics.unsupportedCount,
+      parseFailedCount: webIngest.ingestResult.metrics.parseFailedCount,
+      invalidCount: webIngest.ingestResult.metrics.invalidCount,
+    } : undefined);
+    if (webIngest) {
+      if (webIngest.ingestResult.summary.successCount && webIngest.ingestResult.summary.failedCount) {
+        run.status = 'partial';
+      } else if (!webIngest.ingestResult.summary.successCount) {
+        run.status = 'failed';
+      }
+      run.errorMessage = webIngest.ingestResult.summary.failedCount
+        ? 'captured file was saved but did not fully enter the knowledge base'
+        : '';
+    } else if (task.lastStatus === 'error') {
+      run.errorMessage = task.lastSummary || 'capture failed';
+    }
     await appendDatasourceRun(run);
   }
 

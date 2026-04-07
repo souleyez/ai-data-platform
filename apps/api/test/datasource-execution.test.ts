@@ -25,6 +25,9 @@ const datasourceService = await importFresh<typeof import('../src/lib/datasource
 const documentParser = await importFresh<typeof import('../src/lib/document-parser.js')>(
   '../src/lib/document-parser.js',
 );
+const documentCacheRepository = await importFresh<typeof import('../src/lib/document-cache-repository.js')>(
+  '../src/lib/document-cache-repository.js',
+);
 
 async function startHtmlServer(routes: Record<string, string | { body: string | Buffer; contentType?: string; headers?: Record<string, string> }>) {
   const server = http.createServer((request, response) => {
@@ -193,7 +196,7 @@ test('erp datasource run should emit readonly module summaries', async () => {
 });
 
 test('web_public datasource run should create a successful run with an ingested document', async () => {
-  const html = encodeURIComponent('<html><head><title>医疗设备招标公告</title></head><body><article><h1>医疗设备招标公告</h1><p>本次招标涉及影像设备与配套维保服务。</p></article></body></html>');
+  const html = encodeURIComponent('<html><head><title>医疗设备招标公告</title></head><body><header><p>广州采购平台</p><p>第1页 共1页</p></header><article><h1>医疗设备招标公告</h1><p>本次招标涉及影像设备与配套维保服务。</p><p>要求供应商提供安装、培训和验收支持。</p></article><footer><p>广州采购平台</p><p>第1页 共1页</p></footer></body></html>');
 
   await datasourceDefinitions.upsertDatasourceDefinition({
     id: 'ds-web-public',
@@ -224,7 +227,17 @@ test('web_public datasource run should create a successful run with an ingested 
 
   const documentPath = runs[0]?.documentIds[0] || '';
   const stat = await fs.stat(documentPath);
+  const markdown = await fs.readFile(documentPath, 'utf8');
+  const captureSummarySection = markdown.split('## 采集摘要')[1] || '';
+  const pageBodySection = markdown.split('## 页面正文')[1] || '';
+  const cache = await documentCacheRepository.readDocumentCache();
   assert.ok(stat.isFile());
+  assert.match(documentPath, /\.md$/i);
+  assert.match(markdown, /## 采集元数据/);
+  assert.match(markdown, /## 页面正文/);
+  assert.doesNotMatch(captureSummarySection, /第1页 共1页/);
+  assert.doesNotMatch(pageBodySection, /第1页 共1页/);
+  assert.ok(cache?.items.some((item) => item.path === documentPath));
 
   const items = datasourceService.buildDatasourceRunReadModels({
     runs,
@@ -275,12 +288,20 @@ test('web_public datasource run should preserve downloadable xlsx captures and k
     const result = await datasourceExecution.runDatasourceDefinition('ds-web-footfall');
     const runs = await datasourceDefinitions.listDatasourceRuns('ds-web-footfall');
     const documentPath = runs[0]?.documentIds[0] || '';
+    const markdownPath = String(result.task?.markdownPath || '').trim();
+    const markdown = markdownPath ? await fs.readFile(markdownPath, 'utf8') : '';
+    const cache = await documentCacheRepository.readDocumentCache();
     const parsed = await documentParser.parseDocument(documentPath);
 
     assert.equal(result.run?.status, 'success');
     assert.equal(runs[0]?.ingestedCount, 1);
     assert.match(documentPath, /\.xlsx$/i);
     assert.match(runs[0]?.summary || '', /可下载文件|XLSX/i);
+    assert.ok(markdownPath);
+    assert.match(markdownPath, /-normalized\.md$/i);
+    assert.match(markdown, /## 提取摘要/);
+    assert.match(markdown, /工作表：4月|商场/);
+    assert.ok(cache?.items.some((item) => item.path === documentPath));
     assert.equal(parsed.bizCategory, 'footfall');
     assert.equal(parsed.footfallFields?.aggregationLevel, 'mall-zone');
     assert.equal(parsed.footfallFields?.totalFootfall, '360');

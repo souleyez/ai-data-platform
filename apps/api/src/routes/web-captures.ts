@@ -2,13 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import type { DatasourceTargetLibrary } from '../lib/datasource-definitions.js';
 import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks, type WebCaptureFrequency } from '../lib/web-capture.js';
 import { buildWebCaptureCredentialSummary, loadWebCaptureCredential, saveWebCaptureCredential } from '../lib/web-capture-credentials.js';
-import { loadDocumentCategoryConfig } from '../lib/document-config.js';
-import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { syncWebCaptureTaskToDatasource } from '../lib/datasource-web-bridge.js';
-import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
-import { parseDocument } from '../lib/document-parser.js';
-import { buildFailedPreviewItem, buildPreviewItemFromDocument, resolveSuggestedLibraryKeys } from '../lib/ingest-feedback.js';
-import { saveDocumentOverride } from '../lib/document-overrides.js';
+import { buildFailedPreviewItem } from '../lib/ingest-feedback.js';
+import { ingestWebCaptureTaskDocument } from '../lib/datasource-web-ingest.js';
 
 function normalizeTargetLibraries(value: unknown): DatasourceTargetLibrary[] {
   if (!Array.isArray(value)) return [];
@@ -68,42 +64,34 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       note: String(body.note || '').trim(),
       maxItems: Number(body.maxItems || 5),
     });
-    await syncWebCaptureTaskToDatasource(task, {
+    const definition = await syncWebCaptureTaskToDatasource(task, {
       name: String(body.datasourceName || '').trim(),
       targetLibraries: normalizeTargetLibraries(body.targetLibraries),
       notes: String(body.note || '').trim(),
     });
 
-    let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
+    const webIngest = task.lastStatus === 'success'
+      ? await ingestWebCaptureTaskDocument({
+          task,
+          targetLibraries: definition.targetLibraries,
+        })
+      : null;
 
-    if (task.lastStatus === 'success' && task.documentPath) {
-      const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-      const libraries = await loadDocumentLibraries();
-      const parsed = await parseDocument(task.documentPath, config);
-      const nextGroups = resolveSuggestedLibraryKeys(parsed, libraries);
-      if (nextGroups.length) {
-        await saveDocumentOverride(parsed.path, { groups: nextGroups });
-      }
-      ingestItems = [buildPreviewItemFromDocument({
-        ...parsed,
-        suggestedGroups: [],
-        confirmedGroups: nextGroups.length ? nextGroups : parsed.confirmedGroups,
-      }, 'url', undefined, libraries)];
-    } else {
-      ingestItems = [buildFailedPreviewItem({
+    const ingestItems = webIngest?.ingestResult.ingestItems?.length
+      ? webIngest.ingestResult.ingestItems
+      : [buildFailedPreviewItem({
         id: task.id,
         sourceType: 'url',
         sourceName: task.title || task.url,
         errorMessage: task.lastSummary || '网页抓取失败',
       })];
-    }
 
     return {
-      status: task.lastStatus === 'success' ? 'captured' : 'failed',
+      status: task.lastStatus === 'success' && (webIngest?.ingestResult.summary.successCount || 0) > 0 ? 'captured' : 'failed',
       task,
-      message: task.lastStatus === 'success'
+      message: task.lastStatus === 'success' && (webIngest?.ingestResult.summary.successCount || 0) > 0
         ? '网页已抓取、生成总结，并写入文档库。'
-        : `网页任务已创建，但本次抓取失败：${task.lastSummary}`,
+        : `网页任务已执行，但本次未成功入库：${task.lastSummary || '网页抓取失败'}`,
       summary: {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,
@@ -177,42 +165,34 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       credentialRef: remember || (!username && !password && stored.id) ? stored.id : '',
       credentialLabel: stored.maskedUsername,
     });
-    await syncWebCaptureTaskToDatasource(task, {
+    const definition = await syncWebCaptureTaskToDatasource(task, {
       name: String(body.datasourceName || '').trim(),
       targetLibraries: normalizeTargetLibraries(body.targetLibraries),
       notes: String(body.note || '').trim(),
     });
 
-    let ingestItems = [] as Array<ReturnType<typeof buildPreviewItemFromDocument> | ReturnType<typeof buildFailedPreviewItem>>;
+    const webIngest = task.lastStatus === 'success'
+      ? await ingestWebCaptureTaskDocument({
+          task,
+          targetLibraries: definition.targetLibraries,
+        })
+      : null;
 
-    if (task.lastStatus === 'success' && task.documentPath) {
-      const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-      const libraries = await loadDocumentLibraries();
-      const parsed = await parseDocument(task.documentPath, config);
-      const nextGroups = resolveSuggestedLibraryKeys(parsed, libraries);
-      if (nextGroups.length) {
-        await saveDocumentOverride(parsed.path, { groups: nextGroups });
-      }
-      ingestItems = [buildPreviewItemFromDocument({
-        ...parsed,
-        suggestedGroups: [],
-        confirmedGroups: nextGroups.length ? nextGroups : parsed.confirmedGroups,
-      }, 'url', undefined, libraries)];
-    } else {
-      ingestItems = [buildFailedPreviewItem({
+    const ingestItems = webIngest?.ingestResult.ingestItems?.length
+      ? webIngest.ingestResult.ingestItems
+      : [buildFailedPreviewItem({
         id: task.id,
         sourceType: 'url',
         sourceName: task.title || task.url,
         errorMessage: task.lastSummary || '登录采集失败',
       })];
-    }
 
     return {
-      status: task.lastStatus === 'success' ? 'captured' : 'failed',
+      status: task.lastStatus === 'success' && (webIngest?.ingestResult.summary.successCount || 0) > 0 ? 'captured' : 'failed',
       task,
-      message: task.lastStatus === 'success'
+      message: task.lastStatus === 'success' && (webIngest?.ingestResult.summary.successCount || 0) > 0
         ? '登录采集已完成，内容已结构化入库。'
-        : `登录采集已执行，但本次抓取失败：${task.lastSummary}`,
+        : `登录采集已执行，但本次未成功入库：${task.lastSummary || '登录采集失败'}`,
       summary: {
         total: ingestItems.length,
         successCount: ingestItems.filter((item) => item.status === 'success').length,
@@ -230,7 +210,15 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
 
   app.post('/web-captures/run-due', async () => {
     const result = await runDueWebCaptureTasks();
-    await Promise.all(result.items.map((item) => syncWebCaptureTaskToDatasource(item)));
+    await Promise.all(result.items.map(async (item) => {
+      const definition = await syncWebCaptureTaskToDatasource(item);
+      if (item.lastStatus === 'success') {
+        await ingestWebCaptureTaskDocument({
+          task: item,
+          targetLibraries: definition.targetLibraries,
+        });
+      }
+    }));
     return {
       status: result.executedCount ? 'processed' : 'idle',
       ...result,

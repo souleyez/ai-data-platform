@@ -43,6 +43,7 @@ export type WebCaptureTask = {
   lastStatus?: 'success' | 'error';
   lastSummary?: string;
   documentPath?: string;
+  markdownPath?: string;
   title?: string;
   note?: string;
   nextRunAt?: string;
@@ -1011,6 +1012,136 @@ function formatExtractionMethod(method?: PageResult['extractionMethod']) {
   return method === 'trafilatura' ? 'Trafilatura 正文提取' : '基础清洗 fallback';
 }
 
+function normalizeCaptureNoiseKey(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanCapturedText(text: string, maxChars = 8000) {
+  const rawLines = String(text || '')
+    .replace(/\u0000/g, ' ')
+    .replace(/(?:^|\s)(?:第\s*\d+\s*页(?:\s*共\s*\d+\s*页)?|page\s*\d+(?:\s*of\s*\d+)?)(?=\s|$)/gi, ' ')
+    .replace(/\r/g, '')
+    .split('\n');
+  const lineFrequencies = new Map<string, number>();
+
+  for (const line of rawLines) {
+    const normalized = normalizeCaptureNoiseKey(line);
+    if (!normalized || normalized.length > 60) continue;
+    lineFrequencies.set(normalized, (lineFrequencies.get(normalized) || 0) + 1);
+  }
+
+  const cleanedLines: string[] = [];
+  let previousBlank = true;
+  for (const line of rawLines) {
+    const normalized = String(line || '').replace(/\s+/g, ' ').trim();
+    const noiseKey = normalizeCaptureNoiseKey(normalized);
+
+    if (!normalized) {
+      if (!previousBlank) cleanedLines.push('');
+      previousBlank = true;
+      continue;
+    }
+
+    if (
+      /^(?:page\s*\d+(?:\s*of\s*\d+)?|第\s*\d+\s*页(?:\s*\/\s*共?\s*\d+\s*页)?|页眉|页脚|header|footer)$/i.test(normalized)
+      || /^[#=*_~\-|·•]{3,}$/.test(normalized)
+      || /^\|?\s*:?-{2,}:?(?:\s*\|\s*:?-{2,}:?)*\s*\|?$/.test(normalized)
+      || (/^(?:copyright|版权所有)$/i.test(normalized) && normalized.length <= 20)
+      || (noiseKey && (lineFrequencies.get(noiseKey) || 0) >= 3 && normalized.length <= 60)
+    ) {
+      continue;
+    }
+
+    cleanedLines.push(normalized);
+    previousBlank = false;
+  }
+
+  return cleanedLines
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, maxChars);
+}
+
+function decodeDownloadTextBuffer(data: Buffer) {
+  const utf8 = data.toString('utf8').replace(/\u0000/g, '').trim();
+  const utf16 = data.toString('utf16le').replace(/\u0000/g, '').trim();
+
+  if (!utf8) return utf16;
+  if (!utf16) return utf8;
+
+  const utf8ReplacementCount = (utf8.match(/�/g) || []).length;
+  const utf16ReplacementCount = (utf16.match(/�/g) || []).length;
+  if (utf16ReplacementCount < utf8ReplacementCount) return utf16;
+  return utf8;
+}
+
+function renderMarkdownTable(rows: string[][]) {
+  if (!rows.length) return '';
+  const width = Math.max(...rows.map((row) => row.length), 1);
+  const normalizedRows = rows
+    .map((row) => Array.from({ length: width }, (_, index) => String(row[index] || '').replace(/\|/g, '/').trim()))
+    .filter((row) => row.some(Boolean));
+  if (!normalizedRows.length) return '';
+
+  const header = normalizedRows[0].map((cell, index) => cell || `列${index + 1}`);
+  const body = normalizedRows.slice(1).map((row) => row.map((cell) => cell || '-'));
+  return [
+    `| ${header.join(' | ')} |`,
+    `| ${header.map(() => '---').join(' | ')} |`,
+    ...body.map((row) => `| ${row.join(' | ')} |`),
+  ].join('\n');
+}
+
+async function extractDownloadMarkdownBody(file: DownloadResult) {
+  const extension = String(file.extension || '').toLowerCase();
+
+  if (extension === '.xlsx' || extension === '.xls' || extension === '.csv') {
+    const xlsx = await import('xlsx');
+    const workbook = xlsx.default?.read
+      ? xlsx.default.read(file.data, { type: 'buffer', raw: false })
+      : xlsx.read(file.data, { type: 'buffer', raw: false });
+    const { utils } = xlsx;
+    return workbook.SheetNames
+      .slice(0, 4)
+      .flatMap((sheetName) => {
+        const rows = utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false }) as unknown[][];
+        const normalizedRows = rows
+          .slice(0, 20)
+          .map((row) => row.map((cell) => String(cell ?? '').trim()));
+        const table = renderMarkdownTable(normalizedRows);
+        if (!table) return [] as string[];
+        return [`### 工作表：${sheetName}`, '', table, ''];
+      })
+      .join('\n')
+      .trim();
+  }
+
+  if (extension === '.json') {
+    const rawText = decodeDownloadTextBuffer(file.data);
+    try {
+      return `\`\`\`json\n${JSON.stringify(JSON.parse(rawText), null, 2)}\n\`\`\``;
+    } catch {
+      return cleanCapturedText(rawText);
+    }
+  }
+
+  if (extension === '.html' || extension === '.htm' || extension === '.xml') {
+    return cleanCapturedText(stripHtml(decodeDownloadTextBuffer(file.data)));
+  }
+
+  if (extension === '.txt' || extension === '.md') {
+    return cleanCapturedText(decodeDownloadTextBuffer(file.data));
+  }
+
+  return cleanCapturedText(file.text || '');
+}
+
 function toMarkdown(
   task: WebCaptureTask,
   title: string,
@@ -1019,34 +1150,35 @@ function toMarkdown(
   landingText: string,
   extractionMethod?: PageResult['extractionMethod'],
 ) {
-  const landingSnippet = landingText.slice(0, 3000);
+  const landingSnippet = cleanCapturedText(landingText, 6000);
+  const normalizedSummary = cleanCapturedText(summary, 2000);
   return [
-    `# ${title || '??????'}`,
+    `# ${title || '网页采集结果'}`,
     '',
-    '## ????',
-    `- ?????${task.url}`,
-    `- ?????${task.focus || '???'}`,
-    `- ?????${task.frequency}`,
-    `- ?????${normalizeMaxItems(task.maxItems)} ?`,
-    `- ???????${formatExtractionMethod(extractionMethod)}`,
-    '- ???????????????????????????',
-    `- ?????${new Date().toISOString()}`,
+    '## 采集元数据',
+    `- 来源链接：${task.url}`,
+    `- 采集焦点：${task.focus || '网页正文与关键信息'}`,
+    `- 采集频率：${task.frequency}`,
+    `- 最大条数：${normalizeMaxItems(task.maxItems)} 条`,
+    `- 正文提取：${formatExtractionMethod(extractionMethod)}`,
+    '- 输出说明：当前文件为网页采集后的标准 Markdown 镜像。',
+    `- 采集时间：${new Date().toISOString()}`,
     '',
-    '## ????',
-    summary,
+    '## 采集摘要',
+    normalizedSummary || summary,
     '',
-    '## ??????',
+    '## 候选条目',
     ...(entries.length
       ? entries.flatMap((entry, index) => [
         `### ${index + 1}. ${entry.title}`,
-        `- ???${entry.url}`,
-        `- ???${entry.score}`,
-        `- ???${entry.summary}`,
+        `- 链接：${entry.url}`,
+        `- 评分：${entry.score}`,
+        `- 摘要：${entry.summary}`,
         '',
       ])
-      : ['?????????????????????', '']),
-    '## ?????',
-    landingSnippet || '????????',
+      : ['当前未命中更多候选条目，已保留落地页正文。', '']),
+    '## 页面正文',
+    landingSnippet || '当前页面正文较少，未提取到稳定文本。',
     '',
   ].join('\n');
 }
@@ -1078,7 +1210,27 @@ async function writeDownloadedCapture(task: WebCaptureTask, file: DownloadResult
   const safeBase = baseName || 'capture';
   const filePath = path.join(OUTPUT_DIR, `${task.id}-${safeBase}${file.extension}`);
   await fs.writeFile(filePath, file.data);
-  return filePath;
+  const markdownPath = path.join(OUTPUT_DIR, `${task.id}-${safeBase}-normalized.md`);
+  const markdownBody = await extractDownloadMarkdownBody(file);
+  const markdownContent = [
+    `# ${file.title || safeBase || '网页下载内容'}`,
+    '',
+    '## 采集元数据',
+    `- 来源链接：${file.url || task.url}`,
+    `- 原始文件：${path.basename(filePath)}`,
+    `- 内容类型：${file.contentType || 'unknown'}`,
+    `- 采集焦点：${task.focus || '网页采集内容'}`,
+    `- 采集时间：${new Date().toISOString()}`,
+    '',
+    '## 提取摘要',
+    markdownBody || '当前原始文件已保存，暂未生成更详细的 Markdown 摘要。',
+    '',
+  ].join('\n');
+  await fs.writeFile(markdownPath, markdownContent, 'utf8');
+  return {
+    filePath,
+    markdownPath,
+  };
 }
 
 async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, auth?: RuntimeAuth, jar?: CookieJar) {
@@ -1186,12 +1338,13 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     let landing = await fetchWebPage(normalizedTask.url, runtimeAuth, jar);
 
     if (landing.kind === 'download') {
-      const documentPath = await writeDownloadedCapture(normalizedTask, landing);
+      const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
       const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
       return {
         ...normalizedTask,
         title: landing.title || normalizedTask.url,
-        documentPath,
+        documentPath: storedDownload.filePath,
+        markdownPath: storedDownload.markdownPath,
         lastSummary: summary,
         lastStatus: 'success' as const,
         lastRunAt: now,
@@ -1210,12 +1363,13 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     if (runtimeAuth && isLikelyLoginPage(landing)) {
       const loginResult = await submitLoginForm(landing, runtimeAuth, jar);
       if (loginResult.kind === 'download') {
-        const documentPath = await writeDownloadedCapture(normalizedTask, loginResult);
+        const storedDownload = await writeDownloadedCapture(normalizedTask, loginResult);
         const summary = `登录后返回可下载文件，已保存原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
         return {
           ...normalizedTask,
           title: loginResult.title || normalizedTask.url,
-          documentPath,
+          documentPath: storedDownload.filePath,
+          markdownPath: storedDownload.markdownPath,
           lastSummary: summary,
           lastStatus: 'success' as const,
           lastRunAt: now,
@@ -1234,12 +1388,13 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
         ? await fetchWebPage(normalizedTask.url, runtimeAuth, jar)
         : loginResult;
       if (landing.kind === 'download') {
-        const documentPath = await writeDownloadedCapture(normalizedTask, landing);
+        const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
         const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
         return {
           ...normalizedTask,
           title: landing.title || normalizedTask.url,
-          documentPath,
+          documentPath: storedDownload.filePath,
+          markdownPath: storedDownload.markdownPath,
           lastSummary: summary,
           lastStatus: 'success' as const,
           lastRunAt: now,
@@ -1280,6 +1435,7 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
       ...normalizedTask,
       title,
       documentPath,
+      markdownPath: '',
       lastSummary: summary,
       lastStatus: 'success' as const,
       lastRunAt: now,
@@ -1292,6 +1448,7 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     return {
       ...task,
       maxItems: normalizeMaxItems(task.maxItems),
+      markdownPath: '',
       lastRunAt: now,
       updatedAt: now,
       lastStatus: 'error' as const,
