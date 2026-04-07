@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DatasourceDefinition, DatasourceRun } from './datasource-definitions.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 type DatasourceDefinitionPayload = {
   items: DatasourceDefinition[];
@@ -20,29 +21,47 @@ async function ensureDatasourceConfigDir() {
 }
 
 export async function readDatasourceDefinitionPayload(): Promise<DatasourceDefinitionPayload | null> {
-  try {
-    const raw = await fs.readFile(DEFINITIONS_FILE, 'utf8');
-    return JSON.parse(raw) as DatasourceDefinitionPayload;
-  } catch {
-    return null;
-  }
+  const { data } = await readRuntimeStateJson<DatasourceDefinitionPayload | null>({
+    filePath: DEFINITIONS_FILE,
+    fallback: null,
+    normalize: (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return null;
+      const items = Array.isArray((parsed as { items?: unknown[] }).items)
+        ? (parsed as { items: DatasourceDefinition[] }).items
+        : [];
+      return { items };
+    },
+  });
+  return data;
 }
 
 export async function writeDatasourceDefinitionPayload(items: DatasourceDefinition[]) {
   await ensureDatasourceConfigDir();
-  await fs.writeFile(DEFINITIONS_FILE, JSON.stringify({ items }, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: DEFINITIONS_FILE,
+    payload: { items },
+  });
 }
 
 export async function readDatasourceRunPayload(): Promise<DatasourceRunPayload | null> {
-  try {
-    const raw = await fs.readFile(RUNS_FILE, 'utf8');
-    return JSON.parse(raw) as DatasourceRunPayload;
-  } catch {
-    return null;
-  }
+  const { data } = await readRuntimeStateJson<DatasourceRunPayload | null>({
+    filePath: RUNS_FILE,
+    fallback: null,
+    normalize: (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return null;
+      const items = Array.isArray((parsed as { items?: unknown[] }).items)
+        ? (parsed as { items: DatasourceRun[] }).items
+        : [];
+      return { items };
+    },
+  });
+  return data;
 }
 
 export async function writeDatasourceRunPayload(items: DatasourceRun[]) {
   await ensureDatasourceConfigDir();
-  await fs.writeFile(RUNS_FILE, JSON.stringify({ items }, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: RUNS_FILE,
+    payload: { items },
+  });
 }

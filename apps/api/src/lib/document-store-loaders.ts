@@ -25,6 +25,8 @@ export type LoadParsedDocumentsResult = {
   totalFiles?: number;
   items: ParsedDocument[];
   cacheHit: boolean;
+  generatedAt?: string;
+  loadedFrom?: 'cache' | 'scan';
 };
 
 export async function loadParsedDocuments(
@@ -64,6 +66,8 @@ export async function loadParsedDocuments(
       totalFiles: cache.totalFiles || cache.items.length,
       items: mergedItems.slice(0, limit),
       cacheHit: true,
+      generatedAt: cache.generatedAt || new Date().toISOString(),
+      loadedFrom: 'cache',
     };
   }
 
@@ -72,6 +76,7 @@ export async function loadParsedDocuments(
     return { exists, files, totalFiles: 0, items: [], cacheHit: false };
   }
 
+  const generatedAt = new Date().toISOString();
   const scanSignature = await buildScanSignature(files);
   const items = await parseDocumentFiles(files.slice(0, limit), resolvedScanRoots, {
     parseStage: 'quick',
@@ -80,7 +85,7 @@ export async function loadParsedDocuments(
   const mergedItems = dedupeDocuments(sortDocumentsByRecency(await mergeWithRetainedDocuments(items)));
   await replaceDocumentKnowledgeSnapshot({
     cachePayload: {
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       scanRoot: activeScanRoot,
       scanRoots: resolvedScanRoots,
       totalFiles: files.length,
@@ -96,7 +101,15 @@ export async function loadParsedDocuments(
     memorySyncReason: 'document-scan-refresh',
   });
 
-  return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
+  return {
+    exists,
+    files,
+    totalFiles: files.length,
+    items: mergedItems,
+    cacheHit: false,
+    generatedAt,
+    loadedFrom: 'scan',
+  };
 }
 
 export async function mergeParsedDocumentsForPaths(

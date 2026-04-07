@@ -1,0 +1,180 @@
+import path from 'node:path';
+import { STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR, STORAGE_ROOT } from './paths.js';
+
+export type RuntimeStateManifestEntry = {
+  key: string;
+  filePath: string;
+  owner: string;
+  stateKind: 'config' | 'definition' | 'execution-history' | 'telemetry' | 'content-state' | 'cache' | 'operator-audit';
+  readProfile: 'read-only' | 'mixed' | 'worker-only';
+  phase2Target: 'shared-db' | 'shared-object-storage' | 'shared-cache' | 'keep-local';
+  backupStrategy: 'write-before-overwrite';
+  notes: string;
+};
+
+export const RUNTIME_STATE_MANIFEST: RuntimeStateManifestEntry[] = [
+  {
+    key: 'document-categories',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'document-categories.json'),
+    owner: 'document-config',
+    stateKind: 'config',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Knowledge scan roots and category routing config.',
+  },
+  {
+    key: 'document-libraries',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'document-libraries.json'),
+    owner: 'document-libraries',
+    stateKind: 'definition',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Library definitions and permission-level metadata.',
+  },
+  {
+    key: 'document-overrides',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'document-overrides.json'),
+    owner: 'document-overrides',
+    stateKind: 'content-state',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Manual document grouping, ignore flags, and analysis overrides.',
+  },
+  {
+    key: 'document-cache',
+    filePath: path.join(STORAGE_CACHE_DIR, 'documents-cache.json'),
+    owner: 'document-store',
+    stateKind: 'cache',
+    readProfile: 'read-only',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Quick-parse snapshot and indexed document cache.',
+  },
+  {
+    key: 'document-deep-parse-queue',
+    filePath: path.join(STORAGE_CACHE_DIR, 'document-deep-parse-queue.json'),
+    owner: 'document-deep-parse-queue',
+    stateKind: 'execution-history',
+    readProfile: 'mixed',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Queued, processing, and failed deep-parse runtime state.',
+  },
+  {
+    key: 'retained-documents',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'retained-documents.json'),
+    owner: 'retained-documents',
+    stateKind: 'content-state',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Structured-only retained documents kept after original file deletion.',
+  },
+  {
+    key: 'document-answer-usage',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'document-answer-usage.json'),
+    owner: 'document-answer-usage',
+    stateKind: 'telemetry',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Recent document reference counts and usage events from answer generation.',
+  },
+  {
+    key: 'datasource-definitions',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'datasources', 'definitions.json'),
+    owner: 'datasource-definitions',
+    stateKind: 'definition',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Datasource configuration and scheduling definitions.',
+  },
+  {
+    key: 'datasource-runs',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'datasources', 'runs.json'),
+    owner: 'datasource-definitions',
+    stateKind: 'execution-history',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Datasource run records and execution summaries.',
+  },
+  {
+    key: 'web-capture-tasks',
+    filePath: path.join(STORAGE_ROOT, 'web-captures', 'tasks.json'),
+    owner: 'web-capture',
+    stateKind: 'execution-history',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Capture task definitions plus their last-run runtime fields.',
+  },
+  {
+    key: 'report-center',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'report-center.json'),
+    owner: 'report-center',
+    stateKind: 'content-state',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Report groups, shared templates, and generated outputs.',
+  },
+  {
+    key: 'audit-center',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'audit-center.json'),
+    owner: 'audit-center',
+    stateKind: 'operator-audit',
+    readProfile: 'mixed',
+    phase2Target: 'shared-db',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Audit actions, cleanup logs, and operator activity trail.',
+  },
+  {
+    key: 'memory-sync-status',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-sync-status.json'),
+    owner: 'openclaw-memory-sync',
+    stateKind: 'telemetry',
+    readProfile: 'worker-only',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'OpenClaw memory sync status and latest run result.',
+  },
+  {
+    key: 'openclaw-memory-catalog',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json'),
+    owner: 'openclaw-memory-catalog',
+    stateKind: 'cache',
+    readProfile: 'mixed',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Derived cross-library memory catalog snapshot used for memory-first selection.',
+  },
+  {
+    key: 'bot-memory-catalogs',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'bots', '*', 'memory-catalog.json'),
+    owner: 'bot-memory-catalog',
+    stateKind: 'cache',
+    readProfile: 'mixed',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Per-bot scoped OpenClaw memory catalog snapshots.',
+  },
+  {
+    key: 'task-runtime-metrics',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'task-runtime-metrics.json'),
+    owner: 'operations-overview',
+    stateKind: 'telemetry',
+    readProfile: 'worker-only',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Unified long-task runtime counters for deep parse, memory sync, and dataviz.',
+  },
+];
+
+export function listRuntimeStateManifest() {
+  return [...RUNTIME_STATE_MANIFEST];
+}

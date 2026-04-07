@@ -75,3 +75,15 @@ Verify that PNG and HTML chart export work:
 ```powershell
 corepack pnpm dataviz:verify
 ```
+
+## Phase 1 stability verification
+
+Before pushing or deploying a phase-1 stability change, run:
+
+```powershell
+corepack pnpm verify:phase1:stability
+```
+
+Release gate and rollback details live in:
+
+- `docs/plans/2026-04-07-phase1-stability-release-checklist.md`

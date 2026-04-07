@@ -61,6 +61,7 @@
     "seed:default-samples": "node tools/seed-default-samples.mjs",
     "deploy:remote": "node tools/run-deploy-remote.mjs",
     "deploy:remote:preflight": "node tools/run-deploy-remote.mjs --preflight",
+    "verify:phase1:stability": "powershell -ExecutionPolicy Bypass -File tools/verify-phase1-stability.ps1",
     "check:text-integrity": "node tools/check-text-integrity.mjs",
     "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
     "test": "corepack pnpm --filter api test",

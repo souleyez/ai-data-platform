@@ -7,7 +7,7 @@ import {
   deleteReportOutput,
   deleteSharedReportTemplate,
   deleteSharedTemplateReference,
-  loadReportCenterState,
+  loadReportCenterReadState,
   readSharedTemplateReferenceFile,
   reviseReportOutput,
   updateSharedReportTemplate,
@@ -18,7 +18,8 @@ import {
 
 export async function registerReportRoutes(app: FastifyInstance) {
   app.get('/reports', async () => {
-    const state = await loadReportCenterState();
+    const startedAt = Date.now();
+    const state = await loadReportCenterReadState();
 
     return {
       mode: 'read-only',
@@ -33,6 +34,9 @@ export async function registerReportRoutes(app: FastifyInstance) {
         referenceImages:
           state.groups.reduce((acc, group) => acc + group.referenceImages.length, 0)
           + state.templates.reduce((acc, template) => acc + (template.referenceImages?.length || 0), 0),
+        loadedFrom: 'report-state',
+        durationMs: Date.now() - startedAt,
+        generatedAt: new Date().toISOString(),
       },
     };
   });

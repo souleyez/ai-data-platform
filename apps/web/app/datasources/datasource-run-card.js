@@ -3,12 +3,14 @@ import {
   buildTelemetryItems,
   DatasourceTag,
   formatDateTime,
+  formatDurationMs,
   RUN_STATUS_LABELS,
 } from './datasource-page-support';
 
 export default function DatasourceRunCard({ run }) {
   const telemetryItems = buildTelemetryItems(run);
   const resultItems = buildRunResultItems(run);
+  const stability = run.stability || null;
 
   return (
     <article className="datasource-run-card">
@@ -27,6 +29,7 @@ export default function DatasourceRunCard({ run }) {
         <span>发现 {run.discoveredCount || 0}</span>
         <span>采集 {run.capturedCount || 0}</span>
         <span>入库 {run.ingestedCount || 0}</span>
+        <span>耗时 {formatDurationMs(run.durationMs)}</span>
       </div>
       {telemetryItems.length ? (
         <div className="datasource-managed-meta">
@@ -35,6 +38,14 @@ export default function DatasourceRunCard({ run }) {
           ))}
         </div>
       ) : null}
+      {stability?.badges?.length ? (
+        <div className="datasource-managed-meta">
+          {stability.badges.map((badge) => (
+            <DatasourceTag key={`${run.id}-${badge.label}`} tone={badge.tone}>{badge.label}</DatasourceTag>
+          ))}
+        </div>
+      ) : null}
+      {stability?.note ? <div className="datasource-run-summary">{stability.note}</div> : null}
       {run.summary ? <div className="datasource-run-summary">{run.summary}</div> : null}
       {resultItems.length ? (
         <div className="capture-result-list">

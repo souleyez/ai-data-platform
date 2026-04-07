@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { DEFAULT_SCAN_DIR } from './document-store.js';
 import { STORAGE_ROOT } from './paths.js';
 import { buildAugmentedEnv, getPythonCommandCandidates } from './runtime-executables.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 import { loadWebCaptureCredential } from './web-capture-credentials.js';
 
 const WEB_CAPTURE_DIR = path.join(STORAGE_ROOT, 'web-captures');
@@ -668,18 +669,24 @@ async function ensureDirs() {
 }
 
 async function readTasks(): Promise<WebCaptureTask[]> {
-  try {
-    const raw = await fs.readFile(TASKS_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as TaskPayload;
-    return dedupeTasks(Array.isArray(parsed.items) ? parsed.items : []);
-  } catch {
-    return [];
-  }
+  const { data } = await readRuntimeStateJson<TaskPayload>({
+    filePath: TASKS_FILE,
+    fallback: { items: [] },
+    normalize: (parsed) => ({
+      items: Array.isArray((parsed as { items?: unknown[] } | null)?.items)
+        ? (parsed as TaskPayload).items
+        : [],
+    }),
+  });
+  return dedupeTasks(Array.isArray(data.items) ? data.items : []);
 }
 
 async function writeTasks(items: WebCaptureTask[]) {
   await ensureDirs();
-  await fs.writeFile(TASKS_FILE, JSON.stringify({ items: dedupeTasks(items) }, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: TASKS_FILE,
+    payload: { items: dedupeTasks(items) },
+  });
 }
 
 function dedupeTasks(items: WebCaptureTask[]) {

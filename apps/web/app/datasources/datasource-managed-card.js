@@ -1,6 +1,8 @@
 import {
   buildFormFromDefinition,
   buildTelemetryItems,
+  DatasourceTag,
+  formatDurationMs,
   formatRelative,
   KIND_LABELS,
   SCHEDULE_LABELS,
@@ -17,6 +19,7 @@ export default function DatasourceManagedCard({
 }) {
   const runtime = item.runtime || item;
   const telemetryItems = buildTelemetryItems(runtime);
+  const stability = item.stability || null;
 
   return (
     <article className="datasource-managed-card">
@@ -39,6 +42,15 @@ export default function DatasourceManagedCard({
               ))}
             </div>
           ) : null}
+          {stability?.badges?.length ? (
+            <div className="datasource-managed-meta">
+              {stability.badges.map((badge) => (
+                <DatasourceTag key={`${item.id}-${badge.label}`} tone={badge.tone}>{badge.label}</DatasourceTag>
+              ))}
+              {stability.latestDurationMs ? <span>最近耗时：{formatDurationMs(stability.latestDurationMs)}</span> : null}
+            </div>
+          ) : null}
+          {stability?.note ? <p>{stability.note}</p> : null}
           {runtime.lastSummary || item.lastSummary ? <p>{runtime.lastSummary || item.lastSummary}</p> : null}
         </div>
         <div className="datasource-managed-actions">

@@ -1,10 +1,16 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { mergeParsedDocumentsForPaths } from './document-store.js';
 import { refreshOpenClawMemoryCatalogNow } from './openclaw-memory-sync.js';
 import { STORAGE_CACHE_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 import { upsertDocumentVectorIndex } from './document-vector-index.js';
+import {
+  markTaskFailed,
+  markTaskSkipped,
+  markTaskStarted,
+  markTaskSucceeded,
+} from './task-runtime-metrics.js';
 
 type QueueStatus = 'queued' | 'processing' | 'succeeded' | 'failed';
 
@@ -28,51 +34,86 @@ const LOCK_TTL_MS = 5 * 60 * 1000;
 
 let activeLock: { owner: string; acquiredAt: number } | null = null;
 
-async function ensureQueueDir() {
-  await fs.mkdir(STORAGE_CACHE_DIR, { recursive: true });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeQueueStatus(value: unknown): QueueStatus {
+  return value === 'processing' || value === 'succeeded' || value === 'failed'
+    ? value
+    : 'queued';
+}
+
+function normalizeQueueItem(value: unknown): DeepParseQueueItem | null {
+  if (!isRecord(value)) return null;
+  const pathValue = String(value.path || '').trim();
+  if (!pathValue) return null;
+  return {
+    path: pathValue,
+    status: normalizeQueueStatus(value.status),
+    queuedAt: String(value.queuedAt || '').trim() || new Date().toISOString(),
+    lastAttemptAt: String(value.lastAttemptAt || '').trim() || undefined,
+    completedAt: String(value.completedAt || '').trim() || undefined,
+    attempts: Math.max(0, Number(value.attempts || 0)),
+    error: String(value.error || '').trim() || undefined,
+  };
 }
 
 async function readQueue(): Promise<DeepParseQueuePayload> {
-  try {
-    const raw = await fs.readFile(QUEUE_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as DeepParseQueuePayload;
-    const now = Date.now();
-    const hasFreshLock = Boolean(activeLock && now - activeLock.acquiredAt < LOCK_TTL_MS);
-
-    const items = (Array.isArray(parsed.items) ? parsed.items : []).map((item) => {
-      if (item.status !== 'processing') return item;
-      if (!hasFreshLock) {
+  const { data } = await readRuntimeStateJson<DeepParseQueuePayload>({
+    filePath: QUEUE_FILE,
+    fallback: () => ({
+      updatedAt: new Date().toISOString(),
+      items: [],
+    }),
+    normalize: (parsed) => {
+      if (!isRecord(parsed)) {
         return {
-          ...item,
-          status: 'queued' as const,
-          error: undefined,
+          updatedAt: new Date().toISOString(),
+          items: [],
         };
       }
-      const lastAttemptAt = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
-      if (lastAttemptAt && Number.isFinite(lastAttemptAt) && now - lastAttemptAt < LOCK_TTL_MS) {
-        return item;
-      }
+      return {
+        updatedAt: String(parsed.updatedAt || '').trim() || new Date().toISOString(),
+        items: Array.isArray(parsed.items)
+          ? parsed.items.map((item) => normalizeQueueItem(item)).filter((item): item is DeepParseQueueItem => Boolean(item))
+          : [],
+      };
+    },
+  });
+  const now = Date.now();
+  const hasFreshLock = Boolean(activeLock && now - activeLock.acquiredAt < LOCK_TTL_MS);
+
+  const items = data.items.map((item) => {
+    if (item.status !== 'processing') return item;
+    if (!hasFreshLock) {
       return {
         ...item,
         status: 'queued' as const,
         error: undefined,
       };
-    });
+    }
+    const lastAttemptAt = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
+    if (lastAttemptAt && Number.isFinite(lastAttemptAt) && now - lastAttemptAt < LOCK_TTL_MS) {
+      return item;
+    }
     return {
-      updatedAt: parsed.updatedAt || new Date().toISOString(),
-      items,
+      ...item,
+      status: 'queued' as const,
+      error: undefined,
     };
-  } catch {
-    return {
-      updatedAt: new Date().toISOString(),
-      items: [],
-    };
-  }
+  });
+  return {
+    updatedAt: data.updatedAt,
+    items,
+  };
 }
 
 async function writeQueue(payload: DeepParseQueuePayload) {
-  await ensureQueueDir();
-  await fs.writeFile(QUEUE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: QUEUE_FILE,
+    payload,
+  });
 }
 
 async function acquireLock() {
@@ -164,9 +205,16 @@ export async function applyDetailedParseQueueMetadata(items: ParsedDocument[]) {
   });
 }
 
+export async function readDetailedParseQueueState() {
+  return readQueue();
+}
+
 export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
   const lockOwner = await acquireLock();
   if (!lockOwner) {
+    await markTaskSkipped('deep-parse', 'deep-parse-already-running', {
+      processingCount: 0,
+    }).catch(() => undefined);
     return {
       processedCount: 0,
       succeededCount: 0,
@@ -177,16 +225,27 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
 
   try {
     const queue = await readQueue();
+    const queuedCount = queue.items.filter((item) => item.status === 'queued').length;
     const queued = queue.items
       .filter((item) => item.status === 'queued')
       .sort((left, right) => extractQueuePriority(right) - extractQueuePriority(left))
       .slice(0, Math.max(1, limit));
     if (!queued.length) {
+      await markTaskSkipped('deep-parse', 'no-queued-items', {
+        queuedCount: 0,
+        processingCount: 0,
+      }).catch(() => undefined);
       return { processedCount: 0, succeededCount: 0, failedCount: 0 };
     }
 
+    const startedAtMs = Date.now();
     const now = new Date().toISOString();
     const processingPaths = new Set(queued.map((item) => normalizeQueuePath(item.path)));
+    await markTaskStarted('deep-parse', {
+      queuedCount,
+      processingCount: processingPaths.size,
+      lastMessage: `processing ${processingPaths.size} queued documents`,
+    }).catch(() => undefined);
     const markedItems = queue.items.map((item) =>
       processingPaths.has(normalizeQueuePath(item.path))
         ? {
@@ -233,6 +292,12 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
       items,
     });
     await refreshOpenClawMemoryCatalogNow('document-deep-parse-succeeded').catch(() => null);
+    await markTaskSucceeded('deep-parse', {
+      queuedCount: items.filter((item) => item.status === 'queued').length,
+      processingCount: 0,
+      durationMs: Date.now() - startedAtMs,
+      lastMessage: `processed ${queued.length} documents`,
+    }).catch(() => undefined);
 
     return {
       processedCount: queued.length,
@@ -266,6 +331,14 @@ export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
       });
       await refreshOpenClawMemoryCatalogNow('document-deep-parse-failed').catch(() => null);
     }
+    await markTaskFailed('deep-parse', reason, {
+      queuedCount: queue.items.filter((item) => item.status === 'queued').length,
+      processingCount: 0,
+      retryDelta: processingPaths.size ? 1 : 0,
+      lastMessage: processingPaths.size
+        ? `failed while processing ${processingPaths.size} documents`
+        : 'deep parse failed before selecting queued documents',
+    }).catch(() => undefined);
 
     return {
       processedCount: processingPaths.size,

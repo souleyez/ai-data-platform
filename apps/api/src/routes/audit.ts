@@ -8,6 +8,7 @@ import {
   pauseAuditCaptureTask,
   runAuditPolicy,
 } from '../lib/audit-center.js';
+import { loadOperationsOverviewPayload } from '../lib/operations-overview.js';
 
 export async function registerAuditRoutes(app: FastifyInstance) {
   const disableAuditPolicyInDev =
@@ -16,10 +17,14 @@ export async function registerAuditRoutes(app: FastifyInstance) {
       : /^(1|true|yes)$/i.test(process.env.DISABLE_AUDIT_POLICY_IN_DEV);
 
   app.get('/audit', async () => {
-    const snapshot = await buildAuditSnapshot();
+    const [snapshot, operationsOverview] = await Promise.all([
+      buildAuditSnapshot(),
+      loadOperationsOverviewPayload(),
+    ]);
     return {
       mode: 'read-only',
       ...snapshot,
+      stability: operationsOverview.stability,
     };
   });
 

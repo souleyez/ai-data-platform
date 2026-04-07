@@ -3,7 +3,7 @@ import path from 'node:path';
 import { loadDocumentAnswerUsageState } from './document-answer-usage.js';
 import { loadParsedDocuments } from './document-store.js';
 import { buildDocumentId } from './document-store.js';
-import { loadReportCenterState } from './report-center.js';
+import { loadReportCenterReadState } from './report-center.js';
 import {
   deleteWebCaptureTask,
   listWebCaptureTasks,
@@ -13,6 +13,7 @@ import {
 import { loadDocumentOverrides, saveDocumentOverrides } from './document-overrides.js';
 import { STORAGE_CONFIG_DIR, STORAGE_ROOT, STORAGE_CACHE_DIR } from './paths.js';
 import { loadRetainedDocuments, removeRetainedDocument, retainStructuredDocument } from './retained-documents.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 const AUDIT_CONFIG_DIR = STORAGE_CONFIG_DIR;
 const AUDIT_STATE_FILE = path.join(AUDIT_CONFIG_DIR, 'audit-center.json');
@@ -220,16 +221,25 @@ async function ensureAuditDir() {
 }
 
 async function readAuditState(): Promise<AuditState> {
-  try {
-    return JSON.parse(await fs.readFile(AUDIT_STATE_FILE, 'utf8')) as AuditState;
-  } catch {
-    return {};
-  }
+  const { data } = await readRuntimeStateJson<AuditState>({
+    filePath: AUDIT_STATE_FILE,
+    fallback: {},
+    normalize: (parsed) => {
+      const logs = Array.isArray((parsed as AuditState | null)?.logs)
+        ? (parsed as AuditState).logs
+        : [];
+      return { logs };
+    },
+  });
+  return data;
 }
 
 async function writeAuditState(state: AuditState) {
   await ensureAuditDir();
-  await fs.writeFile(AUDIT_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: AUDIT_STATE_FILE,
+    payload: state,
+  });
 }
 
 async function appendAuditLog(input: Omit<AuditLog, 'id' | 'time'>) {
@@ -311,9 +321,11 @@ async function purgeDocumentRecords(filePaths: string[]) {
 
 export async function buildAuditSnapshot() {
   const [{ items: documents }, tasks, reportState, auditState, storage, retainedDocuments, answerUsageState] = await Promise.all([
-    loadParsedDocuments(5000, false),
+    loadParsedDocuments(5000, false, undefined, {
+      skipBackgroundTasks: true,
+    }),
     listWebCaptureTasks(),
-    loadReportCenterState(),
+    loadReportCenterReadState(),
     readAuditState(),
     getStorageStats(),
     loadRetainedDocuments(),

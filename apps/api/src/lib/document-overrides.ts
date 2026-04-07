@@ -4,6 +4,7 @@ import type { BizCategory } from './document-config.js';
 import type { ParsedDocument } from './document-parser.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 export type DocumentOverride = {
   bizCategory?: BizCategory;
@@ -17,12 +18,16 @@ const OVERRIDE_DIR = STORAGE_CONFIG_DIR;
 const OVERRIDE_FILE = path.join(OVERRIDE_DIR, 'document-overrides.json');
 
 export async function loadDocumentOverrides() {
-  try {
-    const raw = await fs.readFile(OVERRIDE_FILE, 'utf8');
-    return JSON.parse(raw) as Record<string, DocumentOverride>;
-  } catch {
-    return {} as Record<string, DocumentOverride>;
-  }
+  const { data } = await readRuntimeStateJson<Record<string, DocumentOverride>>({
+    filePath: OVERRIDE_FILE,
+    fallback: {} as Record<string, DocumentOverride>,
+    normalize: (parsed) => (
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, DocumentOverride>
+        : {}
+    ),
+  });
+  return data;
 }
 
 export async function saveDocumentOverride(filePath: string, input: { bizCategory?: BizCategory; groups?: string[]; ignored?: boolean }) {
@@ -37,7 +42,10 @@ export async function saveDocumentOverride(filePath: string, input: { bizCategor
   };
 
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
-  await fs.writeFile(OVERRIDE_FILE, JSON.stringify(current, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: OVERRIDE_FILE,
+    payload: current,
+  });
   scheduleOpenClawMemoryCatalogSync('document-override-write');
   return current[filePath];
 }
@@ -54,14 +62,20 @@ export async function saveDocumentSuggestion(filePath: string, input: { suggeste
   };
 
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
-  await fs.writeFile(OVERRIDE_FILE, JSON.stringify(current, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: OVERRIDE_FILE,
+    payload: current,
+  });
   scheduleOpenClawMemoryCatalogSync('document-override-suggestion');
   return current[filePath];
 }
 
 export async function saveDocumentOverrides(overrides: Record<string, DocumentOverride>) {
   await fs.mkdir(OVERRIDE_DIR, { recursive: true });
-  await fs.writeFile(OVERRIDE_FILE, JSON.stringify(overrides, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: OVERRIDE_FILE,
+    payload: overrides,
+  });
   scheduleOpenClawMemoryCatalogSync('document-overrides-bulk-write');
   return overrides;
 }

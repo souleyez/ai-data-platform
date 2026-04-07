@@ -1,6 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import {
+  markTaskFailed,
+  markTaskScheduled,
+  markTaskStarted,
+  markTaskSucceeded,
+} from './task-runtime-metrics.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 const SYNC_DEBOUNCE_MS = Math.max(500, Number(process.env.OPENCLAW_MEMORY_SYNC_DEBOUNCE_MS || 1500));
 const STATUS_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-sync-status.json');
@@ -48,7 +55,10 @@ function buildDefaultStatus(): OpenClawMemorySyncStatus {
 
 async function writeSyncStatus(status: OpenClawMemorySyncStatus) {
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
-  await fs.writeFile(STATUS_FILE, JSON.stringify(status, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: STATUS_FILE,
+    payload: status,
+  });
 }
 
 async function updateSyncStatus(patch: Partial<OpenClawMemorySyncStatus>) {
@@ -72,12 +82,18 @@ async function flushOpenClawMemoryCatalogSync() {
       lastRequestedAt: new Date().toISOString(),
       pendingReasons: [...pendingReasons],
     });
+    await markTaskScheduled('memory-sync', {
+      queuedCount: pendingReasons.size,
+      processingCount: 1,
+      lastMessage: 'memory sync rerun requested while current run is active',
+    }).catch(() => undefined);
     return null;
   }
 
   running = true;
   const reasons = [...pendingReasons];
   pendingReasons.clear();
+  const startedAtMs = Date.now();
   await updateSyncStatus({
     status: 'running',
     lastRequestedAt: new Date().toISOString(),
@@ -86,6 +102,11 @@ async function flushOpenClawMemoryCatalogSync() {
     lastReasons: reasons,
     lastErrorMessage: '',
   });
+  await markTaskStarted('memory-sync', {
+    queuedCount: reasons.length,
+    processingCount: 1,
+    lastMessage: reasons.join(', ') || 'manual',
+  }).catch(() => undefined);
 
   try {
     const result = await runRefresh();
@@ -107,6 +128,12 @@ async function flushOpenClawMemoryCatalogSync() {
         changedThisRun: result.changedThisRun,
       },
     });
+    await markTaskSucceeded('memory-sync', {
+      queuedCount: pendingReasons.size,
+      processingCount: 0,
+      durationMs: Date.now() - startedAtMs,
+      lastMessage: reasons.join(', ') || 'manual',
+    }).catch(() => undefined);
     return {
       ...result,
       reasons,
@@ -120,6 +147,13 @@ async function flushOpenClawMemoryCatalogSync() {
       pendingReasons: [...pendingReasons],
       lastReasons: reasons,
     });
+    await markTaskFailed('memory-sync', error instanceof Error ? error.message : 'openclaw-memory-sync-failed', {
+      queuedCount: pendingReasons.size,
+      processingCount: 0,
+      durationMs: Date.now() - startedAtMs,
+      retryDelta: rerunRequested ? 1 : 0,
+      lastMessage: reasons.join(', ') || 'manual',
+    }).catch(() => undefined);
     throw error;
   } finally {
     running = false;
@@ -136,6 +170,11 @@ export function scheduleOpenClawMemoryCatalogSync(reason = 'unspecified') {
     status: running ? 'running' : 'scheduled',
     lastRequestedAt: new Date().toISOString(),
     pendingReasons: [...pendingReasons],
+  }).catch(() => undefined);
+  void markTaskScheduled('memory-sync', {
+    queuedCount: pendingReasons.size,
+    processingCount: running ? 1 : 0,
+    lastMessage: String(reason || 'unspecified'),
   }).catch(() => undefined);
   if (scheduledTimer) return;
 
@@ -160,27 +199,29 @@ export async function refreshOpenClawMemoryCatalogNow(reason = 'manual') {
 }
 
 export async function readOpenClawMemorySyncStatus(): Promise<OpenClawMemorySyncStatus> {
-  try {
-    const raw = await fs.readFile(STATUS_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<OpenClawMemorySyncStatus>;
-    return {
-      ...buildDefaultStatus(),
-      ...parsed,
-      pendingReasons: Array.isArray(parsed.pendingReasons) ? parsed.pendingReasons.map((item) => String(item || '')).filter(Boolean) : [],
-      lastReasons: Array.isArray(parsed.lastReasons) ? parsed.lastReasons.map((item) => String(item || '')).filter(Boolean) : [],
-      lastResult: parsed.lastResult && typeof parsed.lastResult === 'object'
-        ? {
-            generatedAt: String(parsed.lastResult.generatedAt || ''),
-            libraryCount: Number(parsed.lastResult.libraryCount || 0),
-            documentCount: Number(parsed.lastResult.documentCount || 0),
-            templateCount: Number(parsed.lastResult.templateCount || 0),
-            outputCount: Number(parsed.lastResult.outputCount || 0),
-            changeCount: Number(parsed.lastResult.changeCount || 0),
-            changedThisRun: Number(parsed.lastResult.changedThisRun || 0),
-          }
-        : null,
-    };
-  } catch {
-    return buildDefaultStatus();
-  }
+  const { data } = await readRuntimeStateJson<OpenClawMemorySyncStatus>({
+    filePath: STATUS_FILE,
+    fallback: buildDefaultStatus(),
+    normalize: (raw) => {
+      const parsed = (raw || {}) as Partial<OpenClawMemorySyncStatus>;
+      return {
+        ...buildDefaultStatus(),
+        ...parsed,
+        pendingReasons: Array.isArray(parsed.pendingReasons) ? parsed.pendingReasons.map((item) => String(item || '')).filter(Boolean) : [],
+        lastReasons: Array.isArray(parsed.lastReasons) ? parsed.lastReasons.map((item) => String(item || '')).filter(Boolean) : [],
+        lastResult: parsed.lastResult && typeof parsed.lastResult === 'object'
+          ? {
+              generatedAt: String(parsed.lastResult.generatedAt || ''),
+              libraryCount: Number(parsed.lastResult.libraryCount || 0),
+              documentCount: Number(parsed.lastResult.documentCount || 0),
+              templateCount: Number(parsed.lastResult.templateCount || 0),
+              outputCount: Number(parsed.lastResult.outputCount || 0),
+              changeCount: Number(parsed.lastResult.changeCount || 0),
+              changedThisRun: Number(parsed.lastResult.changedThisRun || 0),
+            }
+          : null,
+      };
+    },
+  });
+  return data;
 }

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT, STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
@@ -186,14 +187,12 @@ async function loadDefaultDocumentCategoryConfig(defaultScanRoot: string) {
 export async function loadDocumentCategoryConfig(fallbackScanRoot: string) {
   const defaultScanRoot = normalizeConfiguredScanRoot(fallbackScanRoot) || normalizeConfiguredScanRoot(STORAGE_FILES_DIR) || STORAGE_FILES_DIR;
   const defaults = await loadDefaultDocumentCategoryConfig(defaultScanRoot);
-
-  try {
-    const raw = await fs.readFile(RUNTIME_CONFIG_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<DocumentCategoryConfig>;
-    return mergeDocumentCategoryConfig(defaults, parsed, defaultScanRoot);
-  } catch {
-    return defaults;
-  }
+  const { data } = await readRuntimeStateJson<DocumentCategoryConfig>({
+    filePath: RUNTIME_CONFIG_FILE,
+    fallback: defaults,
+    normalize: (parsed) => mergeDocumentCategoryConfig(defaults, (parsed || {}) as Partial<DocumentCategoryConfig>, defaultScanRoot),
+  });
+  return data;
 }
 
 export async function saveDocumentCategoryConfig(scanRoot: string, input: Partial<DocumentCategoryConfig>) {
@@ -219,7 +218,10 @@ export async function saveDocumentCategoryConfig(scanRoot: string, input: Partia
   };
 
   await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(RUNTIME_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: RUNTIME_CONFIG_FILE,
+    payload: next,
+  });
   return next;
 }
 

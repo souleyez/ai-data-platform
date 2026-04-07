@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CACHE_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 export type DocumentCachePayload = {
   generatedAt: string;
@@ -21,16 +22,32 @@ async function ensureCacheDir() {
 }
 
 export async function readDocumentCache(): Promise<DocumentCachePayload | null> {
-  try {
-    const raw = await fs.readFile(CACHE_FILE, 'utf8');
-    return JSON.parse(raw) as DocumentCachePayload;
-  } catch {
-    return null;
-  }
+  const { data } = await readRuntimeStateJson<DocumentCachePayload | null>({
+    filePath: CACHE_FILE,
+    fallback: null,
+    normalize: (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return null;
+      const payload = parsed as Partial<DocumentCachePayload>;
+      if (!Array.isArray(payload.items)) return null;
+      return {
+        generatedAt: String(payload.generatedAt || '').trim() || new Date().toISOString(),
+        scanRoot: String(payload.scanRoot || '').trim(),
+        scanRoots: Array.isArray(payload.scanRoots) ? payload.scanRoots.map((item) => String(item || '').trim()).filter(Boolean) : undefined,
+        totalFiles: Number(payload.totalFiles || payload.items.length || 0),
+        scanSignature: String(payload.scanSignature || '').trim(),
+        indexedPaths: Array.isArray(payload.indexedPaths) ? payload.indexedPaths.map((item) => String(item || '').trim()).filter(Boolean) : undefined,
+        items: payload.items as ParsedDocument[],
+      };
+    },
+  });
+  return data;
 }
 
 export async function writeDocumentCache(payload: DocumentCachePayload) {
   await ensureCacheDir();
-  await fs.writeFile(CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: CACHE_FILE,
+    payload,
+  });
   scheduleOpenClawMemoryCatalogSync('document-cache-write');
 }

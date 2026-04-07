@@ -19,6 +19,7 @@ import { adaptTemplateEnvelopeForRequest } from './report-template-adapter.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR, STORAGE_ROOT } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 const REPORT_CONFIG_DIR = STORAGE_CONFIG_DIR;
 const REPORT_REFERENCE_DIR = path.join(STORAGE_FILES_DIR, 'report-references');
@@ -1276,29 +1277,31 @@ export function normalizePersistedReportState(raw: unknown): PersistedState {
 }
 
 async function readState(): Promise<{ state: PersistedState; migrated: boolean }> {
-  try {
-    const raw = await fs.readFile(REPORT_STATE_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    const state = normalizePersistedReportState(parsed);
-    return {
-      state,
-      migrated: JSON.stringify(parsed) !== JSON.stringify(state),
-    };
-  } catch {
-    return {
-      state: normalizePersistedReportState(null),
-      migrated: false,
-    };
-  }
+  const fallbackState = normalizePersistedReportState(null);
+  const { data, source } = await readRuntimeStateJson<{ raw: unknown; state: PersistedState }>({
+    filePath: REPORT_STATE_FILE,
+    fallback: {
+      raw: null,
+      state: fallbackState,
+    },
+    normalize: (parsed) => ({
+      raw: parsed,
+      state: normalizePersistedReportState(parsed),
+    }),
+  });
+
+  return {
+    state: data.state,
+    migrated: source !== 'fallback' && JSON.stringify(data.raw) !== JSON.stringify(data.state),
+  };
 }
 
 async function writeState(state: PersistedState) {
   await ensureDirs();
-  await fs.writeFile(
-    REPORT_STATE_FILE,
-    JSON.stringify(normalizePersistedReportState(state), null, 2),
-    'utf8',
-  );
+  await writeRuntimeStateJson({
+    filePath: REPORT_STATE_FILE,
+    payload: normalizePersistedReportState(state),
+  });
 }
 
 function hasDatasourceGovernanceId(label: string, key: string, id: string) {
@@ -1737,6 +1740,13 @@ async function saveGroupsAndOutputs(groups: ReportGroup[], outputs: ReportOutput
 
 export async function loadReportCenterState() {
   return loadReportCenterStateWithOptions();
+}
+
+export async function loadReportCenterReadState() {
+  return loadReportCenterStateWithOptions({
+    refreshDynamicPages: false,
+    persistFixups: false,
+  });
 }
 
 export async function loadReportCenterStateWithOptions(options?: {

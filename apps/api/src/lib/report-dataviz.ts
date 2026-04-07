@@ -3,6 +3,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatOutput } from './knowledge-output.js';
 import { REPO_ROOT } from './paths.js';
+import {
+  markTaskFailed,
+  markTaskSkipped,
+  markTaskStarted,
+  markTaskSucceeded,
+} from './task-runtime-metrics.js';
 
 export type ReportChartRender = {
   renderer?: string;
@@ -96,9 +102,20 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
     fs.access(PYTHON_RENDER_SCRIPT).then(() => true).catch(() => false),
   ]);
 
-  if (!pythonExecutable || !scriptExists) return null;
+  if (!pythonExecutable || !scriptExists) {
+    await markTaskSkipped('dataviz', 'renderer-unavailable', {
+      processingCount: 0,
+      lastMessage: payload.title,
+    }).catch(() => undefined);
+    return null;
+  }
 
   return new Promise((resolve) => {
+    const startedAtMs = Date.now();
+    void markTaskStarted('dataviz', {
+      processingCount: 1,
+      lastMessage: payload.title,
+    }).catch(() => undefined);
     const child = spawn(pythonExecutable, [PYTHON_RENDER_SCRIPT], {
       cwd: REPO_ROOT,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -109,6 +126,12 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
     let stderr = '';
     const timer = setTimeout(() => {
       child.kill();
+      void markTaskFailed('dataviz', 'renderer-timeout', {
+        processingCount: 0,
+        durationMs: Date.now() - startedAtMs,
+        retryDelta: 1,
+        lastMessage: payload.title,
+      }).catch(() => undefined);
       resolve(null);
     }, RENDER_TIMEOUT_MS);
 
@@ -120,19 +143,44 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
     });
     child.on('error', () => {
       clearTimeout(timer);
+      void markTaskFailed('dataviz', 'renderer-spawn-error', {
+        processingCount: 0,
+        durationMs: Date.now() - startedAtMs,
+        retryDelta: 1,
+        lastMessage: payload.title,
+      }).catch(() => undefined);
       resolve(null);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
         if (stderr.trim()) console.warn(`[report-dataviz] renderer failed: ${stderr.trim()}`);
+        void markTaskFailed('dataviz', stderr.trim() || `renderer-exit-${code}`, {
+          processingCount: 0,
+          durationMs: Date.now() - startedAtMs,
+          retryDelta: 1,
+          lastMessage: payload.title,
+        }).catch(() => undefined);
         return resolve(null);
       }
       try {
         const parsed = JSON.parse(stdout) as { svg?: string; chart_type?: string };
         const svg = String(parsed.svg || '').trim();
-        if (!svg) return resolve(null);
+        if (!svg) {
+          void markTaskFailed('dataviz', 'invalid-renderer-output', {
+            processingCount: 0,
+            durationMs: Date.now() - startedAtMs,
+            retryDelta: 1,
+            lastMessage: payload.title,
+          }).catch(() => undefined);
+          return resolve(null);
+        }
         const chartType = String(parsed.chart_type || payload.chart_type || '').trim() || payload.chart_type;
+        void markTaskSucceeded('dataviz', {
+          processingCount: 0,
+          durationMs: Date.now() - startedAtMs,
+          lastMessage: payload.title,
+        }).catch(() => undefined);
         resolve({
           renderer: 'python-dataviz',
           chartType,
@@ -141,6 +189,12 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
           generatedAt: new Date().toISOString(),
         });
       } catch {
+        void markTaskFailed('dataviz', 'invalid-renderer-output', {
+          processingCount: 0,
+          durationMs: Date.now() - startedAtMs,
+          retryDelta: 1,
+          lastMessage: payload.title,
+        }).catch(() => undefined);
         resolve(null);
       }
     });

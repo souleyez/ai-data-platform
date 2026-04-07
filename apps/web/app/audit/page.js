@@ -30,6 +30,19 @@ function formatSize(value) {
   return `${gb.toFixed(1)} GB`;
 }
 
+function formatDurationMs(value) {
+  const totalMs = Number(value || 0);
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return '暂无';
+  const totalSeconds = Math.round(totalMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours} 小时 ${remainMinutes} 分` : `${hours} 小时`;
+}
+
 function renderStorageState(value) {
   if (value === 'structured-only') return '仅保留结构化数据';
   if (value === 'live') return '保留原文件';
@@ -90,6 +103,7 @@ export default function AuditPage() {
       storage: audit.storage,
       staleDays: audit.staleDays,
       hardDeleteDays: audit.hardDeleteDays,
+      stability: audit.stability || null,
       staleDocs: (audit.documents || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
       staleCaptures: (audit.captureTasks || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
       logs: audit.logs || [],
@@ -108,6 +122,76 @@ export default function AuditPage() {
         </header>
 
         <section className="documents-layout">
+          <section className="card stats-grid">
+            <StatCard
+              label="阶段一告警"
+              value={summary?.stability ? String((summary.stability.summary?.warningCount || 0) + (summary.stability.summary?.criticalCount || 0)) : '-'}
+              subtle={summary?.stability ? `critical ${summary.stability.summary?.criticalCount || 0} / warning ${summary.stability.summary?.warningCount || 0}` : ''}
+            />
+            <StatCard
+              label="深解析积压"
+              value={summary?.stability ? String(summary.stability.summary?.deepParseBacklog || 0) : '-'}
+              subtle="queued + processing"
+            />
+            <StatCard
+              label="采集异常任务"
+              value={summary?.stability ? String(summary.stability.summary?.captureErrorTasks || 0) : '-'}
+              subtle="capture error"
+            />
+            <StatCard
+              label="Dataviz平均耗时"
+              value={summary?.stability ? formatDurationMs(summary.stability.durations?.datavizAvgDurationMs) : '-'}
+              subtle="python dataviz"
+            />
+          </section>
+
+          {summary?.stability ? (
+            <section className="card table-card">
+              <div className="panel-header">
+                <div>
+                  <h3>阶段一稳定性</h3>
+                  <p>把 backlog、失败、渲染链异常和 memory sync 滞后统一收口到现有审计页里。</p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                {(summary.stability.warnings || []).map((warning) => (
+                  <span key={warning.key} className={`tag ${warning.level === 'critical' ? 'danger-tag' : 'warning-tag'}`}>
+                    {warning.title}
+                  </span>
+                ))}
+                {!(summary.stability.warnings || []).length ? (
+                  <span className="tag up-tag">当前没有阶段一稳定性告警</span>
+                ) : null}
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>任务族</th>
+                    <th>状态</th>
+                    <th>积压 / 处理中</th>
+                    <th>平均耗时</th>
+                    <th>最近异常</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['deepParse', '深解析', summary.stability.tasks?.deepParse, `${summary.stability.backlog?.deepParseQueued || 0} / ${summary.stability.backlog?.deepParseProcessing || 0}`, summary.stability.durations?.deepParseAvgDurationMs],
+                    ['memorySync', 'Memory Sync', summary.stability.tasks?.memorySync, '-', summary.stability.durations?.memorySyncAvgDurationMs],
+                    ['dataviz', 'Dataviz', summary.stability.tasks?.dataviz, '-', summary.stability.durations?.datavizAvgDurationMs],
+                  ].map(([key, label, task, backlog, avgDuration]) => (
+                    <tr key={key}>
+                      <td>{label}</td>
+                      <td>{task?.status || 'idle'}</td>
+                      <td>{String(backlog)}</td>
+                      <td>{formatDurationMs(avgDuration)}</td>
+                      <td className="summary-cell">{task?.lastErrorMessage || task?.lastMessage || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+
           <section className="card stats-grid">
             <StatCard
               label="剩余存储"

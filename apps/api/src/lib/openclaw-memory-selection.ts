@@ -1,7 +1,7 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loadBotMemorySelectionState } from './bot-memory-catalog.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import { readRuntimeStateJson } from './runtime-state-file.js';
 import type { OpenClawMemoryDocumentState, OpenClawMemoryState } from './openclaw-memory-changes.js';
 
 type KnowledgeLibrary = { key: string; label: string };
@@ -180,12 +180,16 @@ export async function loadOpenClawMemorySelectionState(botId?: string) {
   if (botId) {
     return loadBotMemorySelectionState(botId);
   }
-  try {
-    const raw = await fs.readFile(STATE_FILE, 'utf8');
-    return JSON.parse(raw) as OpenClawMemoryState;
-  } catch {
-    return null;
-  }
+  const { data } = await readRuntimeStateJson<OpenClawMemoryState | null>({
+    filePath: STATE_FILE,
+    fallback: null,
+    normalize: (parsed) => (
+      parsed && typeof parsed === 'object'
+        ? parsed as OpenClawMemoryState
+        : null
+    ),
+  });
+  return data;
 }
 
 export async function selectOpenClawMemoryDocumentCandidates(input: {

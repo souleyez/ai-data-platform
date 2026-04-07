@@ -1,6 +1,6 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { STORAGE_CONFIG_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 const DOCUMENT_ANSWER_USAGE_FILE = path.join(STORAGE_CONFIG_DIR, 'document-answer-usage.json');
 const MAX_USAGE_EVENTS = 500;
@@ -37,6 +37,10 @@ type DocumentAnswerUsageState = {
 
 let stateMutationQueue: Promise<void> = Promise.resolve();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function buildUsageEventId() {
   return `answer-usage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -53,40 +57,43 @@ function normalizeReferenceName(reference: DocumentAnswerReference) {
   return String(reference.name || reference.path || reference.id || 'unknown').trim();
 }
 
-async function ensureUsageDir() {
-  await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
-}
-
 async function readUsageState(): Promise<DocumentAnswerUsageState> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(DOCUMENT_ANSWER_USAGE_FILE, 'utf8')) as Partial<DocumentAnswerUsageState>;
-    return {
-      updatedAt: String(parsed.updatedAt || new Date().toISOString()),
-      items: Array.isArray(parsed.items) ? parsed.items.map((item) => ({
-        documentId: String(item.documentId || ''),
-        path: String(item.path || ''),
-        name: String(item.name || ''),
-        count: Number(item.count || 0),
-        firstReferencedAt: String(item.firstReferencedAt || ''),
-        lastReferencedAt: String(item.lastReferencedAt || ''),
-      })).filter((item) => item.documentId) : [],
-      events: Array.isArray(parsed.events) ? parsed.events.map((event) => ({
-        id: String(event.id || ''),
-        time: String(event.time || ''),
-        traceId: String(event.traceId || ''),
-        botId: String(event.botId || ''),
-        sessionUser: String(event.sessionUser || ''),
-        documentIds: Array.isArray(event.documentIds) ? event.documentIds.map((item) => String(item || '')).filter(Boolean) : [],
-      })).filter((event) => event.id) : [],
-    };
-  } catch {
-    return createEmptyState();
-  }
+  const { data } = await readRuntimeStateJson<DocumentAnswerUsageState>({
+    filePath: DOCUMENT_ANSWER_USAGE_FILE,
+    fallback: createEmptyState,
+    normalize: (parsed) => {
+      if (!isRecord(parsed)) return createEmptyState();
+      return {
+        updatedAt: String(parsed.updatedAt || new Date().toISOString()),
+        items: Array.isArray(parsed.items) ? parsed.items.map((item) => ({
+          documentId: String(isRecord(item) ? item.documentId || '' : ''),
+          path: String(isRecord(item) ? item.path || '' : ''),
+          name: String(isRecord(item) ? item.name || '' : ''),
+          count: Number(isRecord(item) ? item.count || 0 : 0),
+          firstReferencedAt: String(isRecord(item) ? item.firstReferencedAt || '' : ''),
+          lastReferencedAt: String(isRecord(item) ? item.lastReferencedAt || '' : ''),
+        })).filter((item) => item.documentId) : [],
+        events: Array.isArray(parsed.events) ? parsed.events.map((event) => ({
+          id: String(isRecord(event) ? event.id || '' : ''),
+          time: String(isRecord(event) ? event.time || '' : ''),
+          traceId: String(isRecord(event) ? event.traceId || '' : ''),
+          botId: String(isRecord(event) ? event.botId || '' : ''),
+          sessionUser: String(isRecord(event) ? event.sessionUser || '' : ''),
+          documentIds: Array.isArray(isRecord(event) ? event.documentIds : undefined)
+            ? (event.documentIds as unknown[]).map((item) => String(item || '')).filter(Boolean)
+            : [],
+        })).filter((event) => event.id) : [],
+      };
+    },
+  });
+  return data;
 }
 
 async function writeUsageState(state: DocumentAnswerUsageState) {
-  await ensureUsageDir();
-  await fs.writeFile(DOCUMENT_ANSWER_USAGE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: DOCUMENT_ANSWER_USAGE_FILE,
+    payload: state,
+  });
 }
 
 async function mutateUsageState<T>(mutator: (state: DocumentAnswerUsageState) => Promise<T>) {

@@ -67,3 +67,26 @@ test('applyDetailedParseQueueMetadata should preserve failed status for detailed
     await fs.rm(storageRoot, { recursive: true, force: true });
   }
 });
+
+test('runDetailedParseBatch should mark deep-parse runtime metrics when no queued items exist', async () => {
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-deep-queue-empty-'));
+  process.env.AI_DATA_PLATFORM_STORAGE_ROOT = storageRoot;
+
+  try {
+    const queueModule = await import(`../src/lib/document-deep-parse-queue.js?t=${Date.now()}-${Math.random()}`);
+    const metricsModule = await import(`../src/lib/task-runtime-metrics.js?t=${Date.now()}-${Math.random()}`);
+
+    const result = await queueModule.runDetailedParseBatch(4);
+    const metrics = await metricsModule.readTaskRuntimeMetrics();
+    const deepParseMetrics = metrics.items.find((item: { family?: string }) => item.family === 'deep-parse');
+
+    assert.equal(result.processedCount, 0);
+    assert.equal(result.succeededCount, 0);
+    assert.equal(result.failedCount, 0);
+    assert.equal(deepParseMetrics?.status, 'skipped');
+    assert.equal(deepParseMetrics?.lastMessage, 'no-queued-items');
+  } finally {
+    delete process.env.AI_DATA_PLATFORM_STORAGE_ROOT;
+    await fs.rm(storageRoot, { recursive: true, force: true });
+  }
+});

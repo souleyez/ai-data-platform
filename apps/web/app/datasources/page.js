@@ -14,6 +14,7 @@ import {
   buildSidebarSources,
   copyText,
   EMPTY_FORM,
+  StatCard,
 } from './datasource-page-support';
 
 function hasCredentialSecret(secret) {
@@ -133,6 +134,7 @@ export default function DatasourcesPage() {
   const definitionMap = useMemo(() => new Map(definitions.map((item) => [item.id, item])), [definitions]);
   const sidebarSources = useMemo(() => buildSidebarSources(managed, legacyData?.items || []), [legacyData, managed]);
   const recentRuns = useMemo(() => runs.slice(0, 10), [runs]);
+  const stability = legacyData?.stability || null;
   const isLocalDirectory = form.kind === 'local_directory';
 
   function updateForm(patch) {
@@ -341,6 +343,52 @@ export default function DatasourcesPage() {
           </section>
         ) : (
           <section className="documents-layout">
+            <section className="card stats-grid">
+              <StatCard
+                label="阶段一告警"
+                value={stability ? String((stability.summary?.warningCount || 0) + (stability.summary?.criticalCount || 0)) : '-'}
+                subtle={stability ? `critical ${stability.summary?.criticalCount || 0} / warning ${stability.summary?.warningCount || 0}` : ''}
+              />
+              <StatCard
+                label="深解析积压"
+                value={stability ? String(stability.summary?.deepParseBacklog || 0) : '-'}
+                subtle="queued + processing"
+              />
+              <StatCard
+                label="采集失败任务"
+                value={stability ? String(stability.summary?.captureErrorTasks || 0) : '-'}
+                subtle="web capture error"
+              />
+              <StatCard
+                label="失败运行"
+                value={stability ? String(stability.summary?.datasourceFailedRuns || 0) : '-'}
+                subtle="recent datasource runs"
+              />
+            </section>
+
+            {stability?.warnings?.length ? (
+              <section className="card documents-card">
+                <div className="panel-header">
+                  <div>
+                    <h3>阶段一稳定性</h3>
+                    <p>直接显示 backlog、失败和运行时告警，不需要再去翻本地 runtime JSON。</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {stability.warnings.slice(0, 8).map((warning) => (
+                    <span key={warning.key} className={`tag ${warning.level === 'critical' ? 'danger-tag' : 'warning-tag'}`}>
+                      {warning.title}
+                    </span>
+                  ))}
+                </div>
+                <div className="datasource-managed-meta" style={{ marginTop: 12 }}>
+                  <span>deep parse：{stability.backlog?.deepParseQueued || 0} queued / {stability.backlog?.deepParseProcessing || 0} processing</span>
+                  <span>dynamic outputs：{stability.backlog?.dynamicOutputs || 0}</span>
+                  <span>scheduled captures：{stability.backlog?.captureScheduled || 0}</span>
+                </div>
+              </section>
+            ) : null}
+
             <section className="documents-grid two-columns datasource-workbench-grid">
               <DatasourceComposerCard
                 form={form}

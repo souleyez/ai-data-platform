@@ -1,8 +1,8 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
-import { STORAGE_CONFIG_DIR, STORAGE_ROOT } from './paths.js';
+import { STORAGE_CONFIG_DIR } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 const CONFIG_DIR = STORAGE_CONFIG_DIR;
 const RETAINED_DOCUMENTS_FILE = path.join(CONFIG_DIR, 'retained-documents.json');
@@ -17,24 +17,26 @@ type RetainedDocumentPayload = {
   items?: RetainedDocument[];
 };
 
-async function ensureConfigDir() {
-  await fs.mkdir(CONFIG_DIR, { recursive: true });
-}
-
 async function writePayload(payload: RetainedDocumentPayload) {
-  await ensureConfigDir();
-  await fs.writeFile(RETAINED_DOCUMENTS_FILE, JSON.stringify(payload, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: RETAINED_DOCUMENTS_FILE,
+    payload,
+  });
   scheduleOpenClawMemoryCatalogSync('retained-documents-write');
 }
 
 export async function loadRetainedDocuments() {
-  try {
-    const raw = await fs.readFile(RETAINED_DOCUMENTS_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as RetainedDocumentPayload;
-    return Array.isArray(parsed.items) ? parsed.items : [];
-  } catch {
-    return [];
-  }
+  const { data } = await readRuntimeStateJson<RetainedDocument[]>({
+    filePath: RETAINED_DOCUMENTS_FILE,
+    fallback: [],
+    normalize: (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return [];
+      return Array.isArray((parsed as RetainedDocumentPayload).items)
+        ? (parsed as RetainedDocumentPayload).items as RetainedDocument[]
+        : [];
+    },
+  });
+  return data;
 }
 
 export async function saveRetainedDocuments(items: RetainedDocument[]) {

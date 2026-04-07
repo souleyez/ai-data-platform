@@ -43,6 +43,10 @@ import { DEFAULT_SCAN_DIR, loadParsedDocuments } from '../lib/document-store.js'
 import { loadDocumentCategoryConfig } from '../lib/document-config.js';
 import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { ingestUploadedFiles, saveMultipartFiles } from '../lib/document-upload-ingest.js';
+import { loadOperationsOverviewPayload } from '../lib/operations-overview.js';
+
+const DATASOURCE_STALE_WARNING_MS = 12 * 60 * 60 * 1000;
+const DATASOURCE_STALE_CRITICAL_MS = 24 * 60 * 60 * 1000;
 
 function toDatasourceItem(item: any) {
   return {
@@ -50,6 +54,98 @@ function toDatasourceItem(item: any) {
     actions: item.actions || ['hide', 'delete'],
     updateMode: item.updateMode || '手动更新',
     hidden: false,
+  };
+}
+
+function toTimestamp(value: unknown) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function toDurationMs(startedAt?: string, finishedAt?: string) {
+  const started = toTimestamp(startedAt);
+  const finished = toTimestamp(finishedAt);
+  if (!started || !finished || finished < started) return 0;
+  return finished - started;
+}
+
+function buildDatasourceRunStability(run: any) {
+  const durationMs = toDurationMs(run.startedAt, run.finishedAt);
+  const badges: Array<{ tone: string; label: string }> = [];
+  const notes: string[] = [];
+
+  if (run.status === 'failed') {
+    badges.push({ tone: 'danger-tag', label: '运行失败' });
+  } else if (run.status === 'partial') {
+    badges.push({ tone: 'warning-tag', label: '部分完成' });
+  }
+
+  if (Number(run.failedCount || 0) > 0) {
+    notes.push(`失败 ${Number(run.failedCount || 0)} 项`);
+  }
+  if (durationMs > 0) {
+    notes.push(`耗时 ${Math.round(durationMs / 1000)} 秒`);
+  }
+
+  return {
+    durationMs,
+    badges,
+    note: notes.join('；'),
+  };
+}
+
+function countConsecutiveFailures(runs: any[]) {
+  let total = 0;
+  for (const run of runs) {
+    if (run.status !== 'failed') break;
+    total += 1;
+  }
+  return total;
+}
+
+function buildManagedDatasourceStability(item: any, runs: any[]) {
+  const runtime = item.runtime || item;
+  const sortedRuns = [...runs].sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
+  const latestRun = sortedRuns[0] || runtime || {};
+  const latestDurationMs = toDurationMs(latestRun.startedAt, latestRun.finishedAt);
+  const consecutiveFailures = countConsecutiveFailures(sortedRuns);
+  const badges: Array<{ tone: string; label: string }> = [];
+  const notes: string[] = [];
+
+  if (consecutiveFailures >= 2) {
+    badges.push({ tone: 'danger-tag', label: `连续失败 ${consecutiveFailures}` });
+    notes.push(`最近 ${consecutiveFailures} 次运行连续失败`);
+  } else if (runtime.lastStatus === 'failed') {
+    badges.push({ tone: 'warning-tag', label: '最近失败' });
+  } else if (runtime.lastStatus === 'partial') {
+    badges.push({ tone: 'warning-tag', label: '部分完成' });
+  }
+
+  if (latestDurationMs > 0) {
+    notes.push(`最近耗时 ${Math.round(latestDurationMs / 1000)} 秒`);
+  }
+
+  const isScheduled = item.schedule && item.schedule !== 'manual';
+  const lastRunAtMs = toTimestamp(runtime.lastRunAt || item.lastRunAt);
+  const staleForMs = isScheduled && lastRunAtMs ? Math.max(0, Date.now() - lastRunAtMs) : 0;
+  if (staleForMs >= DATASOURCE_STALE_CRITICAL_MS) {
+    badges.push({ tone: 'danger-tag', label: '运行严重滞后' });
+    notes.push(`距离上次运行已超过 ${Math.round(DATASOURCE_STALE_CRITICAL_MS / 3600000)} 小时`);
+  } else if (staleForMs >= DATASOURCE_STALE_WARNING_MS) {
+    badges.push({ tone: 'warning-tag', label: '运行滞后' });
+    notes.push(`距离上次运行已超过 ${Math.round(DATASOURCE_STALE_WARNING_MS / 3600000)} 小时`);
+  }
+
+  if (item.status === 'paused') {
+    badges.push({ tone: 'neutral-tag', label: '已暂停' });
+  }
+
+  return {
+    consecutiveFailures,
+    latestDurationMs,
+    staleForMs,
+    badges,
+    note: notes.join('；'),
   };
 }
 
@@ -296,14 +392,27 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/datasources/managed', async () => {
-    const [items, meta, documentSummaryMap] = await Promise.all([
+    const [items, meta, documentSummaryMap, runs] = await Promise.all([
       listDatasourceProviderSummaries(),
       buildDatasourceMeta(),
       buildDocumentSummaryMap(),
+      listDatasourceRuns(),
     ]);
+    const runsByDatasource = runs.reduce((acc, item) => {
+      const bucket = acc.get(item.datasourceId) || [];
+      bucket.push(item);
+      acc.set(item.datasourceId, bucket);
+      return acc;
+    }, new Map<string, any[]>());
     return {
       total: items.length,
-      items: items.map((item) => enrichDatasourceProviderSummary(item, documentSummaryMap)),
+      items: items.map((item) => {
+        const enriched = enrichDatasourceProviderSummary(item, documentSummaryMap);
+        return {
+          ...enriched,
+          stability: buildManagedDatasourceStability(enriched, runsByDatasource.get(enriched.id) || []),
+        };
+      }),
       meta,
     };
   });
@@ -325,14 +434,22 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       loadDocumentLibraries(),
     ]);
     const libraryLabelMap = buildDatasourceLibraryLabelMap(documentLibraries);
+    const runModels = buildDatasourceRunReadModels({
+      runs: items,
+      definitions,
+      libraryLabelMap,
+      documentSummaryMap,
+    }).map((item) => {
+      const stability = buildDatasourceRunStability(item);
+      return {
+        ...item,
+        durationMs: stability.durationMs,
+        stability,
+      };
+    });
     return {
       total: items.length,
-      items: buildDatasourceRunReadModels({
-        runs: items,
-        definitions,
-        libraryLabelMap,
-        documentSummaryMap,
-      }),
+      items: runModels,
     };
   });
 
@@ -498,12 +615,13 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/datasources', async () => {
-    const [webTasks, providerSummaries, providerMeta, presetCatalog, documentSummaryMap] = await Promise.all([
+    const [webTasks, providerSummaries, providerMeta, presetCatalog, documentSummaryMap, operationsOverview] = await Promise.all([
       listWebCaptureTasks(),
       listDatasourceProviderSummaries(),
       buildDatasourceMeta(),
       Promise.resolve(listDatasourcePresets()),
       buildDocumentSummaryMap(),
+      loadOperationsOverviewPayload(),
     ]);
 
     const latestCaptureAt = webTasks
@@ -542,6 +660,7 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
         ...enrichDatasourceProviderSummary(item, documentSummaryMap),
       })),
       providerMeta,
+      stability: operationsOverview.stability,
       presetCatalog,
       meta: {
         connected: legacyItems.filter((item) => item.status === 'connected').length,

@@ -13,6 +13,7 @@ import {
   MEMORY_ROOT,
   STORAGE_CONFIG_DIR,
 } from './paths.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 import {
   diffOpenClawMemoryState,
   OPENCLAW_MEMORY_STATE_VERSION,
@@ -656,16 +657,23 @@ async function ensureCatalogDirs() {
 }
 
 async function readPreviousState(): Promise<OpenClawMemoryState | null> {
-  try {
-    const raw = await fs.readFile(STATE_FILE, 'utf8');
-    return JSON.parse(raw) as OpenClawMemoryState;
-  } catch {
-    return null;
-  }
+  const { data } = await readRuntimeStateJson<OpenClawMemoryState | null>({
+    filePath: STATE_FILE,
+    fallback: null,
+    normalize: (parsed) => (
+      parsed && typeof parsed === 'object'
+        ? parsed as OpenClawMemoryState
+        : null
+    ),
+  });
+  return data;
 }
 
 async function writeState(state: OpenClawMemoryState) {
-  await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  await writeRuntimeStateJson({
+    filePath: STATE_FILE,
+    payload: state,
+  });
 }
 
 function renderIndex(snapshot: OpenClawMemoryCatalogSnapshot, recentChanges: OpenClawMemoryChange[]) {

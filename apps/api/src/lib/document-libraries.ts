@@ -5,6 +5,7 @@ import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } f
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
 import type { ParsedDocument } from './document-parser.js';
+import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 export type DocumentLibrary = {
   key: string;
@@ -37,15 +38,17 @@ function slugifyLibraryName(value: string) {
 }
 
 async function readLibrariesFile() {
-  try {
-    const raw = await fs.readFile(LIBRARIES_FILE, 'utf8');
-    const parsed = JSON.parse(raw) as { items?: DocumentLibrary[] };
-    return Array.isArray(parsed.items)
-      ? parsed.items.map((item) => normalizeLibrary(item))
-      : [];
-  } catch {
-    return [] as DocumentLibrary[];
-  }
+  const { data } = await readRuntimeStateJson<DocumentLibrary[]>({
+    filePath: LIBRARIES_FILE,
+    fallback: [] as DocumentLibrary[],
+    normalize: (parsed) => {
+      const items = Array.isArray((parsed as { items?: unknown[] } | null)?.items)
+        ? (parsed as { items: DocumentLibrary[] }).items
+        : [];
+      return items.map((item) => normalizeLibrary(item));
+    },
+  });
+  return data;
 }
 
 function normalizePermissionLevel(value: unknown) {
@@ -82,18 +85,17 @@ function normalizeLibrary(input: Partial<DocumentLibrary> & Pick<DocumentLibrary
 
 async function writeLibrariesFile(items: DocumentLibrary[]) {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(
-    LIBRARIES_FILE,
-    JSON.stringify({
+  await writeRuntimeStateJson({
+    filePath: LIBRARIES_FILE,
+    payload: {
       items: items.map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => ({
         ...rest,
         permissionLevel: normalizePermissionLevel(rest.permissionLevel),
         knowledgePagesEnabled: Boolean(rest.knowledgePagesEnabled),
         knowledgePagesMode: normalizeKnowledgePagesMode(rest.knowledgePagesMode, rest.knowledgePagesEnabled),
       })),
-    }, null, 2),
-    'utf8',
-  );
+    },
+  });
   scheduleOpenClawMemoryCatalogSync('document-libraries-write');
 }
 

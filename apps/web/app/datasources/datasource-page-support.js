@@ -97,6 +97,19 @@ export function formatRelative(value) {
   return `${days} 天前`;
 }
 
+export function formatDurationMs(value) {
+  const totalMs = Number(value || 0);
+  if (!Number.isFinite(totalMs) || totalMs <= 0) return '暂无';
+  const totalSeconds = Math.round(totalMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours} 小时 ${remainMinutes} 分` : `${hours} 小时`;
+}
+
 export function splitValues(value) {
   return String(value || '')
     .split(/[,\n，]/)

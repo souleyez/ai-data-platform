@@ -118,6 +118,9 @@ export function buildDocumentsIndexPayload(input: {
   totalFiles?: number;
   items: ParsedDocument[];
   cacheHit: boolean;
+  generatedAt?: string;
+  loadedFrom?: 'cache' | 'scan';
+  durationMs?: number;
   libraries: DocumentLibrary[];
   memorySync?: OpenClawMemorySyncStatus | null;
 }) {
@@ -146,6 +149,9 @@ export function buildDocumentsIndexPayload(input: {
     return acc;
   }, {});
 
+  const generatedAt = input.generatedAt || new Date().toISOString();
+  const loadedFrom = input.loadedFrom || (input.cacheHit ? 'cache' : 'scan');
+
   return {
     mode: 'read-only',
     scanRoot: input.config.scanRoot,
@@ -159,7 +165,10 @@ export function buildDocumentsIndexPayload(input: {
     items: input.items.map((item) => toListItem({ ...item, id: buildDocumentId(item.path) })),
     capabilities: ['scan', 'summarize', 'classify'],
     cacheHit: input.cacheHit,
-    lastScanAt: new Date().toISOString(),
+    generatedAt,
+    loadedFrom,
+    durationMs: Math.max(0, Number(input.durationMs || 0)),
+    lastScanAt: generatedAt,
     config: input.config,
     libraries: input.libraries,
     meta: {
@@ -180,6 +189,9 @@ export function buildDocumentsOverviewPayload(input: {
   totalFiles?: number;
   items: ParsedDocument[];
   cacheHit: boolean;
+  generatedAt?: string;
+  loadedFrom?: 'cache' | 'scan';
+  durationMs?: number;
   libraries: DocumentLibrary[];
   memorySync?: OpenClawMemorySyncStatus | null;
 }) {
@@ -209,6 +221,9 @@ export function buildDocumentsOverviewPayload(input: {
       return String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN');
     });
 
+  const generatedAt = input.generatedAt || new Date().toISOString();
+  const loadedFrom = input.loadedFrom || (input.cacheHit ? 'cache' : 'scan');
+
   return {
     mode: 'read-only',
     scanRoot: input.config.scanRoot,
@@ -217,7 +232,10 @@ export function buildDocumentsOverviewPayload(input: {
     totalFiles: input.totalFiles ?? input.files.length,
     parsed: input.items.filter((item) => item.parseStatus === 'parsed').length,
     cacheHit: input.cacheHit,
-    lastScanAt: new Date().toISOString(),
+    generatedAt,
+    loadedFrom,
+    durationMs: Math.max(0, Number(input.durationMs || 0)),
+    lastScanAt: generatedAt,
     memorySync: input.memorySync || null,
     libraries: summarizedLibraries,
   };
@@ -226,9 +244,15 @@ export function buildDocumentsOverviewPayload(input: {
 export function buildDocumentLibrariesPayload(input: {
   items: ParsedDocument[];
   libraries: DocumentLibrary[];
+  generatedAt?: string;
+  loadedFrom?: 'cache' | 'scan';
+  durationMs?: number;
 }) {
   return {
     mode: 'read-only',
+    generatedAt: input.generatedAt || new Date().toISOString(),
+    loadedFrom: input.loadedFrom || 'cache',
+    durationMs: Math.max(0, Number(input.durationMs || 0)),
     items: input.libraries.map((library) => ({
       ...library,
       documentCount: input.items.filter((item) => documentMatchesLibrary(item, library)).length,

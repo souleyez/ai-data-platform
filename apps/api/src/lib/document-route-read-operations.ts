@@ -12,8 +12,11 @@ import { loadDocumentStateSnapshot } from './document-route-loaders.js';
 
 export async function loadDocumentLibrariesPayload() {
   const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-  const [{ items }, libraries, extractionGovernance] = await Promise.all([
-    loadParsedDocuments(200, false, config.scanRoots),
+  const startedAt = Date.now();
+  const [{ items, generatedAt, loadedFrom }, libraries, extractionGovernance] = await Promise.all([
+    loadParsedDocuments(200, false, config.scanRoots, {
+      skipBackgroundTasks: true,
+    }),
     loadDocumentLibraries(),
     Promise.resolve(loadDocumentExtractionGovernance()),
   ]);
@@ -21,11 +24,15 @@ export async function loadDocumentLibrariesPayload() {
   return buildDocumentLibrariesPayload({
     items,
     libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
+    generatedAt,
+    loadedFrom,
+    durationMs: Date.now() - startedAt,
   });
 }
 
 export async function loadDocumentsIndexRoutePayload() {
-  const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
+  const startedAt = Date.now();
+  const { config, exists, files, totalFiles, items, cacheHit, generatedAt, loadedFrom } = await loadDocumentStateSnapshot();
   const [libraries, memorySync, extractionGovernance] = await Promise.all([
     loadDocumentLibraries(),
     readOpenClawMemorySyncStatus(),
@@ -39,13 +46,17 @@ export async function loadDocumentsIndexRoutePayload() {
     totalFiles,
     items,
     cacheHit,
+    generatedAt,
+    loadedFrom,
+    durationMs: Date.now() - startedAt,
     libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
     memorySync,
   });
 }
 
 export async function loadDocumentsOverviewRoutePayload() {
-  const { config, exists, files, totalFiles, items, cacheHit } = await loadDocumentStateSnapshot();
+  const startedAt = Date.now();
+  const { config, exists, files, totalFiles, items, cacheHit, generatedAt, loadedFrom } = await loadDocumentStateSnapshot();
   const [libraries, memorySync, extractionGovernance] = await Promise.all([
     loadDocumentLibraries(),
     readOpenClawMemorySyncStatus(),
@@ -59,6 +70,9 @@ export async function loadDocumentsOverviewRoutePayload() {
     totalFiles,
     items,
     cacheHit,
+    generatedAt,
+    loadedFrom,
+    durationMs: Date.now() - startedAt,
     libraries: attachDocumentExtractionSettings(libraries, extractionGovernance),
     memorySync,
   });
