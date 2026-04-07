@@ -52,7 +52,6 @@ export default function HomePageClient({ initialModelState }) {
     submitQuestion,
     systemConstraints,
     deleteReport,
-    reviseReport,
     uploadInputRef,
     uploadLoading,
   } = useHomePageController();
@@ -104,7 +103,6 @@ export default function HomePageClient({ initialModelState }) {
               selectedReportId={selectedReportId}
               onSelectReport={setSelectedReportId}
               onDeleteReport={deleteReport}
-              onReviseReport={reviseReport}
             />
           </section>
         </section>

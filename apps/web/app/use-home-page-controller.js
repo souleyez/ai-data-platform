@@ -6,11 +6,9 @@ import {
   fetchDatasources,
   fetchDocumentsSnapshot,
   fetchReportsSnapshot,
-  reviseReportOutput,
 } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
-  appendChatMessageKeepingLatestFailure,
   clearStoredChatMessages,
   loadStoredChatMessages,
   persistChatMessages,
@@ -26,10 +24,6 @@ import {
 import { normalizeDatasourceResponse } from './lib/types';
 import { normalizeGeneratedReportRecord } from './lib/generated-reports';
 import { initialMessages, sourceItems } from './lib/mock-data';
-
-function createLocalMessageId(prefix = 'assistant') {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
 
@@ -153,38 +147,6 @@ export function useHomePageController() {
     }
   }
 
-  async function reviseReport(reportId, instruction) {
-    if (!reportId || !String(instruction || '').trim()) return null;
-
-    try {
-      const json = await reviseReportOutput(reportId, instruction);
-      await loadReports();
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createLocalMessageId('assistant'),
-          role: 'assistant',
-          title: '报表已更新',
-          content: json?.message || '已按你的要求更新当前报表。',
-          meta: String(instruction || '').trim(),
-        },
-      ]);
-      return {
-        item: json?.item || null,
-        message: json?.message || '已按你的要求更新当前报表。',
-      };
-    } catch (error) {
-      setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, {
-        id: createLocalMessageId('assistant'),
-        role: 'assistant',
-        title: '报表调整失败',
-        content: error instanceof Error ? error.message : '当前报表调整失败，请稍后再试。',
-        messageType: 'system_failure',
-      }));
-      throw error;
-    }
-  }
-
   const baseActionContext = {
     refreshHomeData,
     selectedBotId: '',
@@ -223,7 +185,6 @@ export function useHomePageController() {
     setSelectedReportId,
     setSystemConstraints,
     deleteReport,
-    reviseReport,
     resetConversation,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,

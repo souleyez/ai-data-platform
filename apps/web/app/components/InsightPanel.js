@@ -9,18 +9,16 @@ export default function InsightPanel({
   selectedReportId,
   onSelectReport,
   onDeleteReport,
-  onReviseReport,
 }) {
   return (
     <aside className={`insight-panel ${collapsed ? 'insight-panel-compact' : 'insight-panel-expanded'}`}>
       <ReportResultsPanel
         title="已出报表"
-        description="首页始终保留当前报表区。需要继续调整时，直接在展开后的报表详情里补充要求。"
+        description="首页始终保留当前报表区，这里只保留查看、下载和删除。"
         items={reportItems}
         selectedReportId={selectedReportId}
         onSelectReport={onSelectReport}
         onDeleteReport={onDeleteReport}
-        onReviseReport={onReviseReport}
         collapsed={collapsed}
         onToggleCollapsed={onToggleCollapsed}
         onRequestExpand={(id) => {

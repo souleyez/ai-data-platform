@@ -115,12 +115,3 @@ export async function deleteReportOutput(reportId) {
   });
   return parseApiResponse(response, 'delete report failed');
 }
-
-export async function reviseReportOutput(reportId, instruction) {
-  const response = await fetch(buildApiUrl(`/api/reports/output/${encodeURIComponent(reportId)}/revise`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ instruction }),
-  });
-  return parseApiResponse(response, 'revise report failed');
-}

@@ -823,14 +823,6 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .report-panel-toggle {
   white-space: nowrap;
 }
-.report-revise-box {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-}
-.report-revise-title {
-  font-weight: 700;
-}
 .report-single-view {
   display: grid;
   gap: 16px;

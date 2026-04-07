@@ -34,36 +34,8 @@ function ReportResultItem({
   collapsed,
   onSelect,
   onDeleteReport,
-  onReviseReport,
   onRequestExpand,
 }) {
-  const [draft, setDraft] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-
-  async function handleRevise() {
-    const instruction = String(draft || '').trim();
-    if (!instruction || !onReviseReport) return;
-
-    try {
-      setSubmitting(true);
-      setFeedback({ type: 'pending', message: '正在根据你的要求调整当前报表。' });
-      const result = await onReviseReport(item.id, instruction);
-      setDraft('');
-      setFeedback({
-        type: 'success',
-        message: result?.message || '已按你的要求更新当前报表。',
-      });
-    } catch (error) {
-      setFeedback({
-        type: 'error',
-        message: error instanceof Error ? error.message : '当前报表调整失败，请稍后再试。',
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   const metaLabel = item.templateLabel || item.outputType || item.kind || '报表';
 
   return (
@@ -99,44 +71,6 @@ function ReportResultItem({
               </button>
             </div>
           ) : null}
-
-          {onReviseReport ? (
-            <div className="report-revise-box">
-              <div className="report-revise-title">继续调整这份报表</div>
-              <textarea
-                className="filter-input"
-                rows={3}
-                placeholder="例如：改成更适合管理层查看，突出风险点和行动建议。"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              {feedback?.message ? (
-                <div
-                  className="capture-task-note"
-                  style={{
-                    color:
-                      feedback.type === 'error'
-                        ? '#b91c1c'
-                        : feedback.type === 'success'
-                          ? '#166534'
-                          : '#475569',
-                  }}
-                >
-                  {feedback.message}
-                </div>
-              ) : null}
-              <div>
-                <button
-                  className="primary-btn"
-                  type="button"
-                  disabled={submitting || !String(draft || '').trim()}
-                  onClick={() => void handleRevise()}
-                >
-                  {submitting ? '调整中...' : '按要求调整'}
-                </button>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </article>
@@ -150,7 +84,6 @@ export default function ReportResultsPanel({
   selectedReportId = '',
   onSelectReport,
   onDeleteReport,
-  onReviseReport,
   collapsed = false,
   onToggleCollapsed,
   onRequestExpand,
@@ -223,7 +156,6 @@ export default function ReportResultsPanel({
                 collapsed={collapsed}
                 onSelect={handleSelect}
                 onDeleteReport={onDeleteReport}
-                onReviseReport={onReviseReport}
                 onRequestExpand={onRequestExpand}
               />
             ))}
