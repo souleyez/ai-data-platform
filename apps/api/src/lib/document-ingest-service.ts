@@ -51,13 +51,18 @@ function resolveConfirmedGroups(
   parsed: ParsedDocument,
   libraries: DocumentLibrary[],
   preferredLibraryKeys: string[],
+  forcedLibraryKeys: string[],
 ) {
   const preferredLibraries = preferredLibraryKeys.length
     ? libraries.filter((library) => preferredLibraryKeys.includes(library.key))
     : libraries;
+  const validForcedLibraryKeys = uniq(
+    forcedLibraryKeys.filter((key) => libraries.some((library) => library.key === key)),
+  );
   const suggestedGroups = resolveSuggestedLibraryKeys(parsed, preferredLibraries);
-  const fallbackGroups = suggestedGroups.length ? [] : [UNGROUPED_LIBRARY_KEY];
+  const fallbackGroups = validForcedLibraryKeys.length || suggestedGroups.length ? [] : [UNGROUPED_LIBRARY_KEY];
   const confirmedGroups = uniq([
+    ...validForcedLibraryKeys,
     ...suggestedGroups,
     ...fallbackGroups,
     ...(parsed.confirmedGroups || []),
@@ -129,9 +134,11 @@ export async function ingestDocumentFiles(input: {
   libraries: DocumentLibrary[];
   sourceNameResolver?: (file: IngestFileRecord) => string;
   preferredLibraryKeys?: string[];
+  forcedLibraryKeys?: string[];
   metrics?: Partial<DocumentIngestMetrics>;
 }) {
   const preferredLibraryKeys = uniq(input.preferredLibraryKeys || []);
+  const forcedLibraryKeys = uniq(input.forcedLibraryKeys || []);
   const libraryContext = buildDocumentLibraryContext(input.libraries, preferredLibraryKeys);
   const ingestItems: IngestPreviewItem[] = [];
   const parsedItems: ParsedDocument[] = [];
@@ -191,6 +198,7 @@ export async function ingestDocumentFiles(input: {
       parsed,
       input.libraries,
       preferredLibraryKeys,
+      forcedLibraryKeys,
     );
     const isUngroupedOnly = confirmedGroups.length === 1 && confirmedGroups[0] === UNGROUPED_LIBRARY_KEY;
     if (isUngroupedOnly) {

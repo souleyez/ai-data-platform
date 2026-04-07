@@ -129,6 +129,7 @@ export async function runLocalDirectoryDatasource(input: {
     documentConfig,
     libraries,
     preferredLibraryKeys: [...targetKeySet],
+    forcedLibraryKeys: [...targetKeySet],
   });
   const failedPaths = ingestResult.ingestItems
     .filter((item) => item.status === 'failed')

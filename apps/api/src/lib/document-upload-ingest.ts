@@ -110,6 +110,7 @@ export async function ingestUploadedFiles(input: {
   libraries: DocumentLibrary[];
   sourceNameResolver?: (file: UploadedFileRecord) => string;
   preferredLibraryKeys?: string[];
+  forcedLibraryKeys?: string[];
 }) {
   const result = await ingestDocumentFiles(input);
   return {
@@ -123,6 +124,7 @@ export async function ingestExistingLocalFiles(input: {
   documentConfig: DocumentCategoryConfig;
   libraries: DocumentLibrary[];
   preferredLibraryKeys?: string[];
+  forcedLibraryKeys?: string[];
 }) {
   const files: UploadedFileRecord[] = [];
   const failedItems: IngestPreviewItem[] = [];
@@ -167,6 +169,7 @@ export async function ingestExistingLocalFiles(input: {
       documentConfig: input.documentConfig,
       libraries: input.libraries,
       preferredLibraryKeys: input.preferredLibraryKeys,
+      forcedLibraryKeys: input.forcedLibraryKeys,
       sourceNameResolver: (file) => file.originalPath || file.name,
     })
     : {
@@ -212,6 +215,7 @@ export async function ingestLocalFilesIntoLibrary(input: {
   documentConfig: DocumentCategoryConfig;
   libraries: DocumentLibrary[];
   preferredLibraryKeys?: string[];
+  forcedLibraryKeys?: string[];
 }) {
   const uploadDir = path.join(input.documentConfig.scanRoot, 'uploads');
   const { copiedFiles, failedItems } = await copyLocalFilesIntoUploadDir(input.filePaths, uploadDir);
@@ -222,6 +226,7 @@ export async function ingestLocalFilesIntoLibrary(input: {
       documentConfig: input.documentConfig,
       libraries: input.libraries,
       preferredLibraryKeys: input.preferredLibraryKeys,
+      forcedLibraryKeys: input.forcedLibraryKeys,
       sourceNameResolver: (file) => file.originalPath || file.name,
     })
     : {

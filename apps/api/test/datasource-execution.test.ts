@@ -28,6 +28,9 @@ const documentParser = await importFresh<typeof import('../src/lib/document-pars
 const documentCacheRepository = await importFresh<typeof import('../src/lib/document-cache-repository.js')>(
   '../src/lib/document-cache-repository.js',
 );
+const documentLibraries = await importFresh<typeof import('../src/lib/document-libraries.js')>(
+  '../src/lib/document-libraries.js',
+);
 
 async function startHtmlServer(routes: Record<string, string | { body: string | Buffer; contentType?: string; headers?: Record<string, string> }>) {
   const server = http.createServer((request, response) => {
@@ -197,6 +200,7 @@ test('erp datasource run should emit readonly module summaries', async () => {
 
 test('web_public datasource run should create a successful run with an ingested document', async () => {
   const html = encodeURIComponent('<html><head><title>医疗设备招标公告</title></head><body><header><p>广州采购平台</p><p>第1页 共1页</p></header><article><h1>医疗设备招标公告</h1><p>本次招标涉及影像设备与配套维保服务。</p><p>要求供应商提供安装、培训和验收支持。</p></article><footer><p>广州采购平台</p><p>第1页 共1页</p></footer></body></html>');
+  await documentLibraries.createDocumentLibrary({ name: 'bids', description: 'Bid documents', permissionLevel: 0 }).catch(() => undefined);
 
   await datasourceDefinitions.upsertDatasourceDefinition({
     id: 'ds-web-public',
@@ -237,7 +241,7 @@ test('web_public datasource run should create a successful run with an ingested 
   assert.match(markdown, /## 页面正文/);
   assert.doesNotMatch(captureSummarySection, /第1页 共1页/);
   assert.doesNotMatch(pageBodySection, /第1页 共1页/);
-  assert.ok(cache?.items.some((item) => item.path === documentPath));
+  assert.ok(cache?.items.some((item) => item.path === documentPath && (item.confirmedGroups || []).includes('bids')));
 
   const items = datasourceService.buildDatasourceRunReadModels({
     runs,
@@ -270,6 +274,7 @@ test('web_public datasource run should preserve downloadable xlsx captures and k
   });
 
   try {
+    await documentLibraries.createDocumentLibrary({ name: 'guangzhou-ai', description: 'Mall footfall library', permissionLevel: 0 }).catch(() => undefined);
     await datasourceDefinitions.upsertDatasourceDefinition({
       id: 'ds-web-footfall',
       name: 'Gaoming footfall collector',
@@ -301,7 +306,7 @@ test('web_public datasource run should preserve downloadable xlsx captures and k
     assert.match(markdownPath, /-normalized\.md$/i);
     assert.match(markdown, /## 提取摘要/);
     assert.match(markdown, /工作表：4月|商场/);
-    assert.ok(cache?.items.some((item) => item.path === documentPath));
+    assert.ok(cache?.items.some((item) => item.path === documentPath && (item.confirmedGroups || []).includes('guangzhou-ai')));
     assert.equal(parsed.bizCategory, 'footfall');
     assert.equal(parsed.footfallFields?.aggregationLevel, 'mall-zone');
     assert.equal(parsed.footfallFields?.totalFootfall, '360');

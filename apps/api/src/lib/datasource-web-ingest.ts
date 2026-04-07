@@ -45,6 +45,7 @@ export async function ingestWebCaptureTaskDocument(input: {
     documentConfig,
     libraries,
     preferredLibraryKeys: input.targetLibraries.map((item) => item.key),
+    forcedLibraryKeys: input.targetLibraries.map((item) => item.key),
   });
 
   return {

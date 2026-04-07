@@ -258,6 +258,7 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       documentConfig,
       libraries,
       preferredLibraryKeys: definition.targetLibraries.map((item) => item.key),
+      forcedLibraryKeys: definition.targetLibraries.map((item) => item.key),
     });
 
     const finishedAt = new Date().toISOString();
