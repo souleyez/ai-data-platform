@@ -1,5 +1,3 @@
-$ErrorActionPreference = 'Stop'
-
 param(
   [Parameter(Mandatory = $true)]
   [string]$Provider,
@@ -9,6 +7,8 @@ param(
 
   [string]$Distro = 'Ubuntu-24.04'
 )
+
+$ErrorActionPreference = 'Stop'
 
 $quotedProvider = $Provider.Replace("'", "''")
 $quotedMethod = $Method.Replace("'", "''")
