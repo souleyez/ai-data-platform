@@ -33,6 +33,22 @@ function formatBotChannels(item) {
   return labels.join(' / ');
 }
 
+function formatLibraryLabel(library) {
+  return library?.label || library?.name || library?.key || '未命名文档库';
+}
+
+function summarizeVisibleLibraries(item, libraries = []) {
+  const visibleLibraryKeys = Array.isArray(item?.visibleLibraryKeys) ? item.visibleLibraryKeys : [];
+  if (!visibleLibraryKeys.length) return '未额外限定，按权限等级可见';
+  const labels = visibleLibraryKeys
+    .map((libraryKey) => (
+      libraries.find((library) => library?.key === libraryKey) || { key: libraryKey }
+    ))
+    .map(formatLibraryLabel);
+  if (labels.length <= 3) return labels.join(' / ');
+  return `${labels.slice(0, 3).join(' / ')} 等 ${labels.length} 个库`;
+}
+
 export function filterConnectedBots(items = []) {
   return (Array.isArray(items) ? items : []).filter((item) => (
     item?.enabled !== false && getConnectedBindings(item).length > 0
@@ -41,6 +57,7 @@ export function filterConnectedBots(items = []) {
 
 export default function ConnectedBotsSummary({
   items = [],
+  libraries = [],
   emptyTitle = '还没有已连接机器人',
   emptyText = '先在全智能模式中通过对话接入企业微信、Teams、QQ 或飞书机器人，接通后这里会自动显示。',
   compact = false,
@@ -82,6 +99,10 @@ export default function ConnectedBotsSummary({
             <div className="connected-bot-guidance">
               <span>自然语言约束</span>
               <strong>{summarizePrompt(item)}</strong>
+            </div>
+            <div className="connected-bot-guidance">
+              <span>指定文档库权限</span>
+              <strong>{summarizeVisibleLibraries(item, libraries)}</strong>
             </div>
           </article>
         );

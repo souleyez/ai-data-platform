@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { filterConnectedBots } from './ConnectedBotsSummary';
 
 const CHANNEL_LABELS = {
@@ -25,16 +25,40 @@ function buildDraft(item) {
     libraryAccessLevel: Number.isFinite(Number(item?.libraryAccessLevel))
       ? Math.max(0, Math.floor(Number(item.libraryAccessLevel)))
       : 0,
+    visibleLibraryKeys: Array.isArray(item?.visibleLibraryKeys) ? item.visibleLibraryKeys : [],
     isDefault: item?.isDefault === true,
   };
 }
 
+function toggleListValue(values, value) {
+  const next = new Set(Array.isArray(values) ? values : []);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return [...next];
+}
+
+function formatLibraryLabel(library) {
+  const label = library?.label || library?.name || library?.key || '未命名知识库';
+  const permissionLevel = Number.isFinite(Number(library?.permissionLevel))
+    ? Math.max(0, Math.floor(Number(library.permissionLevel)))
+    : 0;
+  return `${label} · L${permissionLevel}`;
+}
+
 export default function ConnectedBotAccessEditor({
   items = [],
+  libraries = [],
   manageEnabled = false,
   onSave,
 }) {
   const connectedBots = filterConnectedBots(items);
+  const sortedLibraries = useMemo(() => (
+    [...libraries].sort((a, b) => {
+      const levelDiff = Number(a?.permissionLevel || 0) - Number(b?.permissionLevel || 0);
+      if (levelDiff !== 0) return levelDiff;
+      return String(a?.label || a?.key || '').localeCompare(String(b?.label || b?.key || ''), 'zh-CN');
+    })
+  ), [libraries]);
   const [drafts, setDrafts] = useState({});
   const [savingId, setSavingId] = useState('');
   const [notice, setNotice] = useState('');
@@ -58,6 +82,7 @@ export default function ConnectedBotAccessEditor({
       await onSave(item.id, {
         systemPrompt: String(draft.systemPrompt || '').trim(),
         libraryAccessLevel: Math.max(0, Math.floor(Number(draft.libraryAccessLevel || 0))),
+        visibleLibraryKeys: Array.isArray(draft.visibleLibraryKeys) ? draft.visibleLibraryKeys : [],
         isDefault: draft.isDefault === true,
       });
       setNotice(`已更新机器人：${item.name || item.id}`);
@@ -147,6 +172,40 @@ export default function ConnectedBotAccessEditor({
                     }))}
                   />
                 </label>
+              </div>
+
+              <div className="bot-chip-group">
+                <div className="bot-chip-group-title">指定文档库权限（可选）</div>
+                <div className="bot-config-subtle">
+                  不选时按权限等级可见；选中后会进一步限定到这些文档库。
+                </div>
+                {sortedLibraries.length ? (
+                  <div className="bot-chip-grid">
+                    {sortedLibraries.map((library) => {
+                      const libraryKey = library.key;
+                      const active = draft.visibleLibraryKeys.includes(libraryKey);
+                      return (
+                        <label key={libraryKey} className={`bot-chip ${active ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            disabled={!manageEnabled}
+                            checked={active}
+                            onChange={() => setDrafts((prev) => ({
+                              ...prev,
+                              [item.id]: {
+                                ...draft,
+                                visibleLibraryKeys: toggleListValue(draft.visibleLibraryKeys, libraryKey),
+                              },
+                            }))}
+                          />
+                          <span>{formatLibraryLabel(library)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="bot-config-subtle">当前没有可选文档库。</div>
+                )}
               </div>
             </article>
           );

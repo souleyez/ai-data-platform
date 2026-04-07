@@ -562,10 +562,11 @@ function ReportsPageContent() {
                 />
               </div>
 
-              <ConnectedBotsSummary items={botItems} />
+              <ConnectedBotsSummary items={botItems} libraries={documentLibraries} />
               {botManageEnabled ? (
                 <ConnectedBotAccessEditor
                   items={botItems}
+                  libraries={documentLibraries}
                   manageEnabled={botManageEnabled}
                   onSave={saveConnectedBot}
                 />
