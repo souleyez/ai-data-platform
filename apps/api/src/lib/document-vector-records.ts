@@ -56,6 +56,10 @@ function buildTemplateTaskTags(item: ParsedDocument) {
     tags.add('order-static-page');
     tags.add('order-table');
   }
+  if (item.bizCategory === 'footfall') {
+    tags.add('footfall-static-page');
+    tags.add('footfall-table');
+  }
   if (item.schemaType === 'formula') {
     tags.add('formula-table');
     tags.add('formula-static-page');
@@ -83,6 +87,10 @@ function buildTemplateTaskTags(item: ParsedDocument) {
     if (item.bizCategory === 'order') {
       tags.add('order-static-page');
       tags.add('order-table');
+    }
+    if (item.bizCategory === 'footfall') {
+      tags.add('footfall-static-page');
+      tags.add('footfall-table');
     }
   }
 
@@ -173,6 +181,11 @@ function buildFieldAliases(): Record<string, string[]> {
     operatingSignals: ['operating insight', 'business signal', 'operating recommendation', 'business recommendation'],
     keyMetrics: ['yoy', 'mom', 'inventory index', 'sell-through', 'gmv', 'revenue metric'],
     platforms: ['platform list', 'multi-platform', 'channel mix', 'platform mix'],
+    totalFootfall: ['footfall total', 'visitor total', '客流总量', '总客流'],
+    topMallZone: ['top mall zone', 'head zone', '核心分区', '头部分区', '商场分区'],
+    mallZoneCount: ['mall zone count', 'zone count', '分区数', '商场分区数'],
+    aggregationLevel: ['aggregation level', 'summary level', '汇总口径', '展示口径'],
+    mallZones: ['mall zones', 'shopping zones', '商场分区', '分区列表'],
     productForm: ['product form', 'dosage form', 'presentation'],
     section: ['section', 'chapter', 'requirement section', 'response section'],
     responseFocus: ['response focus', 'response point', 'compliance point', 'answer point'],

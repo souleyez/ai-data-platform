@@ -185,7 +185,7 @@ function isEligibleVectorCandidate(item: ParsedDocument) {
   }
 
   if (hasAssignedLibrary(item)) return true;
-  if ((item.schemaType || 'generic') === 'report' && item.bizCategory !== 'order') return false;
+  if ((item.schemaType || 'generic') === 'report' && !['order', 'footfall'].includes(String(item.bizCategory || ''))) return false;
   if (hasStrongBusinessSchema(item) && hasHighQualitySignals(item)) return true;
   return false;
 }
@@ -481,6 +481,7 @@ function scoreIntentFitForRecord(record: DocumentVectorRecord, intent?: string) 
   if (normalizedIntent === 'formula' && (record.schemaType === 'paper' || record.schemaType === 'technical')) score -= 6;
   if (normalizedIntent === 'contract' && record.schemaType !== 'contract') score -= 8;
   if (normalizedIntent === 'resume' && record.schemaType !== 'resume') score -= 8;
+  if (normalizedIntent === 'footfall' && !metadataText.includes('footfall') && !metadataText.includes('客流')) score -= 8;
 
   return score;
 }

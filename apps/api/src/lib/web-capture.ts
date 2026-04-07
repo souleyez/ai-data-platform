@@ -59,11 +59,23 @@ type TaskPayload = {
 };
 
 type PageResult = {
+  kind: 'page';
   url: string;
   html: string;
   title: string;
   text: string;
   extractionMethod?: 'trafilatura' | 'fallback';
+};
+
+type DownloadResult = {
+  kind: 'download';
+  url: string;
+  title: string;
+  text: string;
+  contentType: string;
+  fileName: string;
+  extension: string;
+  data: Buffer;
 };
 
 type CandidateLink = {
@@ -93,6 +105,44 @@ type MainContentResult = {
   text: string;
   title: string;
   method: 'trafilatura' | 'fallback';
+};
+
+const SUPPORTED_DOWNLOAD_EXTENSIONS = new Set([
+  '.pdf',
+  '.txt',
+  '.md',
+  '.docx',
+  '.csv',
+  '.html',
+  '.htm',
+  '.xml',
+  '.json',
+  '.xlsx',
+  '.xls',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+]);
+
+const DOWNLOAD_MIME_EXTENSION_MAP: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'text/plain': '.txt',
+  'text/markdown': '.md',
+  'application/json': '.json',
+  'text/csv': '.csv',
+  'application/csv': '.csv',
+  'application/vnd.ms-excel': '.xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
 };
 
 const DISCOVERY_SIGNAL_TERMS = [
@@ -789,10 +839,60 @@ function buildLoginPayload(form: LoginForm, auth: RuntimeAuth) {
   return params;
 }
 
-async function fetchWebPage(url: string, auth?: RuntimeAuth, jar?: CookieJar): Promise<PageResult> {
+function inferDownloadExtension(url: string, contentType: string, contentDisposition: string) {
+  const headerName = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^\";]+)/i)?.[1]?.trim();
+  const decodedHeaderName = headerName ? decodeURIComponent(headerName.replace(/^["']|["']$/g, '')) : '';
+  const headerExt = path.extname(decodedHeaderName).toLowerCase();
+  if (SUPPORTED_DOWNLOAD_EXTENSIONS.has(headerExt)) return headerExt;
+
+  const contentTypeKey = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const mimeExt = DOWNLOAD_MIME_EXTENSION_MAP[contentTypeKey];
+  if (mimeExt && SUPPORTED_DOWNLOAD_EXTENSIONS.has(mimeExt)) return mimeExt;
+
+  try {
+    const urlExt = path.extname(new URL(url).pathname).toLowerCase();
+    if (SUPPORTED_DOWNLOAD_EXTENSIONS.has(urlExt)) return urlExt;
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
+function inferDownloadFileName(url: string, contentDisposition: string, extension: string) {
+  const headerName = contentDisposition.match(/filename\*?=(?:UTF-8''|"?)([^\";]+)/i)?.[1]?.trim();
+  const decodedHeaderName = headerName ? decodeURIComponent(headerName.replace(/^["']|["']$/g, '')) : '';
+  if (decodedHeaderName) return decodedHeaderName;
+
+  try {
+    const pathname = new URL(url).pathname;
+    const candidate = decodeURIComponent(path.basename(pathname));
+    if (candidate && path.extname(candidate)) return candidate;
+    if (candidate) return `${candidate}${extension || ''}`;
+  } catch {
+    return `capture${extension || ''}`;
+  }
+
+  return `capture${extension || ''}`;
+}
+
+function isDownloadResponse(url: string, response: Response) {
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+  const contentDisposition = String(response.headers.get('content-disposition') || '').toLowerCase();
+  if (/attachment|filename=/i.test(contentDisposition)) {
+    return Boolean(inferDownloadExtension(url, contentType, contentDisposition));
+  }
+  if (/text\/html|application\/xhtml\+xml/i.test(contentType)) return false;
+  if (/application\/octet-stream|application\/pdf|application\/vnd\.ms-excel|spreadsheetml|text\/csv|application\/csv|image\//i.test(contentType)) {
+    return Boolean(inferDownloadExtension(url, contentType, contentDisposition));
+  }
+  return false;
+}
+
+async function fetchWebPage(url: string, auth?: RuntimeAuth, jar?: CookieJar): Promise<PageResult | DownloadResult> {
   const headers: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (compatible; ai-data-platform/0.1; +https://example.local)',
-    Accept: 'text/html,application/xhtml+xml',
+    Accept: 'text/html,application/xhtml+xml,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream',
   };
 
   if (auth?.username && auth?.password) {
@@ -811,12 +911,31 @@ async function fetchWebPage(url: string, auth?: RuntimeAuth, jar?: CookieJar): P
     throw new Error(`fetch failed: ${response.status}`);
   }
 
-  const html = await response.text();
   if (jar) storeResponseCookies(jar, url, response);
+  if (isDownloadResponse(url, response)) {
+    const contentType = String(response.headers.get('content-type') || '');
+    const contentDisposition = String(response.headers.get('content-disposition') || '');
+    const extension = inferDownloadExtension(response.url || url, contentType, contentDisposition) || '.bin';
+    const fileName = inferDownloadFileName(response.url || url, contentDisposition, extension);
+    const data = Buffer.from(await response.arrayBuffer());
+    const title = path.basename(fileName, path.extname(fileName)) || fileName || (response.url || url);
+    return {
+      kind: 'download',
+      url: response.url || url,
+      title,
+      text: `${title}\n${fileName}\n${contentType}`.trim(),
+      contentType,
+      fileName,
+      extension,
+      data,
+    };
+  }
+
+  const html = await response.text();
   const main = await extractMainContent(html, response.url || url);
   const title = main.title || decodeTitle(html);
   const text = main.text;
-  return { url: response.url || url, html, title, text, extractionMethod: main.method };
+  return { kind: 'page', url: response.url || url, html, title, text, extractionMethod: main.method };
 }
 
 async function submitLoginForm(page: PageResult, auth: RuntimeAuth, jar: CookieJar) {
@@ -855,11 +974,30 @@ async function submitLoginForm(page: PageResult, auth: RuntimeAuth, jar: CookieJ
   }
 
   if (jar) storeResponseCookies(jar, form.actionUrl, response);
+  if (isDownloadResponse(form.actionUrl, response)) {
+    const contentType = String(response.headers.get('content-type') || '');
+    const contentDisposition = String(response.headers.get('content-disposition') || '');
+    const extension = inferDownloadExtension(response.url || form.actionUrl, contentType, contentDisposition) || '.bin';
+    const fileName = inferDownloadFileName(response.url || form.actionUrl, contentDisposition, extension);
+    const data = Buffer.from(await response.arrayBuffer());
+    const title = path.basename(fileName, path.extname(fileName)) || fileName || (response.url || form.actionUrl);
+    return {
+      kind: 'download' as const,
+      url: response.url || form.actionUrl,
+      title,
+      text: `${title}\n${fileName}\n${contentType}`.trim(),
+      contentType,
+      fileName,
+      extension,
+      data,
+    };
+  }
+
   const html = await response.text();
   const main = await extractMainContent(html, response.url || form.actionUrl);
   const title = main.title || decodeTitle(html);
   const text = main.text;
-  return { url: response.url || form.actionUrl, html, title, text, extractionMethod: main.method };
+  return { kind: 'page' as const, url: response.url || form.actionUrl, html, title, text, extractionMethod: main.method };
 }
 
 function formatExtractionMethod(method?: PageResult['extractionMethod']) {
@@ -924,6 +1062,18 @@ async function writeCaptureDocument(
   return filePath;
 }
 
+async function writeDownloadedCapture(task: WebCaptureTask, file: DownloadResult) {
+  await ensureDirs();
+  const baseName = path.basename(file.fileName, file.extension)
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .slice(0, 80);
+  const safeBase = baseName || 'capture';
+  const filePath = path.join(OUTPUT_DIR, `${task.id}-${safeBase}${file.extension}`);
+  await fs.writeFile(filePath, file.data);
+  return filePath;
+}
+
 async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, auth?: RuntimeAuth, jar?: CookieJar) {
   const maxItems = normalizeMaxItems(task.maxItems);
   const crawlMode = resolveTaskCrawlMode(task);
@@ -936,6 +1086,7 @@ async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, a
       if (normalizeUrl(seedUrl) === landingUrl) continue;
       try {
         const page = await fetchWebPage(seedUrl, auth, jar);
+        if (page.kind !== 'page') continue;
         if (!isSameHost(page.url, task.url)) continue;
         seedPages.push(page);
       } catch {
@@ -981,6 +1132,7 @@ async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, a
 
     try {
       const page = await fetchWebPage(candidate.url, auth, jar);
+      if (page.kind !== 'page') continue;
       const title = page.title || candidate.title;
       const titleKey = normalizeText(title);
       if (!titleKey || seenTitles.has(titleKey)) continue;
@@ -1026,11 +1178,75 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     const jar: CookieJar = new Map();
     let landing = await fetchWebPage(normalizedTask.url, runtimeAuth, jar);
 
+    if (landing.kind === 'download') {
+      const documentPath = await writeDownloadedCapture(normalizedTask, landing);
+      const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+      return {
+        ...normalizedTask,
+        title: landing.title || normalizedTask.url,
+        documentPath,
+        lastSummary: summary,
+        lastStatus: 'success' as const,
+        lastRunAt: now,
+        updatedAt: now,
+        nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
+        lastCollectedCount: 1,
+        lastCollectedItems: [{
+          title: landing.title || landing.fileName,
+          url: landing.url,
+          summary,
+          score: 100,
+        }],
+      };
+    }
+
     if (runtimeAuth && isLikelyLoginPage(landing)) {
       const loginResult = await submitLoginForm(landing, runtimeAuth, jar);
+      if (loginResult.kind === 'download') {
+        const documentPath = await writeDownloadedCapture(normalizedTask, loginResult);
+        const summary = `登录后返回可下载文件，已保存原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+        return {
+          ...normalizedTask,
+          title: loginResult.title || normalizedTask.url,
+          documentPath,
+          lastSummary: summary,
+          lastStatus: 'success' as const,
+          lastRunAt: now,
+          updatedAt: now,
+          nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
+          lastCollectedCount: 1,
+          lastCollectedItems: [{
+            title: loginResult.title || loginResult.fileName,
+            url: loginResult.url,
+            summary,
+            score: 100,
+          }],
+        };
+      }
       landing = isLikelyLoginPage(loginResult)
         ? await fetchWebPage(normalizedTask.url, runtimeAuth, jar)
         : loginResult;
+      if (landing.kind === 'download') {
+        const documentPath = await writeDownloadedCapture(normalizedTask, landing);
+        const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+        return {
+          ...normalizedTask,
+          title: landing.title || normalizedTask.url,
+          documentPath,
+          lastSummary: summary,
+          lastStatus: 'success' as const,
+          lastRunAt: now,
+          updatedAt: now,
+          nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
+          lastCollectedCount: 1,
+          lastCollectedItems: [{
+            title: landing.title || landing.fileName,
+            url: landing.url,
+            summary,
+            score: 100,
+          }],
+        };
+      }
     }
 
     if (isLikelyLoginPage(landing)) {

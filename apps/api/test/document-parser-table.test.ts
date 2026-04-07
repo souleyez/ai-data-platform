@@ -68,6 +68,15 @@ test('parseDocument should include lightweight table summary for csv order docum
   );
   assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.highRefundRowCount, 2);
   assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskRowCount, 4);
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.platformBreakdown));
+  assert.ok((((tableSummary?.recordInsights as Record<string, unknown>)?.platformBreakdown as Array<Record<string, unknown>>)?.[0]?.netSales as number) > 0);
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.categoryBreakdown));
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.topSkuNetSales));
+  assert.ok((((tableSummary?.recordInsights as Record<string, unknown>)?.topSkuNetSales as Array<Record<string, unknown>>)?.[0]?.netSales as number) > 0);
+  assert.ok(
+    (((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskBreakdown as Array<Record<string, unknown>>) || [])
+      .some((entry) => String(entry.inventoryStatus || '').includes('risk')),
+  );
   assert.equal(
     ((tableSummary?.recordInsights as Record<string, unknown>)?.alerts as Array<Record<string, string>>)?.[0]?.type,
     'high_refund',
@@ -163,4 +172,7 @@ test('parseDocument should derive inventory-focused insight summaries from inven
   assert.ok(Array.isArray(recordInsights?.priorityReplenishmentItems));
   assert.ok((recordInsights?.priorityReplenishmentItems as string[]).length >= 1);
   assert.equal(typeof recordInsights?.inventoryRiskRowCount, 'number');
+  assert.ok(Array.isArray(recordInsights?.platformBreakdown));
+  assert.ok(Array.isArray(recordInsights?.topSkuNetSales));
+  assert.ok(Array.isArray(recordInsights?.inventoryRiskBreakdown));
 });

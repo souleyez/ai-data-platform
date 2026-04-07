@@ -120,6 +120,37 @@
       ]
     },
     {
+      "id": "footfall",
+      "label": "Footfall",
+      "matchKeywords": ["footfall", "visitor", "visitors", "mall traffic", "客流", "人流", "商场分区", "楼层分区", "单间", "铺位", "广州AI"],
+      "description": "{label} uses a mall-footfall output set focused on mall-zone aggregation.",
+      "triggerKeywords": ["footfall", "visitor", "visitors", "mall traffic", "客流", "人流", "商场分区", "楼层分区", "单间", "铺位"],
+      "defaultTemplateSuffix": "static-page",
+      "templates": [
+        {
+          "suffix": "static-page",
+          "label": "Mall Footfall Page",
+          "type": "static-page",
+          "description": "Static page for mall footfall summary, grouped strictly by mall zone.",
+          "supported": true
+        },
+        {
+          "suffix": "table",
+          "label": "Mall Footfall Table",
+          "type": "table",
+          "description": "Structured mall footfall table aggregated by mall zone without expanding floor or room detail.",
+          "supported": true
+        },
+        {
+          "suffix": "ppt",
+          "label": "Mall Footfall PPT Outline",
+          "type": "ppt",
+          "description": "Presentation outline for mall footfall review.",
+          "supported": true
+        }
+      ]
+    },
+    {
       "id": "bid",
       "label": "Bid",
       "matchKeywords": ["bid", "bids", "tender", "标书", "招标", "投标"],
@@ -271,6 +302,34 @@
       }
     },
     {
+      "id": "static-page-footfall",
+      "label": "Footfall static page",
+      "type": "static-page",
+      "matchKeywords": ["footfall", "visitor", "visitors", "mall traffic", "客流", "人流", "商场分区", "广州AI"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable mall footfall page layout with overview, mall-zone comparison, action hints, and explicit aggregation scope.",
+          "Aggregate strictly at mall-zone level and do not expand floor-zone or room-unit detail in the presentation layer."
+        ],
+        "variableZones": [
+          "footfall summary",
+          "metric cards",
+          "mall-zone comparison",
+          "action hints",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a mall footfall page aggregated by mall zone.",
+        "pageSections": [
+          "客流总览",
+          "商场分区贡献",
+          "重点分区对比",
+          "商场动线提示",
+          "行动建议",
+          "AI综合分析"
+        ]
+      }
+    },
+    {
       "id": "static-page-bid",
       "label": "Bid static page",
       "type": "static-page",
@@ -407,6 +466,31 @@
           "Conclusion",
           "Explanation",
           "Evidence"
+        ]
+      }
+    },
+    {
+      "id": "table-footfall",
+      "label": "Footfall table",
+      "type": "table",
+      "matchKeywords": ["footfall", "visitor", "visitors", "mall traffic", "客流", "人流", "商场分区", "广州AI"],
+      "envelope": {
+        "fixedStructure": [
+          "Keep a stable mall footfall table and map one row to one mall zone.",
+          "Aggregate floor-zone and room-unit detail before output; do not expand them as presentation rows."
+        ],
+        "variableZones": [
+          "mall-zone summary",
+          "footfall total",
+          "scope note",
+          "evidence",
+          "ai analysis"
+        ],
+        "outputHint": "Generate a mall footfall table aggregated by mall zone.",
+        "tableColumns": [
+          "商场分区",
+          "客流",
+          "说明"
         ]
       }
     },
@@ -804,6 +888,30 @@
             "table": {
               "title": "库存与补货维度表",
               "tableColumns": ["SKU", "库存健康", "风险等级", "近30天销量", "建议补货量", "处理动作"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "footfall",
+      "label": "客流请求适配",
+      "matchKeywords": ["footfall", "visitor", "visitors", "mall traffic", "客流", "人流", "商场分区", "楼层分区", "单间", "铺位", "广州AI"],
+      "defaultViewId": "mall-zone",
+      "fallbackEnvelopeKind": "table",
+      "views": [
+        {
+          "id": "mall-zone",
+          "label": "商场分区维度",
+          "matchKeywords": [],
+          "kindOverrides": {
+            "page": {
+              "title": "商场客流分区驾驶舱",
+              "pageSections": ["客流总览", "商场分区贡献", "重点分区对比", "商场动线提示", "行动建议", "AI综合分析"]
+            },
+            "table": {
+              "title": "商场客流分区表",
+              "tableColumns": ["商场分区", "客流", "说明"]
             }
           }
         }

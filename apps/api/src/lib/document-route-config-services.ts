@@ -61,6 +61,9 @@ export async function updateManagedDocumentLibrary(
     extractionPreferredFieldKeys?: string[];
     extractionRequiredFieldKeys?: string[];
     extractionFieldAliases?: Record<string, string>;
+    extractionFieldPrompts?: Record<string, string>;
+    extractionFieldNormalizationRules?: Record<string, string[] | string>;
+    extractionFieldConflictStrategies?: Record<string, string>;
   },
 ) {
   const library = await updateDocumentLibrary(key, input);
@@ -72,6 +75,9 @@ export async function updateManagedDocumentLibrary(
     preferredFieldKeys: input.extractionPreferredFieldKeys,
     requiredFieldKeys: input.extractionRequiredFieldKeys,
     fieldAliases: input.extractionFieldAliases,
+    fieldPrompts: input.extractionFieldPrompts,
+    fieldNormalizationRules: input.extractionFieldNormalizationRules,
+    fieldConflictStrategies: input.extractionFieldConflictStrategies,
   });
   await syncLibraryKnowledgePagesForLibraryKeys([library.key], 'library-settings-update').catch(() => undefined);
   const libraries = await loadDocumentLibraries();

@@ -175,6 +175,13 @@ test('inferReportPlanTaskHint should resolve domain page hints from request, gro
     }),
     'contract-risk',
   );
+  assert.equal(
+    inferReportPlanTaskHint({
+      requestText: '请基于广州AI知识库输出商场客流报表，按商场分区汇总',
+      kind: 'page',
+    }),
+    'footfall-static-page',
+  );
 });
 
 test('buildReportPlan should use client-facing resume sections and planned visuals', () => {
@@ -217,4 +224,56 @@ test('buildReportPlan should use client-facing resume sections and planned visua
   assert.deepEqual(plan.envelope.pageSections, ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析']);
   assert.deepEqual(plan.cards.map((item) => item.label), ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
   assert.deepEqual(plan.charts.map((item) => item.title), ['公司覆盖分布', '技能热点分布']);
+});
+
+test('buildReportPlan should keep footfall reports at mall-zone aggregation level', () => {
+  const plan = buildReportPlan({
+    requestText: '请基于广州AI知识库输出商场客流报表静态页，统一按商场分区汇总，不展开楼层和单间。',
+    templateTaskHint: 'footfall-static-page',
+    conceptPageMode: true,
+    selectedTemplates: [],
+    retrieval: {
+      documents: [
+        {
+          path: 'storage/files/uploads/footfall-a.csv',
+          name: 'footfall-a.csv',
+          ext: '.csv',
+          title: '广州 AI 商场客流日报',
+          category: 'report',
+          bizCategory: 'footfall',
+          parseStatus: 'parsed',
+          summary: '包含商场分区、楼层分区和单间粒度的客流数据，当前统一按商场分区汇总。',
+          excerpt: 'mall_zone,floor_zone,room_unit,visitor_count',
+          extractedChars: 980,
+          schemaType: 'report',
+          topicTags: ['客流分析', '商场分区', '客流报表'],
+          parseStage: 'detailed',
+          structuredProfile: {
+            reportFocus: 'footfall',
+            totalFootfall: '4830',
+            topMallZone: 'A区',
+            mallZoneCount: '3',
+            aggregationLevel: 'mall-zone',
+            mallZones: ['A区', 'B区', 'C区'],
+          },
+        },
+      ],
+      evidenceMatches: [],
+      meta: {
+        stages: ['rule'],
+        vectorEnabled: false,
+        candidateCount: 1,
+        rerankedCount: 1,
+        intent: 'footfall',
+        templateTask: 'footfall-static-page',
+      },
+    },
+    libraries: [{ key: 'guangzhou-ai', label: '广州AI' }],
+  });
+
+  assert.equal(plan.envelope.title, '客户汇报型商场客流分区驾驶舱');
+  assert.deepEqual(plan.envelope.pageSections, ['客流总览', '商场分区贡献', '重点分区对比', '商场动线提示', '行动建议', 'AI综合分析']);
+  assert.ok(plan.objective.includes('mall-zone level'));
+  assert.deepEqual(plan.cards.map((item) => item.label), ['总客流', '商场分区数', '头部分区', '展示口径']);
+  assert.deepEqual(plan.charts.map((item) => item.title), ['商场分区客流贡献', '重点分区客流梯队']);
 });

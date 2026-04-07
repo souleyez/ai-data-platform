@@ -209,6 +209,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       extractionPreferredFieldKeys?: string[];
       extractionRequiredFieldKeys?: string[];
       extractionFieldAliases?: Record<string, string>;
+      extractionFieldPrompts?: Record<string, string>;
+      extractionFieldNormalizationRules?: Record<string, string[] | string>;
+      extractionFieldConflictStrategies?: Record<string, string>;
     };
 
     try {
@@ -223,6 +226,9 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         extractionPreferredFieldKeys: body.extractionPreferredFieldKeys,
         extractionRequiredFieldKeys: body.extractionRequiredFieldKeys,
         extractionFieldAliases: body.extractionFieldAliases,
+        extractionFieldPrompts: body.extractionFieldPrompts,
+        extractionFieldNormalizationRules: body.extractionFieldNormalizationRules,
+        extractionFieldConflictStrategies: body.extractionFieldConflictStrategies,
       });
       return {
         status: 'updated',
@@ -483,6 +489,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         status: 'updated',
         item: result.item,
         feedbackSnapshot: result.feedbackSnapshot,
+        libraryKnowledge: result.libraryKnowledge,
         message: '已更新解析结果并同步到知识记忆',
       };
     } catch (error) {

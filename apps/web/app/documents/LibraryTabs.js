@@ -69,6 +69,12 @@ const FIELD_LABELS = {
   replenishmentAction: '补货动作',
 };
 
+const FIELD_CONFLICT_STRATEGY_OPTIONS = [
+  { value: 'merge-distinct', label: '合并去重' },
+  { value: 'keep-last', label: '保留最新' },
+  { value: 'keep-first', label: '保留首个' },
+];
+
 function normalizePermissionLevel(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -121,6 +127,15 @@ export default function LibraryTabs({
     : [];
   const fieldAliases = activeLibrarySettingsDraft?.extractionFieldAliases && typeof activeLibrarySettingsDraft.extractionFieldAliases === 'object'
     ? activeLibrarySettingsDraft.extractionFieldAliases
+    : {};
+  const fieldPrompts = activeLibrarySettingsDraft?.extractionFieldPrompts && typeof activeLibrarySettingsDraft.extractionFieldPrompts === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldPrompts
+    : {};
+  const fieldNormalizationRules = activeLibrarySettingsDraft?.extractionFieldNormalizationRules && typeof activeLibrarySettingsDraft.extractionFieldNormalizationRules === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldNormalizationRules
+    : {};
+  const fieldConflictStrategies = activeLibrarySettingsDraft?.extractionFieldConflictStrategies && typeof activeLibrarySettingsDraft.extractionFieldConflictStrategies === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldConflictStrategies
     : {};
 
   return (
@@ -214,6 +229,9 @@ export default function LibraryTabs({
                   extractionPreferredFieldKeys: [],
                   extractionRequiredFieldKeys: [],
                   extractionFieldAliases: {},
+                  extractionFieldPrompts: {},
+                  extractionFieldNormalizationRules: {},
+                  extractionFieldConflictStrategies: {},
                 })}
               >
                 {EXTRACTION_FIELD_SET_OPTIONS.map((option) => (
@@ -279,19 +297,28 @@ export default function LibraryTabs({
                         <input
                           type="checkbox"
                           checked={selected}
-                          onChange={(event) => {
-                            const next = event.target.checked
-                              ? [...selectedFieldKeys, fieldKey].filter((item, index, items) => items.indexOf(item) === index)
-                              : selectedFieldKeys.filter((item) => item !== fieldKey);
-                            onSettingsChange(activeLibraryRecord.key, {
-                              extractionPreferredFieldKeys: next,
-                              extractionRequiredFieldKeys: requiredFieldKeys.filter((item) => next.includes(item)),
-                              extractionFieldAliases: Object.fromEntries(
-                                Object.entries(fieldAliases).filter(([key]) => next.includes(key)),
-                              ),
-                            });
-                          }}
-                        />
+                            onChange={(event) => {
+                              const next = event.target.checked
+                                ? [...selectedFieldKeys, fieldKey].filter((item, index, items) => items.indexOf(item) === index)
+                                : selectedFieldKeys.filter((item) => item !== fieldKey);
+                              onSettingsChange(activeLibraryRecord.key, {
+                                extractionPreferredFieldKeys: next,
+                                extractionRequiredFieldKeys: requiredFieldKeys.filter((item) => next.includes(item)),
+                                extractionFieldAliases: Object.fromEntries(
+                                  Object.entries(fieldAliases).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldPrompts: Object.fromEntries(
+                                  Object.entries(fieldPrompts).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldNormalizationRules: Object.fromEntries(
+                                  Object.entries(fieldNormalizationRules).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldConflictStrategies: Object.fromEntries(
+                                  Object.entries(fieldConflictStrategies).filter(([key]) => next.includes(key)),
+                                ),
+                              });
+                            }}
+                          />
                         <span>{getFieldLabel(fieldKey)}</span>
                       </label>
                     );
@@ -347,6 +374,52 @@ export default function LibraryTabs({
                               },
                             })}
                           />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段提取提示</span>
+                          <input
+                            value={String(fieldPrompts[fieldKey] || '')}
+                            placeholder={`例如：优先提取${getFieldLabel(fieldKey)}的稳定规范表述`}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldPrompts: {
+                                ...fieldPrompts,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段标准化规则</span>
+                          <textarea
+                            rows={3}
+                            value={String(fieldNormalizationRules[fieldKey] || '')}
+                            placeholder={'每行一条，格式：原值=>标准值'}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldNormalizationRules: {
+                                ...fieldNormalizationRules,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段冲突处理</span>
+                          <select
+                            value={String(fieldConflictStrategies[fieldKey] || 'merge-distinct')}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldConflictStrategies: {
+                                ...fieldConflictStrategies,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          >
+                            {FIELD_CONFLICT_STRATEGY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
                         </label>
 
                         <label className="bot-channel-chip active" style={{ width: 'fit-content' }}>

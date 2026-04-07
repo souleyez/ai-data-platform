@@ -10,7 +10,10 @@ import {
   getDocumentParseFeedbackSnapshot,
   recordDocumentParseFeedback,
 } from './document-parse-feedback.js';
-import { syncLibraryKnowledgePagesForDocuments } from './library-knowledge-pages.js';
+import {
+  loadLibraryKnowledgeCompilationsForKeys,
+  syncLibraryKnowledgePagesForDocuments,
+} from './library-knowledge-pages.js';
 import { removeDocumentOverrides, saveDocumentOverride } from './document-overrides.js';
 import { removeDocumentsFromCache } from './document-store.js';
 import { buildDocumentId } from './document-store.js';
@@ -212,14 +215,16 @@ export async function updateDocumentAnalysisResult(
     }).catch(() => undefined);
   }
   await syncLibraryKnowledgePagesForDocuments([updated], 'document-analysis-manual-edit').catch(() => undefined);
+  const libraryKeys = updated.confirmedGroups?.length ? updated.confirmedGroups : updated.groups || [];
 
   return {
     item: updated,
     feedbackSnapshot: getDocumentParseFeedbackSnapshot({
-      libraryKeys: updated.confirmedGroups?.length ? updated.confirmedGroups : updated.groups || [],
+      libraryKeys,
       schemaType: updated.schemaType,
       text: updated.fullText || `${updated.title || ''}\n${updated.summary || ''}`,
     }),
+    libraryKnowledge: await loadLibraryKnowledgeCompilationsForKeys(libraryKeys).catch(() => []),
   };
 }
 

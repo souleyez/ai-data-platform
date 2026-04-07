@@ -60,8 +60,23 @@ function makeSelectedTemplate(overrides?: {
   };
 }
 
-test('inferTemplateTaskHint should identify resume, bids, order, paper and iot tasks', () => {
+test('inferTemplateTaskHint should identify resume, bids, order, footfall, paper and iot tasks', () => {
   assert.equal(inferTemplateTaskHint([makeSelectedTemplate()], 'table'), 'resume-comparison');
+
+  assert.equal(
+    inferTemplateTaskHint([
+      makeSelectedTemplate({
+        group: {
+          key: 'guangzhou-ai',
+          label: '广州AI',
+          description: '商场客流知识库',
+          triggerKeywords: ['客流', '商场分区', '广州AI'],
+        },
+        template: { key: 'footfall-page-template', label: '商场客流分区驾驶舱', type: 'static-page' },
+      }),
+    ], 'page'),
+    'footfall-static-page',
+  );
 
   assert.equal(
     inferTemplateTaskHint([
@@ -276,6 +291,10 @@ test('inferKnowledgeTemplateTaskHintFromLibraries should derive task hints witho
   assert.equal(
     inferKnowledgeTemplateTaskHintFromLibraries([{ key: 'bids', label: '招投标项目' }], 'table'),
     'bids-table',
+  );
+  assert.equal(
+    inferKnowledgeTemplateTaskHintFromLibraries([{ key: 'guangzhou-ai', label: '广州AI' }], 'page'),
+    'footfall-static-page',
   );
 });
 

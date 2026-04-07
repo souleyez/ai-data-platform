@@ -60,11 +60,37 @@ function formatFieldTemplate(value: unknown) {
       .filter((entry) => !entry.endsWith('->'))
       .slice(0, 8)
     : [];
+  const prompts = isObject(value.fieldPrompts)
+    ? Object.entries(value.fieldPrompts)
+      .map(([field, prompt]) => `${field}:${String(prompt || '').trim()}`)
+      .filter((entry) => !entry.endsWith(':'))
+      .slice(0, 6)
+    : [];
+  const normalizationRules = isObject(value.fieldNormalizationRules)
+    ? Object.entries(value.fieldNormalizationRules)
+      .map(([field, entries]) => {
+        const rules = Array.isArray(entries)
+          ? entries.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 3)
+          : [];
+        return rules.length ? `${field}=${rules.join(' ; ')}` : '';
+      })
+      .filter(Boolean)
+      .slice(0, 6)
+    : [];
+  const conflicts = isObject(value.fieldConflictStrategies)
+    ? Object.entries(value.fieldConflictStrategies)
+      .map(([field, strategy]) => `${field}:${String(strategy || '').trim()}`)
+      .filter((entry) => !entry.endsWith(':'))
+      .slice(0, 6)
+    : [];
   const parts = [
     fieldSet ? `fieldSet=${fieldSet}` : '',
     preferred.length ? `preferred=${preferred.join(', ')}` : '',
     required.length ? `required=${required.join(', ')}` : '',
     aliases.length ? `aliases=${aliases.join('; ')}` : '',
+    prompts.length ? `prompts=${prompts.join(' | ')}` : '',
+    normalizationRules.length ? `normalization=${normalizationRules.join(' | ')}` : '',
+    conflicts.length ? `conflicts=${conflicts.join(' | ')}` : '',
   ].filter(Boolean);
   return parts.length ? [`fieldTemplate: ${parts.join(' | ')}`] : [];
 }

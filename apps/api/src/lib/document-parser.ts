@@ -29,8 +29,8 @@ export type ParsedDocument = {
   ext: string;
   title: string;
   category: string;
-  bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'general';
-  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'general';
+  bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'footfall' | 'general';
+  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'footfall' | 'general';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   parseMethod?: string;
@@ -77,6 +77,13 @@ export type ParsedDocument = {
     topCategory?: string;
     inventoryStatus?: string;
     replenishmentAction?: string;
+  };
+  footfallFields?: {
+    period?: string;
+    totalFootfall?: string;
+    topMallZone?: string;
+    mallZoneCount?: string;
+    aggregationLevel?: string;
   };
   retentionStatus?: 'structured-only';
   retainedAt?: string;
@@ -126,6 +133,10 @@ export type TableRecordFieldRoles = {
   platformField?: string;
   categoryField?: string;
   skuField?: string;
+  mallZoneField?: string;
+  floorZoneField?: string;
+  roomUnitField?: string;
+  footfallField?: string;
   orderCountField?: string;
   quantityField?: string;
   netSalesField?: string;
@@ -148,15 +159,57 @@ export type TableRecordAlert = {
   message: string;
 };
 
+export type TablePlatformBreakdown = {
+  platform: string;
+  rowCount: number;
+  netSales: number;
+  inventoryRiskRowCount: number;
+};
+
+export type TableMallZoneBreakdown = {
+  mallZone: string;
+  rowCount: number;
+  footfall: number;
+  floorZoneCount: number;
+  roomUnitCount: number;
+};
+
+export type TableCategoryBreakdown = {
+  category: string;
+  rowCount: number;
+  netSales: number;
+  inventoryRiskRowCount: number;
+};
+
+export type TableSkuNetSalesSummary = {
+  sku: string;
+  platform?: string;
+  rowCount: number;
+  netSales: number;
+  inventoryStatus?: string;
+};
+
+export type TableInventoryRiskBreakdown = {
+  inventoryStatus: string;
+  count: number;
+};
+
 export type TableRecordInsightSummary = {
   topPlatforms?: string[];
   topCategories?: string[];
+  topMallZones?: string[];
+  totalFootfall?: number;
   lowMarginRowCount?: number;
   highRefundRowCount?: number;
   inventoryRiskRowCount?: number;
   topRiskSkus?: string[];
   priorityReplenishmentItems?: string[];
   refundHotspots?: string[];
+  platformBreakdown?: TablePlatformBreakdown[];
+  categoryBreakdown?: TableCategoryBreakdown[];
+  mallZoneBreakdown?: TableMallZoneBreakdown[];
+  topSkuNetSales?: TableSkuNetSalesSummary[];
+  inventoryRiskBreakdown?: TableInventoryRiskBreakdown[];
   alerts?: TableRecordAlert[];
 };
 
@@ -788,7 +841,7 @@ function buildTableInsights(columns: string[], rows: string[][]): TableInsightSu
     values.forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
     const distinctCount = counts.size;
     const key = normalizeTableColumnKey(column);
-    const isKnownDimension = /(platform|platform_focus|channel|category|类目|品类|warehouse|仓|risk|priority|recommendation|region)/i.test(key);
+    const isKnownDimension = /(platform|platform_focus|channel|category|类目|品类|warehouse|仓|risk|priority|recommendation|region|mall_zone|mall_area|mall_partition|shopping_zone|business_zone|floor_zone|floor_area|floor_partition|room_unit|shop_unit|shop_no|商场分区|商场区域|楼层分区|楼层区域|楼层|单间|铺位|店铺|区域|分区|片区|位置|点位)/i.test(key);
     if (
       distinctCount >= 2
       && (distinctCount <= Math.min(12, Math.max(4, Math.ceil(values.length * 0.25))) || isKnownDimension)
@@ -860,10 +913,71 @@ function findTableColumnByAliases(columns: string[], aliases: string[]) {
 
 function buildRecordFieldRoles(columns: string[]) {
   const roles: TableRecordFieldRoles = {
-    periodField: findTableColumnByAliases(columns, ['month', 'date', 'order_date', 'snapshot_date', 'period']),
+    periodField: findTableColumnByAliases(columns, ['month', 'date', 'order_date', 'snapshot_date', 'period', '时间', '日期', '统计时间', '报表日期']),
     platformField: findTableColumnByAliases(columns, ['platform', 'platform_focus', 'channel']),
     categoryField: findTableColumnByAliases(columns, ['category', 'category_name', '类目', '品类']),
     skuField: findTableColumnByAliases(columns, ['sku', 'sku_id', 'product_id', 'item_id']),
+    mallZoneField: findTableColumnByAliases(columns, [
+      'mall_zone',
+      'mall_area',
+      'mall_partition',
+      'shopping_zone',
+      'business_zone',
+      'mall_region',
+      '商场分区',
+      '商场区域',
+      '商场片区',
+      '商业分区',
+      '区域',
+      '分区',
+      '片区',
+    ]),
+    floorZoneField: findTableColumnByAliases(columns, [
+      'floor_zone',
+      'floor_area',
+      'floor_partition',
+      'floor_region',
+      '楼层分区',
+      '楼层区域',
+      '楼面分区',
+      '楼层',
+      '楼面',
+      '楼层片区',
+    ]),
+    roomUnitField: findTableColumnByAliases(columns, [
+      'room_unit',
+      'room_no',
+      'unit_no',
+      'shop_unit',
+      'shop_no',
+      'store_unit',
+      '单间',
+      '铺位',
+      '店铺',
+      '商户',
+      '位置',
+      '点位',
+      '铺位号',
+      '门店',
+    ]),
+    footfallField: findTableColumnByAliases(columns, [
+      'visitor_count',
+      'visitors',
+      'footfall',
+      'traffic_count',
+      'entry_count',
+      'passenger_flow',
+      '客流',
+      '人流',
+      '到访量',
+      '进店客流',
+      '进入人数',
+      '进场人数',
+      '入场人数',
+      '进店人数',
+      '进馆人数',
+      '客流人数',
+    ]),
     orderCountField: findTableColumnByAliases(columns, ['order_count', 'orders', 'units_sold']),
     quantityField: findTableColumnByAliases(columns, ['quantity', 'qty', 'count']),
     netSalesField: findTableColumnByAliases(columns, ['net_amount', 'net_sales', 'revenue', 'gmv']),
@@ -894,6 +1008,10 @@ function deriveRecordBusinessFields(
   const platform = readRole(roles.platformField);
   const category = readRole(roles.categoryField);
   const sku = readRole(roles.skuField);
+  const mallZone = readRole(roles.mallZoneField);
+  const floorZone = readRole(roles.floorZoneField);
+  const roomUnit = readRole(roles.roomUnitField);
+  const footfall = readRole(roles.footfallField);
   const orderCount = readRole(roles.orderCountField) || readRole(roles.quantityField);
   const netSales = readRole(roles.netSalesField) || readRole(roles.grossAmountField);
   const grossMarginDirect = readRole(roles.grossMarginField);
@@ -909,6 +1027,10 @@ function deriveRecordBusinessFields(
   if (platform) derivedFields.platform = platform;
   if (category) derivedFields.category = category;
   if (sku) derivedFields.sku = sku;
+  if (mallZone) derivedFields.mallZone = mallZone;
+  if (floorZone) derivedFields.floorZone = floorZone;
+  if (roomUnit) derivedFields.roomUnit = roomUnit;
+  if (footfall) derivedFields.footfall = footfall;
   if (orderCount) derivedFields.orderCount = orderCount;
   if (netSales) derivedFields.netSales = netSales;
   if (grossMarginDirect) derivedFields.grossMargin = grossMarginDirect;
@@ -952,6 +1074,11 @@ function buildTopValueCounts(values: string[]) {
     .map(([value]) => value);
 }
 
+function roundMetricValue(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Number(value.toFixed(2));
+}
+
 function parsePercentText(value: string) {
   const text = String(value || '').trim();
   if (!text) return undefined;
@@ -973,9 +1100,21 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
   let lowMarginRowCount = 0;
   let highRefundRowCount = 0;
   let inventoryRiskRowCount = 0;
+  let totalFootfall = 0;
   const riskSkuCandidates: string[] = [];
   const replenishmentCandidates: string[] = [];
   const refundHotspotCandidates: string[] = [];
+  const platformSummary = new Map<string, { platform: string; rowCount: number; netSales: number; inventoryRiskRowCount: number }>();
+  const categorySummary = new Map<string, { category: string; rowCount: number; netSales: number; inventoryRiskRowCount: number }>();
+  const mallZoneSummary = new Map<string, {
+    mallZone: string;
+    rowCount: number;
+    footfall: number;
+    floorZones: Set<string>;
+    roomUnits: Set<string>;
+  }>();
+  const skuNetSalesSummary = new Map<string, { sku: string; platform?: string; rowCount: number; netSales: number; inventoryStatus?: string }>();
+  const inventoryRiskSummary = new Map<string, number>();
 
   for (const row of recordRows) {
     const derived = row.derivedFields || {};
@@ -985,10 +1124,62 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
     const refundAmount = parseCurrencyText(String(row.values?.refund_amount || ''));
     const inventoryStatus = String(derived.inventoryStatus || '').trim();
     const sku = String(derived.sku || row.keyValue || '').trim();
+    const mallZone = String(derived.mallZone || '').trim();
+    const floorZone = String(derived.floorZone || '').trim();
+    const roomUnit = String(derived.roomUnit || '').trim();
+    const footfall = parseTableNumericValue(String(derived.footfall || ''), 'number');
     const platform = String(derived.platform || '').trim();
     const category = String(derived.category || '').trim();
     const recommendation = String(derived.recommendation || '').trim();
     const replenishmentPriority = String(derived.replenishmentPriority || '').trim();
+    const hasInventoryRisk = Boolean(inventoryStatus && !/^healthy$/i.test(inventoryStatus));
+
+    if (platform) {
+      const current = platformSummary.get(platform) || { platform, rowCount: 0, netSales: 0, inventoryRiskRowCount: 0 };
+      current.rowCount += 1;
+      current.netSales += typeof netSales === 'number' ? netSales : 0;
+      current.inventoryRiskRowCount += hasInventoryRisk ? 1 : 0;
+      platformSummary.set(platform, current);
+    }
+
+    if (category) {
+      const current = categorySummary.get(category) || { category, rowCount: 0, netSales: 0, inventoryRiskRowCount: 0 };
+      current.rowCount += 1;
+      current.netSales += typeof netSales === 'number' ? netSales : 0;
+      current.inventoryRiskRowCount += hasInventoryRisk ? 1 : 0;
+      categorySummary.set(category, current);
+    }
+
+    if (mallZone) {
+      const current = mallZoneSummary.get(mallZone) || {
+        mallZone,
+        rowCount: 0,
+        footfall: 0,
+        floorZones: new Set<string>(),
+        roomUnits: new Set<string>(),
+      };
+      current.rowCount += 1;
+      current.footfall += typeof footfall === 'number' ? footfall : 0;
+      if (floorZone) current.floorZones.add(floorZone);
+      if (roomUnit) current.roomUnits.add(roomUnit);
+      mallZoneSummary.set(mallZone, current);
+      totalFootfall += typeof footfall === 'number' ? footfall : 0;
+    }
+
+    if (sku) {
+      const skuKey = [sku, platform].filter(Boolean).join('||');
+      const current = skuNetSalesSummary.get(skuKey) || {
+        sku,
+        ...(platform ? { platform } : {}),
+        rowCount: 0,
+        netSales: 0,
+        ...(inventoryStatus ? { inventoryStatus } : {}),
+      };
+      current.rowCount += 1;
+      current.netSales += typeof netSales === 'number' ? netSales : 0;
+      if (inventoryStatus) current.inventoryStatus = inventoryStatus;
+      skuNetSalesSummary.set(skuKey, current);
+    }
 
     if (typeof grossMargin === 'number' && grossMargin <= 0.2) {
       lowMarginRowCount += 1;
@@ -1015,7 +1206,11 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
       });
     }
 
-    if (inventoryStatus && !/^healthy$/i.test(inventoryStatus)) {
+    if (inventoryStatus) {
+      inventoryRiskSummary.set(inventoryStatus, (inventoryRiskSummary.get(inventoryStatus) || 0) + 1);
+    }
+
+    if (hasInventoryRisk) {
       inventoryRiskRowCount += 1;
       if (sku) riskSkuCandidates.push(sku);
       alerts.push({
@@ -1041,6 +1236,21 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
   const summary: TableRecordInsightSummary = {};
   if (topPlatforms.length) summary.topPlatforms = topPlatforms;
   if (topCategories.length) summary.topCategories = topCategories;
+  const mallZoneBreakdown = [...mallZoneSummary.values()]
+    .sort((left, right) => right.footfall - left.footfall || right.rowCount - left.rowCount || left.mallZone.localeCompare(right.mallZone, 'zh-CN'))
+    .slice(0, 6)
+    .map((entry) => ({
+      mallZone: entry.mallZone,
+      rowCount: entry.rowCount,
+      footfall: roundMetricValue(entry.footfall),
+      floorZoneCount: entry.floorZones.size,
+      roomUnitCount: entry.roomUnits.size,
+    }));
+  if (mallZoneBreakdown.length) {
+    summary.mallZoneBreakdown = mallZoneBreakdown;
+    summary.topMallZones = mallZoneBreakdown.slice(0, 3).map((entry) => entry.mallZone);
+  }
+  if (totalFootfall > 0) summary.totalFootfall = roundMetricValue(totalFootfall);
   if (lowMarginRowCount) summary.lowMarginRowCount = lowMarginRowCount;
   if (highRefundRowCount) summary.highRefundRowCount = highRefundRowCount;
   if (inventoryRiskRowCount) summary.inventoryRiskRowCount = inventoryRiskRowCount;
@@ -1050,8 +1260,123 @@ function buildRecordInsights(recordRows: TableStructuredRow[]) {
   if (topRiskSkus.length) summary.topRiskSkus = topRiskSkus;
   if (priorityReplenishmentItems.length) summary.priorityReplenishmentItems = priorityReplenishmentItems;
   if (refundHotspots.length) summary.refundHotspots = refundHotspots;
+  const platformBreakdown = [...platformSummary.values()]
+    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.platform.localeCompare(right.platform, 'zh-CN'))
+    .slice(0, 5)
+    .map((entry) => ({
+      platform: entry.platform,
+      rowCount: entry.rowCount,
+      netSales: roundMetricValue(entry.netSales),
+      inventoryRiskRowCount: entry.inventoryRiskRowCount,
+    }));
+  const categoryBreakdown = [...categorySummary.values()]
+    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.category.localeCompare(right.category, 'zh-CN'))
+    .slice(0, 5)
+    .map((entry) => ({
+      category: entry.category,
+      rowCount: entry.rowCount,
+      netSales: roundMetricValue(entry.netSales),
+      inventoryRiskRowCount: entry.inventoryRiskRowCount,
+    }));
+  const topSkuNetSales = [...skuNetSalesSummary.values()]
+    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.sku.localeCompare(right.sku, 'zh-CN'))
+    .slice(0, 5)
+    .map((entry) => ({
+      sku: entry.sku,
+      ...(entry.platform ? { platform: entry.platform } : {}),
+      rowCount: entry.rowCount,
+      netSales: roundMetricValue(entry.netSales),
+      ...(entry.inventoryStatus ? { inventoryStatus: entry.inventoryStatus } : {}),
+    }));
+  const inventoryRiskBreakdown = [...inventoryRiskSummary.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
+    .slice(0, 5)
+    .map(([inventoryStatus, count]) => ({ inventoryStatus, count }));
+  if (platformBreakdown.length) summary.platformBreakdown = platformBreakdown;
+  if (categoryBreakdown.length) summary.categoryBreakdown = categoryBreakdown;
+  if (topSkuNetSales.length) summary.topSkuNetSales = topSkuNetSales;
+  if (inventoryRiskBreakdown.length) summary.inventoryRiskBreakdown = inventoryRiskBreakdown;
   if (alerts.length) summary.alerts = alerts.slice(0, 8);
   return Object.keys(summary).length ? summary : undefined;
+}
+
+function looksLikeWideFootfallZoneColumn(column: string) {
+  const normalized = normalizeTableColumnKey(column);
+  if (!normalized) return false;
+  if (/^(date|month|time|period|时间|日期|统计时间|报表日期|合计|总计|total|sum)$/i.test(normalized)) return false;
+  if (/(mall|zone|area|region|partition|商场|区域|分区|片区|停车|楼外|楼层|楼面|电玩|中庭|广场)/i.test(normalized)) return true;
+  return /^[\u4e00-\u9fff]{1,6}$/.test(column.trim());
+}
+
+function isWideFootfallTotalColumn(column: string) {
+  const normalized = normalizeTableColumnKey(column);
+  return /^(total|sum|合计|总计|总客流|总人流)$/i.test(normalized);
+}
+
+function buildWideFootfallSheetSummary(columns: string[], rows: string[][]) {
+  if (columns.length < 3 || !rows.length) return undefined;
+
+  const firstColumn = columns[0];
+  const firstColumnValues = rows
+    .map((row) => normalizeTableCell(row[0] || ''))
+    .filter(Boolean);
+  const dateLikeCount = firstColumnValues
+    .map((value) => parseTableDateValue(value))
+    .filter(Boolean).length;
+  if (dateLikeCount < Math.max(1, Math.ceil(firstColumnValues.length * 0.6))) return undefined;
+
+  const numericColumns = columns.slice(1).filter((column, offset) => {
+    const values = rows
+      .map((row) => normalizeTableCell(row[offset + 1] || ''))
+      .filter(Boolean);
+    if (!values.length) return false;
+    const numericValues = values
+      .map((value) => parseTableNumericValue(value, 'number'))
+      .filter((value): value is number => Number.isFinite(value));
+    return numericValues.length >= Math.max(1, Math.ceil(values.length * 0.7));
+  });
+  const totalColumn = numericColumns.find((column) => isWideFootfallTotalColumn(column));
+  const mallZoneColumns = numericColumns.filter((column) => !isWideFootfallTotalColumn(column) && looksLikeWideFootfallZoneColumn(column));
+  if (!totalColumn && mallZoneColumns.length < 2) return undefined;
+
+  const mallZoneBreakdown = mallZoneColumns
+    .map((column) => {
+      const columnIndex = columns.indexOf(column);
+      const footfall = rows.reduce((sum, row) => {
+        const numeric = parseTableNumericValue(normalizeTableCell(row[columnIndex] || ''), 'number');
+        return sum + (typeof numeric === 'number' ? numeric : 0);
+      }, 0);
+      return {
+        mallZone: column,
+        rowCount: rows.length,
+        footfall: roundMetricValue(footfall),
+        floorZoneCount: 0,
+        roomUnitCount: 0,
+      } satisfies TableMallZoneBreakdown;
+    })
+    .filter((entry) => entry.footfall > 0)
+    .sort((left, right) => right.footfall - left.footfall || left.mallZone.localeCompare(right.mallZone, 'zh-CN'))
+    .slice(0, 8);
+  if (!mallZoneBreakdown.length) return undefined;
+
+  const totalFootfall = totalColumn
+    ? roundMetricValue(rows.reduce((sum, row) => {
+      const numeric = parseTableNumericValue(normalizeTableCell(row[columns.indexOf(totalColumn)] || ''), 'number');
+      return sum + (typeof numeric === 'number' ? numeric : 0);
+    }, 0))
+    : roundMetricValue(mallZoneBreakdown.reduce((sum, entry) => sum + entry.footfall, 0));
+
+  return {
+    recordFieldRoles: {
+      periodField: firstColumn,
+      ...(totalColumn ? { footfallField: totalColumn } : {}),
+    } satisfies TableRecordFieldRoles,
+    recordInsights: {
+      totalFootfall,
+      topMallZones: mallZoneBreakdown.slice(0, 3).map((entry) => entry.mallZone),
+      mallZoneBreakdown,
+    } satisfies TableRecordInsightSummary,
+  };
 }
 
 function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string, recordFieldRoles: TableRecordFieldRoles = {}) {
@@ -1097,9 +1422,19 @@ function buildTableSheetSummary(
     : buildTableColumns([], columnCount);
   const insights = buildTableInsights(columns, dataRows);
   const recordKeyField = detectRecordKeyField(columns, dataRows);
-  const recordFieldRoles = buildRecordFieldRoles(columns);
+  const wideFootfallSummary = buildWideFootfallSheetSummary(columns, dataRows);
+  const recordFieldRoles = {
+    ...buildRecordFieldRoles(columns),
+    ...(wideFootfallSummary?.recordFieldRoles || {}),
+  };
   const recordRows = mapRecordRows(columns, dataRows, recordKeyField, recordFieldRoles);
-  const recordInsights = buildRecordInsights(recordRows);
+  const parsedRecordInsights = buildRecordInsights(recordRows);
+  const recordInsights = parsedRecordInsights || wideFootfallSummary?.recordInsights
+    ? {
+        ...(parsedRecordInsights || {}),
+        ...(wideFootfallSummary?.recordInsights || {}),
+      }
+    : undefined;
 
   return {
     name,
@@ -1115,6 +1450,26 @@ function buildTableSheetSummary(
   };
 }
 
+function scoreTableSheetSummary(sheet: TableSheetSummary) {
+  const roles = sheet.recordFieldRoles || {};
+  const insights = sheet.recordInsights || {};
+  const mallZoneBreakdownCount = (insights.mallZoneBreakdown || []).length;
+  let score = 0;
+
+  if (roles.mallZoneField && roles.footfallField) score += 80;
+  if (roles.netSalesField || roles.orderCountField || roles.skuField) score += 60;
+  if (roles.periodField) score += 15;
+  if (mallZoneBreakdownCount) score += 60 + mallZoneBreakdownCount * 25;
+  if ((insights.platformBreakdown || []).length || (insights.categoryBreakdown || []).length) score += 40;
+  if ((sheet.recordRows || []).length) score += Math.min(20, Math.ceil((sheet.recordRows || []).length / 5));
+  if (/(汇总|总表|summary|总览)/i.test(sheet.name)) {
+    score += mallZoneBreakdownCount > 1 ? 90 : 15;
+  }
+  score += Math.min(10, Math.ceil(sheet.rowCount / 20));
+
+  return score;
+}
+
 function buildWorkbookTableSummary(
   format: 'csv' | 'xlsx',
   sheets: Array<{ name: string; rows: unknown[][] }>,
@@ -1125,7 +1480,8 @@ function buildWorkbookTableSummary(
 
   if (!sheetSummaries.length) return undefined;
 
-  const [primarySheet] = sheetSummaries;
+  const [primarySheet] = [...sheetSummaries]
+    .sort((left, right) => scoreTableSheetSummary(right) - scoreTableSheetSummary(left) || right.rowCount - left.rowCount || left.name.localeCompare(right.name, 'zh-CN'));
   return {
     format,
     rowCount: sheetSummaries.reduce((sum, sheet) => sum + sheet.rowCount, 0),
@@ -2014,16 +2370,21 @@ export function detectBizCategory(filePath: string, category: string, text = '',
   }
 
   const evidence = buildEvidence(filePath, text);
+  const hasFootfallMetricSignal = /(footfall|visitor_count|visitor count|visitors|traffic_count|entry_count|passenger_flow|客流|人流|到访量|进店客流|进入人数|进场人数|入场人数|离开人数)/i.test(evidence);
+  const hasFootfallSpatialSignal = /(mall_zone|mall zone|mall_area|mall partition|shopping_zone|business_zone|floor_zone|floor zone|room_unit|shop_unit|shop_no|商场分区|商场区域|商业分区|楼层分区|楼层区域|楼层|单间|铺位|店铺|区域|位置|点位)/i.test(evidence);
   const hasOrderFieldSignal = /(order_id|order_count|units_sold|net_sales|gross_profit|gross_margin|avg_order_value|refund_total|discount_total|shop_name)/i.test(evidence);
   const hasInventoryFieldSignal = /(inventory_index|days_of_cover|safety_stock|replenishment_priority|risk_flag|platform_focus|warehouse|inbound_7d)/i.test(evidence);
+  const hasFootfallPathSignal = /(?:footfall|visitor|traffic|客流|人流)[-_/\\]/i.test(filePath);
   const hasOrderPathSignal = /(?:order|orders|sales)[-_/\\]/i.test(filePath);
   const hasInventoryPathSignal = /(?:inventory|stock|sku)[-_/\\]/i.test(filePath);
   if (category === 'resume' || RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'general';
   if (scoreHints(evidence, ['发票', '票据', '凭据', 'invoice']) >= 4) return 'invoice';
+  if ((hasFootfallMetricSignal && hasFootfallSpatialSignal) || (hasFootfallPathSignal && hasFootfallMetricSignal)) return 'footfall';
   if (hasOrderFieldSignal) return 'order';
   if (hasInventoryFieldSignal) return 'inventory';
   if (hasInventoryPathSignal) return 'inventory';
   if (hasOrderPathSignal) return 'order';
+  if (scoreHints(evidence, ['客流', '人流', '商场分区', '楼层分区', 'visitor', 'footfall']) >= 6) return 'footfall';
   if (scoreHints(evidence, ['订单', '回款', '销售', 'order']) >= 4) return 'order';
   if (scoreHints(evidence, ['客服', '工单', '投诉', 'service']) >= 4) return 'service';
   if (scoreHints(evidence, ['库存', 'sku', '出入库', 'inventory']) >= 4) return 'inventory';
@@ -2296,6 +2657,24 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     }
     if (/(risk_flag|anomaly|warning|异常|风险|波动|overstock|stockout)/i.test(normalized)) {
       tags.push('异常波动');
+    }
+    return [...new Set(tags)];
+  }
+
+  if (bizCategory === 'footfall') {
+    const normalized = text.toLowerCase();
+    const tags = ['客流分析'];
+    if (/(mall_zone|mall area|mall partition|shopping_zone|商场分区|商场区域|商业分区)/i.test(normalized)) {
+      tags.push('商场分区');
+    }
+    if (/(floor_zone|floor area|floor partition|楼层分区|楼层区域|楼层)/i.test(normalized)) {
+      tags.push('楼层明细');
+    }
+    if (/(room_unit|shop_unit|shop_no|单间|店铺|铺位|商户)/i.test(normalized)) {
+      tags.push('单间明细');
+    }
+    if (/(visitor_count|visitors|footfall|traffic_count|entry_count|客流|人流|到访量)/i.test(normalized)) {
+      tags.push('客流报表');
     }
     return [...new Set(tags)];
   }
@@ -2745,6 +3124,122 @@ function extractOrderFields(
     : undefined;
 }
 
+function deriveTopMallZoneFromTableSummary(tableSummary: TableSummary | undefined) {
+  const recordInsights = [
+    tableSummary?.recordInsights,
+    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
+  ].find((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length)) as TableRecordInsightSummary | undefined;
+  if (recordInsights?.mallZoneBreakdown?.length) {
+    return recordInsights.mallZoneBreakdown[0]?.mallZone || '';
+  }
+  const mallZoneSummary = findTableDimensionSummary(tableSummary, [
+    'mall_zone',
+    'mall_area',
+    'mall_partition',
+    'shopping_zone',
+    'business_zone',
+    '商场分区',
+    '商场区域',
+    '商业分区',
+    '区域',
+    '分区',
+    '片区',
+  ]);
+  return mallZoneSummary?.topValues?.[0]?.value || '';
+}
+
+function deriveTotalFootfallFromTableSummary(tableSummary: TableSummary | undefined) {
+  const recordInsights = [
+    tableSummary?.recordInsights,
+    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
+  ].find((entry) => typeof (entry as TableRecordInsightSummary | undefined)?.totalFootfall === 'number') as TableRecordInsightSummary | undefined;
+  if (typeof recordInsights?.totalFootfall === 'number' && recordInsights.totalFootfall > 0) {
+    return formatMetricValue(recordInsights.totalFootfall, 'number');
+  }
+  const metric = findTableMetricSummary(tableSummary, [
+    'visitor_count',
+    'visitors',
+    'footfall',
+    'traffic_count',
+    'entry_count',
+    'passenger_flow',
+    '客流',
+    '人流',
+    '到访量',
+    '进店客流',
+    '进入人数',
+    '进场人数',
+    '入场人数',
+    '进店人数',
+    '进馆人数',
+  ]);
+  return metric ? formatMetricValue(metric.sum, 'number') : '';
+}
+
+function deriveMallZoneCountFromTableSummary(tableSummary: TableSummary | undefined) {
+  const recordInsights = [
+    tableSummary?.recordInsights,
+    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
+  ].find((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length)) as TableRecordInsightSummary | undefined;
+  if (recordInsights?.mallZoneBreakdown?.length) {
+    return String(recordInsights.mallZoneBreakdown.length);
+  }
+  const dimension = findTableDimensionSummary(tableSummary, [
+    'mall_zone',
+    'mall_area',
+    'mall_partition',
+    'shopping_zone',
+    'business_zone',
+    '商场分区',
+    '商场区域',
+    '商业分区',
+    '区域',
+    '分区',
+    '片区',
+  ]);
+  return dimension?.distinctCount ? String(dimension.distinctCount) : '';
+}
+
+function extractFootfallFields(
+  text: string,
+  title: string,
+  bizCategory: ParsedDocument['bizCategory'],
+  topicTags: string[],
+  tableSummary?: TableSummary,
+): ParsedDocument['footfallFields'] | undefined {
+  if (bizCategory !== 'footfall') return undefined;
+
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
+  const textPeriod = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
+    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim()
+    || '';
+  const textTopMallZone = normalized.match(/(?:商场分区|重点分区|top\s*mall\s*zone)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim() || '';
+  const period = formatDateRange(findTableDateSummary(tableSummary, ['month', 'date', 'snapshot_date', 'period', '时间', '日期', '统计时间', '报表日期'])) || textPeriod;
+  const totalFootfall = deriveTotalFootfallFromTableSummary(tableSummary)
+    || normalized.match(/(?:总客流|累计客流|总到访量)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim()
+    || '';
+  const topMallZone = deriveTopMallZoneFromTableSummary(tableSummary) || textTopMallZone;
+  const mallZoneCount = deriveMallZoneCountFromTableSummary(tableSummary);
+  const aggregationLevel = [
+    tableSummary?.recordInsights,
+    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
+  ].some((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length))
+    ? 'mall-zone'
+    : 'report';
+
+  const hasAnyValue = Boolean(period || totalFootfall || topMallZone || mallZoneCount || aggregationLevel);
+  return hasAnyValue
+    ? {
+        period,
+        totalFootfall,
+        topMallZone,
+        mallZoneCount,
+        aggregationLevel,
+      }
+    : undefined;
+}
+
 async function extractText(filePath: string, ext: string) {
   if (ext === '.txt' || ext === '.md' || ext === '.csv') {
     const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
@@ -3037,6 +3532,13 @@ export async function parseDocument(
         text: quickText,
         fields: extractOrderFields(quickText, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
       });
+      const footfallFields = extractFootfallFields(
+        quickText,
+        inferredTitle,
+        bizCategory,
+        topicTags,
+        tableSummary,
+      );
       const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
         inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
         extractionProfile,
@@ -3063,6 +3565,7 @@ export async function parseDocument(
         contractFields,
         enterpriseGuidanceFields,
         orderFields,
+        footfallFields,
         riskLevel: detectRiskLevel(normalizedText, category),
         topicTags,
         groups,
@@ -3080,6 +3583,7 @@ export async function parseDocument(
           contractFields,
           enterpriseGuidanceFields,
           orderFields,
+          footfallFields,
           resumeFields,
           evidenceChunks: [],
           tableSummary,
@@ -3128,6 +3632,13 @@ export async function parseDocument(
       text,
       fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
     });
+    const footfallFields = extractFootfallFields(
+      text,
+      inferredTitle,
+      bizCategory,
+      topicTags,
+      tableSummary,
+    );
     const schemaType = applyGovernedSchemaTypeWithEnterpriseGuidance(
       inferSchemaType(category, bizCategory, resumeFields, topicTags, inferredTitle, summary),
       extractionProfile,
@@ -3154,6 +3665,7 @@ export async function parseDocument(
       resumeFields,
       enterpriseGuidanceFields,
       orderFields,
+      footfallFields,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
       groups,
@@ -3172,6 +3684,7 @@ export async function parseDocument(
         contractFields,
         enterpriseGuidanceFields,
         orderFields,
+        footfallFields,
         resumeFields,
         evidenceChunks,
         tableSummary,

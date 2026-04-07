@@ -39,6 +39,9 @@ test('parseDocument should extract xinshijie ioa enterprise guidance fields from
     assert.ok((doc.enterpriseGuidanceFields?.policyFocus || []).includes('IT治理'));
     assert.equal(doc.structuredProfile?.businessSystem, 'IOA');
     assert.equal(doc.structuredProfile?.documentKind, 'policy-standard');
+    assert.equal(doc.structuredProfile?.fieldTemplate?.fieldPrompts?.operationEntry?.length > 0, true);
+    assert.equal(doc.structuredProfile?.fieldTemplate?.fieldConflictStrategies?.approvalLevels, 'merge-distinct');
+    assert.ok(Array.isArray(doc.structuredProfile?.fieldTemplate?.fieldNormalizationRules?.businessSystem));
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

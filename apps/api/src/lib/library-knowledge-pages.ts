@@ -1,6 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readDocumentCache } from './document-cache-repository.js';
+import {
+  loadDocumentExtractionGovernance,
+  normalizeDocumentExtractionFieldValues,
+  resolveDocumentExtractionConflictValues,
+  resolveDocumentExtractionFieldConflictStrategy,
+  resolveDocumentExtractionProfile,
+  type DocumentExtractionFieldConflictStrategy,
+} from './document-extraction-governance.js';
 import { buildDocumentId } from './document-store.js';
 import { documentMatchesLibrary, loadDocumentLibraries, type DocumentLibrary } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
@@ -21,6 +29,26 @@ export type LibraryKnowledgeRepresentativeDocument = {
   summary: string;
 };
 
+export type LibraryKnowledgeFocusedFieldCoverage = {
+  key: string;
+  alias: string;
+  prompt: string;
+  conflictStrategy: DocumentExtractionFieldConflictStrategy;
+  populatedDocumentCount: number;
+  totalDocumentCount: number;
+  coverageRatio: number;
+  resolvedValues: string[];
+  sampleValues: string[];
+};
+
+export type LibraryKnowledgeFieldConflict = {
+  key: string;
+  alias: string;
+  conflictStrategy: DocumentExtractionFieldConflictStrategy;
+  values: string[];
+  sampleDocumentTitles: string[];
+};
+
 export type LibraryKnowledgeCompilation = {
   version: 1;
   libraryKey: string;
@@ -33,17 +61,22 @@ export type LibraryKnowledgeCompilation = {
   overview: string;
   keyTopics: string[];
   keyFacts: string[];
+  focusedFieldSet?: string;
+  focusedFieldCoverage?: LibraryKnowledgeFocusedFieldCoverage[];
+  fieldConflicts?: LibraryKnowledgeFieldConflict[];
   suggestedQuestions: string[];
   representativeDocuments: LibraryKnowledgeRepresentativeDocument[];
   recentUpdates: LibraryKnowledgeUpdateEntry[];
   sourceDocumentIds: string[];
   sourceTitles: string[];
+  pilotValidated?: boolean;
 };
 
 const LIBRARY_PAGES_ROOT = path.join(MEMORY_ROOT, 'library-pages');
 const SUMMARY_FILE_NAME = 'summary.json';
 const MAX_CONTEXT_LIBRARIES = 3;
 const MAX_CONTEXT_CHARS_PER_LIBRARY = 1800;
+const LIBRARY_KNOWLEDGE_PILOT_KEYS = new Set(['xinshijie-ioa']);
 
 function normalizeText(value: unknown, maxLength = 240) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -56,6 +89,10 @@ function normalizeText(value: unknown, maxLength = 240) {
 function normalizeMode(value: unknown) {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'topics' || normalized === 'overview' ? normalized : 'none';
+}
+
+function isLibraryKnowledgePilotTarget(libraryKey: string) {
+  return LIBRARY_KNOWLEDGE_PILOT_KEYS.has(String(libraryKey || '').trim().toLowerCase());
 }
 
 function isLibraryKnowledgePagesEnabled(library: Pick<DocumentLibrary, 'knowledgePagesEnabled' | 'knowledgePagesMode'>) {
@@ -146,8 +183,113 @@ function collectKeyTopics(items: ParsedDocument[]) {
     .map(([topic, count]) => `${topic} (${count})`);
 }
 
-function collectKeyFacts(items: ParsedDocument[]) {
+function toTextValueList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeText(entry, 160)).filter(Boolean);
+  }
+  const text = normalizeText(value, 160);
+  return text ? [text] : [];
+}
+
+function extractDocumentFieldValues(item: ParsedDocument, key: string) {
+  const profile = item.structuredProfile && typeof item.structuredProfile === 'object' && !Array.isArray(item.structuredProfile)
+    ? item.structuredProfile as Record<string, unknown>
+    : null;
+  if (!profile) return [];
+
+  const focusedEntries = Array.isArray(profile.focusedFieldEntries)
+    ? profile.focusedFieldEntries
+    : [];
+  for (const entry of focusedEntries) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (String((entry as Record<string, unknown>).key || '').trim() !== key) continue;
+    const values = toTextValueList((entry as Record<string, unknown>).value);
+    if (values.length) return values;
+  }
+
+  const fieldDetails = profile.fieldDetails && typeof profile.fieldDetails === 'object' && !Array.isArray(profile.fieldDetails)
+    ? profile.fieldDetails as Record<string, unknown>
+    : null;
+  const detail = fieldDetails?.[key];
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const values = toTextValueList((detail as Record<string, unknown>).value);
+    if (values.length) return values;
+  }
+
+  return toTextValueList(profile[key]);
+}
+
+function buildFocusedFieldCoverage(library: DocumentLibrary, items: ParsedDocument[]) {
+  const profile = resolveDocumentExtractionProfile(
+    loadDocumentExtractionGovernance(),
+    { keys: [library.key], labels: [library.label] },
+  );
+  if (!profile?.preferredFieldKeys?.length) {
+    return {
+      fieldSet: '',
+      coverage: [] as LibraryKnowledgeFocusedFieldCoverage[],
+      conflicts: [] as LibraryKnowledgeFieldConflict[],
+    };
+  }
+
+  const coverage = profile.preferredFieldKeys.map((fieldKey) => {
+    const alias = normalizeText(profile.fieldAliases?.[fieldKey] || fieldKey, 64) || fieldKey;
+    const prompt = normalizeText(profile.fieldPrompts?.[fieldKey], 120);
+    const valuesByDocument = items.map((item) => {
+      const rawValues = extractDocumentFieldValues(item, fieldKey);
+      const normalizedValues = resolveDocumentExtractionConflictValues(
+        fieldKey,
+        normalizeDocumentExtractionFieldValues(fieldKey, rawValues, profile),
+        profile,
+        'merge-distinct',
+      );
+      return {
+        title: normalizeText(item.title || item.name, 80) || 'Untitled document',
+        values: normalizedValues,
+      };
+    }).filter((entry) => entry.values.length);
+
+    const distinctValues = [...new Set(valuesByDocument.flatMap((entry) => entry.values))];
+    return {
+      key: fieldKey,
+      alias,
+      prompt,
+      conflictStrategy: resolveDocumentExtractionFieldConflictStrategy(fieldKey, profile, 'merge-distinct'),
+      populatedDocumentCount: valuesByDocument.length,
+      totalDocumentCount: items.length,
+      coverageRatio: items.length ? Number((valuesByDocument.length / items.length).toFixed(2)) : 0,
+      resolvedValues: resolveDocumentExtractionConflictValues(fieldKey, distinctValues, profile, 'merge-distinct').slice(0, 4),
+      sampleValues: distinctValues.slice(0, 4),
+      sampleDocumentTitles: valuesByDocument.slice(0, 3).map((entry) => entry.title),
+    };
+  });
+
+  const conflicts = coverage
+    .filter((entry) => entry.sampleValues.length > 1)
+    .slice(0, 6)
+    .map((entry) => ({
+      key: entry.key,
+      alias: entry.alias,
+      conflictStrategy: entry.conflictStrategy,
+      values: entry.sampleValues,
+      sampleDocumentTitles: (entry as typeof entry & { sampleDocumentTitles?: string[] }).sampleDocumentTitles || [],
+    }));
+
+  return {
+    fieldSet: profile.fieldSet,
+    coverage: coverage.map(({ sampleDocumentTitles: _sampleDocumentTitles, ...entry }) => entry),
+    conflicts,
+  };
+}
+
+function collectKeyFacts(items: ParsedDocument[], focusedFieldCoverage: LibraryKnowledgeFocusedFieldCoverage[] = []) {
   const facts = new Set<string>();
+
+  for (const entry of focusedFieldCoverage) {
+    if (!entry.resolvedValues.length) continue;
+    facts.add(`${entry.alias}: ${entry.resolvedValues.join(' / ')}`);
+    if (facts.size >= 8) return [...facts];
+  }
 
   for (const item of items) {
     const profile = item.structuredProfile && typeof item.structuredProfile === 'object'
@@ -215,9 +357,15 @@ function buildOverviewText(input: {
   library: DocumentLibrary;
   keyTopics: string[];
   keyFacts: string[];
+  focusedFieldCoverage: LibraryKnowledgeFocusedFieldCoverage[];
   representativeDocuments: LibraryKnowledgeRepresentativeDocument[];
 }) {
   const description = normalizeText(input.library.description, 180);
+  const coverageSummary = input.focusedFieldCoverage
+    .filter((entry) => entry.populatedDocumentCount > 0)
+    .slice(0, 3)
+    .map((entry) => `${entry.alias}${Math.round(entry.coverageRatio * 100)}%`)
+    .join('、');
   const summaryParts = [
     description ? `${input.library.label} mainly covers ${description}.` : `${input.library.label} is a compiled knowledge view for this library.`,
     input.keyTopics.length
@@ -226,6 +374,7 @@ function buildOverviewText(input: {
     input.keyFacts.length
       ? `The most reusable facts include ${input.keyFacts.slice(0, 3).join(' ; ')}.`
       : '',
+    coverageSummary ? `Focused field coverage currently centers on ${coverageSummary}.` : '',
     input.representativeDocuments.length
       ? `Representative sources include ${input.representativeDocuments.slice(0, 3).map((item) => item.title).join(', ')}.`
       : '',
@@ -240,13 +389,20 @@ function buildLibraryKnowledgeCompilation(
   reason: string,
 ): LibraryKnowledgeCompilation {
   const sortedItems = sortDocumentsByRecency(items);
+  const focusedFieldSummary = buildFocusedFieldCoverage(library, sortedItems);
   const keyTopics = collectKeyTopics(sortedItems);
-  const keyFacts = collectKeyFacts(sortedItems);
+  const keyFacts = collectKeyFacts(sortedItems, focusedFieldSummary.coverage);
   const representativeDocuments = buildRepresentativeDocuments(sortedItems);
   const recentUpdates = buildRecentUpdates(sortedItems, changedItems);
   const sourceDocumentIds = representativeDocuments.map((item) => item.documentId).filter(Boolean);
   const sourceTitles = representativeDocuments.map((item) => item.title).filter(Boolean);
-  const overview = buildOverviewText({ library, keyTopics, keyFacts, representativeDocuments });
+  const overview = buildOverviewText({
+    library,
+    keyTopics,
+    keyFacts,
+    focusedFieldCoverage: focusedFieldSummary.coverage,
+    representativeDocuments,
+  });
 
   return {
     version: 1,
@@ -260,11 +416,15 @@ function buildLibraryKnowledgeCompilation(
     overview,
     keyTopics,
     keyFacts,
+    focusedFieldSet: focusedFieldSummary.fieldSet || undefined,
+    focusedFieldCoverage: focusedFieldSummary.coverage,
+    fieldConflicts: focusedFieldSummary.conflicts,
     suggestedQuestions: deriveSuggestedQuestions(library, sortedItems),
     representativeDocuments,
     recentUpdates,
     sourceDocumentIds,
     sourceTitles,
+    pilotValidated: isLibraryKnowledgePilotTarget(library.key),
   };
 }
 
@@ -288,6 +448,21 @@ function buildOverviewMarkdown(summary: LibraryKnowledgeCompilation) {
     '',
     '## Key Facts',
     ...(summary.keyFacts.length ? summary.keyFacts.map((entry) => `- ${entry}`) : ['- No extracted key facts yet']),
+    '',
+    '## Focused Field Coverage',
+    ...(summary.focusedFieldCoverage?.length
+      ? summary.focusedFieldCoverage.map((entry) => {
+        const coverage = `${entry.populatedDocumentCount}/${entry.totalDocumentCount}`;
+        const resolvedValues = entry.resolvedValues.length ? ` => ${entry.resolvedValues.join(' / ')}` : '';
+        const prompt = entry.prompt ? ` [hint: ${entry.prompt}]` : '';
+        return `- ${entry.alias} (${coverage}, ${Math.round(entry.coverageRatio * 100)}%, ${entry.conflictStrategy})${resolvedValues}${prompt}`;
+      })
+      : ['- No governed field coverage yet']),
+    '',
+    '## Field Conflicts',
+    ...(summary.fieldConflicts?.length
+      ? summary.fieldConflicts.map((entry) => `- ${entry.alias} (${entry.conflictStrategy}): ${entry.values.join(' / ')}`)
+      : ['- No multi-value conflicts detected']),
     '',
     '## Representative Documents',
     ...(summary.representativeDocuments.length
@@ -428,9 +603,20 @@ function trimSummaryText(value: string, maxChars = MAX_CONTEXT_CHARS_PER_LIBRARY
 function buildSummarySection(summary: LibraryKnowledgeCompilation) {
   const lines = [
     `## ${summary.libraryLabel}`,
+    summary.pilotValidated ? 'Pilot: validated text-governance library summary is enabled for this library.' : '',
     summary.overview ? `Overview: ${trimSummaryText(summary.overview, 420)}` : '',
     summary.keyTopics.length ? `Key topics: ${summary.keyTopics.slice(0, 6).join(' | ')}` : '',
     summary.keyFacts.length ? `Key facts: ${summary.keyFacts.slice(0, 5).join(' | ')}` : '',
+    summary.focusedFieldCoverage?.length
+      ? `Field coverage: ${summary.focusedFieldCoverage
+        .filter((entry) => entry.populatedDocumentCount > 0)
+        .slice(0, 4)
+        .map((entry) => `${entry.alias} ${Math.round(entry.coverageRatio * 100)}%`)
+        .join(' | ')}`
+      : '',
+    summary.fieldConflicts?.length
+      ? `Field conflicts: ${summary.fieldConflicts.slice(0, 3).map((entry) => `${entry.alias}:${entry.values.join('/')}`).join(' | ')}`
+      : '',
     summary.recentUpdates.length
       ? `Recent updates: ${summary.recentUpdates.slice(0, 3).map((item) => item.title).join(' | ')}`
       : '',
@@ -450,6 +636,7 @@ export async function buildLibraryKnowledgePagesContextBlock(libraries: Array<{ 
       settings: libraryMap.get(String(library.key || '').trim()),
     }))
     .filter((entry) => entry.key && entry.settings && isLibraryKnowledgePagesEnabled(entry.settings))
+    .filter((entry) => isLibraryKnowledgePilotTarget(entry.key))
     .slice(0, MAX_CONTEXT_LIBRARIES);
 
   if (!candidates.length) return '';
@@ -465,7 +652,30 @@ export async function buildLibraryKnowledgePagesContextBlock(libraries: Array<{ 
   if (!visibleSections.length) return '';
 
   return [
-    'Compiled library knowledge summary (derived cross-document layer; verify details against structured fields and raw evidence):',
+    'Pilot compiled library knowledge summary (derived cross-document layer; verify details against structured fields and raw evidence):',
     ...visibleSections,
   ].join('\n\n');
+}
+
+export async function loadLibraryKnowledgeCompilationsForKeys(
+  libraryKeys: string[],
+  options?: { pilotOnly?: boolean },
+) {
+  const normalizedKeys = [...new Set((libraryKeys || []).map((item) => String(item || '').trim()).filter(Boolean))];
+  if (!normalizedKeys.length) return [];
+
+  const libraries = await loadDocumentLibraries();
+  const allowedKeys = new Set(
+    libraries
+      .filter((library) => normalizedKeys.includes(library.key))
+      .filter((library) => isLibraryKnowledgePagesEnabled(library))
+      .filter((library) => !options?.pilotOnly || isLibraryKnowledgePilotTarget(library.key))
+      .map((library) => library.key),
+  );
+  if (!allowedKeys.size) return [];
+
+  const summaries = await Promise.all(
+    [...allowedKeys].map(async (key) => readLibraryKnowledgeCompilation(key)),
+  );
+  return summaries.filter((item): item is LibraryKnowledgeCompilation => Boolean(item));
 }

@@ -148,6 +148,38 @@
         "applicableScope": "适用范围",
         "operationEntry": "操作入口",
         "policyFocus": "规范重点"
+      },
+      "fieldPrompts": {
+        "businessSystem": "优先提取制度或操作文档实际指向的系统名称，统一归一成稳定系统名。",
+        "documentKind": "优先识别 FAQ、操作指引、审批流程、预算调整、政策守则这类规范文档类型。",
+        "operationEntry": "提取用户进入系统或功能模块的入口、路径和菜单定位。",
+        "policyFocus": "归纳这份规范真正约束的重点，如审批、预算、登录、权限或制度执行。"
+      },
+      "fieldNormalizationRules": {
+        "businessSystem": [
+          "新中iOA=>IOA",
+          "新世界IOA=>IOA",
+          "iOA=>IOA",
+          "ioa=>IOA"
+        ],
+        "documentKind": [
+          "Q&A=>faq",
+          "FAQ=>faq",
+          "常见问题=>faq",
+          "操作指引=>operation-guide",
+          "应用技巧=>operation-guide",
+          "审批流程=>approval-flow",
+          "预算调整=>budget-adjustment",
+          "政策守则=>policy-standard",
+          "制度规范=>policy-standard"
+        ]
+      },
+      "fieldConflictStrategies": {
+        "businessSystem": "keep-last",
+        "documentKind": "merge-distinct",
+        "applicableScope": "merge-distinct",
+        "operationEntry": "merge-distinct",
+        "policyFocus": "merge-distinct"
       }
     },
     {
@@ -190,6 +222,50 @@
         "approvalLevels": "审批层级",
         "policyFocus": "规范重点",
         "contacts": "联系方式"
+      },
+      "fieldPrompts": {
+        "businessSystem": "统一把新中iOA、新世界IOA、iOA 系统等表述归一成 IOA。",
+        "documentKind": "明确归类为 FAQ、操作指引、审批流程、预算调整、用户手册或政策守则，不要只写泛化说明。",
+        "applicableScope": "提取制度适用对象、组织范围或角色边界。",
+        "operationEntry": "优先抽取系统入口、菜单路径、功能导航或登录方式。",
+        "approvalLevels": "提取审批链条里的角色、层级和先后顺序。",
+        "policyFocus": "归纳制度重点，如企业规范、IT治理、系统操作、预算调整、资产管理。",
+        "contacts": "提取支持邮箱、联系人或服务台渠道。"
+      },
+      "fieldNormalizationRules": {
+        "businessSystem": [
+          "新中iOA=>IOA",
+          "新世界IOA=>IOA",
+          "iOA=>IOA",
+          "ioa=>IOA"
+        ],
+        "documentKind": [
+          "Q&A=>faq",
+          "FAQ=>faq",
+          "常见问题=>faq",
+          "应用技巧=>operation-guide",
+          "操作指引=>operation-guide",
+          "用户手册=>user-manual",
+          "审批流程=>approval-flow",
+          "预算调整=>budget-adjustment",
+          "政策守则=>policy-standard",
+          "制度规范=>policy-standard"
+        ],
+        "policyFocus": [
+          "IT政策=>IT治理",
+          "IT守则=>IT治理",
+          "系统登录=>系统操作",
+          "操作指引=>系统操作"
+        ]
+      },
+      "fieldConflictStrategies": {
+        "businessSystem": "keep-last",
+        "documentKind": "merge-distinct",
+        "applicableScope": "merge-distinct",
+        "operationEntry": "merge-distinct",
+        "approvalLevels": "merge-distinct",
+        "policyFocus": "merge-distinct",
+        "contacts": "merge-distinct"
       }
     }
   ]

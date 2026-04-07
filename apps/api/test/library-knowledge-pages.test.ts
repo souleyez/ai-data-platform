@@ -90,10 +90,12 @@ test('library knowledge pages should compile summary json and context block', as
           structuredProfile: {
             focusedFields: {
               documentKind: '预算调整指引',
+              operationEntry: 'iOA > 合同 > 预算调整',
               approvalLevels: '部门负责人、集团审批',
             },
             focusedFieldEntries: [
               { key: 'documentKind', alias: '文档类型', value: '预算调整指引' },
+              { key: 'operationEntry', alias: '操作入口', value: 'iOA > 合同 > 预算调整' },
               { key: 'approvalLevels', alias: '审批层级', value: '部门负责人、集团审批' },
             ],
           },
@@ -117,13 +119,20 @@ test('library knowledge pages should compile summary json and context block', as
     assert.match(summary.overview, /新世界IOA|IOA/);
     assert.ok(Array.isArray(summary.keyTopics) && summary.keyTopics.length >= 1);
     assert.ok(Array.isArray(summary.keyFacts) && summary.keyFacts.length >= 1);
+    assert.equal(summary.pilotValidated, true);
+    assert.equal(summary.focusedFieldSet, 'enterprise-guidance');
+    assert.ok(Array.isArray(summary.focusedFieldCoverage) && summary.focusedFieldCoverage.length >= 1);
+    assert.equal(summary.focusedFieldCoverage?.find((entry: { key: string }) => entry.key === 'operationEntry')?.populatedDocumentCount, 2);
+    assert.ok(Array.isArray(summary.fieldConflicts));
+    assert.ok(summary.fieldConflicts?.some((entry: { key: string }) => entry.key === 'operationEntry'));
 
     const contextBlock = await buildLibraryKnowledgePagesContextBlock([
       { key: 'xinshijie-ioa', label: '新世界IOA' },
     ]);
-    assert.match(contextBlock, /Compiled library knowledge summary/);
+    assert.match(contextBlock, /Pilot compiled library knowledge summary/);
     assert.match(contextBlock, /新世界IOA/);
     assert.match(contextBlock, /Key topics:/);
+    assert.match(contextBlock, /Field coverage:/);
   } finally {
     await fs.rm(libraryDir, { recursive: true, force: true }).catch(() => undefined);
     if (previousLibraries === null) {

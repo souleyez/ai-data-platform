@@ -48,6 +48,7 @@ import {
 import {
   buildReportPlan,
   buildReportPlanContextBlock,
+  inferReportPlanTaskHint,
 } from './report-planner.js';
 import { attachDatavizRendersToOutput } from './report-dataviz.js';
 import {
@@ -498,7 +499,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     requestedKind,
     requestedTemplateKey,
   );
-  const templateTaskHint = inferKnowledgeTemplateTaskHintFromLibraries(scopeState.libraries, requestedKind);
+  const templateTaskHint = inferReportPlanTaskHint({
+    requestText,
+    groupKey: scopeState.libraries.map((item) => item.key || '').join(' '),
+    groupLabel: scopeState.libraries.map((item) => item.label || '').join(' '),
+    templateKey: requestedTemplateKey || selectedTemplates[0]?.template.key || '',
+    templateLabel: selectedTemplates[0]?.template.label || templateCatalogOptions[0]?.templateLabel || '',
+    kind: requestedKind,
+  }) || inferKnowledgeTemplateTaskHintFromLibraries(scopeState.libraries, requestedKind);
   const templateSearchHints = buildTemplateCatalogSearchHints(templateCatalogOptions);
   const isOrderInventoryPageRequest = requestedKind === 'page' && templateTaskHint === 'order-static-page';
   const memorySelection = await selectOpenClawMemoryDocumentCandidates({
