@@ -18,6 +18,11 @@ test('parseDocument should include lightweight table summary for csv order docum
   assert.ok(tableSummary);
   assert.equal(tableSummary?.format, 'csv');
   assert.equal(tableSummary?.rowCount, 1000);
+  assert.equal(tableSummary?.recordKeyField, 'order_id');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.periodField, 'order_date');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.platformField, 'platform');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.netSalesField, 'net_amount');
+  assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.refundAmountField, 'refund_amount');
   assert.deepEqual(tableSummary?.columns, [
     'order_id',
     'order_date',
@@ -44,6 +49,38 @@ test('parseDocument should include lightweight table summary for csv order docum
     'anomaly_note',
   ]);
   assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.order_id, 'ORD202602080001');
+  assert.equal((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.keyValue, 'ORD202602080001');
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.platform,
+    'Douyin',
+  );
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.period,
+    '2026-02-08',
+  );
+  assert.equal(
+    ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.netSales,
+    '223.53',
+  );
+  assert.deepEqual((tableSummary?.recordInsights as Record<string, unknown>)?.topPlatforms, ['Douyin', 'Tmall', 'JD']);
+  assert.ok(
+    ((tableSummary?.recordInsights as Record<string, unknown>)?.refundHotspots as string[]).some((entry) => /Douyin|Tmall|手机配件|电脑外设/.test(entry)),
+  );
+  assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.highRefundRowCount, 2);
+  assert.equal((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskRowCount, 4);
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.platformBreakdown));
+  assert.ok((((tableSummary?.recordInsights as Record<string, unknown>)?.platformBreakdown as Array<Record<string, unknown>>)?.[0]?.netSales as number) > 0);
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.categoryBreakdown));
+  assert.ok(Array.isArray((tableSummary?.recordInsights as Record<string, unknown>)?.topSkuNetSales));
+  assert.ok((((tableSummary?.recordInsights as Record<string, unknown>)?.topSkuNetSales as Array<Record<string, unknown>>)?.[0]?.netSales as number) > 0);
+  assert.ok(
+    (((tableSummary?.recordInsights as Record<string, unknown>)?.inventoryRiskBreakdown as Array<Record<string, unknown>>) || [])
+      .some((entry) => String(entry.inventoryStatus || '').includes('risk')),
+  );
+  assert.equal(
+    ((tableSummary?.recordInsights as Record<string, unknown>)?.alerts as Array<Record<string, string>>)?.[0]?.type,
+    'high_refund',
+  );
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.min, '2026-01-01');
   assert.equal((tableSummary?.insights?.dateColumns as Array<Record<string, string>>)?.[0]?.max, '2026-03-31');
   assert.equal(
@@ -95,12 +132,47 @@ test('parseDocument should include workbook sheet summaries for xlsx documents',
     assert.equal(tableSummary?.format, 'xlsx');
     assert.equal(tableSummary?.sheetCount, 2);
     assert.equal(tableSummary?.primarySheetName, 'summary');
+    assert.equal(tableSummary?.recordKeyField, 'month');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.periodField, 'month');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.platformField, 'platform');
+    assert.equal((tableSummary?.recordFieldRoles as Record<string, string>)?.netSalesField, 'net_sales');
     assert.deepEqual(tableSummary?.columns, ['month', 'platform', 'net_sales']);
     assert.equal((tableSummary?.sampleRows as Array<Record<string, string>>)[0]?.platform, 'Douyin');
+    assert.equal(
+      ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.values as Record<string, string>)?.month,
+      '2026-01',
+    );
+    assert.equal(
+      ((tableSummary?.recordRows as Array<Record<string, unknown>>)?.[0]?.derivedFields as Record<string, string>)?.period,
+      '2026-01',
+    );
     assert.equal((tableSummary?.insights?.metricColumns as Array<Record<string, number>>)?.[0]?.column, 'net_sales');
     assert.equal(sheets?.[1]?.name, 'inventory');
     assert.deepEqual(sheets?.[1]?.columns, ['sku', 'inventory_after']);
+    assert.equal(sheets?.[1]?.recordKeyField, 'sku');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.skuField, 'sku');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.inventoryAfterField, 'inventory_after');
+    assert.equal((sheets?.[1]?.recordFieldRoles as Record<string, string>)?.replenishmentPriorityField, undefined);
+    assert.ok(!('recordInsights' in (tableSummary || {})) || typeof (tableSummary?.recordInsights) === 'object');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
+});
+
+test('parseDocument should derive inventory-focused insight summaries from inventory snapshot tables', async () => {
+  const doc = await parseDocument(path.join(fixtureDir, 'order-inventory-snapshot-q1-2026.csv'));
+  const tableSummary = doc.structuredProfile?.tableSummary as Record<string, unknown> | undefined;
+  const recordInsights = tableSummary?.recordInsights as Record<string, unknown> | undefined;
+
+  assert.equal(doc.bizCategory, 'inventory');
+  assert.ok(tableSummary);
+  assert.ok(recordInsights);
+  assert.ok(Array.isArray(recordInsights?.topRiskSkus));
+  assert.ok((recordInsights?.topRiskSkus as string[]).length >= 1);
+  assert.ok(Array.isArray(recordInsights?.priorityReplenishmentItems));
+  assert.ok((recordInsights?.priorityReplenishmentItems as string[]).length >= 1);
+  assert.equal(typeof recordInsights?.inventoryRiskRowCount, 'number');
+  assert.ok(Array.isArray(recordInsights?.platformBreakdown));
+  assert.ok(Array.isArray(recordInsights?.topSkuNetSales));
+  assert.ok(Array.isArray(recordInsights?.inventoryRiskBreakdown));
 });

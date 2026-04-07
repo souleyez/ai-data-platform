@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { buildDocumentLibraryContext } from './document-extraction-governance.js';
+import { getDocumentParseFeedbackSnapshot } from './document-parse-feedback.js';
 import { parseDocument } from './document-parser.js';
+import { loadLibraryKnowledgeCompilationsForKeys } from './library-knowledge-pages.js';
 import {
   hasReadableDocumentSource,
   resolveReadableDocumentSource,
@@ -22,6 +24,14 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
   const detailItem = found.fullText && found.parseStage === 'detailed'
     ? found
     : await parseDocument(found.path, documentConfig, { stage: 'detailed', libraryContext });
+  const feedbackSnapshot = getDocumentParseFeedbackSnapshot({
+    libraryKeys: found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [],
+    schemaType: detailItem.schemaType,
+    text: detailItem.fullText || `${detailItem.title || ''}\n${detailItem.summary || ''}`,
+  });
+  const libraryKnowledge = await loadLibraryKnowledgeCompilationsForKeys(
+    found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [],
+  );
 
   return {
     mode: 'read-only' as const,
@@ -32,6 +42,8 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
         ? { sourceAvailable: await hasReadableDocumentSource(found.path) }
         : {}),
     },
+    feedbackSnapshot,
+    libraryKnowledge,
     meta: {
       category: detailItem.category,
       bizCategory: detailItem.bizCategory,

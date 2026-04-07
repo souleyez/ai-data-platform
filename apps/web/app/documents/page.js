@@ -60,6 +60,18 @@ function normalizePermissionLevel(value, fallback = 0) {
 }
 
 function buildLibrarySettingsDraft(library, draft) {
+  const normalizationRules = library?.extractionSettings?.fieldNormalizationRules
+    && typeof library.extractionSettings.fieldNormalizationRules === 'object'
+    ? Object.fromEntries(
+      Object.entries(library.extractionSettings.fieldNormalizationRules).map(([key, value]) => [
+        key,
+        Array.isArray(value)
+          ? value.map((item) => String(item || '').trim()).filter(Boolean).join('\n')
+          : '',
+      ]),
+    )
+    : {};
+
   return {
     label: typeof draft?.label === 'string' ? draft.label : String(library?.label || library?.name || ''),
     description: typeof draft?.description === 'string' ? draft.description : String(library?.description || ''),
@@ -67,6 +79,12 @@ function buildLibrarySettingsDraft(library, draft) {
       draft?.permissionLevel ?? library?.permissionLevel ?? 0,
       0,
     ),
+    knowledgePagesEnabled: draft?.knowledgePagesEnabled === undefined
+      ? Boolean(library?.knowledgePagesEnabled)
+      : Boolean(draft.knowledgePagesEnabled),
+    knowledgePagesMode: typeof draft?.knowledgePagesMode === 'string'
+      ? draft.knowledgePagesMode
+      : String(library?.knowledgePagesMode || (library?.knowledgePagesEnabled ? 'overview' : 'none')),
     extractionFieldSet: typeof draft?.extractionFieldSet === 'string'
       ? draft.extractionFieldSet
       : String(library?.extractionSettings?.fieldSet || 'auto'),
@@ -78,6 +96,29 @@ function buildLibrarySettingsDraft(library, draft) {
       : (Array.isArray(library?.extractionSettings?.preferredFieldKeys)
         ? library.extractionSettings.preferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
         : []),
+    extractionRequiredFieldKeys: Array.isArray(draft?.extractionRequiredFieldKeys)
+      ? draft.extractionRequiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : (Array.isArray(library?.extractionSettings?.requiredFieldKeys)
+        ? library.extractionSettings.requiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+        : []),
+    extractionFieldAliases: draft?.extractionFieldAliases && typeof draft.extractionFieldAliases === 'object'
+      ? draft.extractionFieldAliases
+      : (library?.extractionSettings?.fieldAliases && typeof library.extractionSettings.fieldAliases === 'object'
+        ? library.extractionSettings.fieldAliases
+        : {}),
+    extractionFieldPrompts: draft?.extractionFieldPrompts && typeof draft.extractionFieldPrompts === 'object'
+      ? draft.extractionFieldPrompts
+      : (library?.extractionSettings?.fieldPrompts && typeof library.extractionSettings.fieldPrompts === 'object'
+        ? library.extractionSettings.fieldPrompts
+        : {}),
+    extractionFieldNormalizationRules: draft?.extractionFieldNormalizationRules && typeof draft.extractionFieldNormalizationRules === 'object'
+      ? draft.extractionFieldNormalizationRules
+      : normalizationRules,
+    extractionFieldConflictStrategies: draft?.extractionFieldConflictStrategies && typeof draft.extractionFieldConflictStrategies === 'object'
+      ? draft.extractionFieldConflictStrategies
+      : (library?.extractionSettings?.fieldConflictStrategies && typeof library.extractionSettings.fieldConflictStrategies === 'object'
+        ? library.extractionSettings.fieldConflictStrategies
+        : {}),
   };
 }
 
@@ -249,11 +290,40 @@ export default function DocumentsPage() {
         label,
         description: String(draft.description || '').trim(),
         permissionLevel: normalizePermissionLevel(draft.permissionLevel, 0),
+        knowledgePagesEnabled: Boolean(draft.knowledgePagesEnabled),
+        knowledgePagesMode: String(draft.knowledgePagesMode || 'none'),
         extractionFieldSet: String(draft.extractionFieldSet || 'auto'),
         extractionFallbackSchemaType: String(draft.extractionFallbackSchemaType || 'auto'),
         extractionPreferredFieldKeys: Array.isArray(draft.extractionPreferredFieldKeys)
           ? draft.extractionPreferredFieldKeys
           : [],
+        extractionRequiredFieldKeys: Array.isArray(draft.extractionRequiredFieldKeys)
+          ? draft.extractionRequiredFieldKeys
+          : [],
+        extractionFieldAliases: draft.extractionFieldAliases && typeof draft.extractionFieldAliases === 'object'
+          ? draft.extractionFieldAliases
+          : {},
+        extractionFieldPrompts: draft.extractionFieldPrompts && typeof draft.extractionFieldPrompts === 'object'
+          ? draft.extractionFieldPrompts
+          : {},
+        extractionFieldNormalizationRules: draft.extractionFieldNormalizationRules && typeof draft.extractionFieldNormalizationRules === 'object'
+          ? Object.fromEntries(
+            Object.entries(draft.extractionFieldNormalizationRules).map(([key, value]) => [
+              key,
+              String(value || '')
+                .split(/\n+/)
+                .map((item) => item.trim())
+                .filter(Boolean),
+            ]).filter(([, rules]) => rules.length),
+          )
+          : {},
+        extractionFieldConflictStrategies: draft.extractionFieldConflictStrategies && typeof draft.extractionFieldConflictStrategies === 'object'
+          ? Object.fromEntries(
+            Object.entries(draft.extractionFieldConflictStrategies)
+              .map(([key, value]) => [key, String(value || '').trim()])
+              .filter(([, value]) => Boolean(value)),
+          )
+          : {},
       });
       await loadDocuments();
       setScanMessage(`已更新知识库“${label}”的权限等级`);

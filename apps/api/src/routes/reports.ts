@@ -80,7 +80,17 @@ export async function registerReportRoutes(app: FastifyInstance) {
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
-        charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+        charts?: Array<{
+          title?: string;
+          items?: Array<{ label?: string; value?: number }>;
+          render?: {
+            renderer?: string;
+            chartType?: string;
+            svg?: string;
+            alt?: string;
+            generatedAt?: string;
+          } | null;
+        }>;
       } | null;
       libraries?: Array<{ key?: string; label?: string }>;
       downloadUrl?: string;

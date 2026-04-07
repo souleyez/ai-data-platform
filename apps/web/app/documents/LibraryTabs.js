@@ -16,12 +16,64 @@ const EXTRACTION_SCHEMA_OPTIONS = [
   { value: 'order', label: 'order' },
 ];
 
+const KNOWLEDGE_PAGE_MODE_OPTIONS = [
+  { value: 'none', label: '关闭' },
+  { value: 'overview', label: '概览' },
+  { value: 'topics', label: '专题' },
+];
+
 const EXTRACTION_FIELD_KEY_OPTIONS = {
   contract: ['contractNo', 'partyA', 'partyB', 'amount', 'signDate', 'effectiveDate', 'paymentTerms', 'duration'],
   resume: ['candidateName', 'targetRole', 'currentRole', 'yearsOfExperience', 'education', 'major', 'expectedCity', 'expectedSalary', 'latestCompany', 'companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'],
   'enterprise-guidance': ['businessSystem', 'documentKind', 'applicableScope', 'operationEntry', 'approvalLevels', 'policyFocus', 'contacts'],
   order: ['period', 'platform', 'orderCount', 'netSales', 'grossMargin', 'topCategory', 'inventoryStatus', 'replenishmentAction'],
 };
+
+const FIELD_LABELS = {
+  contractNo: '合同编号',
+  partyA: '甲方',
+  partyB: '乙方',
+  amount: '金额',
+  signDate: '签订日期',
+  effectiveDate: '生效日期',
+  paymentTerms: '付款条款',
+  duration: '履约期限',
+  candidateName: '候选人姓名',
+  targetRole: '目标岗位',
+  currentRole: '当前岗位',
+  yearsOfExperience: '工作年限',
+  education: '学历',
+  major: '专业',
+  expectedCity: '期望城市',
+  expectedSalary: '期望薪资',
+  latestCompany: '最近公司',
+  companies: '公司经历',
+  skills: '技能',
+  highlights: '亮点',
+  projectHighlights: '项目亮点',
+  itProjectHighlights: 'IT 项目亮点',
+  businessSystem: '业务系统',
+  documentKind: '文档类型',
+  applicableScope: '适用范围',
+  operationEntry: '操作入口',
+  approvalLevels: '审批层级',
+  policyFocus: '规范重点',
+  contacts: '联系方式',
+  period: '周期',
+  platform: '平台',
+  orderCount: '订单量',
+  netSales: '净销售额',
+  grossMargin: '毛利率',
+  topCategory: '重点类目',
+  inventoryStatus: '库存状态',
+  replenishmentAction: '补货动作',
+};
+
+const FIELD_CONFLICT_STRATEGY_OPTIONS = [
+  { value: 'merge-distinct', label: '合并去重' },
+  { value: 'keep-last', label: '保留最新' },
+  { value: 'keep-first', label: '保留首个' },
+];
 
 function normalizePermissionLevel(value) {
   const numeric = Number(value);
@@ -31,6 +83,20 @@ function normalizePermissionLevel(value) {
 
 function buildPreferredFieldOptions(fieldSet) {
   return EXTRACTION_FIELD_KEY_OPTIONS[String(fieldSet || '')] || [];
+}
+
+function getFieldLabel(fieldKey) {
+  return FIELD_LABELS[fieldKey] || fieldKey;
+}
+
+function moveItem(items, fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
+    return items;
+  }
+  const next = items.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
 }
 
 export default function LibraryTabs({
@@ -53,6 +119,24 @@ export default function LibraryTabs({
   settingsSubmittingId,
 }) {
   const preferredFieldOptions = buildPreferredFieldOptions(activeLibrarySettingsDraft?.extractionFieldSet);
+  const selectedFieldKeys = Array.isArray(activeLibrarySettingsDraft?.extractionPreferredFieldKeys)
+    ? activeLibrarySettingsDraft.extractionPreferredFieldKeys
+    : [];
+  const requiredFieldKeys = Array.isArray(activeLibrarySettingsDraft?.extractionRequiredFieldKeys)
+    ? activeLibrarySettingsDraft.extractionRequiredFieldKeys
+    : [];
+  const fieldAliases = activeLibrarySettingsDraft?.extractionFieldAliases && typeof activeLibrarySettingsDraft.extractionFieldAliases === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldAliases
+    : {};
+  const fieldPrompts = activeLibrarySettingsDraft?.extractionFieldPrompts && typeof activeLibrarySettingsDraft.extractionFieldPrompts === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldPrompts
+    : {};
+  const fieldNormalizationRules = activeLibrarySettingsDraft?.extractionFieldNormalizationRules && typeof activeLibrarySettingsDraft.extractionFieldNormalizationRules === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldNormalizationRules
+    : {};
+  const fieldConflictStrategies = activeLibrarySettingsDraft?.extractionFieldConflictStrategies && typeof activeLibrarySettingsDraft.extractionFieldConflictStrategies === 'object'
+    ? activeLibrarySettingsDraft.extractionFieldConflictStrategies
+    : {};
 
   return (
     <section className="workbench-toolbar card">
@@ -63,7 +147,7 @@ export default function LibraryTabs({
             className="filter-input library-inline-create-name"
             value={createDraft}
             onChange={(event) => onCreateDraftChange(event.target.value)}
-            placeholder="新建分组名称"
+            placeholder="新建知识库名称"
           />
           <input
             className="filter-input library-inline-create-level"
@@ -80,7 +164,7 @@ export default function LibraryTabs({
             onClick={onCreateLibrary}
             disabled={createSubmitting || !String(createDraft || '').trim()}
           >
-            {createSubmitting ? '创建中...' : '新建分组'}
+            {createSubmitting ? '创建中...' : '新建知识库'}
           </button>
         </div>
       </div>
@@ -111,8 +195,9 @@ export default function LibraryTabs({
         <div className="library-settings-inline">
           <div className="library-settings-inline-head">
             <strong>当前知识库设置</strong>
-            <span className="bot-config-subtle">这里补充知识库权限、解析模板和重点字段，不改原有文档中心结构。</span>
+            <span className="bot-config-subtle">在这里配置权限等级、解析模板，以及重点字段的顺序、必填和别名。</span>
           </div>
+
           <div className="library-settings-inline-grid">
             <label className="bot-field">
               <span>知识库名称</span>
@@ -121,6 +206,7 @@ export default function LibraryTabs({
                 onChange={(event) => onSettingsChange(activeLibraryRecord.key, { label: event.target.value })}
               />
             </label>
+
             <label className="bot-field">
               <span>权限等级</span>
               <input
@@ -133,6 +219,7 @@ export default function LibraryTabs({
                 })}
               />
             </label>
+
             <label className="bot-field">
               <span>提取模板</span>
               <select
@@ -140,6 +227,11 @@ export default function LibraryTabs({
                 onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
                   extractionFieldSet: event.target.value,
                   extractionPreferredFieldKeys: [],
+                  extractionRequiredFieldKeys: [],
+                  extractionFieldAliases: {},
+                  extractionFieldPrompts: {},
+                  extractionFieldNormalizationRules: {},
+                  extractionFieldConflictStrategies: {},
                 })}
               >
                 {EXTRACTION_FIELD_SET_OPTIONS.map((option) => (
@@ -147,6 +239,39 @@ export default function LibraryTabs({
                 ))}
               </select>
             </label>
+
+            <label className="bot-field">
+              <span>知识页</span>
+              <label className="bot-channel-chip active" style={{ width: 'fit-content' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(activeLibrarySettingsDraft.knowledgePagesEnabled)}
+                  onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                    knowledgePagesEnabled: event.target.checked,
+                    knowledgePagesMode: event.target.checked
+                      ? (String(activeLibrarySettingsDraft.knowledgePagesMode || '') === 'topics' ? 'topics' : 'overview')
+                      : 'none',
+                  })}
+                />
+                <span>启用库级知识页</span>
+              </label>
+            </label>
+
+            <label className="bot-field">
+              <span>知识页模式</span>
+              <select
+                value={String(activeLibrarySettingsDraft.knowledgePagesMode || 'none')}
+                onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                  knowledgePagesMode: event.target.value,
+                  knowledgePagesEnabled: event.target.value !== 'none',
+                })}
+              >
+                {KNOWLEDGE_PAGE_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+
             <label className="bot-field">
               <span>回退结构</span>
               <select
@@ -160,37 +285,165 @@ export default function LibraryTabs({
                 ))}
               </select>
             </label>
+
             <label className="bot-field bot-field-span">
               <span>重点提取字段</span>
               {preferredFieldOptions.length ? (
                 <div className="bot-channel-tags">
                   {preferredFieldOptions.map((fieldKey) => {
-                    const selected = Array.isArray(activeLibrarySettingsDraft.extractionPreferredFieldKeys)
-                      && activeLibrarySettingsDraft.extractionPreferredFieldKeys.includes(fieldKey);
+                    const selected = selectedFieldKeys.includes(fieldKey);
                     return (
                       <label key={fieldKey} className={`bot-channel-chip ${selected ? 'active' : ''}`}>
                         <input
                           type="checkbox"
                           checked={selected}
-                          onChange={(event) => {
-                            const current = Array.isArray(activeLibrarySettingsDraft.extractionPreferredFieldKeys)
-                              ? activeLibrarySettingsDraft.extractionPreferredFieldKeys
-                              : [];
-                            const next = event.target.checked
-                              ? [...new Set([...current, fieldKey])]
-                              : current.filter((item) => item !== fieldKey);
-                            onSettingsChange(activeLibraryRecord.key, { extractionPreferredFieldKeys: next });
-                          }}
-                        />
-                        <span>{fieldKey}</span>
+                            onChange={(event) => {
+                              const next = event.target.checked
+                                ? [...selectedFieldKeys, fieldKey].filter((item, index, items) => items.indexOf(item) === index)
+                                : selectedFieldKeys.filter((item) => item !== fieldKey);
+                              onSettingsChange(activeLibraryRecord.key, {
+                                extractionPreferredFieldKeys: next,
+                                extractionRequiredFieldKeys: requiredFieldKeys.filter((item) => next.includes(item)),
+                                extractionFieldAliases: Object.fromEntries(
+                                  Object.entries(fieldAliases).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldPrompts: Object.fromEntries(
+                                  Object.entries(fieldPrompts).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldNormalizationRules: Object.fromEntries(
+                                  Object.entries(fieldNormalizationRules).filter(([key]) => next.includes(key)),
+                                ),
+                                extractionFieldConflictStrategies: Object.fromEntries(
+                                  Object.entries(fieldConflictStrategies).filter(([key]) => next.includes(key)),
+                                ),
+                              });
+                            }}
+                          />
+                        <span>{getFieldLabel(fieldKey)}</span>
                       </label>
                     );
                   })}
                 </div>
               ) : (
-                <span className="bot-config-subtle">先选择提取模板，再指定重点字段。</span>
+                <span className="bot-config-subtle">先选择提取模板，再挑选重点字段。</span>
               )}
             </label>
+
+            {selectedFieldKeys.length ? (
+              <div className="bot-field bot-field-span">
+                <span>字段治理</span>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  {selectedFieldKeys.map((fieldKey, index) => (
+                    <div key={fieldKey} className="bot-summary-card">
+                      <div style={{ display: 'grid', gap: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong>{index + 1}. {getFieldLabel(fieldKey)}</strong>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button
+                              className="ghost-btn"
+                              type="button"
+                              disabled={index === 0}
+                              onClick={() => onSettingsChange(activeLibraryRecord.key, {
+                                extractionPreferredFieldKeys: moveItem(selectedFieldKeys, index, index - 1),
+                              })}
+                            >
+                              上移
+                            </button>
+                            <button
+                              className="ghost-btn"
+                              type="button"
+                              disabled={index === selectedFieldKeys.length - 1}
+                              onClick={() => onSettingsChange(activeLibraryRecord.key, {
+                                extractionPreferredFieldKeys: moveItem(selectedFieldKeys, index, index + 1),
+                              })}
+                            >
+                              下移
+                            </button>
+                          </div>
+                        </div>
+
+                        <label className="bot-field">
+                          <span>字段别名</span>
+                          <input
+                            value={String(fieldAliases[fieldKey] || '')}
+                            placeholder={getFieldLabel(fieldKey)}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldAliases: {
+                                ...fieldAliases,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段提取提示</span>
+                          <input
+                            value={String(fieldPrompts[fieldKey] || '')}
+                            placeholder={`例如：优先提取${getFieldLabel(fieldKey)}的稳定规范表述`}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldPrompts: {
+                                ...fieldPrompts,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段标准化规则</span>
+                          <textarea
+                            rows={3}
+                            value={String(fieldNormalizationRules[fieldKey] || '')}
+                            placeholder={'每行一条，格式：原值=>标准值'}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldNormalizationRules: {
+                                ...fieldNormalizationRules,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          />
+                        </label>
+
+                        <label className="bot-field">
+                          <span>字段冲突处理</span>
+                          <select
+                            value={String(fieldConflictStrategies[fieldKey] || 'merge-distinct')}
+                            onChange={(event) => onSettingsChange(activeLibraryRecord.key, {
+                              extractionFieldConflictStrategies: {
+                                ...fieldConflictStrategies,
+                                [fieldKey]: event.target.value,
+                              },
+                            })}
+                          >
+                            {FIELD_CONFLICT_STRATEGY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="bot-channel-chip active" style={{ width: 'fit-content' }}>
+                          <input
+                            type="checkbox"
+                            checked={requiredFieldKeys.includes(fieldKey)}
+                            onChange={(event) => {
+                              const next = event.target.checked
+                                ? [...requiredFieldKeys, fieldKey].filter((item, itemIndex, items) => items.indexOf(item) === itemIndex)
+                                : requiredFieldKeys.filter((item) => item !== fieldKey);
+                              onSettingsChange(activeLibraryRecord.key, {
+                                extractionRequiredFieldKeys: next,
+                              });
+                            }}
+                          />
+                          <span>设为必填字段</span>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <label className="bot-field bot-field-span">
               <span>描述</span>
               <textarea
@@ -201,6 +454,7 @@ export default function LibraryTabs({
               />
             </label>
           </div>
+
           <div className="bot-config-actions">
             <button
               className="ghost-btn"

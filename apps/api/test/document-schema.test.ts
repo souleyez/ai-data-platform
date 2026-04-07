@@ -34,7 +34,7 @@ test('refreshDerivedSchemaProfile should preserve manually edited structured pro
   assert.equal(refreshed.schemaType, 'contract');
 });
 
-test('buildStructuredProfile should include contract field metadata details', () => {
+test('buildStructuredProfile should include contract field metadata details and focused field template metadata', () => {
   const profile = buildStructuredProfile({
     schemaType: 'contract',
     title: '采购合同',
@@ -61,6 +61,12 @@ test('buildStructuredProfile should include contract field metadata details', ()
     extractionProfile: {
       fieldSet: 'contract',
       preferredFieldKeys: ['partyA', 'partyB', 'amount'],
+      requiredFieldKeys: ['partyA', 'amount'],
+      fieldAliases: {
+        partyA: '甲方',
+        partyB: '乙方',
+        amount: '合同金额',
+      },
     },
   });
 
@@ -80,8 +86,13 @@ test('buildStructuredProfile should include contract field metadata details', ()
   assert.equal(profile.fieldDetails.amount?.evidenceChunkId, 'chunk-1');
   assert.equal(profile.fieldTemplate?.fieldSet, 'contract');
   assert.deepEqual(profile.fieldTemplate?.preferredFieldKeys, ['partyA', 'partyB', 'amount']);
+  assert.deepEqual(profile.fieldTemplate?.requiredFieldKeys, ['partyA', 'amount']);
+  assert.equal(profile.fieldTemplate?.fieldAliases?.partyA, '甲方');
   assert.equal(profile.focusedFields?.partyA, '广州轻工集团');
   assert.equal(profile.focusedFieldDetails?.amount?.value, '￥120000');
+  assert.equal(profile.focusedFieldEntries?.[0]?.key, 'partyA');
+  assert.equal(profile.focusedFieldEntries?.[0]?.alias, '甲方');
+  assert.equal(profile.focusedFieldEntries?.[0]?.required, true);
 });
 
 test('buildStructuredProfile should include enterprise guidance fields for technical documents', () => {
@@ -178,4 +189,43 @@ test('buildStructuredProfile should retain lightweight table summary metadata', 
   assert.equal(profile.tableSummary?.format, 'csv');
   assert.equal(profile.tableSummary?.rowCount, 12);
   assert.deepEqual(profile.tableSummary?.columns, ['month', 'platform', 'category', 'net_sales']);
+});
+
+test('buildStructuredProfile should expose mall-zone footfall fields for footfall reports', () => {
+  const profile = buildStructuredProfile({
+    schemaType: 'report',
+    title: '广州 AI 商场客流日报',
+    topicTags: ['客流分析', '商场分区', '客流报表'],
+    summary: '统一按商场分区汇总商场客流，楼层和单间仅参与聚合。',
+    footfallFields: {
+      period: '2026-04-01',
+      totalFootfall: '4830',
+      topMallZone: 'A区',
+      mallZoneCount: '3',
+      aggregationLevel: 'mall-zone',
+    },
+    tableSummary: {
+      format: 'csv',
+      rowCount: 6,
+      columnCount: 5,
+      columns: ['report_date', 'mall_zone', 'floor_zone', 'room_unit', 'visitor_count'],
+      sampleRows: [],
+      sheetCount: 1,
+      recordInsights: {
+        mallZoneBreakdown: [
+          { mallZone: 'A区', rowCount: 2, footfall: 2180, floorZoneCount: 1, roomUnitCount: 2 },
+          { mallZone: 'B区', rowCount: 2, footfall: 1650, floorZoneCount: 1, roomUnitCount: 2 },
+          { mallZone: 'C区', rowCount: 2, footfall: 1000, floorZoneCount: 1, roomUnitCount: 2 },
+        ],
+      },
+    },
+  });
+
+  assert.equal(profile.domain, 'report');
+  assert.equal(profile.reportFocus, 'footfall');
+  assert.equal(profile.totalFootfall, '4830');
+  assert.equal(profile.topMallZone, 'A区');
+  assert.equal(profile.mallZoneCount, '3');
+  assert.equal(profile.aggregationLevel, 'mall-zone');
+  assert.deepEqual(profile.mallZones, ['A区', 'B区', 'C区']);
 });

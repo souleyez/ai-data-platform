@@ -8,6 +8,7 @@ import {
   deleteLibraryDocumentExtractionSettings,
   updateLibraryDocumentExtractionSettings,
 } from './document-extraction-governance.js';
+import { syncLibraryKnowledgePagesForLibraryKeys } from './library-knowledge-pages.js';
 import {
   loadDocumentCategoryConfig,
   saveDocumentCategoryConfig,
@@ -53,9 +54,16 @@ export async function updateManagedDocumentLibrary(
     label?: string;
     description?: string;
     permissionLevel?: number;
+    knowledgePagesEnabled?: boolean;
+    knowledgePagesMode?: 'none' | 'overview' | 'topics';
     extractionFieldSet?: string;
     extractionFallbackSchemaType?: string;
     extractionPreferredFieldKeys?: string[];
+    extractionRequiredFieldKeys?: string[];
+    extractionFieldAliases?: Record<string, string>;
+    extractionFieldPrompts?: Record<string, string>;
+    extractionFieldNormalizationRules?: Record<string, string[] | string>;
+    extractionFieldConflictStrategies?: Record<string, string>;
   },
 ) {
   const library = await updateDocumentLibrary(key, input);
@@ -65,7 +73,13 @@ export async function updateManagedDocumentLibrary(
     fieldSet: input.extractionFieldSet,
     fallbackSchemaType: input.extractionFallbackSchemaType,
     preferredFieldKeys: input.extractionPreferredFieldKeys,
+    requiredFieldKeys: input.extractionRequiredFieldKeys,
+    fieldAliases: input.extractionFieldAliases,
+    fieldPrompts: input.extractionFieldPrompts,
+    fieldNormalizationRules: input.extractionFieldNormalizationRules,
+    fieldConflictStrategies: input.extractionFieldConflictStrategies,
   });
+  await syncLibraryKnowledgePagesForLibraryKeys([library.key], 'library-settings-update').catch(() => undefined);
   const libraries = await loadDocumentLibraries();
   return { library, libraries };
 }

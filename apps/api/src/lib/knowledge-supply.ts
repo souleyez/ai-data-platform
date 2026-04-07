@@ -93,6 +93,9 @@ function detectConceptDimension(requestText: string, templateTaskHint?: Knowledg
     if (/category|sku|品类|类目/.test(text)) return 'category';
     return 'stock';
   }
+  if (templateTaskHint === 'footfall-static-page') {
+    return 'mall-zone';
+  }
   if (templateTaskHint === 'technical-summary' || templateTaskHint === 'iot-static-page' || templateTaskHint === 'iot-table') {
     if (/value|roi|benefit|收益|价值/.test(text)) return 'value';
     if (/module|device|gateway|模块|设备|网关|接口/.test(text)) return 'module';
@@ -129,6 +132,9 @@ function buildConceptSections(dimension: string, templateTaskHint?: KnowledgeTem
     if (dimension === 'category') return ['经营摘要', '品类对比', '平台覆盖', '销量趋势', '库存与备货建议', 'AI综合分析'];
     return ['经营摘要', '核心指标', '库存与预测', '异常波动', '备货建议', 'AI综合分析'];
   }
+  if (templateTaskHint === 'footfall-static-page') {
+    return ['客流总览', '商场分区贡献', '重点分区对比', '商场动线提示', '行动建议', 'AI综合分析'];
+  }
   if (templateTaskHint === 'technical-summary' || templateTaskHint === 'iot-static-page' || templateTaskHint === 'iot-table') {
     if (dimension === 'module') return ['模块概览', '设备与网关', '平台能力', '接口集成', '交付关系', 'AI综合分析'];
     if (dimension === 'value') return ['价值概览', '业务收益', '交付稳定性', '关键能力', '风险提示', 'AI综合分析'];
@@ -149,6 +155,12 @@ function buildConceptGroupingHints(
 ) {
   const values = documents.flatMap((item) => {
     const profile = (item.structuredProfile || {}) as Record<string, unknown>;
+    const tableSummary = profile.tableSummary && typeof profile.tableSummary === 'object'
+      ? profile.tableSummary as Record<string, unknown>
+      : null;
+    const recordInsights = tableSummary?.recordInsights && typeof tableSummary.recordInsights === 'object'
+      ? tableSummary.recordInsights as Record<string, unknown>
+      : null;
     if (dimension === 'company') {
       return collectStructuredValues(profile, ['companies', 'latestCompany', 'organizationSignals']);
     }
@@ -172,6 +184,18 @@ function buildConceptGroupingHints(
     }
     if (dimension === 'stock') {
       return collectStructuredValues(profile, ['forecastSignals', 'inventorySignals', 'replenishmentSignals']);
+    }
+    if (dimension === 'mall-zone') {
+      const mallZoneBreakdown = Array.isArray(recordInsights?.mallZoneBreakdown)
+        ? recordInsights.mallZoneBreakdown as Array<Record<string, unknown>>
+        : [];
+      const mallZonesFromBreakdown = mallZoneBreakdown
+        .map((entry) => String(entry.mallZone || '').trim())
+        .filter(Boolean);
+      return [
+        ...mallZonesFromBreakdown,
+        ...collectStructuredValues(profile, ['mallZones', 'topMallZone', 'aggregationLevel']),
+      ];
     }
     if (dimension === 'method') {
       return collectStructuredValues(profile, ['methodology', 'subjectType', 'publicationSignals']);
@@ -228,7 +252,11 @@ export function buildConceptPageSupplyBlock(input: {
     `资料数量=${documents.length}`,
     `进阶解析=${detailedCount}`,
     schemaHints[0]?.label ? `主要类型=${schemaHints[0].label}` : '',
-    groupingHints[0]?.label ? `核心维度=${groupingHints[0].label}` : '',
+    groupingHints[0]?.label
+      ? `核心维度=${groupingHints[0].label}`
+      : input.templateTaskHint === 'footfall-static-page'
+        ? '核心维度=商场分区'
+        : '',
   ].filter(Boolean);
 
   const charts = [

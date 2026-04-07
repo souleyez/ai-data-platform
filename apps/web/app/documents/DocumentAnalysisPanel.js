@@ -77,14 +77,172 @@ function extractTableSummary(profile) {
     columns: Array.isArray(summary.columns) ? summary.columns.map((item) => String(item || '').trim()).filter(Boolean) : [],
     primarySheetName: String(summary.primarySheetName || '').trim(),
     sheetCount: typeof summary.sheetCount === 'number' ? summary.sheetCount : null,
+    recordKeyField: String(summary.recordKeyField || '').trim(),
+    recordFieldRoles: summary.recordFieldRoles && typeof summary.recordFieldRoles === 'object' && !Array.isArray(summary.recordFieldRoles)
+      ? summary.recordFieldRoles
+      : {},
+    recordInsights: summary.recordInsights && typeof summary.recordInsights === 'object' && !Array.isArray(summary.recordInsights)
+      ? summary.recordInsights
+      : {},
     sampleRows: Array.isArray(summary.sampleRows) ? summary.sampleRows.slice(0, 3) : [],
+    recordRows: Array.isArray(summary.recordRows) ? summary.recordRows.slice(0, 5) : [],
   };
 }
 
-export default function DocumentAnalysisPanel({ item: initialItem }) {
+function extractFieldTemplate(profile) {
+  const template = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.fieldTemplate
+    : null;
+  if (!template || typeof template !== 'object' || Array.isArray(template)) return null;
+
+  return {
+    fieldSet: String(template.fieldSet || '').trim(),
+    preferredFieldKeys: Array.isArray(template.preferredFieldKeys)
+      ? template.preferredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    requiredFieldKeys: Array.isArray(template.requiredFieldKeys)
+      ? template.requiredFieldKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    fieldAliases: template.fieldAliases && typeof template.fieldAliases === 'object' && !Array.isArray(template.fieldAliases)
+      ? template.fieldAliases
+      : {},
+    fieldPrompts: template.fieldPrompts && typeof template.fieldPrompts === 'object' && !Array.isArray(template.fieldPrompts)
+      ? template.fieldPrompts
+      : {},
+    fieldNormalizationRules: template.fieldNormalizationRules && typeof template.fieldNormalizationRules === 'object' && !Array.isArray(template.fieldNormalizationRules)
+      ? template.fieldNormalizationRules
+      : {},
+    fieldConflictStrategies: template.fieldConflictStrategies && typeof template.fieldConflictStrategies === 'object' && !Array.isArray(template.fieldConflictStrategies)
+      ? template.fieldConflictStrategies
+      : {},
+  };
+}
+
+function extractFocusedFieldEntries(profile) {
+  const entries = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.focusedFieldEntries
+    : null;
+  if (!Array.isArray(entries)) return [];
+
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      return {
+        key: String(entry.key || '').trim(),
+        alias: String(entry.alias || '').trim(),
+        required: Boolean(entry.required),
+        value: entry.value,
+        confidence: typeof entry.confidence === 'number' ? entry.confidence : null,
+        source: String(entry.source || '').trim(),
+        evidenceChunkId: String(entry.evidenceChunkId || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractFeedbackSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+
+  return {
+    schemaType: String(snapshot.schemaType || '').trim(),
+    updatedAt: String(snapshot.updatedAt || '').trim(),
+    fieldCount: typeof snapshot.fieldCount === 'number' ? snapshot.fieldCount : 0,
+    totalValueCount: typeof snapshot.totalValueCount === 'number' ? snapshot.totalValueCount : 0,
+    matchedFieldCount: typeof snapshot.matchedFieldCount === 'number' ? snapshot.matchedFieldCount : 0,
+    fields: Array.isArray(snapshot.fields)
+      ? snapshot.fields
+        .map((field) => {
+          if (!field || typeof field !== 'object' || Array.isArray(field)) return null;
+          return {
+            name: String(field.name || '').trim(),
+            values: Array.isArray(field.values) ? field.values.map((item) => String(item || '').trim()).filter(Boolean) : [],
+            valueCount: typeof field.valueCount === 'number' ? field.valueCount : 0,
+            matchedValues: Array.isArray(field.matchedValues) ? field.matchedValues.map((item) => String(item || '').trim()).filter(Boolean) : [],
+            matchedValueCount: typeof field.matchedValueCount === 'number' ? field.matchedValueCount : 0,
+          };
+        })
+        .filter(Boolean)
+      : [],
+  };
+}
+
+function extractLibraryKnowledgeSummaries(summaries) {
+  if (!Array.isArray(summaries)) return [];
+  return summaries
+    .map((summary) => {
+      if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
+      return {
+        libraryKey: String(summary.libraryKey || '').trim(),
+        libraryLabel: String(summary.libraryLabel || '').trim(),
+        updatedAt: String(summary.updatedAt || '').trim(),
+        documentCount: typeof summary.documentCount === 'number' ? summary.documentCount : 0,
+        overview: String(summary.overview || '').trim(),
+        keyTopics: Array.isArray(summary.keyTopics) ? summary.keyTopics.map((item) => String(item || '').trim()).filter(Boolean) : [],
+        keyFacts: Array.isArray(summary.keyFacts) ? summary.keyFacts.map((item) => String(item || '').trim()).filter(Boolean) : [],
+        focusedFieldSet: String(summary.focusedFieldSet || '').trim(),
+        focusedFieldCoverage: Array.isArray(summary.focusedFieldCoverage)
+          ? summary.focusedFieldCoverage
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              return {
+                key: String(entry.key || '').trim(),
+                alias: String(entry.alias || '').trim(),
+                prompt: String(entry.prompt || '').trim(),
+                conflictStrategy: String(entry.conflictStrategy || '').trim(),
+                populatedDocumentCount: typeof entry.populatedDocumentCount === 'number' ? entry.populatedDocumentCount : 0,
+                totalDocumentCount: typeof entry.totalDocumentCount === 'number' ? entry.totalDocumentCount : 0,
+                coverageRatio: typeof entry.coverageRatio === 'number' ? entry.coverageRatio : 0,
+                resolvedValues: Array.isArray(entry.resolvedValues) ? entry.resolvedValues.map((item) => String(item || '').trim()).filter(Boolean) : [],
+              };
+            })
+            .filter(Boolean)
+          : [],
+        fieldConflicts: Array.isArray(summary.fieldConflicts)
+          ? summary.fieldConflicts
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+              return {
+                key: String(entry.key || '').trim(),
+                alias: String(entry.alias || '').trim(),
+                conflictStrategy: String(entry.conflictStrategy || '').trim(),
+                values: Array.isArray(entry.values) ? entry.values.map((item) => String(item || '').trim()).filter(Boolean) : [],
+                sampleDocumentTitles: Array.isArray(entry.sampleDocumentTitles)
+                  ? entry.sampleDocumentTitles.map((item) => String(item || '').trim()).filter(Boolean)
+                  : [],
+              };
+            })
+            .filter(Boolean)
+          : [],
+        representativeDocuments: Array.isArray(summary.representativeDocuments)
+          ? summary.representativeDocuments.map((entry) => ({
+            title: String(entry?.title || '').trim(),
+            summary: String(entry?.summary || '').trim(),
+          })).filter((entry) => entry.title)
+          : [],
+        recentUpdates: Array.isArray(summary.recentUpdates)
+          ? summary.recentUpdates.map((entry) => ({
+            title: String(entry?.title || '').trim(),
+            summary: String(entry?.summary || '').trim(),
+            updatedAt: String(entry?.updatedAt || '').trim(),
+          })).filter((entry) => entry.title)
+          : [],
+        pilotValidated: Boolean(summary.pilotValidated),
+      };
+    })
+    .filter(Boolean);
+}
+
+export default function DocumentAnalysisPanel({
+  item: initialItem,
+  feedbackSnapshot: initialFeedbackSnapshot,
+  libraryKnowledge: initialLibraryKnowledge,
+}) {
   const [item, setItem] = useState(initialItem);
+  const [feedbackSnapshot, setFeedbackSnapshot] = useState(extractFeedbackSnapshot(initialFeedbackSnapshot));
+  const [libraryKnowledge, setLibraryKnowledge] = useState(extractLibraryKnowledgeSummaries(initialLibraryKnowledge));
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [clearingFeedback, setClearingFeedback] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [summaryDraft, setSummaryDraft] = useState(String(initialItem?.summary || ''));
@@ -98,6 +256,14 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
   );
   const tableSummary = useMemo(
     () => extractTableSummary(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
+  const fieldTemplate = useMemo(
+    () => extractFieldTemplate(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
+  const focusedFieldEntries = useMemo(
+    () => extractFocusedFieldEntries(item?.structuredProfile || {}),
     [item?.structuredProfile],
   );
   const detailMeta = useMemo(() => ([
@@ -150,6 +316,8 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
       }
 
       setItem(data?.item || item);
+      setFeedbackSnapshot(extractFeedbackSnapshot(data?.feedbackSnapshot || feedbackSnapshot));
+      setLibraryKnowledge(extractLibraryKnowledgeSummaries(data?.libraryKnowledge || libraryKnowledge));
       setEditing(false);
       setNotice(data?.message || '解析结果已更新');
     } catch (saveError) {
@@ -159,12 +327,37 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
     }
   }
 
+  async function handleClearFeedback(fieldName) {
+    setClearingFeedback(String(fieldName || '__all__'));
+    setError('');
+    setNotice('');
+
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(item.id)}/parse-feedback/clear`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fieldName ? { fieldName } : {}),
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        throw new Error(data?.error || '清理解析反馈失败');
+      }
+
+      setFeedbackSnapshot(extractFeedbackSnapshot(data?.feedbackSnapshot || null));
+      setNotice(data?.message || '已清理解析反馈');
+    } catch (clearError) {
+      setError(clearError instanceof Error ? clearError.message : '清理解析反馈失败');
+    } finally {
+      setClearingFeedback('');
+    }
+  }
+
   return (
     <section className="card documents-card">
       <div className="panel-header">
         <div>
           <h3>解析结果</h3>
-          <p>查看摘要、结构化结果、字段置信度和证据块；必要时可手工修正，帮助后续问答与输出更准确。</p>
+          <p>查看摘要、结构化结果、字段置信度、证据块，以及当前知识库的解析反馈回流状态。</p>
         </div>
         {!editing ? (
           <button type="button" className="ghost-btn" onClick={handleStartEdit}>
@@ -202,8 +395,183 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
             </div>
           </section>
 
+          {libraryKnowledge.length ? (
+            <section>
+              <h4 style={{ marginBottom: 8 }}>库级编译摘要</h4>
+              <div style={{ display: 'grid', gap: 12 }}>
+                {libraryKnowledge.map((summary) => (
+                  <div key={summary.libraryKey} className="bot-summary-card">
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <strong>{summary.libraryLabel || summary.libraryKey}</strong>
+                        <div className="message-refs">
+                          {summary.pilotValidated ? <span className="source-chip">pilot</span> : null}
+                          <span className="source-chip">文档数：{summary.documentCount}</span>
+                          {summary.focusedFieldSet ? <span className="source-chip">字段集：{summary.focusedFieldSet}</span> : null}
+                          <span className="source-chip">更新时间：{formatDateTime(summary.updatedAt)}</span>
+                        </div>
+                      </div>
+                      <div className="preview-meta-line" style={{ whiteSpace: 'pre-wrap' }}>
+                        {summary.overview || '-'}
+                      </div>
+                      {summary.keyTopics.length ? (
+                        <div className="preview-meta-line">主题：{summary.keyTopics.join(' / ')}</div>
+                      ) : null}
+                      {summary.keyFacts.length ? (
+                        <div className="preview-meta-line">关键事实：{summary.keyFacts.join(' / ')}</div>
+                      ) : null}
+                      {summary.focusedFieldCoverage.length ? (
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <div className="preview-meta-line">重点字段覆盖率</div>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {summary.focusedFieldCoverage.map((entry) => (
+                              <div key={entry.key} className="message-refs">
+                                <span className="source-chip">{entry.alias || entry.key}</span>
+                                <span className="source-chip">{entry.populatedDocumentCount}/{entry.totalDocumentCount}</span>
+                                <span className="source-chip">{Math.round(entry.coverageRatio * 100)}%</span>
+                                {entry.conflictStrategy ? <span className="source-chip">冲突：{entry.conflictStrategy}</span> : null}
+                                {entry.resolvedValues.length ? <span className="source-chip">代表值：{entry.resolvedValues.join(' / ')}</span> : null}
+                                {entry.prompt ? <span className="source-chip">提示：{entry.prompt}</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {summary.fieldConflicts.length ? (
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <div className="preview-meta-line">字段冲突</div>
+                          {summary.fieldConflicts.map((entry) => (
+                            <div key={entry.key} className="preview-meta-line">
+                              {entry.alias || entry.key}（{entry.conflictStrategy || '-'}）：{entry.values.length ? entry.values.join(' / ') : '-'}
+                              {entry.sampleDocumentTitles.length ? `；样本文档：${entry.sampleDocumentTitles.join(' / ')}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {summary.representativeDocuments.length ? (
+                        <div className="preview-meta-line">
+                          代表文档：{summary.representativeDocuments.slice(0, 3).map((entry) => entry.title).join(' / ')}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {feedbackSnapshot ? (
+            <section>
+              <h4 style={{ marginBottom: 8 }}>解析反馈回流</h4>
+              <div style={{ display: 'grid', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div className="message-refs">
+                    <span className="source-chip">反馈字段：{feedbackSnapshot.fieldCount}</span>
+                    <span className="source-chip">反馈值：{feedbackSnapshot.totalValueCount}</span>
+                    <span className="source-chip">当前文档命中：{feedbackSnapshot.matchedFieldCount}</span>
+                    <span className="source-chip">更新时间：{formatDateTime(feedbackSnapshot.updatedAt)}</span>
+                  </div>
+                  {feedbackSnapshot.fieldCount ? (
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={clearingFeedback === '__all__'}
+                      onClick={() => handleClearFeedback('')}
+                    >
+                      {clearingFeedback === '__all__' ? '清理中...' : '清理当前库反馈'}
+                    </button>
+                  ) : null}
+                </div>
+
+                {feedbackSnapshot.fieldCount ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {feedbackSnapshot.fields.map((field) => {
+                      const alias = fieldTemplate?.fieldAliases?.[field.name] || field.name;
+                      return (
+                        <div key={field.name} className="bot-summary-card">
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                              <strong>{alias}</strong>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                                <div className="message-refs">
+                                  <span className="source-chip">字段键：{field.name}</span>
+                                  <span className="source-chip">反馈值：{field.valueCount}</span>
+                                  {field.matchedValueCount ? <span className="source-chip">命中：{field.matchedValueCount}</span> : null}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="ghost-btn"
+                                  disabled={clearingFeedback === field.name}
+                                  onClick={() => handleClearFeedback(field.name)}
+                                >
+                                  {clearingFeedback === field.name ? '清理中...' : '清理字段反馈'}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="preview-meta-line">反馈值：{field.values.length ? field.values.join(' / ') : '-'}</div>
+                            {field.matchedValues.length ? (
+                              <div className="preview-meta-line">当前文档命中：{field.matchedValues.join(' / ')}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="preview-meta-line">当前知识库还没有可复用的解析反馈。</div>
+                )}
+              </div>
+            </section>
+          ) : null}
+
           <section>
             <h4 style={{ marginBottom: 8 }}>字段置信度与来源</h4>
+            {fieldTemplate?.preferredFieldKeys?.length ? (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+                <div className="message-refs">
+                  <span className="source-chip">字段模板：{fieldTemplate.fieldSet || '-'}</span>
+                  <span className="source-chip">重点字段：{fieldTemplate.preferredFieldKeys.length}</span>
+                  <span className="source-chip">必填字段：{fieldTemplate.requiredFieldKeys.length}</span>
+                </div>
+                {focusedFieldEntries.length ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {focusedFieldEntries.map((entry, index) => (
+                      <div key={`${entry.key}-${index}`} className="bot-summary-card">
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                            <strong>{index + 1}. {entry.alias || entry.key}</strong>
+                            <div className="message-refs">
+                              {entry.required ? <span className="source-chip">必填</span> : null}
+                              {entry.confidence != null ? (
+                                <span className="source-chip">置信度：{Math.round(entry.confidence * 100)}%</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="preview-meta-line">{formatFieldValue(entry.value)}</div>
+                          <div className="message-refs">
+                            <span className="source-chip">字段键：{entry.key}</span>
+                            {entry.source ? <span className="source-chip">来源：{entry.source}</span> : null}
+                            {entry.evidenceChunkId ? <span className="source-chip">证据块：{entry.evidenceChunkId}</span> : null}
+                            {fieldTemplate?.fieldPrompts?.[entry.key] ? (
+                              <span className="source-chip">提示：{fieldTemplate.fieldPrompts[entry.key]}</span>
+                            ) : null}
+                            {fieldTemplate?.fieldConflictStrategies?.[entry.key] ? (
+                              <span className="source-chip">冲突：{fieldTemplate.fieldConflictStrategies[entry.key]}</span>
+                            ) : null}
+                          </div>
+                          {Array.isArray(fieldTemplate?.fieldNormalizationRules?.[entry.key]) && fieldTemplate.fieldNormalizationRules[entry.key].length ? (
+                            <div className="preview-meta-line">
+                              标准化：{fieldTemplate.fieldNormalizationRules[entry.key].join(' / ')}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {fieldDetails.length ? (
               <div style={{ display: 'grid', gap: 10 }}>
                 {fieldDetails.map((entry) => (
@@ -227,7 +595,7 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
                 ))}
               </div>
             ) : (
-              <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 中补充。</div>
+              <div className="preview-meta-line">暂无字段元数据，可先重新解析或手工在 JSON 里补充。</div>
             )}
           </section>
 
@@ -245,14 +613,35 @@ export default function DocumentAnalysisPanel({ item: initialItem }) {
                   {tableSummary.primarySheetName ? (
                     <span className="source-chip">主表：{tableSummary.primarySheetName}</span>
                   ) : null}
+                  {tableSummary.recordKeyField ? (
+                    <span className="source-chip">主键列：{tableSummary.recordKeyField}</span>
+                  ) : null}
                 </div>
                 {tableSummary.columns.length ? (
                   <div className="preview-meta-line">列名：{tableSummary.columns.join(' / ')}</div>
+                ) : null}
+                {Object.keys(tableSummary.recordFieldRoles || {}).length ? (
+                  <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {safeJsonStringify(tableSummary.recordFieldRoles)}
+                  </pre>
+                ) : null}
+                {Object.keys(tableSummary.recordInsights || {}).length ? (
+                  <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {safeJsonStringify(tableSummary.recordInsights)}
+                  </pre>
                 ) : null}
                 {tableSummary.sampleRows.length ? (
                   <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
                     {safeJsonStringify(tableSummary.sampleRows)}
                   </pre>
+                ) : null}
+                {tableSummary.recordRows.length ? (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div className="preview-meta-line">标准化记录行（前 5 行）</div>
+                    <pre className="code-block" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                      {safeJsonStringify(tableSummary.recordRows)}
+                    </pre>
+                  </div>
                 ) : null}
               </div>
             </section>

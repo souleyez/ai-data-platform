@@ -1,4 +1,5 @@
 import { buildKnowledgeContext } from './knowledge-evidence.js';
+import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import type { RetrievalResult } from './document-retrieval.js';
 import {
   buildKnowledgeFallbackOutput,
@@ -47,7 +48,9 @@ import {
 import {
   buildReportPlan,
   buildReportPlanContextBlock,
+  inferReportPlanTaskHint,
 } from './report-planner.js';
+import { attachDatavizRendersToOutput } from './report-dataviz.js';
 import {
   buildResumeDisplayProfileContextBlock,
   runResumeDisplayProfileResolver,
@@ -496,7 +499,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     requestedKind,
     requestedTemplateKey,
   );
-  const templateTaskHint = inferKnowledgeTemplateTaskHintFromLibraries(scopeState.libraries, requestedKind);
+  const templateTaskHint = inferReportPlanTaskHint({
+    requestText,
+    groupKey: scopeState.libraries.map((item) => item.key || '').join(' '),
+    groupLabel: scopeState.libraries.map((item) => item.label || '').join(' '),
+    templateKey: requestedTemplateKey || selectedTemplates[0]?.template.key || '',
+    templateLabel: selectedTemplates[0]?.template.label || templateCatalogOptions[0]?.templateLabel || '',
+    kind: requestedKind,
+  }) || inferKnowledgeTemplateTaskHintFromLibraries(scopeState.libraries, requestedKind);
   const templateSearchHints = buildTemplateCatalogSearchHints(templateCatalogOptions);
   const isOrderInventoryPageRequest = requestedKind === 'page' && templateTaskHint === 'order-static-page';
   const memorySelection = await selectOpenClawMemoryDocumentCandidates({
@@ -544,9 +554,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
   const supplySkillInstruction = await loadWorkspaceSkillBundle('knowledge-report-supply', [
     'references/supply-contract.md',
   ]);
-  const plannerSkillInstruction = requestedKind === 'page'
-    ? await loadWorkspaceSkillBundle('report-page-planner', [
-      'references/planning-contract.md',
+  const datavizSkillInstruction = requestedKind === 'page'
+    ? await loadWorkspaceSkillBundle('data-visualization-studio', [
+      'references/visualization_types.md',
     ])
     : '';
   const reportPlan = requestedKind === 'page'
@@ -560,7 +570,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : null;
   const reportPlanContext = reportPlan ? buildReportPlanContextBlock(reportPlan) : '';
-  const skillInstruction = [supplySkillInstruction, plannerSkillInstruction]
+  const skillInstruction = [supplySkillInstruction, datavizSkillInstruction]
     .filter(Boolean)
     .join('\n\n');
   const templateCatalogContext = buildTemplateCatalogContextBlock(
@@ -630,6 +640,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     })
     : '';
   const memorySelectionContext = buildOpenClawMemorySelectionContextBlock(memorySelection);
+  const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(resolvedLibraries);
 
   let output: ChatOutput | null = null;
   let executionStage = 'composer-model';
@@ -744,6 +755,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           reportPlanContext,
           resumeDisplayProfileContext,
           templateCatalogContext,
+          libraryKnowledgePagesContext,
           buildKnowledgeContext(requestText, resolvedLibraries, effectiveRetrieval, {
             timeRange: input.timeRange,
             contentFocus: input.contentFocus,
@@ -812,13 +824,14 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     }
   }
 
-  const finalOutput = output || buildKnowledgeFallbackOutput(
+  const rawFinalOutput = output || buildKnowledgeFallbackOutput(
     requestedKind,
     requestText,
     effectiveRetrieval.documents,
     activeEnvelope,
     resumeDisplayProfileResolution?.profiles || [],
   );
+  const finalOutput = await attachDatavizRendersToOutput(rawFinalOutput);
 
   return {
     libraries: resolvedLibraries,
@@ -898,6 +911,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
         'references/output-contract.md',
       ])
       : '';
+    const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(libraries);
     const cloud = await runOpenClawChat({
       prompt: requestText,
       sessionUser: input.sessionUser,
@@ -916,6 +930,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
         }),
         buildOpenClawMemorySelectionContextBlock(memorySelection),
         buildKnowledgeCatalogSelectionDetailBlock(memorySelection),
+        libraryKnowledgePagesContext,
         effectiveRetrieval?.documents.length
           ? buildKnowledgeContext(requestText, libraries, effectiveRetrieval, {
             timeRange: input.timeRange,

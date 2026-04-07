@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseDocument } from '../src/lib/document-parser.js';
 
-test('parseDocument should apply contract library fallback schema and fields', async () => {
+test('parseDocument should apply contract library fallback schema and focused fields', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-contract-template-'));
   const filePath = path.join(tempDir, 'business-note.md');
   const content = [
@@ -17,6 +17,7 @@ test('parseDocument should apply contract library fallback schema and fields', a
     '生效日期：2026-04-02',
     '金额：￥120000',
     '服务期限：12个月',
+    '付款条款：签约后7日内付款',
   ].join('\n');
 
   try {
@@ -42,7 +43,21 @@ test('parseDocument should apply contract library fallback schema and fields', a
       'signDate',
       'paymentTerms',
     ]);
+    assert.deepEqual(contractDoc.structuredProfile?.fieldTemplate?.requiredFieldKeys, ['partyA', 'partyB', 'amount']);
+    assert.equal(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.partyA, '甲方');
     assert.equal(contractDoc.structuredProfile?.focusedFields?.partyA, contractDoc.structuredProfile?.partyA);
+
+    const partyAAlias = String(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.partyA || '');
+    const amountAlias = String(contractDoc.structuredProfile?.fieldTemplate?.fieldAliases?.amount || '');
+
+    assert.equal(contractDoc.structuredProfile?.aliasFields?.[partyAAlias], contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.focusedAliasFields?.[partyAAlias], contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.aliasFieldDetails?.[partyAAlias]?.value, contractDoc.structuredProfile?.partyA);
+    assert.equal(contractDoc.structuredProfile?.focusedAliasFieldDetails?.[amountAlias]?.value, contractDoc.structuredProfile?.amount);
+    assert.equal(contractDoc.structuredProfile?.focusedFieldDetails?.amount?.value, '￥120000');
+    assert.equal(contractDoc.structuredProfile?.focusedFieldEntries?.[0]?.key, 'partyA');
+    assert.equal(contractDoc.structuredProfile?.focusedFieldEntries?.[0]?.alias, '甲方');
+    assert.equal(contractDoc.structuredProfile?.focusedFieldEntries?.[0]?.required, true);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

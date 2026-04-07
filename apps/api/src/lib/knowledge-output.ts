@@ -22,7 +22,17 @@ export type ChatOutput =
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
-        charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+        charts?: Array<{
+          title?: string;
+          items?: Array<{ label?: string; value?: number }>;
+          render?: {
+            renderer?: string;
+            chartType?: string;
+            svg?: string;
+            alt?: string;
+            generatedAt?: string;
+          } | null;
+        }>;
       } | null;
     };
 
@@ -88,6 +98,13 @@ type OrderPageStats = {
   categoryAmounts: Array<{ label: string; value: number }>;
   riskHighlights: string[];
   actionHighlights: string[];
+};
+type FootfallPageStats = {
+  documentCount: number;
+  totalFootfall: number;
+  mallZoneBreakdown: Array<{ label: string; value: number; floorZoneCount: number; roomUnitCount: number }>;
+  supportingLines: string[];
+  lowZoneHighlights: string[];
 };
 type KnowledgePageOutput = {
   type: 'page';
@@ -314,6 +331,18 @@ function normalizeSections(value: unknown) {
     .filter((item) => item.title || item.body || item.bullets.length);
 }
 
+function normalizeChartRender(value: unknown) {
+  if (!isObject(value)) return null;
+  const renderer = sanitizeText(value.renderer);
+  const chartType = sanitizeText(value.chartType);
+  const svg = sanitizeText(value.svg);
+  const alt = sanitizeText(value.alt);
+  const generatedAt = sanitizeText(value.generatedAt);
+  return renderer || chartType || svg || alt || generatedAt
+    ? { renderer, chartType, svg, alt, generatedAt }
+    : null;
+}
+
 function normalizeCharts(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -329,8 +358,9 @@ function normalizeCharts(value: unknown) {
             }))
             .filter((entry) => entry.label)
         : [],
+      render: normalizeChartRender(item.render),
     }))
-    .filter((item) => item.title || item.items.length);
+    .filter((item) => item.title || item.items.length || item.render);
 }
 
 function normalizeObjectArray(value: unknown) {
@@ -351,6 +381,298 @@ function looksLikeKnowledgeSupplyPayload(value: unknown): value is JsonRecord {
     || Array.isArray(value.rows)
     || Array.isArray(value.columns);
   return hasScope && (hasSupplyCollections || hasGuidance) && !hasReportShape;
+}
+
+function formatFootfallValue(value: number) {
+  if (!Number.isFinite(value)) return '0';
+  return `${Math.round(value).toLocaleString('zh-CN')} 人次`;
+}
+
+function parseFootfallNumericValue(value: unknown) {
+  const text = sanitizeText(value).replace(/,/g, '');
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getStructuredProfileRecord(item: ParsedDocument) {
+  return isObject(item.structuredProfile) ? item.structuredProfile as JsonRecord : {};
+}
+
+function getFootfallRecordInsights(item: ParsedDocument) {
+  const profile = getStructuredProfileRecord(item);
+  const tableSummary = isObject(profile.tableSummary) ? profile.tableSummary as JsonRecord : null;
+  return tableSummary && isObject(tableSummary.recordInsights)
+    ? tableSummary.recordInsights as JsonRecord
+    : null;
+}
+
+function isFootfallReportDocument(item: ParsedDocument) {
+  if (String(item.bizCategory || '').toLowerCase() === 'footfall') return true;
+  const profile = getStructuredProfileRecord(item);
+  if (String(profile.reportFocus || '').toLowerCase() === 'footfall') return true;
+  return String(item.schemaType || '').toLowerCase() === 'report'
+    && containsAny(normalizeText([
+      item.title,
+      item.summary,
+      item.excerpt,
+      ...(item.topicTags || []),
+    ].join(' ')), ['footfall', 'visitor', '客流', '人流', '商场分区', 'mall zone', 'shopping zone']);
+}
+
+function buildFootfallSupportingLines(documents: ParsedDocument[]) {
+  return documents
+    .slice(0, 5)
+    .map((item) => {
+      const title = sanitizeText(item.title || item.name || '客流资料');
+      return `${title}：已纳入商场分区口径汇总。`;
+    })
+    .filter(Boolean);
+}
+
+function buildFootfallPageStats(documents: ParsedDocument[]): FootfallPageStats {
+  const mallZoneTotals = new Map<string, { label: string; value: number; floorZoneCount: number; roomUnitCount: number }>();
+  let totalFootfall = 0;
+
+  for (const item of documents) {
+    const profile = getStructuredProfileRecord(item);
+    const insights = getFootfallRecordInsights(item);
+    const mallZoneBreakdown = Array.isArray(insights?.mallZoneBreakdown)
+      ? (insights.mallZoneBreakdown as JsonRecord[])
+      : [];
+    const reportFootfall = parseFootfallNumericValue(insights?.totalFootfall ?? profile.totalFootfall);
+    if (reportFootfall !== null) totalFootfall += reportFootfall;
+
+    for (const entry of mallZoneBreakdown) {
+      const label = sanitizeText(entry.mallZone);
+      const value = parseFootfallNumericValue(entry.footfall);
+      if (!label || value === null) continue;
+      const existing = mallZoneTotals.get(normalizeText(label));
+      if (existing) {
+        existing.value += value;
+        existing.floorZoneCount = Math.max(existing.floorZoneCount, Number(entry.floorZoneCount || 0) || 0);
+        existing.roomUnitCount = Math.max(existing.roomUnitCount, Number(entry.roomUnitCount || 0) || 0);
+        continue;
+      }
+      mallZoneTotals.set(normalizeText(label), {
+        label,
+        value,
+        floorZoneCount: Number(entry.floorZoneCount || 0) || 0,
+        roomUnitCount: Number(entry.roomUnitCount || 0) || 0,
+      });
+    }
+  }
+
+  const mallZoneBreakdown = [...mallZoneTotals.values()]
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, 'zh-CN'))
+    .slice(0, 6);
+  if (!totalFootfall && mallZoneBreakdown.length) {
+    totalFootfall = mallZoneBreakdown.reduce((sum, entry) => sum + entry.value, 0);
+  }
+
+  const lowZoneHighlights = mallZoneBreakdown.length > 2
+    ? mallZoneBreakdown
+        .slice(-2)
+        .map((entry) => `${entry.label}：${formatFootfallValue(entry.value)}`)
+    : [];
+
+  return {
+    documentCount: documents.length,
+    totalFootfall,
+    mallZoneBreakdown,
+    supportingLines: buildFootfallSupportingLines(documents),
+    lowZoneHighlights,
+  };
+}
+
+function buildFootfallPageTitle(envelope?: ReportTemplateEnvelope | null) {
+  return sanitizeText(envelope?.title) || '商场客流分区驾驶舱';
+}
+
+function buildFootfallPageSummary(stats: FootfallPageStats) {
+  const topZones = stats.mallZoneBreakdown
+    .slice(0, 3)
+    .map((entry) => `${entry.label} ${formatFootfallValue(entry.value)}`)
+    .join('、');
+  const lead = topZones
+    ? `当前客流重心主要集中在 ${topZones}。`
+    : '当前已识别到商场客流资料，但分区贡献仍需继续积累。';
+  return [
+    `本次共汇总 ${stats.documentCount} 份客流资料，累计识别 ${formatFootfallValue(stats.totalFootfall)}。`,
+    lead,
+    '报表已统一按商场分区汇总，楼层分区和单间明细不单独展开。',
+  ].join('');
+}
+
+function buildFootfallPageCards(stats: FootfallPageStats) {
+  const topZone = stats.mallZoneBreakdown[0];
+  return [
+    { label: '总客流', value: formatFootfallValue(stats.totalFootfall), note: '已按商场分区汇总' },
+    { label: '商场分区数', value: `${Math.max(stats.mallZoneBreakdown.length, 1)} 个`, note: '只展示商场分区口径' },
+    {
+      label: '头部分区',
+      value: topZone ? `${topZone.label}` : '待补充',
+      note: topZone ? formatFootfallValue(topZone.value) : '暂无稳定分区',
+    },
+    { label: '展示口径', value: '商场分区', note: '楼层与单间明细已折叠' },
+  ];
+}
+
+function buildFootfallPageSections(summary: string, stats: FootfallPageStats, envelope?: ReportTemplateEnvelope | null) {
+  const sectionTitles = envelope?.pageSections?.length
+    ? envelope.pageSections
+    : ['客流总览', '商场分区贡献', '高客流分区', '低效分区提醒', '口径说明', 'AI综合分析'];
+  const topZoneBullets = stats.mallZoneBreakdown
+    .slice(0, 5)
+    .map((entry) => `${entry.label}：${formatFootfallValue(entry.value)}`);
+  const lowZoneBullets = stats.lowZoneHighlights.length
+    ? stats.lowZoneHighlights
+    : ['当前低位分区样本仍有限，建议持续按商场分区追踪波动。'];
+  const blueprints = [
+    {
+      body: summary,
+      bullets: stats.supportingLines.slice(0, 3),
+    },
+    {
+      body: topZoneBullets.length
+        ? '当前展示层统一落在商场分区，不继续展开楼层或单间。先看分区贡献，再决定需要深挖的具体点位。'
+        : '当前分区贡献仍在补齐中，建议继续累积同口径链接。',
+      bullets: topZoneBullets,
+    },
+    {
+      body: topZoneBullets[0]
+        ? `高客流焦点当前主要落在 ${stats.mallZoneBreakdown[0]?.label}${stats.mallZoneBreakdown[1] ? `，以及 ${stats.mallZoneBreakdown[1]?.label}` : ''}。`
+        : '高客流分区尚未形成稳定排序。',
+      bullets: topZoneBullets.slice(0, 3),
+    },
+    {
+      body: '低位分区更适合做经营提醒而不是明细堆砌，保持在商场分区口径即可。',
+      bullets: lowZoneBullets,
+    },
+    {
+      body: '本页统一按商场分区汇总客流；楼层分区和单间数据只参与聚合，不在展示层逐条展开。',
+      bullets: [
+        '适合直接给商场运营、招商或现场团队看整体分区热度',
+        '需要深挖时再回到明细，不把展示层拉回到点位级列表',
+      ],
+    },
+    {
+      body: 'AI 综合分析保持克制：先看客流是否持续集中到少数商场分区，再决定活动、导流或点位优化动作，不补写无证据的经营结论。',
+      bullets: [
+        '优先围绕高客流分区安排活动承接和资源配置',
+        '低位分区只做提醒，不把页面退回到明细表展示',
+      ],
+    },
+  ];
+
+  return sectionTitles.map((title, index) => ({
+    title,
+    body: blueprints[index]?.body || (index === 0 ? summary : ''),
+    bullets: blueprints[index]?.bullets || [],
+  }));
+}
+
+function buildFootfallPageCharts(stats: FootfallPageStats) {
+  const topItems = stats.mallZoneBreakdown.slice(0, 6).map((entry) => ({ label: entry.label, value: entry.value }));
+  return [
+    { title: '商场分区客流贡献', items: topItems },
+    { title: '商场分区客流梯队', items: topItems },
+  ].filter((item) => item.items.length);
+}
+
+function buildFootfallPageOutput(
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+): KnowledgePageOutput {
+  const stats = buildFootfallPageStats(documents);
+  const summary = buildFootfallPageSummary(stats);
+  return {
+    type: 'page',
+    title: buildFootfallPageTitle(envelope),
+    content: summary,
+    format: 'html',
+    page: {
+      summary,
+      cards: buildFootfallPageCards(stats),
+      sections: buildFootfallPageSections(summary, stats, envelope),
+      charts: buildFootfallPageCharts(stats),
+    },
+  };
+}
+
+function buildFootfallTableOutput(
+  documents: ParsedDocument[],
+  envelope?: ReportTemplateEnvelope | null,
+): ChatOutput {
+  const stats = buildFootfallPageStats(documents);
+  const columns = envelope?.tableColumns?.length
+    ? envelope.tableColumns
+    : ['商场分区', '客流', '说明'];
+  const rows = stats.mallZoneBreakdown.map((entry) => ([
+    entry.label,
+    formatFootfallValue(entry.value),
+    '仅输出商场分区汇总，楼层和单间明细不展开',
+  ]));
+
+  return {
+    type: 'table',
+    title: sanitizeText(envelope?.title) || '商场客流分区表',
+    content: buildFootfallPageSummary(stats),
+    format: 'csv',
+    table: {
+      title: sanitizeText(envelope?.title) || '商场客流分区表',
+      subtitle: '按商场分区汇总输出',
+      columns,
+      rows,
+    },
+  };
+}
+
+function hydrateFootfallPageVisualShell(
+  documents: ParsedDocument[],
+  envelope: ReportTemplateEnvelope | null | undefined,
+  page: KnowledgePageOutput['page'],
+) {
+  const fallbackPage = buildFootfallPageOutput(documents, envelope).page;
+  const mergeCards = (
+    primary: NonNullable<KnowledgePageOutput['page']['cards']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['cards']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.label || item.value || item.note || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.label || item.value || item.note || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+  const mergeCharts = (
+    primary: NonNullable<KnowledgePageOutput['page']['charts']>,
+    fallback: NonNullable<KnowledgePageOutput['page']['charts']>,
+    minCount: number,
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(merged.map((item) => normalizeText(item.title || '')));
+    for (const item of fallback) {
+      if (merged.length >= minCount) break;
+      const key = normalizeText(item.title || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return merged.length ? merged : fallback;
+  };
+
+  return {
+    summary: page.summary || fallbackPage.summary,
+    cards: mergeCards(page.cards || [], fallbackPage.cards || [], 4),
+    sections: page.sections?.length ? mergeOrderPageSections(page.sections, fallbackPage.sections || []) : fallbackPage.sections,
+    charts: mergeCharts(page.charts || [], fallbackPage.charts || [], 2),
+  };
 }
 
 function extractSupplySectionTitles(payload: JsonRecord, envelope?: ReportTemplateEnvelope | null) {
@@ -3178,6 +3500,7 @@ export function buildKnowledgeFallbackOutput(
 ): ChatOutput {
   const view = resolveResumeRequestView(requestText);
   const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+  const footfallDocuments = documents.filter(isFootfallReportDocument);
   const orderDocuments = documents.filter(isOrderInventoryDocument);
   const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
 
@@ -3262,6 +3585,17 @@ export function buildKnowledgeFallbackOutput(
     }
   }
 
+  if (footfallDocuments.length) {
+    if (isNarrativeOutputKind(kind)) {
+      const page = buildFootfallPageOutput(footfallDocuments, envelope);
+      return wrapPageOutputAsKind(kind, page);
+    }
+
+    if (kind === 'table') {
+      return buildFootfallTableOutput(footfallDocuments, envelope);
+    }
+  }
+
   if (orderDocuments.length && isNarrativeOutputKind(kind)) {
     const page = buildOrderPageOutput(orderView, orderDocuments, envelope);
     return wrapPageOutputAsKind(kind, page);
@@ -3336,11 +3670,15 @@ export function normalizeReportOutput(
     const charts = normalizeCharts(pageSource.charts || effectivePayload.charts || payload.charts || root.charts);
     const effectiveSections = alignedSections.length ? alignedSections : rawSections;
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+    const footfallDocuments = documents.filter(isFootfallReportDocument);
     const orderDocuments = documents.filter(isOrderInventoryDocument);
     const resumeView = resumeDocuments.length ? resolveResumeRequestView(requestText) : 'generic';
     const orderView = orderDocuments.length ? resolveOrderRequestView(requestText) : 'generic';
 
     if (looksLikePromptEchoPage(requestText, summary, content, cards, effectiveSections)) {
+      if (footfallDocuments.length) {
+        return buildKnowledgeFallbackOutput(kind, requestText, footfallDocuments, envelope, displayProfiles);
+      }
       if (orderDocuments.length) {
         return buildKnowledgeFallbackOutput(kind, requestText, orderDocuments, envelope, displayProfiles);
       }
@@ -3351,6 +3689,8 @@ export function normalizeReportOutput(
     }
     const normalizedTitle = resumeDocuments.length
       ? buildResumePageTitle(resumeView, envelope)
+      : footfallDocuments.length
+        ? buildFootfallPageTitle(envelope)
       : orderDocuments.length
         ? buildOrderPageTitle(orderView, envelope)
         : title;
@@ -3384,7 +3724,15 @@ export function normalizeReportOutput(
       );
     }
 
-    if (!resumeDocuments.length && orderDocuments.length && normalizedOutput.page) {
+    if (!resumeDocuments.length && footfallDocuments.length && normalizedOutput.page) {
+      normalizedOutput.page = hydrateFootfallPageVisualShell(
+        footfallDocuments,
+        envelope,
+        normalizedOutput.page,
+      );
+    }
+
+    if (!resumeDocuments.length && !footfallDocuments.length && orderDocuments.length && normalizedOutput.page) {
       normalizedOutput.page = hydrateOrderPageVisualShell(
         orderView,
         orderDocuments,
@@ -3410,6 +3758,21 @@ export function normalizeReportOutput(
     pickNestedObject(payload, [['table']])
     || pickNestedObject(root, [['table']])
     || payload;
+  const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
+  const footfallDocuments = documents.filter(isFootfallReportDocument);
+  const orderDocuments = documents.filter(isOrderInventoryDocument);
+  const normalizedRawContent = normalizeText(rawContent);
+  if (normalizedRawContent && normalizedRawContent === normalizeText(requestText)) {
+    if (footfallDocuments.length) {
+      return buildKnowledgeFallbackOutput(kind, requestText, footfallDocuments, envelope, displayProfiles);
+    }
+    if (orderDocuments.length) {
+      return buildKnowledgeFallbackOutput(kind, requestText, orderDocuments, envelope, displayProfiles);
+    }
+    if (resumeDocuments.length) {
+      return buildKnowledgeFallbackOutput(kind, requestText, resumeDocuments, envelope, displayProfiles);
+    }
+  }
 
   const candidateColumns = normalizeColumnNames(sanitizeStringArray(
     (isObject(tableSource) ? tableSource.columns : undefined)

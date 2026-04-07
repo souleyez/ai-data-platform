@@ -1,51 +1,272 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-06T18:30:00.000Z",
+  "updatedAt": "2026-04-06T20:30:00.000Z",
   "profiles": [
     {
       "id": "contract-standard",
       "label": "合同协议提取模板",
-      "matchLibraryKeys": ["contract", "合同", "合同协议", "协议"],
-      "matchLibraryLabels": ["合同", "合同协议", "协议"],
+      "matchLibraryKeys": [
+        "contract",
+        "合同",
+        "合同协议",
+        "协议"
+      ],
+      "matchLibraryLabels": [
+        "合同",
+        "合同协议",
+        "协议"
+      ],
       "fieldSet": "contract",
       "fallbackSchemaType": "contract",
-      "preferredFieldKeys": ["partyA", "partyB", "amount", "signDate", "paymentTerms"]
+      "preferredFieldKeys": [
+        "partyA",
+        "partyB",
+        "amount",
+        "signDate",
+        "paymentTerms"
+      ],
+      "requiredFieldKeys": [
+        "partyA",
+        "partyB",
+        "amount"
+      ],
+      "fieldAliases": {
+        "partyA": "甲方",
+        "partyB": "乙方",
+        "amount": "合同金额",
+        "signDate": "签订日期",
+        "paymentTerms": "付款条款"
+      }
     },
     {
       "id": "resume-standard",
       "label": "简历提取模板",
-      "matchLibraryKeys": ["resume", "简历", "人才简历", "候选人"],
-      "matchLibraryLabels": ["简历", "人才简历", "候选人"],
+      "matchLibraryKeys": [
+        "resume",
+        "简历",
+        "人才简历",
+        "候选人"
+      ],
+      "matchLibraryLabels": [
+        "简历",
+        "人才简历",
+        "候选人"
+      ],
       "fieldSet": "resume",
       "fallbackSchemaType": "resume",
-      "preferredFieldKeys": ["candidateName", "targetRole", "latestCompany", "yearsOfExperience", "skills"]
+      "preferredFieldKeys": [
+        "candidateName",
+        "targetRole",
+        "latestCompany",
+        "yearsOfExperience",
+        "skills"
+      ],
+      "requiredFieldKeys": [
+        "candidateName",
+        "targetRole"
+      ],
+      "fieldAliases": {
+        "candidateName": "候选人姓名",
+        "targetRole": "目标岗位",
+        "latestCompany": "最近公司",
+        "yearsOfExperience": "工作年限",
+        "skills": "核心技能"
+      }
     },
     {
       "id": "order-standard",
       "label": "订单分析提取模板",
-      "matchLibraryKeys": ["order", "订单", "订单分析", "销售订单"],
-      "matchLibraryLabels": ["订单", "订单分析", "销售订单"],
+      "matchLibraryKeys": [
+        "order",
+        "订单",
+        "订单分析",
+        "销售订单"
+      ],
+      "matchLibraryLabels": [
+        "订单",
+        "订单分析",
+        "销售订单"
+      ],
       "fieldSet": "order",
       "fallbackSchemaType": "order",
-      "preferredFieldKeys": ["period", "platform", "orderCount", "netSales", "grossMargin", "inventoryStatus"]
+      "preferredFieldKeys": [
+        "period",
+        "platform",
+        "orderCount",
+        "netSales",
+        "grossMargin",
+        "inventoryStatus"
+      ],
+      "requiredFieldKeys": [
+        "period",
+        "platform",
+        "orderCount",
+        "netSales"
+      ],
+      "fieldAliases": {
+        "period": "统计周期",
+        "platform": "平台",
+        "orderCount": "订单量",
+        "netSales": "净销售额",
+        "grossMargin": "毛利率",
+        "inventoryStatus": "库存状态"
+      }
     },
     {
       "id": "ioa-guidance",
       "label": "IOA与企业规范提取模板",
-      "matchLibraryKeys": ["ioa", "ioa-guidance", "enterprise-guidance", "企业规范", "制度规范", "系统指引"],
-      "matchLibraryLabels": ["IOA", "企业规范", "制度规范", "系统指引"],
+      "matchLibraryKeys": [
+        "ioa",
+        "ioa-guidance",
+        "enterprise-guidance",
+        "企业规范",
+        "制度规范",
+        "系统指引"
+      ],
+      "matchLibraryLabels": [
+        "IOA",
+        "企业规范",
+        "制度规范",
+        "系统指引"
+      ],
       "fieldSet": "enterprise-guidance",
       "fallbackSchemaType": "technical",
-      "preferredFieldKeys": ["businessSystem", "documentKind", "applicableScope", "operationEntry", "policyFocus"]
+      "preferredFieldKeys": [
+        "businessSystem",
+        "documentKind",
+        "applicableScope",
+        "operationEntry",
+        "policyFocus"
+      ],
+      "requiredFieldKeys": [
+        "businessSystem",
+        "documentKind"
+      ],
+      "fieldAliases": {
+        "businessSystem": "业务系统",
+        "documentKind": "文档类型",
+        "applicableScope": "适用范围",
+        "operationEntry": "操作入口",
+        "policyFocus": "规范重点"
+      },
+      "fieldPrompts": {
+        "businessSystem": "优先提取制度或操作文档实际指向的系统名称，统一归一成稳定系统名。",
+        "documentKind": "优先识别 FAQ、操作指引、审批流程、预算调整、政策守则这类规范文档类型。",
+        "operationEntry": "提取用户进入系统或功能模块的入口、路径和菜单定位。",
+        "policyFocus": "归纳这份规范真正约束的重点，如审批、预算、登录、权限或制度执行。"
+      },
+      "fieldNormalizationRules": {
+        "businessSystem": [
+          "新中iOA=>IOA",
+          "新世界IOA=>IOA",
+          "iOA=>IOA",
+          "ioa=>IOA"
+        ],
+        "documentKind": [
+          "Q&A=>faq",
+          "FAQ=>faq",
+          "常见问题=>faq",
+          "操作指引=>operation-guide",
+          "应用技巧=>operation-guide",
+          "审批流程=>approval-flow",
+          "预算调整=>budget-adjustment",
+          "政策守则=>policy-standard",
+          "制度规范=>policy-standard"
+        ]
+      },
+      "fieldConflictStrategies": {
+        "businessSystem": "keep-last",
+        "documentKind": "merge-distinct",
+        "applicableScope": "merge-distinct",
+        "operationEntry": "merge-distinct",
+        "policyFocus": "merge-distinct"
+      }
     },
     {
       "id": "xinshijie-ioa-guidance",
       "label": "新世界IOA企业规范提取模板",
-      "matchLibraryKeys": ["xinshijie-ioa", "xinshijieioa", "newworld-ioa", "新世界ioa", "新世界IOA"],
-      "matchLibraryLabels": ["新世界IOA", "新中IOA", "IOA问答", "企业规范"],
+      "matchLibraryKeys": [
+        "xinshijie-ioa",
+        "xinshijieioa",
+        "newworld-ioa",
+        "新世界ioa",
+        "新世界IOA"
+      ],
+      "matchLibraryLabels": [
+        "新世界IOA",
+        "新中IOA",
+        "IOA问答",
+        "企业规范"
+      ],
       "fieldSet": "enterprise-guidance",
       "fallbackSchemaType": "technical",
-      "preferredFieldKeys": ["businessSystem", "documentKind", "applicableScope", "operationEntry", "approvalLevels", "policyFocus", "contacts"]
+      "preferredFieldKeys": [
+        "businessSystem",
+        "documentKind",
+        "applicableScope",
+        "operationEntry",
+        "approvalLevels",
+        "policyFocus",
+        "contacts"
+      ],
+      "requiredFieldKeys": [
+        "businessSystem",
+        "documentKind",
+        "operationEntry"
+      ],
+      "fieldAliases": {
+        "businessSystem": "业务系统",
+        "documentKind": "文档类型",
+        "applicableScope": "适用范围",
+        "operationEntry": "操作入口",
+        "approvalLevels": "审批层级",
+        "policyFocus": "规范重点",
+        "contacts": "联系方式"
+      },
+      "fieldPrompts": {
+        "businessSystem": "统一把新中iOA、新世界IOA、iOA 系统等表述归一成 IOA。",
+        "documentKind": "明确归类为 FAQ、操作指引、审批流程、预算调整、用户手册或政策守则，不要只写泛化说明。",
+        "applicableScope": "提取制度适用对象、组织范围或角色边界。",
+        "operationEntry": "优先抽取系统入口、菜单路径、功能导航或登录方式。",
+        "approvalLevels": "提取审批链条里的角色、层级和先后顺序。",
+        "policyFocus": "归纳制度重点，如企业规范、IT治理、系统操作、预算调整、资产管理。",
+        "contacts": "提取支持邮箱、联系人或服务台渠道。"
+      },
+      "fieldNormalizationRules": {
+        "businessSystem": [
+          "新中iOA=>IOA",
+          "新世界IOA=>IOA",
+          "iOA=>IOA",
+          "ioa=>IOA"
+        ],
+        "documentKind": [
+          "Q&A=>faq",
+          "FAQ=>faq",
+          "常见问题=>faq",
+          "应用技巧=>operation-guide",
+          "操作指引=>operation-guide",
+          "用户手册=>user-manual",
+          "审批流程=>approval-flow",
+          "预算调整=>budget-adjustment",
+          "政策守则=>policy-standard",
+          "制度规范=>policy-standard"
+        ],
+        "policyFocus": [
+          "IT政策=>IT治理",
+          "IT守则=>IT治理",
+          "系统登录=>系统操作",
+          "操作指引=>系统操作"
+        ]
+      },
+      "fieldConflictStrategies": {
+        "businessSystem": "keep-last",
+        "documentKind": "merge-distinct",
+        "applicableScope": "merge-distinct",
+        "operationEntry": "merge-distinct",
+        "approvalLevels": "merge-distinct",
+        "policyFocus": "merge-distinct",
+        "contacts": "merge-distinct"
+      }
     }
   ]
 }

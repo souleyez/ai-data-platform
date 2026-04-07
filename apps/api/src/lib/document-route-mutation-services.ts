@@ -9,5 +9,6 @@ export {
 export {
   saveConfirmedDocumentClassifications,
   saveIgnoredDocuments,
+  clearDocumentAnalysisFeedback,
   updateDocumentAnalysisResult,
 } from './document-route-document-mutation-services.js';

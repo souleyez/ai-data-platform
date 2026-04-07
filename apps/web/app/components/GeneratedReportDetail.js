@@ -1,5 +1,11 @@
 'use client';
 
+function buildSvgDataUrl(svg) {
+  const content = String(svg || '').trim();
+  if (!content) return '';
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`;
+}
+
 function ReportTable({ table }) {
   if (!table) return null;
 
@@ -71,24 +77,35 @@ function PageCharts({ charts }) {
   return (
     <div className="generated-page-charts">
       {charts.map((chart, chartIndex) => {
+        const svgUrl = buildSvgDataUrl(chart?.render?.svg);
         const maxValue = Math.max(...(chart.items || []).map((item) => Number(item.value || 0)), 1);
         return (
           <section className="generated-page-chart" key={`${chart.title || 'chart'}-${chartIndex}`}>
             {chart.title ? <h4>{chart.title}</h4> : null}
-            <div className="generated-page-bars">
-              {(chart.items || []).map((item, itemIndex) => {
-                const width = Math.max(8, (Number(item.value || 0) / maxValue) * 100);
-                return (
-                  <div className="generated-page-bar-row" key={`${item.label || 'item'}-${itemIndex}`}>
-                    <span className="generated-page-bar-label">{item.label}</span>
-                    <span className="generated-page-bar-track">
-                      <span className="generated-page-bar-fill" style={{ width: `${width}%` }} />
-                    </span>
-                    <span className="generated-page-bar-value">{item.value}</span>
-                  </div>
-                );
-              })}
-            </div>
+            {svgUrl ? (
+              <div className="generated-page-chart-visual" style={{ marginTop: 12 }}>
+                <img
+                  src={svgUrl}
+                  alt={chart?.render?.alt || chart.title || 'Chart'}
+                  style={{ width: '100%', height: 'auto', display: 'block' }}
+                />
+              </div>
+            ) : (
+              <div className="generated-page-bars">
+                {(chart.items || []).map((item, itemIndex) => {
+                  const width = Math.max(8, (Number(item.value || 0) / maxValue) * 100);
+                  return (
+                    <div className="generated-page-bar-row" key={`${item.label || 'item'}-${itemIndex}`}>
+                      <span className="generated-page-bar-label">{item.label}</span>
+                      <span className="generated-page-bar-track">
+                        <span className="generated-page-bar-fill" style={{ width: `${width}%` }} />
+                      </span>
+                      <span className="generated-page-bar-value">{item.value}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
         );
       })}

@@ -4,6 +4,7 @@ import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import xlsx from 'xlsx';
 
 const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-datasource-test-'));
 process.env.AI_DATA_PLATFORM_STORAGE_ROOT = storageRoot;
@@ -21,18 +22,30 @@ const datasourceExecution = await importFresh<typeof import('../src/lib/datasour
 const datasourceService = await importFresh<typeof import('../src/lib/datasource-service.js')>(
   '../src/lib/datasource-service.js',
 );
+const documentParser = await importFresh<typeof import('../src/lib/document-parser.js')>(
+  '../src/lib/document-parser.js',
+);
 
-async function startHtmlServer(routes: Record<string, string>) {
+async function startHtmlServer(routes: Record<string, string | { body: string | Buffer; contentType?: string; headers?: Record<string, string> }>) {
   const server = http.createServer((request, response) => {
-    const body = routes[request.url || '/'];
-    if (!body) {
+    const route = routes[request.url || '/'];
+    if (!route) {
       response.statusCode = 404;
       response.end('not found');
       return;
     }
 
+    const body = typeof route === 'string' || Buffer.isBuffer(route)
+      ? route
+      : route.body;
+    const contentType = typeof route === 'string' || Buffer.isBuffer(route)
+      ? 'text/html; charset=utf-8'
+      : route.contentType || 'text/html; charset=utf-8';
     response.statusCode = 200;
-    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.setHeader('Content-Type', contentType);
+    if (typeof route !== 'string' && !Buffer.isBuffer(route)) {
+      Object.entries(route.headers || {}).forEach(([key, value]) => response.setHeader(key, value));
+    }
     response.end(body);
   });
 
@@ -221,6 +234,60 @@ test('web_public datasource run should create a successful run with an ingested 
   });
   assert.equal(items[0]?.documentSummaries?.length, 1);
   assert.equal(items[0]?.documentSummaries?.[0]?.label, runs[0]?.resultSummaries?.[0]?.label);
+});
+
+test('web_public datasource run should preserve downloadable xlsx captures and keep footfall parsing intact', async () => {
+  const workbook = xlsx.utils.book_new();
+  xlsx.utils.book_append_sheet(workbook, xlsx.utils.aoa_to_sheet([
+    ['区域', '设备SN', '通道SN', '位置', '时间', '进入人数', '离开人数'],
+    ['商场', 'SN001', 'CH001', '南门', '2026-04-01 10:00:00', 120, 110],
+    ['商场', 'SN001', 'CH002', '北门', '2026-04-01 11:00:00', 100, 95],
+    ['层一', 'SN002', 'CH010', '中庭', '2026-04-01 10:30:00', 80, 70],
+    ['停车', 'SN003', 'CH020', '停车场入口', '2026-04-01 10:45:00', 60, 55],
+  ]), '4月');
+  const fileBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  const server = await startHtmlServer({
+    '/gaoming-footfall': {
+      body: fileBuffer,
+      contentType: 'application/octet-stream',
+      headers: {
+        'Content-Disposition': "attachment; filename*=UTF-8''%E9%AB%98%E6%98%8E%E4%B8%AD%E6%B8%AF%E5%9F%8E%E5%AE%A2%E6%B5%81.xlsx",
+      },
+    },
+  });
+
+  try {
+    await datasourceDefinitions.upsertDatasourceDefinition({
+      id: 'ds-web-footfall',
+      name: 'Gaoming footfall collector',
+      kind: 'web_public',
+      status: 'active',
+      targetLibraries: [{ key: 'guangzhou-ai', label: '广州AI', mode: 'primary' }],
+      schedule: { kind: 'manual', maxItemsPerRun: 1 },
+      authMode: 'none',
+      config: {
+        url: `${server.baseUrl}/gaoming-footfall`,
+        focus: '客流报表 商场分区汇总',
+        maxItems: 1,
+      },
+    });
+
+    const result = await datasourceExecution.runDatasourceDefinition('ds-web-footfall');
+    const runs = await datasourceDefinitions.listDatasourceRuns('ds-web-footfall');
+    const documentPath = runs[0]?.documentIds[0] || '';
+    const parsed = await documentParser.parseDocument(documentPath);
+
+    assert.equal(result.run?.status, 'success');
+    assert.equal(runs[0]?.ingestedCount, 1);
+    assert.match(documentPath, /\.xlsx$/i);
+    assert.match(runs[0]?.summary || '', /可下载文件|XLSX/i);
+    assert.equal(parsed.bizCategory, 'footfall');
+    assert.equal(parsed.footfallFields?.aggregationLevel, 'mall-zone');
+    assert.equal(parsed.footfallFields?.totalFootfall, '360');
+    assert.equal(parsed.footfallFields?.topMallZone, '商场');
+  } finally {
+    await server.close();
+  }
 });
 
 test('web_discovery datasource run should discover listing-detail entries and preserve discovery config', async () => {

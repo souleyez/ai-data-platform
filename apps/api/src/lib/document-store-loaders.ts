@@ -2,6 +2,7 @@ import { refreshDerivedSchemaProfile, type ParsedDocument } from './document-par
 import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
 import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
+import { syncLibraryKnowledgePagesForDocuments } from './library-knowledge-pages.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { buildDocumentLibraryContext, type DocumentLibraryContext } from './document-extraction-governance.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
@@ -170,5 +171,11 @@ export async function mergeParsedDocumentsForPaths(
       ? 'document-merge-detailed'
       : 'document-merge-quick',
   });
+  if (effectiveParseStage === 'detailed') {
+    await syncLibraryKnowledgePagesForDocuments(
+      reparsedItems.filter((item) => item.parseStatus === 'parsed'),
+      'document-merge-detailed',
+    ).catch(() => undefined);
+  }
   return { exists, files, totalFiles: files.length, items: mergedItems, cacheHit: false };
 }

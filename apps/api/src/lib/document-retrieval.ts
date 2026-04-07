@@ -9,7 +9,7 @@ import { searchDocumentVectorIndex } from './document-vector-index.js';
 import { STORAGE_FILES_DIR } from './paths.js';
 
 export type RetrievalStage = 'rule' | 'vector' | 'rerank';
-export type RetrievalIntent = 'generic' | 'formula' | 'paper' | 'technical' | 'contract' | 'resume' | 'iot';
+export type RetrievalIntent = 'generic' | 'formula' | 'paper' | 'technical' | 'contract' | 'resume' | 'iot' | 'footfall';
 export type TemplateTask =
   | 'general'
   | 'resume-comparison'
@@ -17,6 +17,7 @@ export type TemplateTask =
   | 'formula-static-page'
   | 'bids-table'
   | 'bids-static-page'
+  | 'footfall-static-page'
   | 'paper-table'
   | 'paper-static-page'
   | 'paper-summary'
@@ -99,6 +100,9 @@ function expandPromptBySchema(prompt: string) {
   if (containsAny(normalized, ['order', '订单', 'sales', '销量', 'inventory', '库存', '备货', '同比', '环比'])) {
     expansions.push('order sales inventory replenishment forecast 同比 环比 预测销量 备货 库存指数 电商平台 品类');
   }
+  if (containsAny(normalized, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区'])) {
+    expansions.push('footfall visitor mall zone shopping zone floor zone room unit 客流 人流 商场分区 楼层分区 单间 商场客流 分区汇总');
+  }
   if (containsAny(normalized, ['bid', 'bids', 'tender', 'rfp', 'proposal', '标书', '招标', '投标'])) {
     expansions.push('bids tender proposal section response risk material evidence 标书 招标 投标 章节 应答 材料 风险 证据');
   }
@@ -133,6 +137,9 @@ function detectTemplateTask(prompt: string): TemplateTask {
   }
   if (containsAny(text, ['order', '订单', 'sales', '销量', 'inventory', '库存', '备货']) && containsAny(text, ['static page', 'static-page', 'dashboard', '静态页', '可视化页'])) {
     return 'order-static-page';
+  }
+  if (containsAny(text, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区']) && containsAny(text, ['static page', 'static-page', 'dashboard', '报表', '静态页', '可视化页'])) {
+    return 'footfall-static-page';
   }
   if (containsAny(text, ['contract', '合同', '条款']) && containsAny(text, ['table', 'risk', '表格', '风险'])) {
     return 'contract-risk';
@@ -173,6 +180,7 @@ function detectRetrievalIntent(prompt: string): RetrievalIntent {
     iot: containsAny(text, ['iot', '物联网', '设备', '网关', '平台', '传感', '解决方案']) ? 2 : 0,
     contract: containsAny(text, ['contract', '合同', 'clause', '条款', 'payment', 'legal']) ? 2 : 0,
     resume: containsAny(text, ['resume', 'cv', 'candidate', 'talent', '简历', '候选人']) ? 2 : 0,
+    footfall: containsAny(text, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区', '单间']) ? 2 : 0,
   };
 
   if (containsAny(text, ['journal', 'publication', 'peer review', 'peer-reviewed', 'abstract', 'methods', 'results', 'conclusion', '期刊', '发表'])) {
@@ -186,6 +194,9 @@ function detectRetrievalIntent(prompt: string): RetrievalIntent {
   }
   if (containsAny(text, ['iot', '物联网', 'device', 'gateway', 'sensor', '设备', '网关', '传感', '平台'])) {
     signalScore.iot += 3;
+  }
+  if (containsAny(text, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', 'mall zone', 'shopping zone', '商场分区', '楼层分区', '单间'])) {
+    signalScore.footfall += 4;
   }
 
   const ranked = Object.entries(signalScore).sort((left, right) => right[1] - left[1]);
@@ -260,6 +271,7 @@ function scoreCandidatePreference(item: ParsedDocument, templateTask: TemplateTa
   if ((templateTask === 'formula-table' || templateTask === 'formula-static-page') && item.schemaType === 'formula') score += 12;
   if ((templateTask === 'bids-table' || templateTask === 'bids-static-page') && matchesTemplateTask(item, templateTask)) score += 14;
   if ((templateTask === 'iot-static-page' || templateTask === 'iot-table') && isIotTemplateCandidate(item)) score += 14;
+  if (templateTask === 'footfall-static-page' && isFootfallTemplateCandidate(item)) score += 16;
 
   return score;
 }
@@ -316,6 +328,19 @@ function isOrderTemplateCandidate(item: ParsedDocument) {
   return isStoredKnowledgeDocument(item) || isHighValueKnowledgeDocument(item);
 }
 
+function isFootfallTemplateCandidate(item: ParsedDocument) {
+  const profileText = JSON.stringify(item.structuredProfile || {}).toLowerCase();
+  const summaryText = `${item.title || ''} ${item.summary || ''} ${(item.topicTags || []).join(' ')}`.toLowerCase();
+  return (
+    String(item.bizCategory || '').toLowerCase() === 'footfall'
+    || (
+      String(item.schemaType || '').toLowerCase() === 'report'
+      && /(footfall|visitor|客流|人流|商场分区|mall zone|shopping zone)/.test(`${summaryText} ${profileText}`)
+      && isHighValueKnowledgeDocument(item)
+    )
+  );
+}
+
 function isIotTemplateCandidate(item: ParsedDocument) {
   const text = `${(item.confirmedGroups || []).join(' ')} ${(item.groups || []).join(' ')} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
   return (
@@ -337,6 +362,7 @@ function matchesTemplateTask(item: ParsedDocument, templateTask: TemplateTask) {
   if (templateTask === 'technical-summary') return item.schemaType === 'technical';
   if (templateTask === 'contract-risk') return item.schemaType === 'contract';
   if (templateTask === 'order-static-page') return isOrderTemplateCandidate(item);
+  if (templateTask === 'footfall-static-page') return isFootfallTemplateCandidate(item);
   if (templateTask === 'iot-static-page' || templateTask === 'iot-table') return isIotTemplateCandidate(item);
   if (templateTask === 'bids-table' || templateTask === 'bids-static-page') return isBidTemplateCandidate(item);
   return true;
@@ -362,6 +388,9 @@ function selectTemplateCandidates(items: ParsedDocument[], templateTask: Templat
   if (templateTask === 'order-static-page') {
     return items.filter((item) => isOrderTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
   }
+  if (templateTask === 'footfall-static-page') {
+    return items.filter((item) => isFootfallTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
+  }
   if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
     return items.filter((item) => isIotTemplateCandidate(item)).sort((a, b) => scoreCandidatePreference(b, templateTask) - scoreCandidatePreference(a, templateTask));
   }
@@ -382,6 +411,7 @@ function preselectDocumentsByTemplateTask(items: ParsedDocument[], templateTask:
     || templateTask === 'paper-table'
     || templateTask === 'technical-summary'
     || templateTask === 'order-static-page'
+    || templateTask === 'footfall-static-page'
     || templateTask === 'iot-static-page'
     || templateTask === 'iot-table'
     || templateTask === 'bids-table'
@@ -416,11 +446,19 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
   if (item.schemaType === 'technical' && containsAny(text, ['technical', 'api', 'sdk', 'deployment', 'architecture', 'device', '技术', '接口', '部署'])) score += 12;
   if (item.schemaType === 'report' && containsAny(text, ['report', 'dashboard', 'summary', '报表', '看板'])) score += 10;
   if (item.schemaType === 'formula' && containsAny(text, ['formula', 'probiotic', 'gut', 'brain', 'allergy', 'nutrition', '配方', '奶粉', '益生菌'])) score += 14;
+  if (
+    item.schemaType === 'report'
+    && containsAny(text, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区'])
+    && isFootfallTemplateCandidate(item)
+  ) {
+    score += 16;
+  }
 
   if (intent !== 'generic') {
     if (item.schemaType === intent) score += 22;
     else if (intent === 'paper' && item.schemaType === 'formula') score -= 30;
     else if (intent === 'iot' && !isIotTemplateCandidate(item) && item.schemaType !== 'technical') score -= 14;
+    else if (intent === 'footfall' && !isFootfallTemplateCandidate(item)) score -= 14;
     else if (intent === 'technical' && item.schemaType === 'formula') score -= 18;
     else if (intent === 'formula' && (item.schemaType === 'paper' || item.schemaType === 'technical')) score -= 10;
     else if (intent === 'contract' && item.schemaType !== 'contract') score -= 10;
@@ -445,6 +483,10 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
     if (containsAny(text, ['iot', '物联网', 'device', 'gateway', 'sensor', '设备', '网关', '传感', '平台']) && isIotTemplateCandidate(item)) score += 10;
     if (item.schemaType === 'formula') score -= 12;
   }
+  if (intent === 'footfall') {
+    if (isFootfallTemplateCandidate(item)) score += 18;
+    if (containsAny(text, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区']) && isFootfallTemplateCandidate(item)) score += 10;
+  }
 
   if (templateTask === 'resume-comparison') {
     score += item.schemaType === 'resume' ? 24 : -24;
@@ -453,6 +495,8 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
     else if (item.schemaType === 'paper') score -= 8;
   } else if (templateTask === 'order-static-page') {
     score += isOrderTemplateCandidate(item) ? 18 : -8;
+  } else if (templateTask === 'footfall-static-page') {
+    score += isFootfallTemplateCandidate(item) ? 22 : -10;
   } else if (templateTask === 'technical-summary') {
     if (item.schemaType === 'technical') score += 16;
     else if (item.schemaType === 'formula') score -= 12;
@@ -469,6 +513,44 @@ function scoreSchemaFit(item: ParsedDocument, prompt: string, intent: RetrievalI
   return score;
 }
 
+function collectAliasProfileData(profile: Record<string, unknown>) {
+  const fieldTemplate =
+    profile.fieldTemplate && typeof profile.fieldTemplate === 'object'
+      ? (profile.fieldTemplate as Record<string, unknown>)
+      : null;
+  const fieldAliases =
+    fieldTemplate?.fieldAliases && typeof fieldTemplate.fieldAliases === 'object'
+      ? (fieldTemplate.fieldAliases as Record<string, unknown>)
+      : null;
+  const aliasMaps = [profile.focusedAliasFields, profile.aliasFields]
+    .filter((entry) => entry && typeof entry === 'object') as Array<Record<string, unknown>>;
+
+  const aliasNames = new Set<string>();
+  const aliasValues = new Set<string>();
+
+  for (const [canonicalField, aliasValue] of Object.entries(fieldAliases || {})) {
+    const normalizedAliasName = String(aliasValue || '').trim();
+    if (normalizedAliasName) aliasNames.add(normalizedAliasName.toLowerCase());
+
+    const canonicalValue = String(profile[canonicalField] || '').trim();
+    if (canonicalValue) aliasValues.add(canonicalValue.toLowerCase());
+  }
+
+  for (const aliasMap of aliasMaps) {
+    for (const [aliasName, aliasValue] of Object.entries(aliasMap)) {
+      const normalizedAliasName = String(aliasName || '').trim();
+      const normalizedAliasValue = String(aliasValue || '').trim();
+      if (normalizedAliasName) aliasNames.add(normalizedAliasName.toLowerCase());
+      if (normalizedAliasValue) aliasValues.add(normalizedAliasValue.toLowerCase());
+    }
+  }
+
+  return {
+    aliasNamesText: [...aliasNames].join(' '),
+    aliasValuesText: [...aliasValues].join(' '),
+  };
+}
+
 function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: TemplateTask) {
   const profile = item.structuredProfile || {};
   const haystack = JSON.stringify(profile).toLowerCase();
@@ -478,6 +560,14 @@ function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: Tem
   let score = 0;
   for (const token of tokens) {
     if (haystack.includes(token)) score += token.length >= 4 ? 4 : 2;
+  }
+
+  const { aliasNamesText, aliasValuesText } = collectAliasProfileData(profile as Record<string, unknown>);
+  if (aliasNamesText || aliasValuesText) {
+    for (const token of tokens) {
+      if (aliasNamesText.includes(token)) score += token.length >= 4 ? 8 : 4;
+      if (aliasValuesText.includes(token)) score += token.length >= 4 ? 5 : 3;
+    }
   }
 
   const profileText = JSON.stringify(profile);
@@ -492,6 +582,10 @@ function scoreProfileFit(item: ParsedDocument, prompt: string, templateTask: Tem
   if (templateTask === 'order-static-page') {
     if (/(platformsignals|categorysignals|metricsignals|replenishmentsignals|salescyclesignals|forecastsignals|anomalysignals|operatingsignals|keymetrics|platforms)/i.test(profileText)) score += 14;
     if (/(forecast|inventory|sales|replenishment|restock|yoy|mom|inventory-index|platform|gmv|sell-through)/i.test(profileText)) score += 10;
+  }
+  if (templateTask === 'footfall-static-page') {
+    if (/(reportfocus|totalfootfall|topmallzone|mallzonecount|aggregationlevel|mallzones)/i.test(profileText)) score += 14;
+    if (/(footfall|visitor|客流|人流|mall zone|shopping zone|商场分区)/i.test(profileText)) score += 10;
   }
   if (templateTask === 'technical-summary' && /(interfacetype|deploymentmode|integrationsignals|modulesignals|metricsignals)/i.test(profileText)) score += 10;
   if ((templateTask === 'paper-summary' || templateTask === 'paper-static-page' || templateTask === 'paper-table') && /(methodology|subjecttype|resultsignals|metricsignals|publicationsignals)/i.test(profileText)) score += 10;
@@ -532,6 +626,10 @@ function scoreEvidenceTemplateFit(entry: DocumentEvidenceMatch, prompt: string, 
     score += isOrderTemplateCandidate(item) ? 8 : -10;
     if (containsAny(chunkText, ['sales', 'inventory', 'forecast', 'replenishment', 'restock', 'platform', 'category', 'gmv', 'yoy', 'mom', 'sell-through', 'stock cover', 'safety stock'])) score += 12;
     if (containsAny(chunkText, ['tmall', 'jd', 'douyin', 'pinduoduo', 'amazon', 'shopify'])) score += 8;
+  } else if (templateTask === 'footfall-static-page') {
+    score += isFootfallTemplateCandidate(item) ? 10 : -12;
+    if (containsAny(chunkText, ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', 'mall zone', 'shopping zone', '商场分区'])) score += 12;
+    if (containsAny(chunkText, ['floor zone', 'room unit', '楼层分区', '单间', '铺位'])) score += 4;
   }
 
   if (!prompt) return score;
@@ -599,6 +697,10 @@ function finalizeDocuments(documents: ParsedDocument[], intent: RetrievalIntent,
   if (templateTask === 'order-static-page') {
     const orderDocs = documents.filter((item) => isOrderTemplateCandidate(item));
     return orderDocs.slice(0, limit);
+  }
+  if (templateTask === 'footfall-static-page') {
+    const footfallDocs = documents.filter((item) => isFootfallTemplateCandidate(item));
+    return (footfallDocs.length ? footfallDocs : documents).slice(0, limit);
   }
   if (templateTask === 'iot-static-page' || templateTask === 'iot-table') {
     const iotDocs = documents.filter((item) => isIotTemplateCandidate(item));

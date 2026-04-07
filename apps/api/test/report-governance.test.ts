@@ -46,6 +46,26 @@ test('report governance should expose defaults and honor storage overrides', asy
   assert.equal(requestAdapter?.viewId, 'platform');
   assert.equal(requestAdapter?.kind, 'page');
 
+  const footfallProfile = governanceModule.resolveDatasourceGovernanceProfile('广州AI', 'guangzhou-ai');
+  assert.equal(footfallProfile.id, 'footfall');
+
+  const footfallEnvelope = governanceModule.resolveTemplateEnvelopeProfile({
+    type: 'static-page',
+    label: 'Mall Footfall Page',
+    description: 'Static page for mall footfall summary',
+  });
+  assert.equal(footfallEnvelope?.id, 'static-page-footfall');
+
+  const footfallRequestAdapter = governanceModule.resolveRequestAdapterEnvelope({
+    key: 'guangzhou-ai',
+    label: '广州AI',
+    description: '商场客流知识库',
+    triggerKeywords: ['客流', '商场分区'],
+  }, 'table', '请按商场分区输出客流报表');
+  assert.equal(footfallRequestAdapter?.profileId, 'footfall');
+  assert.equal(footfallRequestAdapter?.viewId, 'mall-zone');
+  assert.equal(footfallRequestAdapter?.kind, 'table');
+
   const overrideFile = path.join(storageRoot, 'control-plane', 'report-governance.json');
   await fs.mkdir(path.dirname(overrideFile), { recursive: true });
   await fs.writeFile(overrideFile, JSON.stringify({

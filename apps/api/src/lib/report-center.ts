@@ -8,6 +8,7 @@ import type { ParsedDocument } from './document-parser.js';
 import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
 import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
+import { attachDatavizRendersToPage } from './report-dataviz.js';
 import {
   buildDefaultSystemTemplates,
   expandDatasourceGovernanceProfile,
@@ -127,7 +128,17 @@ export type ReportOutputRecord = {
     summary?: string;
     cards?: Array<{ label?: string; value?: string; note?: string }>;
     sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
-    charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;
+    charts?: Array<{
+      title?: string;
+      items?: Array<{ label?: string; value?: number }>;
+      render?: {
+        renderer?: string;
+        chartType?: string;
+        svg?: string;
+        alt?: string;
+        generatedAt?: string;
+      } | null;
+    }>;
   } | null;
   libraries?: Array<{ key?: string; label?: string }>;
   downloadUrl?: string;
@@ -452,6 +463,12 @@ async function attachReportAnalysis(record: ReportOutputRecord) {
   };
 }
 
+async function attachReportDataviz(record: ReportOutputRecord) {
+  if (!isNarrativeReportKind(record.kind) || !record.page) return record;
+  const page = await attachDatavizRendersToPage(record.page);
+  return page ? { ...record, page } : record;
+}
+
 function attachLocalReportAnalysis(record: ReportOutputRecord) {
   const analysis = buildLocalReportAnalysis(record);
   if (!analysis) return record;
@@ -770,7 +787,7 @@ function buildDynamicSectionBody(
   return latestSummary || `当前可用资料主要围绕 ${topicSummary || schemaSummary} 展开。`;
 }
 
-function buildDynamicPageRecord(
+async function buildDynamicPageRecord(
   record: ReportOutputRecord,
   group: ReportGroup | null,
   template: SharedReportTemplate | null,
@@ -907,7 +924,7 @@ function buildDynamicPageRecord(
     }))
     .filter((chart) => chart.items.length);
 
-  return attachLocalReportAnalysis({
+  return attachReportDataviz(attachLocalReportAnalysis({
     ...record,
     content: summary,
     summary: `${displayTemplateLabel} 已按当前知识库内容动态刷新。`,
@@ -930,7 +947,7 @@ function buildDynamicPageRecord(
       ...planMetadata,
       planUpdatedAt: new Date().toISOString(),
     },
-  });
+  }));
 }
 
 function resolveTemplateTypeFromKind(kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md'): ReportTemplateType | null {
@@ -1113,6 +1130,18 @@ function normalizeStoredPageSection(value: unknown) {
     : null;
 }
 
+function normalizeStoredPageChartRender(value: unknown) {
+  if (!isRecord(value)) return null;
+  const renderer = normalizeTextField(value.renderer);
+  const chartType = normalizeTextField(value.chartType);
+  const svg = normalizeTextField(value.svg);
+  const alt = normalizeTextField(value.alt);
+  const generatedAt = normalizeTextField(value.generatedAt);
+  return renderer || chartType || svg || alt || generatedAt
+    ? { renderer, chartType, svg, alt, generatedAt }
+    : null;
+}
+
 function normalizeStoredPageChart(value: unknown) {
   if (!isRecord(value)) return null;
   const title = normalizeTextField(value.title);
@@ -1131,8 +1160,9 @@ function normalizeStoredPageChart(value: unknown) {
       })
       .filter(Boolean) as Array<{ label?: string; value?: number }>
     : [];
+  const render = normalizeStoredPageChartRender(value.render);
 
-  return title || items.length ? { title, items } : null;
+  return title || items.length || render ? { title, items, render } : null;
 }
 
 function normalizeStoredPage(value: unknown): ReportOutputRecord['page'] | null {
@@ -1745,7 +1775,7 @@ export async function loadReportCenterStateWithOptions(options?: {
   const refreshDynamicPages = options?.refreshDynamicPages !== false;
   if (refreshDynamicPages && nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled)) {
     const documentState = await loadParsedDocuments(400, false);
-    nextOutputs = nextOutputs.map((item) => {
+    nextOutputs = await Promise.all(nextOutputs.map(async (item) => {
       if (!(item.kind === 'page' && item.dynamicSource?.enabled)) return item;
       const conceptMode = Boolean(item.dynamicSource?.conceptMode)
         || !String(item.dynamicSource?.templateKey || '').trim();
@@ -1759,7 +1789,12 @@ export async function loadReportCenterStateWithOptions(options?: {
       const group =
         resolveReportGroup(groups, item.groupKey)
         || resolveReportGroup(groups, item.groupLabel);
-      const refreshed = buildDynamicPageRecord(item, group || null, template || null, documentState.items as Array<Record<string, unknown>>);
+      const refreshed = await buildDynamicPageRecord(
+        item,
+        group || null,
+        template || null,
+        documentState.items as Array<Record<string, unknown>>,
+      );
       if (JSON.stringify({
         content: refreshed.content,
         summary: refreshed.summary,
@@ -1774,7 +1809,7 @@ export async function loadReportCenterStateWithOptions(options?: {
         refreshedChanged = true;
       }
       return refreshed;
-    });
+    }));
   }
 
   const persistFixups = options?.persistFixups !== false;
@@ -1843,7 +1878,7 @@ export async function createReportOutput(input: {
     }),
   };
 
-  const record = await attachReportAnalysis(baseRecord);
+  const record = await attachReportAnalysis(await attachReportDataviz(baseRecord));
 
   const nextOutputs = [record, ...state.outputs].slice(0, 100);
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
@@ -2189,7 +2224,7 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
     const nextPage = 'page' in normalized ? normalized.page || null : null;
     const nextFormat = 'format' in normalized ? normalized.format || record.format : record.format;
 
-    revisedBase = {
+    revisedBase = await attachReportDataviz({
       ...record,
       summary: `${record.templateLabel} 已根据自然语言要求更新。`,
       content: normalized.content,
@@ -2197,7 +2232,7 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
       page: nextPage,
       format: nextFormat,
       kind: record.kind,
-    };
+    });
   } catch {
     revisedBase = {
       ...record,

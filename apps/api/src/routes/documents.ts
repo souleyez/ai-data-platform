@@ -16,6 +16,7 @@ import {
   saveConfirmedDocumentClassifications,
   saveConfirmedDocumentGroups,
   saveIgnoredDocuments,
+  clearDocumentAnalysisFeedback,
   updateDocumentAnalysisResult,
 } from '../lib/document-route-services.js';
 import {
@@ -201,9 +202,16 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       label?: string;
       description?: string;
       permissionLevel?: number;
+      knowledgePagesEnabled?: boolean;
+      knowledgePagesMode?: 'none' | 'overview' | 'topics';
       extractionFieldSet?: string;
       extractionFallbackSchemaType?: string;
       extractionPreferredFieldKeys?: string[];
+      extractionRequiredFieldKeys?: string[];
+      extractionFieldAliases?: Record<string, string>;
+      extractionFieldPrompts?: Record<string, string>;
+      extractionFieldNormalizationRules?: Record<string, string[] | string>;
+      extractionFieldConflictStrategies?: Record<string, string>;
     };
 
     try {
@@ -211,9 +219,16 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         label: body.label,
         description: body.description,
         permissionLevel: body.permissionLevel,
+        knowledgePagesEnabled: body.knowledgePagesEnabled,
+        knowledgePagesMode: body.knowledgePagesMode,
         extractionFieldSet: body.extractionFieldSet,
         extractionFallbackSchemaType: body.extractionFallbackSchemaType,
         extractionPreferredFieldKeys: body.extractionPreferredFieldKeys,
+        extractionRequiredFieldKeys: body.extractionRequiredFieldKeys,
+        extractionFieldAliases: body.extractionFieldAliases,
+        extractionFieldPrompts: body.extractionFieldPrompts,
+        extractionFieldNormalizationRules: body.extractionFieldNormalizationRules,
+        extractionFieldConflictStrategies: body.extractionFieldConflictStrategies,
       });
       return {
         status: 'updated',
@@ -469,14 +484,38 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     };
 
     try {
-      const item = await updateDocumentAnalysisResult(id, body);
+      const result = await updateDocumentAnalysisResult(id, body);
       return {
         status: 'updated',
-        item,
+        item: result.item,
+        feedbackSnapshot: result.feedbackSnapshot,
+        libraryKnowledge: result.libraryKnowledge,
         message: '已更新解析结果并同步到知识记忆',
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'document update failed';
+      const code = message === 'document not found' ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/documents/:id/parse-feedback/clear', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { fieldName?: unknown };
+
+    try {
+      const result = await clearDocumentAnalysisFeedback(id, body);
+      return {
+        status: result.changed ? 'cleared' : 'unchanged',
+        feedbackSnapshot: result.snapshot,
+        clearedFieldCount: result.clearedFieldCount,
+        clearedLibraryCount: result.clearedLibraryCount,
+        message: result.changed
+          ? '已清理解析反馈并同步更新。'
+          : '当前没有可清理的解析反馈。',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'document feedback clear failed';
       const code = message === 'document not found' ? 404 : 400;
       return reply.code(code).send({ error: message });
     }

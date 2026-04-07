@@ -59,3 +59,19 @@ To clear the local token:
 ```powershell
 corepack pnpm local:home-token:clear
 ```
+
+## Local dataviz environment
+
+This repository keeps the `python-dataviz` virtual environment inside the project at `skills/python-dataviz/.venv`.
+
+Initialize it:
+
+```powershell
+corepack pnpm dataviz:setup
+```
+
+Verify that PNG and HTML chart export work:
+
+```powershell
+corepack pnpm dataviz:verify
+```

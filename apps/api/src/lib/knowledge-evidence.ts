@@ -1,4 +1,4 @@
-import type { ParsedDocument } from './document-parser.js';
+﻿import type { ParsedDocument } from './document-parser.js';
 import type { RetrievalResult } from './document-retrieval.js';
 
 type KnowledgeLibrary = { key: string; label: string };
@@ -32,6 +32,69 @@ function clampPositiveInt(value: number | undefined, fallback: number, max: numb
   return Math.max(1, Math.min(Math.floor(numeric), max));
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function formatAliasFieldObject(value: unknown, label: string, maxEntries: number) {
+  if (!isObject(value)) return [];
+  const compact = Object.entries(value)
+    .map(([entryKey, entryValue]) => `${entryKey}=${String(entryValue || '').trim()}`)
+    .filter((entry) => !entry.endsWith('='))
+    .slice(0, maxEntries);
+  return compact.length ? [`${label}: ${compact.join('; ')}`] : [];
+}
+
+function formatFieldTemplate(value: unknown) {
+  if (!isObject(value)) return [];
+  const fieldSet = toText(value.fieldSet);
+  const preferred = Array.isArray(value.preferredFieldKeys)
+    ? value.preferredFieldKeys.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const required = Array.isArray(value.requiredFieldKeys)
+    ? value.requiredFieldKeys.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const aliases = isObject(value.fieldAliases)
+    ? Object.entries(value.fieldAliases)
+      .map(([field, alias]) => `${field}->${String(alias || '').trim()}`)
+      .filter((entry) => !entry.endsWith('->'))
+      .slice(0, 8)
+    : [];
+  const prompts = isObject(value.fieldPrompts)
+    ? Object.entries(value.fieldPrompts)
+      .map(([field, prompt]) => `${field}:${String(prompt || '').trim()}`)
+      .filter((entry) => !entry.endsWith(':'))
+      .slice(0, 6)
+    : [];
+  const normalizationRules = isObject(value.fieldNormalizationRules)
+    ? Object.entries(value.fieldNormalizationRules)
+      .map(([field, entries]) => {
+        const rules = Array.isArray(entries)
+          ? entries.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, 3)
+          : [];
+        return rules.length ? `${field}=${rules.join(' ; ')}` : '';
+      })
+      .filter(Boolean)
+      .slice(0, 6)
+    : [];
+  const conflicts = isObject(value.fieldConflictStrategies)
+    ? Object.entries(value.fieldConflictStrategies)
+      .map(([field, strategy]) => `${field}:${String(strategy || '').trim()}`)
+      .filter((entry) => !entry.endsWith(':'))
+      .slice(0, 6)
+    : [];
+  const parts = [
+    fieldSet ? `fieldSet=${fieldSet}` : '',
+    preferred.length ? `preferred=${preferred.join(', ')}` : '',
+    required.length ? `required=${required.join(', ')}` : '',
+    aliases.length ? `aliases=${aliases.join('; ')}` : '',
+    prompts.length ? `prompts=${prompts.join(' | ')}` : '',
+    normalizationRules.length ? `normalization=${normalizationRules.join(' | ')}` : '',
+    conflicts.length ? `conflicts=${conflicts.join(' | ')}` : '',
+  ].filter(Boolean);
+  return parts.length ? [`fieldTemplate: ${parts.join(' | ')}`] : [];
+}
+
 function formatStructuredProfile(
   profile: ParsedDocument['structuredProfile'],
   options?: KnowledgeContextOptions,
@@ -41,27 +104,44 @@ function formatStructuredProfile(
   const maxEntries = clampPositiveInt(options?.maxStructuredProfileEntries, 8, 16);
   const maxArrayValues = clampPositiveInt(options?.maxStructuredArrayValues, 5, 8);
   const maxObjectEntries = clampPositiveInt(options?.maxStructuredObjectEntries, 4, 8);
+  const reservedKeys = new Set([
+    'fieldTemplate',
+    'fieldDetails',
+    'focusedFieldDetails',
+    'aliasFieldDetails',
+    'focusedFieldEntries',
+    'aliasFields',
+    'focusedAliasFields',
+    'focusedAliasFieldDetails',
+  ]);
 
-  return Object.entries(profile)
-    .flatMap(([key, value]) => {
+  const rows = [
+    ...formatFieldTemplate((profile as Record<string, unknown>).fieldTemplate),
+    ...formatAliasFieldObject((profile as Record<string, unknown>).focusedAliasFields, 'focusedAliases', maxObjectEntries),
+    ...formatAliasFieldObject((profile as Record<string, unknown>).aliasFields, 'aliasValues', maxObjectEntries),
+    ...Object.entries(profile).flatMap(([key, value]) => {
+      if (reservedKeys.has(key)) return [];
       if (Array.isArray(value)) {
-        const compact = value.map((entry) => String(entry || '').trim()).filter(Boolean).slice(0, maxArrayValues);
-        return compact.length ? [`${key}: ${compact.join('、')}`] : [];
+        const compact = value
+          .map((entry) => String(entry || '').trim())
+          .filter(Boolean)
+          .slice(0, maxArrayValues);
+        return compact.length ? [`${key}: ${compact.join('; ')}`] : [];
       }
-      if (value && typeof value === 'object') {
-        const compact = Object.entries(value as Record<string, unknown>)
+      if (isObject(value)) {
+        const compact = Object.entries(value)
           .map(([entryKey, entryValue]) => `${entryKey}:${String(entryValue || '').trim()}`)
           .filter((entry) => !entry.endsWith(':'))
           .slice(0, maxObjectEntries);
-        return compact.length ? [`${key}: ${compact.join('；')}`] : [];
+        return compact.length ? [`${key}: ${compact.join('; ')}`] : [];
       }
       const text = String(value || '').trim();
       return text ? [`${key}: ${text}`] : [];
-    })
-    .slice(0, maxEntries)
-    .join('\n');
-}
+    }),
+  ];
 
+  return rows.slice(0, maxEntries).join('\n');
+}
 function extractPathTimestamp(filePath: string) {
   const match = String(filePath || '').match(/(?:^|[\\/])(\d{13})(?:[-_.]|$)/);
   if (!match) return 0;
@@ -276,16 +356,16 @@ export function buildKnowledgeContext(
     const profile = formatStructuredProfile(item.structuredProfile, options);
     const summary = toText(item.summary).slice(0, summaryLength)
       || (includeExcerpt ? toText(item.excerpt).slice(0, summaryLength) : '')
-      || '无摘要';
+      || 'No summary';
 
     return [
-      `文档 ${index + 1}: ${item.title || item.name}`,
-      `类型：${item.schemaType || item.category || 'generic'}`,
-      `摘要：${summary}`,
-      profile ? `结构化重点：\n${profile}` : '',
-      claims.length ? `关键结论：\n${claims.map((text, claimIndex) => `${claimIndex + 1}. ${text}`).join('\n')}` : '',
+      `Document ${index + 1}: ${item.title || item.name}`,
+      `Type: ${item.schemaType || item.category || 'generic'}`,
+      `Summary: ${summary}`,
+      profile ? `Structured profile:\n${profile}` : '',
+      claims.length ? `Claims:\n${claims.map((text, claimIndex) => `${claimIndex + 1}. ${text}`).join('\n')}` : '',
       evidenceChunks.length
-        ? `关键证据：\n${evidenceChunks.map((text, evidenceIndex) => `${evidenceIndex + 1}. ${text}`).join('\n')}`
+        ? `Evidence:\n${evidenceChunks.map((text, evidenceIndex) => `${evidenceIndex + 1}. ${text}`).join('\n')}`
         : '',
     ]
       .filter(Boolean)
@@ -293,18 +373,18 @@ export function buildKnowledgeContext(
   });
 
   return [
-    `用户需求：${requestText}`,
-    `优先知识库：${libraries.map((item) => item.label).join('、') || '未明确'}`,
-    scope?.timeRange ? `时间范围：${scope.timeRange}` : '',
-    scope?.contentFocus ? `内容范围：${scope.contentFocus}` : '',
+    `User request: ${requestText}`,
+    `Priority libraries: ${libraries.map((item) => item.label).join(', ') || 'unspecified'}`,
+    scope?.timeRange ? `Time range: ${scope.timeRange}` : '',
+    scope?.contentFocus ? `Content focus: ${scope.contentFocus}` : '',
     '',
-    '优先参考的详细解析文档：',
+    'Detailed documents:',
     ...documentBlocks,
     '',
-    '高相关证据：',
+    'High-signal evidence:',
     ...evidence.map(
       (item: any, index: number) =>
-        `${index + 1}. ${item.item.title || item.item.name}\n证据：${String(item.chunkText || '').trim()}`,
+        `${index + 1}. ${item.item.title || item.item.name}\nEvidence: ${String(item.chunkText || '').trim()}`,
     ),
   ].filter(Boolean).join('\n\n');
 }
@@ -312,7 +392,7 @@ export function buildKnowledgeContext(
 export function buildLibraryFallbackRetrieval(scopedItems: ParsedDocument[]) {
   const documents = scopedItems.slice(0, 6).map((item) => ({
     ...item,
-    title: item.title || item.name || '未命名文档',
+    title: item.title || item.name || 'Untitled document',
   }));
 
   const evidenceMatches = scopedItems
@@ -330,3 +410,4 @@ export function buildLibraryFallbackRetrieval(scopedItems: ParsedDocument[]) {
 
   return { documents, evidenceMatches };
 }
+

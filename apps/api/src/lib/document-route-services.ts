@@ -6,6 +6,7 @@ export {
   saveConfirmedDocumentClassifications,
   saveAcceptedCategorySuggestions,
   saveIgnoredDocuments,
+  clearDocumentAnalysisFeedback,
   updateDocumentAnalysisResult,
 } from './document-route-mutation-services.js';
 

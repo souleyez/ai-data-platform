@@ -65,6 +65,7 @@ type ReportPlanTaskHintInput = {
 const RESUME_HINT_KEYWORDS = ['resume', 'cv', '简历', '候选人', '人才'];
 const BID_HINT_KEYWORDS = ['bids', 'bid', 'tender', 'rfp', 'proposal', '标书', '招标', '投标'];
 const ORDER_HINT_KEYWORDS = ['order', 'orders', '订单', '销售', '销售', '库存', '备货', '电商'];
+const FOOTFALL_HINT_KEYWORDS = ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区', '单间', '铺位', '广州ai'];
 const FORMULA_HINT_KEYWORDS = ['formula', '配方', '奶粉', '菌株', '益生菌'];
 const PAPER_HINT_KEYWORDS = ['paper', 'papers', 'study', 'studies', 'journal', 'research', '论文', '学术论文', '研究', '期刊'];
 const CONTRACT_HINT_KEYWORDS = ['contract', 'contracts', '合同', '条款', '法务'];
@@ -120,6 +121,7 @@ export function inferReportPlanTaskHint(input: ReportPlanTaskHintInput): Knowled
   if (hasKeyword(text, RESUME_HINT_KEYWORDS)) return 'resume-comparison';
   if (hasKeyword(text, BID_HINT_KEYWORDS)) return input.kind === 'table' ? 'bids-table' : 'bids-static-page';
   if (hasKeyword(text, ORDER_HINT_KEYWORDS)) return 'order-static-page';
+  if (hasKeyword(text, FOOTFALL_HINT_KEYWORDS)) return 'footfall-static-page';
   if (hasKeyword(text, FORMULA_HINT_KEYWORDS)) return input.kind === 'table' ? 'formula-table' : 'formula-static-page';
   if (hasKeyword(text, PAPER_HINT_KEYWORDS)) return input.kind === 'table' ? 'paper-table' : 'paper-static-page';
   if (hasKeyword(text, CONTRACT_HINT_KEYWORDS)) return 'contract-risk';
@@ -137,6 +139,8 @@ function buildFallbackSections(templateTaskHint?: KnowledgeTemplateTaskHint | nu
       return ['研究概览', '核心发现', '证据质量', '行动建议', 'AI综合分析'];
     case 'order-static-page':
       return ['经营总览', '渠道结构', 'SKU与品类焦点', '库存与补货', '异常波动解释', '行动建议', 'AI综合分析'];
+    case 'footfall-static-page':
+      return ['客流总览', '商场分区贡献', '重点分区对比', '商场动线提示', '行动建议', 'AI综合分析'];
     case 'iot-static-page':
       return ['方案概览', '核心模块', '接口与集成', '交付与风险', 'AI综合分析'];
     default:
@@ -158,6 +162,8 @@ function buildFallbackTitle(
       return '客户汇报型论文综述页';
     case 'order-static-page':
       return '客户汇报型多渠道经营驾驶舱';
+    case 'footfall-static-page':
+      return '客户汇报型商场客流分区驾驶舱';
     case 'iot-static-page':
       return '客户汇报型 IOT 方案静态页';
     default:
@@ -207,6 +213,8 @@ function buildObjective(
       return `Create a readable research insight page from ${primaryLabel}, turning paper evidence into a clear decision-oriented overview.`;
     case 'order-static-page':
       return `Create a multi-channel, multi-SKU operating cockpit from ${primaryLabel}, highlighting channel mix, SKU concentration, inventory health, and replenishment priorities.`;
+    case 'footfall-static-page':
+      return `Create a mall footfall summary page from ${primaryLabel}, aggregate strictly at mall-zone level, and avoid expanding floor-zone or room-unit detail in the presentation layer.`;
     case 'iot-static-page':
       return `Create a solution overview page from ${primaryLabel}, showing modules, integrations, delivery shape, and business value.`;
     default:
@@ -244,6 +252,13 @@ function buildCardPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | unde
         { label: '高风险SKU', purpose: 'Surface SKUs with stockout, overstock, or margin pressure.' },
         { label: '库存健康', purpose: 'Summarize whether the inventory structure can safely support the next cycle.' },
         { label: '补货优先级', purpose: 'Show the most urgent replenishment or allocation actions.' },
+      ];
+    case 'footfall-static-page':
+      return [
+        { label: '总客流', purpose: 'Show the total recognized visitor volume across the matched footfall reports.' },
+        { label: '商场分区数', purpose: 'Show how many mall zones are included after aggregation.' },
+        { label: '头部分区', purpose: 'Surface the highest-footfall mall zone at the summary layer.' },
+        { label: '展示口径', purpose: 'Make it explicit that the page stays at mall-zone level only.' },
       ];
     case 'iot-static-page':
       return [
@@ -285,6 +300,11 @@ function buildChartPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | und
         { title: 'SKU动销/库存风险矩阵', purpose: 'Show which SKUs are both important and operationally fragile.' },
         { title: '月度GMV与库存指数联动', purpose: 'Show whether growth and inventory health are moving together or drifting apart.' },
         { title: '补货优先级队列', purpose: 'Show which replenishment actions should be handled first.' },
+      ];
+    case 'footfall-static-page':
+      return [
+        { title: '商场分区客流贡献', purpose: 'Show how total footfall is distributed across mall zones.' },
+        { title: '重点分区客流梯队', purpose: 'Show the relative ranking of leading mall zones without exploding floor or room detail.' },
       ];
     case 'iot-static-page':
       return [

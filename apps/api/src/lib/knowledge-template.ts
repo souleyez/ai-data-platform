@@ -20,6 +20,7 @@ export type KnowledgeTemplateTaskHint =
   | 'formula-static-page'
   | 'bids-table'
   | 'bids-static-page'
+  | 'footfall-static-page'
   | 'paper-table'
   | 'paper-static-page'
   | 'order-static-page'
@@ -65,6 +66,7 @@ type IotRequestView = 'generic' | 'scenario' | 'module' | 'value';
 const RESUME_KEYWORDS = ['resume', 'cv', '简历', '候选人', '人才'];
 const BID_KEYWORDS = ['bids', 'bid', 'tender', 'rfp', 'proposal', '标书', '招标', '投标'];
 const ORDER_KEYWORDS = ['order', 'orders', '订单', '销量', '销售', '库存', '备货', '电商'];
+const FOOTFALL_KEYWORDS = ['footfall', 'visitor', 'visitors', 'mall traffic', '客流', '人流', '商场分区', '楼层分区', '单间', '铺位', '广州ai'];
 const FORMULA_KEYWORDS = ['formula', '配方', '奶粉', '菌株', '益生菌'];
 const PAPER_KEYWORDS = ['paper', 'papers', 'study', 'studies', 'journal', 'research', '论文', '学术论文', '研究', '期刊'];
 const CONTRACT_KEYWORDS = ['contract', 'contracts', '合同', '条款', '法务'];
@@ -122,6 +124,10 @@ function isOrderGroup(group: ReportGroup) {
   return hasAnyKeyword(buildGroupText(group), ORDER_KEYWORDS);
 }
 
+function isFootfallGroup(group: ReportGroup) {
+  return hasAnyKeyword(buildGroupText(group), FOOTFALL_KEYWORDS);
+}
+
 function isFormulaGroup(group: ReportGroup) {
   return hasAnyKeyword(buildGroupText(group), FORMULA_KEYWORDS);
 }
@@ -150,6 +156,10 @@ function looksLikeOrderTemplate(template: SharedReportTemplate) {
   return hasAnyKeyword(buildTemplateText(template), ORDER_KEYWORDS);
 }
 
+function looksLikeFootfallTemplate(template: SharedReportTemplate) {
+  return hasAnyKeyword(buildTemplateText(template), FOOTFALL_KEYWORDS);
+}
+
 function looksLikeFormulaTemplate(template: SharedReportTemplate) {
   return hasAnyKeyword(buildTemplateText(template), FORMULA_KEYWORDS);
 }
@@ -176,6 +186,7 @@ function scoreTemplateForGroup(template: SharedReportTemplate, group: ReportGrou
   if (isResumeGroup(group) && looksLikeResumeTemplate(template)) score += 120;
   if (isBidGroup(group) && looksLikeBidTemplate(template)) score += 120;
   if (isOrderGroup(group) && looksLikeOrderTemplate(template)) score += 120;
+  if (isFootfallGroup(group) && looksLikeFootfallTemplate(template)) score += 120;
   if (isFormulaGroup(group) && looksLikeFormulaTemplate(template)) score += 120;
   if (isPaperGroup(group) && looksLikePaperTemplate(template)) score += 120;
   if (isContractGroup(group) && looksLikeContractTemplate(template)) score += 120;
@@ -969,6 +980,7 @@ export function inferKnowledgeTemplateTaskHintFromLibraries(
   if (hasAnyKeyword(text, RESUME_KEYWORDS)) return 'resume-comparison';
   if (hasAnyKeyword(text, BID_KEYWORDS)) return kind === 'page' ? 'bids-static-page' : 'bids-table';
   if (hasAnyKeyword(text, ORDER_KEYWORDS)) return 'order-static-page';
+  if (hasAnyKeyword(text, FOOTFALL_KEYWORDS)) return 'footfall-static-page';
   if (hasAnyKeyword(text, FORMULA_KEYWORDS)) return kind === 'page' ? 'formula-static-page' : 'formula-table';
   if (hasAnyKeyword(text, PAPER_KEYWORDS)) return kind === 'page' ? 'paper-static-page' : 'paper-table';
   if (hasAnyKeyword(text, CONTRACT_KEYWORDS)) return 'contract-risk';
@@ -1107,6 +1119,7 @@ export function inferTemplateTaskHint(
   if (isResumeGroup(primary.group)) return 'resume-comparison';
   if (isBidGroup(primary.group)) return kind === 'page' ? 'bids-static-page' : 'bids-table';
   if (isOrderGroup(primary.group)) return 'order-static-page';
+  if (isFootfallGroup(primary.group)) return 'footfall-static-page';
   if (isFormulaGroup(primary.group)) return kind === 'page' ? 'formula-static-page' : 'formula-table';
   if (isPaperGroup(primary.group)) return kind === 'page' ? 'paper-static-page' : 'paper-table';
   if (isContractGroup(primary.group)) return 'contract-risk';

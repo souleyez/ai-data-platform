@@ -185,7 +185,7 @@ function isEligibleVectorCandidate(item: ParsedDocument) {
   }
 
   if (hasAssignedLibrary(item)) return true;
-  if ((item.schemaType || 'generic') === 'report' && item.bizCategory !== 'order') return false;
+  if ((item.schemaType || 'generic') === 'report' && !['order', 'footfall'].includes(String(item.bizCategory || ''))) return false;
   if (hasStrongBusinessSchema(item) && hasHighQualitySignals(item)) return true;
   return false;
 }
@@ -412,6 +412,29 @@ function scoreRecordByTokens(record: DocumentVectorRecord, promptTokens: string[
   return score * (kindWeight[record.kind] || 1);
 }
 
+function scoreAliasFitForRecord(record: DocumentVectorRecord, promptTokens: string[]) {
+  if (record.kind !== 'profile-field' || !promptTokens.length) return 0;
+
+  const aliasNames = Array.isArray(record.metadata?.profileAliases)
+    ? (record.metadata.profileAliases as unknown[]).map((entry) => String(entry || '').toLowerCase()).filter(Boolean)
+    : [];
+  const aliasValues = Array.isArray(record.metadata?.profileAliasValues)
+    ? (record.metadata.profileAliasValues as unknown[]).map((entry) => String(entry || '').toLowerCase()).filter(Boolean)
+    : [];
+  if (!aliasNames.length && !aliasValues.length) return 0;
+
+  const aliasNameText = aliasNames.join(' ');
+  const aliasValueText = aliasValues.join(' ');
+  let score = 0;
+
+  for (const token of promptTokens) {
+    if (aliasNameText.includes(token)) score += token.length >= 4 ? 10 : 5;
+    if (aliasValueText.includes(token)) score += token.length >= 4 ? 6 : 3;
+  }
+
+  return score;
+}
+
 function scoreTemplateTaskFit(record: DocumentVectorRecord, templateTask?: string) {
   const task = String(templateTask || '').trim().toLowerCase();
   if (!task) return 0;
@@ -458,6 +481,7 @@ function scoreIntentFitForRecord(record: DocumentVectorRecord, intent?: string) 
   if (normalizedIntent === 'formula' && (record.schemaType === 'paper' || record.schemaType === 'technical')) score -= 6;
   if (normalizedIntent === 'contract' && record.schemaType !== 'contract') score -= 8;
   if (normalizedIntent === 'resume' && record.schemaType !== 'resume') score -= 8;
+  if (normalizedIntent === 'footfall' && !metadataText.includes('footfall') && !metadataText.includes('客流')) score -= 8;
 
   return score;
 }
@@ -475,6 +499,7 @@ export async function searchDocumentVectorIndex(
 
   for (const record of records) {
     const score = scoreRecordByTokens(record, promptTokens)
+      + scoreAliasFitForRecord(record, promptTokens)
       + scoreIntentFitForRecord(record, options?.intent)
       + scoreTemplateTaskFit(record, options?.templateTask);
     if (score <= 0) continue;
