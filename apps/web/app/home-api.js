@@ -61,6 +61,89 @@ export async function updateBot(botId, payload) {
   return parseApiResponse(response, 'update bot failed');
 }
 
+export async function fetchChannelDirectorySources(botId) {
+  const response = await fetch(buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources`), {
+    cache: 'no-store',
+  });
+  return parseApiResponse(response, 'load channel directory sources failed');
+}
+
+export async function createChannelDirectorySource(botId, payload) {
+  const response = await fetch(buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'create channel directory source failed');
+}
+
+export async function updateChannelDirectorySource(botId, sourceId, payload) {
+  const response = await fetch(buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'update channel directory source failed');
+}
+
+export async function syncChannelDirectorySource(botId, sourceId) {
+  const response = await fetch(buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/sync`), {
+    method: 'POST',
+  });
+  return parseApiResponse(response, 'sync channel directory source failed');
+}
+
+export async function searchChannelDirectorySubjects(botId, sourceId, options = {}) {
+  const query = new URLSearchParams();
+  if (options.query) query.set('q', options.query);
+  if (options.type) query.set('type', options.type);
+  const response = await fetch(
+    buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/subjects${query.toString() ? `?${query}` : ''}`),
+    { cache: 'no-store' },
+  );
+  return parseApiResponse(response, 'search channel directory subjects failed');
+}
+
+export async function fetchChannelDirectorySubjectDetail(botId, sourceId, subjectType, subjectId) {
+  const response = await fetch(
+    buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/subjects/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}`),
+    { cache: 'no-store' },
+  );
+  return parseApiResponse(response, 'load channel directory subject failed');
+}
+
+export async function fetchChannelDirectoryPolicies(botId, sourceId) {
+  const response = await fetch(
+    buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/access-policies`),
+    { cache: 'no-store' },
+  );
+  return parseApiResponse(response, 'load channel directory policies failed');
+}
+
+export async function patchChannelDirectoryPolicies(botId, sourceId, payload) {
+  const response = await fetch(
+    buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/access-policies`),
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+  return parseApiResponse(response, 'patch channel directory policies failed');
+}
+
+export async function previewChannelDirectoryAccess(botId, sourceId, payload) {
+  const response = await fetch(
+    buildApiUrl(`/api/bots/${encodeURIComponent(botId)}/channel-directory-sources/${encodeURIComponent(sourceId)}/access-preview`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+  return parseApiResponse(response, 'preview channel directory access failed');
+}
+
 export async function uploadDocuments(formData) {
   const response = await fetch(buildApiUrl('/api/documents/upload'), {
     method: 'POST',

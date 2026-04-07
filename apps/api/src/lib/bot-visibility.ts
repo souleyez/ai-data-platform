@@ -3,7 +3,7 @@ import type { BotDefinition } from './bot-definitions.js';
 import type { ParsedDocument } from './document-parser.js';
 import type { OpenClawMemoryDocumentState } from './openclaw-memory-changes.js';
 
-export function buildVisibleLibraryKeySet(bot: BotDefinition, libraries: DocumentLibrary[]) {
+export function buildVisibleLibraryKeySetFromBot(bot: BotDefinition, libraries: DocumentLibrary[]) {
   const explicitKeys = new Set(bot.visibleLibraryKeys);
   const hasExplicitFilter = explicitKeys.size > 0;
   const keys = new Set<string>();
@@ -17,6 +17,10 @@ export function buildVisibleLibraryKeySet(bot: BotDefinition, libraries: Documen
   }
 
   return keys;
+}
+
+export function buildVisibleLibraryKeySet(bot: BotDefinition, libraries: DocumentLibrary[]) {
+  return buildVisibleLibraryKeySetFromBot(bot, libraries);
 }
 
 function isFailedDocument(input: { parseStatus?: string; detailParseStatus?: string; availability?: string }) {

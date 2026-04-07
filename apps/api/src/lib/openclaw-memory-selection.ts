@@ -140,6 +140,7 @@ export function selectOpenClawMemoryDocumentCandidatesFromState(input: {
   requestText: string;
   libraries?: KnowledgeLibrary[];
   limit?: number;
+  effectiveVisibleLibraryKeys?: string[];
 }): OpenClawMemorySelection {
   const stateDocuments = Object.values(input.state?.documents || {});
   if (!stateDocuments.length) {
@@ -150,8 +151,15 @@ export function selectOpenClawMemoryDocumentCandidatesFromState(input: {
   const tokens = tokenizeText(input.requestText);
   const recentSignal = hasRecentSignal(input.requestText);
   const libraryKeySet = new Set((input.libraries || []).map((item) => String(item.key || '').trim()).filter(Boolean));
+  const effectiveVisibleLibraryKeySet = Array.isArray(input.effectiveVisibleLibraryKeys)
+    ? new Set(input.effectiveVisibleLibraryKeys.map((item) => String(item || '').trim()).filter(Boolean))
+    : null;
 
   const candidates = stateDocuments
+    .filter((document) => (
+      !effectiveVisibleLibraryKeySet
+      || document.libraryKeys.some((key) => effectiveVisibleLibraryKeySet.has(key))
+    ))
     .map((document) => ({
       ...document,
       score: scoreDocumentCandidate({
@@ -176,9 +184,21 @@ export function selectOpenClawMemoryDocumentCandidatesFromState(input: {
   };
 }
 
-export async function loadOpenClawMemorySelectionState(botId?: string) {
-  if (botId) {
-    return loadBotMemorySelectionState(botId);
+export async function loadOpenClawMemorySelectionState(input?: string | {
+  botId?: string;
+  forceGlobalState?: boolean;
+}) {
+  const options = typeof input === 'string'
+    ? { botId: input, forceGlobalState: false }
+    : {
+        botId: input?.botId,
+        forceGlobalState: input?.forceGlobalState === true,
+      };
+
+  if (options.botId) {
+    return loadBotMemorySelectionState(options.botId, {
+      forceGlobalState: options.forceGlobalState,
+    });
   }
   const { data } = await readRuntimeStateJson<OpenClawMemoryState | null>({
     filePath: STATE_FILE,
@@ -197,13 +217,19 @@ export async function selectOpenClawMemoryDocumentCandidates(input: {
   libraries?: KnowledgeLibrary[];
   limit?: number;
   botId?: string;
+  forceGlobalState?: boolean;
+  effectiveVisibleLibraryKeys?: string[];
 }) {
-  const state = await loadOpenClawMemorySelectionState(input.botId);
+  const state = await loadOpenClawMemorySelectionState({
+    botId: input.botId,
+    forceGlobalState: input.forceGlobalState,
+  });
   return selectOpenClawMemoryDocumentCandidatesFromState({
     state,
     requestText: input.requestText,
     libraries: input.libraries,
     limit: input.limit,
+    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
 }
 

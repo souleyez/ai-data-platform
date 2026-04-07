@@ -14,6 +14,7 @@ export type BotChannelBinding = {
   externalBotId?: string;
   tenantId?: string;
   routeKey?: string;
+  directorySourceId?: string;
 };
 
 export type BotDefinition = {
@@ -97,6 +98,7 @@ function normalizeChannelBinding(value: unknown): BotChannelBinding | null {
     externalBotId: normalizeText(source.externalBotId) || undefined,
     tenantId: normalizeText(source.tenantId) || undefined,
     routeKey: normalizeText(source.routeKey) || undefined,
+    directorySourceId: normalizeText(source.directorySourceId) || undefined,
   };
 }
 

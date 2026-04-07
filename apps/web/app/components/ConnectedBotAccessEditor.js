@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import {
+  createChannelDirectorySource,
+  fetchChannelDirectorySources,
+  syncChannelDirectorySource,
+  updateChannelDirectorySource,
+} from '../home-api';
 import { filterConnectedBots } from './ConnectedBotsSummary';
+import ExternalDirectorySourceCard from './ExternalDirectorySourceCard';
+import ExternalUserAccessPanel from './ExternalUserAccessPanel';
 
 const CHANNEL_LABELS = {
   web: '工作台',
@@ -27,6 +35,16 @@ function buildDraft(item) {
       : 0,
     visibleLibraryKeys: Array.isArray(item?.visibleLibraryKeys) ? item.visibleLibraryKeys : [],
     isDefault: item?.isDefault === true,
+    channelBindings: Array.isArray(item?.channelBindings)
+      ? item.channelBindings.map((binding) => ({
+          channel: binding?.channel,
+          enabled: binding?.enabled !== false,
+          routeKey: String(binding?.routeKey || ''),
+          tenantId: String(binding?.tenantId || ''),
+          externalBotId: String(binding?.externalBotId || ''),
+          directorySourceId: String(binding?.directorySourceId || ''),
+        }))
+      : [],
   };
 }
 
@@ -63,6 +81,8 @@ export default function ConnectedBotAccessEditor({
   const [savingId, setSavingId] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [sourcesByBot, setSourcesByBot] = useState({});
+  const [expandedAccessPanel, setExpandedAccessPanel] = useState('');
 
   useEffect(() => {
     const nextDrafts = {};
@@ -71,6 +91,53 @@ export default function ConnectedBotAccessEditor({
     }
     setDrafts(nextDrafts);
   }, [items]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSources() {
+      if (!manageEnabled || !connectedBots.length) {
+        if (!cancelled) setSourcesByBot({});
+        return;
+      }
+      const nextEntries = await Promise.all(connectedBots.map(async (item) => {
+        try {
+          const payload = await fetchChannelDirectorySources(item.id);
+          return [item.id, Array.isArray(payload?.items) ? payload.items : []];
+        } catch {
+          return [item.id, []];
+        }
+      }));
+      if (!cancelled) {
+        setSourcesByBot(Object.fromEntries(nextEntries));
+      }
+    }
+    void loadSources();
+    return () => {
+      cancelled = true;
+    };
+  }, [connectedBots, manageEnabled]);
+
+  function getDraftBinding(itemId, channel) {
+    const bindings = Array.isArray(drafts[itemId]?.channelBindings) ? drafts[itemId].channelBindings : [];
+    return bindings.find((binding) => binding?.channel === channel) || null;
+  }
+
+  function updateDraftBinding(itemId, channel, nextBinding) {
+    setDrafts((prev) => {
+      const draft = prev[itemId] || buildDraft(connectedBots.find((item) => item.id === itemId));
+      const bindings = Array.isArray(draft?.channelBindings) ? [...draft.channelBindings] : [];
+      const index = bindings.findIndex((binding) => binding?.channel === channel);
+      if (index >= 0) bindings[index] = nextBinding;
+      else bindings.push(nextBinding);
+      return {
+        ...prev,
+        [itemId]: {
+          ...draft,
+          channelBindings: bindings,
+        },
+      };
+    });
+  }
 
   async function handleSave(item) {
     const draft = drafts[item.id];
@@ -84,6 +151,7 @@ export default function ConnectedBotAccessEditor({
         libraryAccessLevel: Math.max(0, Math.floor(Number(draft.libraryAccessLevel || 0))),
         visibleLibraryKeys: Array.isArray(draft.visibleLibraryKeys) ? draft.visibleLibraryKeys : [],
         isDefault: draft.isDefault === true,
+        channelBindings: Array.isArray(draft.channelBindings) ? draft.channelBindings : [],
       });
       setNotice(`已更新机器人：${item.name || item.id}`);
     } catch (saveError) {
@@ -91,6 +159,39 @@ export default function ConnectedBotAccessEditor({
     } finally {
       setSavingId('');
     }
+  }
+
+  async function reloadSources(botId) {
+    try {
+      const payload = await fetchChannelDirectorySources(botId);
+      setSourcesByBot((prev) => ({
+        ...prev,
+        [botId]: Array.isArray(payload?.items) ? payload.items : [],
+      }));
+    } catch {
+      setSourcesByBot((prev) => ({
+        ...prev,
+        [botId]: [],
+      }));
+    }
+  }
+
+  async function handleCreateSource(botId, payload) {
+    const result = await createChannelDirectorySource(botId, payload);
+    await reloadSources(botId);
+    return result?.item || result;
+  }
+
+  async function handleUpdateSource(botId, sourceId, payload) {
+    const result = await updateChannelDirectorySource(botId, sourceId, payload);
+    await reloadSources(botId);
+    return result?.item || result;
+  }
+
+  async function handleSyncSource(botId, sourceId) {
+    const result = await syncChannelDirectorySource(botId, sourceId);
+    await reloadSources(botId);
+    return result;
   }
 
   if (!connectedBots.length) return null;
@@ -207,6 +308,43 @@ export default function ConnectedBotAccessEditor({
                   <div className="bot-config-subtle">当前没有可选文档库。</div>
                 )}
               </div>
+
+              {(Array.isArray(item?.channelBindings) ? item.channelBindings : [])
+                .filter((binding) => binding?.enabled !== false && binding?.channel !== 'web')
+                .map((binding) => {
+                  const draftBinding = getDraftBinding(item.id, binding.channel) || {
+                    ...binding,
+                    directorySourceId: String(binding?.directorySourceId || ''),
+                  };
+                  const sources = Array.isArray(sourcesByBot[item.id]) ? sourcesByBot[item.id] : [];
+                  const activeSource = sources.find((source) => source?.id === draftBinding.directorySourceId) || null;
+                  const panelKey = `${item.id}:${binding.channel}`;
+                  return (
+                    <div key={panelKey}>
+                      <ExternalDirectorySourceCard
+                        botId={item.id}
+                        channelLabel={CHANNEL_LABELS[binding.channel] || binding.channel}
+                        binding={draftBinding}
+                        source={activeSource}
+                        existingSources={sources}
+                        manageEnabled={manageEnabled}
+                        onBindingChange={(nextBinding) => updateDraftBinding(item.id, binding.channel, nextBinding)}
+                        onCreateSource={(payload) => handleCreateSource(item.id, payload)}
+                        onUpdateSource={(sourceId, payload) => handleUpdateSource(item.id, sourceId, payload)}
+                        onSyncSource={(sourceId) => handleSyncSource(item.id, sourceId)}
+                        onOpenAccessPanel={() => setExpandedAccessPanel((prev) => (prev === panelKey ? '' : panelKey))}
+                      />
+                      {expandedAccessPanel === panelKey && draftBinding.directorySourceId ? (
+                        <ExternalUserAccessPanel
+                          botId={item.id}
+                          sourceId={draftBinding.directorySourceId}
+                          libraries={sortedLibraries}
+                          manageEnabled={manageEnabled}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
             </article>
           );
         })}

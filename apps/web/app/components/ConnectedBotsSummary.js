@@ -49,6 +49,22 @@ function summarizeVisibleLibraries(item, libraries = []) {
   return `${labels.slice(0, 3).join(' / ')} 等 ${labels.length} 个库`;
 }
 
+function summarizeExternalDirectorySources(item) {
+  const sources = Array.isArray(item?.externalDirectorySources) ? item.externalDirectorySources : [];
+  if (!sources.length) return '未启用外部用户映射';
+  const active = sources.filter((source) => source?.enabled !== false);
+  if (!active.length) return '外部用户映射已配置但未启用';
+  const labels = active.map((source) => {
+    const status = source?.syncStatus?.status || 'idle';
+    const statusLabel = status === 'success'
+      ? '最近同步成功'
+      : (status === 'error' ? '最近同步失败' : '未同步');
+    return `${source.id} · ${statusLabel}`;
+  });
+  if (labels.length <= 2) return labels.join(' / ');
+  return `${labels.slice(0, 2).join(' / ')} 等 ${labels.length} 个映射`;
+}
+
 export function filterConnectedBots(items = []) {
   return (Array.isArray(items) ? items : []).filter((item) => (
     item?.enabled !== false && getConnectedBindings(item).length > 0
@@ -103,6 +119,10 @@ export default function ConnectedBotsSummary({
             <div className="connected-bot-guidance">
               <span>指定文档库权限</span>
               <strong>{summarizeVisibleLibraries(item, libraries)}</strong>
+            </div>
+            <div className="connected-bot-guidance">
+              <span>外部用户映射</span>
+              <strong>{summarizeExternalDirectorySources(item)}</strong>
             </div>
           </article>
         );

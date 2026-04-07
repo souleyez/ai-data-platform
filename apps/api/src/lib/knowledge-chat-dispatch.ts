@@ -16,6 +16,7 @@ import {
 import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
+import type { ResolvedChannelAccess } from './channel-access-resolver.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
@@ -95,14 +96,21 @@ export async function runGeneralKnowledgeAwareChat(input: {
   systemContextBlocks?: string[];
   skipTemplateConfirmation?: boolean;
   botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
+  accessContext?: ResolvedChannelAccess | null;
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
-  const memoryState = await loadOpenClawMemorySelectionState(input.botDefinition?.id);
+  const useExternalScopedMemory = input.accessContext?.source === 'external-directory';
+  const memoryState = await loadOpenClawMemorySelectionState({
+    botId: input.botDefinition?.id,
+    forceGlobalState: useExternalScopedMemory,
+  });
   const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
     state: memoryState,
     requestText,
     limit: 5,
+    effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
   });
   const supply = await prepareKnowledgeSupply({
     requestText,
@@ -111,6 +119,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     evidenceLimit: 6,
     preferredDocumentIds: memorySelection.documentIds,
     botDefinition: input.botDefinition,
+    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
 
   const knowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
@@ -170,7 +179,10 @@ export async function runGeneralKnowledgeAwareChat(input: {
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
-      visibleLibraries: input.botDefinition?.visibleLibraryKeys || [],
+      visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
+        ? input.effectiveVisibleLibraryKeys
+        : (input.botDefinition?.visibleLibraryKeys || []),
+      accessContext: input.accessContext || null,
     },
       conversationState: null,
       routeKind: 'template_confirmation',
@@ -205,7 +217,10 @@ export async function runGeneralKnowledgeAwareChat(input: {
       nativeSearchPreferred: true,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
-      visibleLibraries: input.botDefinition?.visibleLibraryKeys || [],
+      visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
+        ? input.effectiveVisibleLibraryKeys
+        : (input.botDefinition?.visibleLibraryKeys || []),
+      accessContext: input.accessContext || null,
     },
     conversationState: null,
     routeKind: 'general',

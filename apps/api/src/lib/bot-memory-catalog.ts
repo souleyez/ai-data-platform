@@ -84,14 +84,19 @@ export async function refreshBotMemoryCatalogs(globalState?: OpenClawMemoryState
   return { botCount: enabledBots.length };
 }
 
-export async function loadBotMemorySelectionState(botId?: string) {
+export async function loadBotMemorySelectionState(
+  botId?: string,
+  options?: {
+    forceGlobalState?: boolean;
+  },
+) {
   const bot = await getBotDefinition(botId);
   const [globalState, libraries] = await Promise.all([
     loadGlobalState(),
     loadDocumentLibraries(),
   ]);
   if (!globalState) return null;
-  if (!bot) return globalState;
+  if (options?.forceGlobalState || !bot) return globalState;
 
   const fileState = await readJsonFile<OpenClawMemoryState>(getBotStateFile(bot.id));
   return fileState || buildBotScopedMemoryState(bot, globalState, buildVisibleLibraryKeySet(bot, libraries));

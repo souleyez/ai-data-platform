@@ -473,6 +473,7 @@ async function resolveKnowledgeScope(
   contentFocus?: string,
   preferredDocumentIds?: string[],
   botDefinition?: BotDefinition | null,
+  effectiveVisibleLibraryKeys?: string[],
 ) {
   const [documentLibraries, documentState] = await Promise.all([
     loadDocumentLibraries(),
@@ -483,12 +484,25 @@ async function resolveKnowledgeScope(
       ? preferredDocumentIds.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
   );
-  const visibleLibraries = botDefinition
+  const baseVisibleLibraries = botDefinition
     ? filterLibrariesForBot(botDefinition, documentLibraries)
     : documentLibraries;
-  const visibleItems = botDefinition
+  const baseVisibleItems = botDefinition
     ? filterDocumentsForBot(botDefinition, documentState.items, documentLibraries)
     : documentState.items;
+  const effectiveVisibleLibrarySet = Array.isArray(effectiveVisibleLibraryKeys)
+    ? new Set(effectiveVisibleLibraryKeys.map((item) => String(item || '').trim()).filter(Boolean))
+    : null;
+  const visibleLibraries = effectiveVisibleLibrarySet
+    ? baseVisibleLibraries.filter((library) => effectiveVisibleLibrarySet.has(library.key))
+    : baseVisibleLibraries;
+  const visibleItems = effectiveVisibleLibrarySet
+    ? baseVisibleItems.filter((item) => visibleLibraries.some((library) => documentMatchesLibrary(item, library)))
+    : baseVisibleItems;
+
+  if (effectiveVisibleLibrarySet && !visibleLibraries.length) {
+    return { libraries: [], scopedItems: [] };
+  }
 
   const preferredKeys = new Set(preferredLibraries.map((item) => item.key));
   const preferredLabels = new Set(preferredLibraries.map((item) => item.label));
@@ -573,6 +587,7 @@ export async function prepareKnowledgeScope(input: {
   contentFocus?: string;
   preferredDocumentIds?: string[];
   botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
 }): Promise<KnowledgeScopeState> {
   const knowledgeChatHistory = buildKnowledgeChatHistory(input.chatHistory, input.requestText);
   const preferredLibraries = normalizePreferredLibraries(input.preferredLibraries);
@@ -584,6 +599,7 @@ export async function prepareKnowledgeScope(input: {
     input.contentFocus,
     input.preferredDocumentIds,
     input.botDefinition,
+    input.effectiveVisibleLibraryKeys,
   );
 
   return {
@@ -666,6 +682,7 @@ export async function prepareKnowledgeSupply(input: {
   templateSearchHints?: string[];
   preferredDocumentIds?: string[];
   botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
 }): Promise<KnowledgeSupply> {
   const scopeState = await prepareKnowledgeScope(input);
   return prepareKnowledgeRetrieval({

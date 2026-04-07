@@ -107,6 +107,8 @@ export type KnowledgeExecutionInput = {
   debugResumePage?: boolean;
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
+  forceGlobalMemorySelection?: boolean;
 };
 
 export type ResumePageDebugTrace = {
@@ -168,6 +170,8 @@ export type KnowledgeAnswerInput = {
   chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   answerMode?: 'catalog_memory' | 'live_detail';
   botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
+  forceGlobalMemorySelection?: boolean;
 };
 
 export type KnowledgeAnswerResult = {
@@ -482,6 +486,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     timeRange: input.timeRange,
     contentFocus: input.contentFocus,
     botDefinition: input.botDefinition,
+    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
 
   const selectedTemplates = requestedTemplateKey
@@ -516,6 +521,8 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
       ? ORDER_OUTPUT_MEMORY_LIMIT
       : (requestedKind === 'page' ? 10 : 8),
     botId: input.botDefinition?.id,
+    forceGlobalState: input.forceGlobalMemorySelection,
+    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
   const supply = await prepareKnowledgeRetrieval({
     requestText,
@@ -853,12 +860,17 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
 export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promise<KnowledgeAnswerResult> {
   const requestText = String(input.prompt || '').trim();
   const preferLiveDetail = (input.answerMode || 'live_detail') === 'live_detail';
-  const memoryState = await loadOpenClawMemorySelectionState(input.botDefinition?.id);
+  const useExternalScopedMemory = input.forceGlobalMemorySelection === true;
+  const memoryState = await loadOpenClawMemorySelectionState({
+    botId: input.botDefinition?.id,
+    forceGlobalState: useExternalScopedMemory,
+  });
   const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
     state: memoryState,
     requestText,
     libraries: input.preferredLibraries,
     limit: preferLiveDetail ? 4 : 6,
+    effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
   });
 
   let libraries = input.preferredLibraries || [];
@@ -876,6 +888,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
       evidenceLimit: 6,
       preferredDocumentIds: memorySelection.documentIds,
       botDefinition: input.botDefinition,
+      effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
     });
     libraries = supply.libraries;
     knowledgeChatHistory = supply.knowledgeChatHistory;

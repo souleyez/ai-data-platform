@@ -1,6 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import {
+  createChannelDirectorySource,
+  fetchChannelDirectorySources,
+  syncChannelDirectorySource,
+  updateChannelDirectorySource,
+} from '../home-api';
+import ExternalDirectorySourceCard from './ExternalDirectorySourceCard';
+import ExternalUserAccessPanel from './ExternalUserAccessPanel';
 
 const CHANNEL_OPTIONS = [
   { key: 'web', label: 'Web' },
@@ -17,6 +25,7 @@ function createEmptyChannelDraft(channel, enabled = false) {
     routeKey: '',
     tenantId: '',
     externalBotId: '',
+    directorySourceId: '',
   };
 }
 
@@ -50,6 +59,7 @@ function createDraftFromBot(bot) {
       routeKey: String(binding?.routeKey || ''),
       tenantId: String(binding?.tenantId || ''),
       externalBotId: String(binding?.externalBotId || ''),
+      directorySourceId: String(binding?.directorySourceId || ''),
     };
   }
 
@@ -88,6 +98,7 @@ function serializeDraft(draft) {
         routeKey: String(binding.routeKey || '').trim() || undefined,
         tenantId: String(binding.tenantId || '').trim() || undefined,
         externalBotId: String(binding.externalBotId || '').trim() || undefined,
+        directorySourceId: String(binding.directorySourceId || '').trim() || undefined,
       };
     }),
   };
@@ -153,10 +164,18 @@ function ChannelBindingEditor({ value, onChange }) {
 }
 
 function BotEditorCard({
+  botId,
   title,
   draft,
   libraries,
+  manageEnabled,
+  directorySources = [],
+  expandedAccessPanel = '',
   onChange,
+  onCreateSource,
+  onUpdateSource,
+  onSyncSource,
+  onToggleAccessPanel,
   actionLabel,
   actionPending,
   onSubmit,
@@ -277,6 +296,50 @@ function BotEditorCard({
         </div>
       </div>
 
+      {botId ? CHANNEL_OPTIONS
+        .filter((option) => option.key !== 'web')
+        .map((option) => {
+          const channelDraft = draft.channels[option.key] || createEmptyChannelDraft(option.key);
+          const panelKey = `${botId}:${option.key}`;
+          const activeSource = directorySources.find((source) => source?.id === channelDraft.directorySourceId) || null;
+          return (
+            <div key={panelKey}>
+              <ExternalDirectorySourceCard
+                botId={botId}
+                channelLabel={option.label}
+                binding={channelDraft}
+                source={activeSource}
+                existingSources={directorySources}
+                manageEnabled={manageEnabled}
+                onBindingChange={(nextBinding) => onChange({
+                  ...draft,
+                  channels: {
+                    ...draft.channels,
+                    [option.key]: nextBinding,
+                  },
+                })}
+                onCreateSource={onCreateSource}
+                onUpdateSource={onUpdateSource}
+                onSyncSource={onSyncSource}
+                onOpenAccessPanel={() => onToggleAccessPanel?.(panelKey)}
+              />
+              {expandedAccessPanel === panelKey && channelDraft.directorySourceId ? (
+                <ExternalUserAccessPanel
+                  botId={botId}
+                  sourceId={channelDraft.directorySourceId}
+                  libraries={libraries}
+                  manageEnabled={manageEnabled}
+                />
+              ) : null}
+            </div>
+          );
+        })
+        : (
+          <div className="bot-config-subtle">
+            机器人创建后，才可以继续配置外部用户映射与用户/组文档权限。
+          </div>
+        )}
+
       <div className="bot-chip-group">
         <div className="bot-chip-group-title">额外限定知识库（可选）</div>
         {hasLibraries ? (
@@ -321,6 +384,8 @@ export default function BotConfigPanel({
   const [error, setError] = useState('');
   const [savingId, setSavingId] = useState('');
   const [creating, setCreating] = useState(false);
+  const [sourcesByBot, setSourcesByBot] = useState({});
+  const [expandedAccessPanel, setExpandedAccessPanel] = useState('');
 
   useEffect(() => {
     const next = {};
@@ -329,6 +394,31 @@ export default function BotConfigPanel({
     }
     setDrafts(next);
   }, [items]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSources() {
+      if (!manageEnabled || !items.length) {
+        if (!cancelled) setSourcesByBot({});
+        return;
+      }
+      const nextEntries = await Promise.all(items.map(async (item) => {
+        try {
+          const payload = await fetchChannelDirectorySources(item.id);
+          return [item.id, Array.isArray(payload?.items) ? payload.items : []];
+        } catch {
+          return [item.id, []];
+        }
+      }));
+      if (!cancelled) {
+        setSourcesByBot(Object.fromEntries(nextEntries));
+      }
+    }
+    void loadSources();
+    return () => {
+      cancelled = true;
+    };
+  }, [items, manageEnabled]);
 
   const sortedLibraries = useMemo(() => (
     [...libraries].sort((a, b) => {
@@ -369,6 +459,39 @@ export default function BotConfigPanel({
     }
   }
 
+  async function reloadSources(botId) {
+    try {
+      const payload = await fetchChannelDirectorySources(botId);
+      setSourcesByBot((prev) => ({
+        ...prev,
+        [botId]: Array.isArray(payload?.items) ? payload.items : [],
+      }));
+    } catch {
+      setSourcesByBot((prev) => ({
+        ...prev,
+        [botId]: [],
+      }));
+    }
+  }
+
+  async function handleCreateSource(botId, payload) {
+    const result = await createChannelDirectorySource(botId, payload);
+    await reloadSources(botId);
+    return result?.item || result;
+  }
+
+  async function handleUpdateSource(botId, sourceId, payload) {
+    const result = await updateChannelDirectorySource(botId, sourceId, payload);
+    await reloadSources(botId);
+    return result?.item || result;
+  }
+
+  async function handleSyncSource(botId, sourceId) {
+    const result = await syncChannelDirectorySource(botId, sourceId);
+    await reloadSources(botId);
+    return result;
+  }
+
   return (
     <div className="bot-config-card">
       <div className="bot-config-head">
@@ -397,10 +520,18 @@ export default function BotConfigPanel({
               {items.map((item) => (
                 <BotEditorCard
                   key={item.id}
+                  botId={item.id}
                   title={`${item.name} · ${item.id}`}
                   draft={drafts[item.id] || createDraftFromBot(item)}
                   libraries={sortedLibraries}
+                  manageEnabled={manageEnabled}
+                  directorySources={Array.isArray(sourcesByBot[item.id]) ? sourcesByBot[item.id] : []}
+                  expandedAccessPanel={expandedAccessPanel}
                   onChange={(nextDraft) => setDrafts((prev) => ({ ...prev, [item.id]: nextDraft }))}
+                  onCreateSource={(payload) => handleCreateSource(item.id, payload)}
+                  onUpdateSource={(sourceId, payload) => handleUpdateSource(item.id, sourceId, payload)}
+                  onSyncSource={(sourceId) => handleSyncSource(item.id, sourceId)}
+                  onToggleAccessPanel={(panelKey) => setExpandedAccessPanel((prev) => (prev === panelKey ? '' : panelKey))}
                   actionLabel="保存"
                   actionPending={savingId === item.id}
                   onSubmit={() => handleSave(item.id)}
@@ -415,6 +546,7 @@ export default function BotConfigPanel({
               title="新机器人"
               draft={createDraft}
               libraries={sortedLibraries}
+              manageEnabled={manageEnabled}
               onChange={setCreateDraft}
               actionLabel="创建"
               actionPending={creating}

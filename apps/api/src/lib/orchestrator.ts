@@ -19,6 +19,7 @@ import {
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
 import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import type { ChatOutput } from './knowledge-output.js';
+import type { ResolvedChannelAccess } from './channel-access-resolver.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
@@ -34,6 +35,8 @@ export type ChatRequestInput = {
   systemConstraints?: string;
   confirmedAction?: 'openclaw_action' | 'template_output';
   botId?: string;
+  effectiveVisibleLibraryKeys?: string[];
+  accessContext?: ResolvedChannelAccess | null;
 };
 
 function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
@@ -178,6 +181,8 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           systemContextBlocks,
           skipTemplateConfirmation: input.confirmedAction === 'openclaw_action',
           botDefinition,
+          effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+          accessContext: input.accessContext || null,
         });
         libraries = result.libraries;
         output = result.output;
@@ -278,7 +283,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       nativeSearchPreferred: true,
       botId: botDefinition?.id || '',
       botName: botDefinition?.name || '',
-      },
+    },
     debug,
     conversationState,
     latencyMs: 120,
