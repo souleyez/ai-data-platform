@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { DocumentExtractionFieldKey } from './document-extraction-governance.js';
 import type { ParsedDocument } from './document-parser.js';
 import { runOpenClawChat } from './openclaw-adapter.js';
-import { readDocumentImageVlmCapability, type DocumentImageVlmCapability } from './document-image-vlm-capability.js';
+import { loadDocumentImageVlmCapability, type DocumentImageVlmCapability } from './document-image-vlm-capability.js';
 
 export type DocumentImageVlmFieldCandidate = {
   key?: string;
@@ -90,6 +90,27 @@ function extractJsonObject(raw: string) {
   }
 }
 
+async function withDocumentImageGatewayEnv<T>(
+  capability: DocumentImageVlmCapability,
+  run: () => Promise<T>,
+) {
+  const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
+  const shouldInjectGatewayUrl = !String(process.env.OPENCLAW_GATEWAY_URL || '').trim() && Boolean(capability.gatewayUrl);
+
+  if (shouldInjectGatewayUrl && capability.gatewayUrl) {
+    process.env.OPENCLAW_GATEWAY_URL = capability.gatewayUrl;
+  }
+
+  try {
+    return await run();
+  } finally {
+    if (shouldInjectGatewayUrl) {
+      if (previousUrl === undefined) delete process.env.OPENCLAW_GATEWAY_URL;
+      else process.env.OPENCLAW_GATEWAY_URL = previousUrl;
+    }
+  }
+}
+
 function normalizeFieldKey(value: unknown) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -158,6 +179,7 @@ export function buildDocumentImageVlmSystemPrompt() {
   return [
     'You are an image-document structuring assistant for a private enterprise knowledge base.',
     'You must inspect the provided local image by using the OpenClaw image understanding capability.',
+    'Prefer the MiniMax-backed image understanding capability configured inside OpenClaw when it is available.',
     'Return strict JSON only. No markdown. No explanation.',
     'Do not invent facts. Only extract content visible in the image.',
     'If a value is not visible, omit it or leave it empty.',
@@ -189,7 +211,7 @@ export async function runDocumentImageVlm(input: {
   item: ParsedDocument;
   imagePath?: string;
 }): Promise<DocumentImageVlmResult | null> {
-  const capability = readDocumentImageVlmCapability();
+  const capability = await loadDocumentImageVlmCapability();
   if (!capability.available) return null;
 
   const imagePath = path.resolve(String(input.imagePath || input.item.path || '').trim());
@@ -205,11 +227,11 @@ export async function runDocumentImageVlm(input: {
     return null;
   }
 
-  const result = await runOpenClawChat({
+  const result = await withDocumentImageGatewayEnv(capability, async () => runOpenClawChat({
     prompt: buildDocumentImageVlmPrompt(input.item, imagePath),
     systemPrompt: buildDocumentImageVlmSystemPrompt(),
     sessionUser: 'document-image-vlm',
-  });
+  }));
 
   return {
     content: result.content,

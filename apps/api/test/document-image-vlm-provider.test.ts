@@ -73,11 +73,9 @@ test('normalizeDocumentImageFieldCandidateKey should normalize aliases and canon
   assert.equal(normalizeDocumentImageFieldCandidateKey('unknown_key'), '');
 });
 
-test('runDocumentImageVlm should return null when gateway is not configured', async () => {
-  const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
-  const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;
-  delete process.env.OPENCLAW_GATEWAY_URL;
-  delete process.env.OPENCLAW_GATEWAY_TOKEN;
+test('runDocumentImageVlm should return null when image VLM is explicitly disabled', async () => {
+  const previousMode = process.env.DOCUMENT_IMAGE_PARSE_MODE;
+  process.env.DOCUMENT_IMAGE_PARSE_MODE = 'ocr-only';
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-image-vlm-provider-'));
   const filePath = path.join(tempDir, 'screenshot.png');
@@ -90,10 +88,8 @@ test('runDocumentImageVlm should return null when gateway is not configured', as
     });
     assert.equal(result, null);
   } finally {
-    if (previousUrl === undefined) delete process.env.OPENCLAW_GATEWAY_URL;
-    else process.env.OPENCLAW_GATEWAY_URL = previousUrl;
-    if (previousToken === undefined) delete process.env.OPENCLAW_GATEWAY_TOKEN;
-    else process.env.OPENCLAW_GATEWAY_TOKEN = previousToken;
+    if (previousMode === undefined) delete process.env.DOCUMENT_IMAGE_PARSE_MODE;
+    else process.env.DOCUMENT_IMAGE_PARSE_MODE = previousMode;
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
