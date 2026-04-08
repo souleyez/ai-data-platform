@@ -91,6 +91,24 @@ function buildAnswerReferences(documents: Array<{ path?: string; title?: string;
   return references.slice(0, 6);
 }
 
+function appendReference(
+  references: Array<{ id: string; name: string; path: string }>,
+  item?: { path?: string; title?: string; name?: string } | null,
+) {
+  const filePath = String(item?.path || '').trim();
+  if (!filePath) return references;
+  const id = buildDocumentId(filePath);
+  if (!id || references.some((entry) => entry.id === id)) return references;
+  return [
+    ...references,
+    {
+      id,
+      name: String(item?.title || item?.name || path.basename(filePath)).trim() || id,
+      path: filePath,
+    },
+  ].slice(0, 6);
+}
+
 function extractDocumentTimestamp(item: Pick<ParsedDocument, 'path' | 'detailParsedAt' | 'cloudStructuredAt' | 'retainedAt'>) {
   const candidates = [
     Date.parse(String(item.detailParsedAt || '')),
@@ -216,7 +234,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
 
-  const knowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
+  const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
       requestText,
       supply.libraries,
@@ -239,11 +257,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
     ...systemContextBlocks,
     buildOpenClawMemorySelectionContextBlock(memorySelection),
     libraryKnowledgePagesContext,
-    knowledgeContext,
+    templateKnowledgeContext,
   ].filter(Boolean);
   const latestDocumentFullTextBlock = buildLatestParsedDocumentFullTextContextBlock(latestDetailedDocument);
-  const fullContextBlocks = [...templateContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
-  const references = buildAnswerReferences(supply.effectiveRetrieval.documents);
+  const chatContextBlocks = [...systemContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
+  const references = appendReference(buildAnswerReferences(supply.effectiveRetrieval.documents), latestDetailedDocument);
 
   const confirmation = input.skipTemplateConfirmation
     ? null
@@ -296,7 +314,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     prompt: requestText,
     sessionUser: input.sessionUser,
     chatHistory: input.chatHistory,
-    systemContextBlocks: fullContextBlocks,
+    systemContextBlocks: chatContextBlocks,
   });
 
   return {
