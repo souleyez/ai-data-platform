@@ -39,6 +39,7 @@ Primary runtime variables:
 
 - `API_PORT`
 - `API_HOST`
+- `WEB_HOST`
 - `OPENCLAW_GATEWAY_URL`
 - `OPENCLAW_GATEWAY_TOKEN`
 - `OPENCLAW_AGENT_ID`
@@ -82,6 +83,26 @@ If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the 
 7. Restart the application services.
 8. Verify the health endpoints.
 
+## Network boundary
+
+Production servers should bind the application services to loopback and expose only the reverse proxy entrypoints.
+
+- `API_HOST=127.0.0.1`
+- `WEB_HOST=127.0.0.1`
+- if the frozen legacy control-plane is still installed, keep `CONTROL_PLANE_API_HOST=127.0.0.1` and `CONTROL_PLANE_WEB_HOST=127.0.0.1`
+- public traffic should enter through `nginx` on `80/443`, not through direct access to `3001/3002/3100/3210`
+
+If you want explicit host-level rejection in addition to loopback binding, use:
+
+- [harden-public-entry.sh](C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/server/harden-public-entry.sh)
+
+That helper installs a dedicated `nftables` include snippet which rejects direct access to:
+
+- `3001`
+- `3002`
+- `3100`
+- `3210`
+
 ## Health checks
 
 - `curl http://127.0.0.1:3100/api/health`
@@ -121,6 +142,8 @@ This drop-in is required because the 120 server uses the local model bridge serv
 
 1. `systemctl daemon-reload`
 2. `systemctl restart ai-data-platform-model-bridge.service`
+
+The current 120 deployment also keeps the app services bound to `127.0.0.1` and rejects direct public access to `3001/3002/3100/3210` at the host firewall layer. Preserve that boundary when rebuilding the machine.
 
 ### Expected bridge health on 120
 

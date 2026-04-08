@@ -9,7 +9,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/srv/ai-data-platform/apps/control-plane-web
 EnvironmentFile=/etc/ai-data-platform/ai-data-platform.env
-ExecStart=/bin/sh -lc '/usr/local/bin/node node_modules/next/dist/bin/next start -p ${CONTROL_PLANE_WEB_PORT:-3001}'
+ExecStart=/bin/sh -lc '/usr/local/bin/node node_modules/next/dist/bin/next start -H ${CONTROL_PLANE_WEB_HOST:-127.0.0.1} -p ${CONTROL_PLANE_WEB_PORT:-3001}'
 Restart=always
 RestartSec=5
 

@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/srv/ai-data-platform/apps/api
 EnvironmentFile=/etc/ai-data-platform/ai-data-platform.env
-ExecStart=/bin/sh -lc 'PORT=${API_PORT:-3100} HOST=${API_HOST:-0.0.0.0} /usr/local/bin/node dist/server.js'
+ExecStart=/bin/sh -lc 'PORT=${API_PORT:-3100} HOST=${API_HOST:-127.0.0.1} /usr/local/bin/node dist/server.js'
 Restart=always
 RestartSec=5
 
