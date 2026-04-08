@@ -10,6 +10,7 @@ import {
   listDatasourceDefinitions,
   listDatasourceRuns,
   type DatasourceDefinition,
+  type DatasourceTargetLibrary,
 } from './datasource-definitions.js';
 import { logDatasourceRunDeletion } from './datasource-audit.js';
 import {
@@ -21,6 +22,8 @@ import {
   buildDatasourceLibraryLabelMap,
   buildDatasourceRunReadModels,
 } from './datasource-service.js';
+import { syncWebCaptureTaskToDatasource } from './datasource-web-bridge.js';
+import { ingestWebCaptureTaskDocument } from './datasource-web-ingest.js';
 import {
   loadDocumentDetailPayload,
 } from './document-route-detail-loaders.js';
@@ -56,6 +59,7 @@ import {
   reviseReportOutput,
 } from './report-center.js';
 import type { KnowledgeOutputKind } from './knowledge-template.js';
+import { createAndRunWebCaptureTask } from './web-capture.js';
 
 type CommandFlags = Record<string, string>;
 type ModelProviderId = 'openai' | 'github-copilot' | 'minimax' | 'moonshot' | 'zai';
@@ -120,6 +124,11 @@ function splitFlagList(value: string | undefined) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function resolveBooleanFlag(value: string | undefined) {
+  const normalized = normalizeText(value || '');
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
 }
 
 function buildDatasourceMatchTerms(definition: DatasourceDefinition) {
@@ -230,6 +239,29 @@ async function resolveLibraryReference(reference: string) {
     throw new Error(`Library match is ambiguous: ${matches.slice(0, 5).map((item) => item.library.label).join(', ')}`);
   }
   return matches[0].library;
+}
+
+async function resolveTargetLibrariesFromFlags(flags: CommandFlags): Promise<DatasourceTargetLibrary[]> {
+  const requested = [
+    ...splitFlagList(flags.library),
+    ...splitFlagList(flags.libraries),
+  ];
+  if (!requested.length) return [];
+
+  const dedup = new Map<string, DatasourceTargetLibrary>();
+  for (const [index, reference] of requested.entries()) {
+    const library = await resolveLibraryReference(reference);
+    if (!dedup.has(library.key)) {
+      dedup.set(library.key, {
+        key: library.key,
+        label: library.label,
+        mode: index === 0 ? 'primary' : 'secondary',
+      });
+    }
+  }
+  const values = Array.from(dedup.values());
+  if (values[0]) values[0].mode = 'primary';
+  return values;
 }
 
 function resolveOutputKind(value: string): KnowledgeOutputKind {
@@ -587,6 +619,64 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
       summary: `Deleted datasource run "${runId}".`,
       data: {
         item: removed,
+      },
+    };
+  }
+
+  if (subcommand === 'capture-url') {
+    const url = String(flags.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Missing valid --url for datasources capture-url.');
+    }
+
+    const targetLibraries = await resolveTargetLibrariesFromFlags(flags);
+    const task = await createAndRunWebCaptureTask({
+      url,
+      focus: String(flags.focus || '').trim(),
+      frequency: 'manual',
+      note: String(flags.note || '').trim(),
+      maxItems: clampLimit(flags['max-items'], 1, 20),
+      keepOriginalFiles: resolveBooleanFlag(flags['keep-original']),
+    });
+    const definition = await syncWebCaptureTaskToDatasource(task, {
+      name: String(flags.name || '').trim() || undefined,
+      targetLibraries: targetLibraries.length ? targetLibraries : undefined,
+      notes: String(flags.note || '').trim() || undefined,
+    });
+    const webIngest = task.lastStatus === 'success'
+      ? await ingestWebCaptureTaskDocument({
+          task,
+          targetLibraries: definition.targetLibraries,
+        })
+      : null;
+    const successCount = webIngest?.ingestResult.summary.successCount || 0;
+    const failedCount = webIngest?.ingestResult.summary.failedCount || (successCount > 0 ? 0 : (task.lastStatus === 'error' ? 1 : 0));
+
+    return {
+      ok: true,
+      action: 'datasources.capture-url',
+      summary: task.lastStatus === 'success' && successCount > 0
+        ? `Captured URL "${url}" and ingested it into ${definition.targetLibraries.map((item) => item.label).join(', ') || 'the target library'}.`
+        : `Capture executed for "${url}", but ingestion did not complete successfully.`,
+      data: {
+        datasource: {
+          id: definition.id,
+          name: definition.name,
+          kind: definition.kind,
+          targetLibraries: definition.targetLibraries,
+        },
+        task,
+        ingest: webIngest
+          ? {
+              ingestPath: webIngest.ingestPath,
+              summary: webIngest.ingestResult.summary,
+              libraryKeys: webIngest.ingestResult.confirmedLibraryKeys,
+            }
+          : null,
+        captureStatus: task.lastStatus || 'idle',
+        captureSummary: task.lastSummary || '',
+        successCount,
+        failedCount,
       },
     };
   }

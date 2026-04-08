@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +21,47 @@ const auditCenter = await importFresh<typeof import('../src/lib/audit-center.js'
 const platformControl = await importFresh<typeof import('../src/lib/platform-control.js')>(
   '../src/lib/platform-control.js',
 );
+const documentLibraries = await importFresh<typeof import('../src/lib/document-libraries.js')>(
+  '../src/lib/document-libraries.js',
+);
+const documentCacheRepository = await importFresh<typeof import('../src/lib/document-cache-repository.js')>(
+  '../src/lib/document-cache-repository.js',
+);
 const syncStatusFile = path.join(storageRoot, 'config', 'openclaw-memory-sync-status.json');
+
+async function startHtmlServer(routes: Record<string, string>) {
+  const server = http.createServer((request, response) => {
+    const body = routes[request.url || '/'];
+    if (!body) {
+      response.statusCode = 404;
+      response.end('not found');
+      return;
+    }
+
+    response.statusCode = 200;
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end(body);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('failed to start html server');
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    },
+  };
+}
 
 test.after(async () => {
   await fs.rm(storageRoot, { recursive: true, force: true });
@@ -136,6 +177,13 @@ test('platform control should expose capability registry metadata', async () => 
   ]);
   assert.equal(showIntegrationResult.ok, true);
   assert.equal((showIntegrationResult.data?.integration as { id?: string })?.id, 'openclaw');
+
+  const areas = (listResult.data?.areas as Array<{ id?: string; commands?: Array<{ key?: string }> }>) || [];
+  const datasourceArea = areas.find((item) => item.id === 'datasources');
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.capture-url'));
+
+  const integrations = (listResult.data?.integrations as Array<{ id?: string }>) || [];
+  assert.ok(integrations.some((item) => item.id === 'web-capture'));
 });
 
 test('platform control should tolerate pnpm forwarded separator args', async () => {
@@ -179,4 +227,53 @@ test('platform control should expose document memory sync status', async () => {
   assert.equal(result.action, 'documents.sync-status');
   assert.equal((result.data as { status?: string })?.status, 'success');
   assert.equal((result.data as { lastResult?: { documentCount?: number } })?.lastResult?.documentCount, 12);
+});
+
+test('platform control should capture one url into the requested knowledge library', async () => {
+  await documentLibraries.createDocumentLibrary({ name: 'bids', description: 'Bid knowledge base', permissionLevel: 0 }).catch(() => undefined);
+  const server = await startHtmlServer({
+    '/capture': `
+      <html>
+        <head><title>医疗设备采购公告</title></head>
+        <body>
+          <article>
+            <h1>医疗设备采购公告</h1>
+            <p>本公告包含采购范围、投标资格、交付节点与验收要求。</p>
+            <p>适合作为标书资料沉淀到 bids 知识库。</p>
+          </article>
+        </body>
+      </html>
+    `,
+  });
+
+  try {
+    const result = await platformControl.executePlatformControlCommand([
+      'datasources',
+      'capture-url',
+      '--url',
+      `${server.baseUrl}/capture`,
+      '--focus',
+      '标书相关内容',
+      '--library',
+      'bids',
+      '--name',
+      'Medical bids capture',
+    ]);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.action, 'datasources.capture-url');
+    assert.match(result.summary, /Captured URL/);
+    assert.equal((result.data?.datasource as { name?: string })?.name, 'Medical bids capture');
+    assert.equal((result.data?.captureStatus as string), 'success');
+    assert.equal((result.data?.successCount as number), 1);
+
+    const cache = await documentCacheRepository.readDocumentCache();
+    assert.ok(
+      cache?.items.some((item) =>
+        String(item.path || '').includes(`${path.sep}web-captures${path.sep}`)
+        && (item.confirmedGroups || []).includes('bids')),
+    );
+  } finally {
+    await server.close();
+  }
 });

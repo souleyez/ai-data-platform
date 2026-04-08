@@ -131,6 +131,7 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
     abilities: [
       'List managed datasource definitions and recent runs.',
       'Run a datasource immediately.',
+      'Capture one public web or procurement link by URL and ingest it into a target knowledge library.',
       'Pause and activate local-directory, web, database, and ERP-like sources.',
     ],
     commands: [
@@ -148,6 +149,11 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         key: 'datasources.run',
         command: 'pnpm system:control -- datasources run --datasource "<name>"',
         description: 'Run one datasource now.',
+      },
+      {
+        key: 'datasources.capture-url',
+        command: 'pnpm system:control -- datasources capture-url --url "<url>" [--focus "<focus>"] [--library "<library>"] [--name "<name>"] [--max-items 1]',
+        description: 'Capture one public page or procurement link immediately and ingest it into the selected knowledge library.',
       },
       {
         key: 'datasources.pause',
@@ -237,6 +243,17 @@ export const PLATFORM_INTEGRATIONS: PlatformIntegration[] = [
       'Normal and full chat both supply context into OpenClaw.',
       'Native search is preferred when available.',
       'CLI should be treated as the canonical system action surface.',
+    ],
+  },
+  {
+    id: 'web-capture',
+    label: 'Web and procurement capture',
+    kind: 'tool',
+    description: 'Single-link web capture tool for public pages, procurement notices, and other URL-based knowledge ingestion.',
+    capabilities: [
+      'Capture one specified URL directly from the CLI.',
+      'Extract正文 or downloadable content and ingest it into a target knowledge library.',
+      'Useful when OpenClaw should act through a concrete system command instead of ad-hoc chat routing.',
     ],
   },
   {
