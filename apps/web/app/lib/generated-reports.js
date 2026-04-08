@@ -360,6 +360,7 @@ function buildPlainText(item) {
 }
 
 function buildPageHtml(item) {
+  const pageTitle = 'AI智能助手';
   const cards = (item?.page?.cards || [])
     .map(
       (card) => `
@@ -419,7 +420,7 @@ function buildPageHtml(item) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(item?.title || '数据可视化静态页')}</title>
+  <title>${pageTitle}</title>
   <style>
     body { font-family: "Microsoft YaHei", sans-serif; margin: 32px; color: #16202f; line-height: 1.7; background: #f8fafc; }
     h1, h2 { margin: 0 0 12px; }

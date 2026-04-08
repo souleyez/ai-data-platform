@@ -27,6 +27,7 @@ function escapeHtml(value) {
 function buildFallbackPreviewHtml(detail) {
   const item = detail?.item || {};
   const title = escapeHtml(item.title || item.name || '文档预览');
+  const pageTitle = 'AI智能助手';
   const summary = escapeHtml(item.summary || item.excerpt || '');
   const fullText = escapeHtml(
     item.fullText || item.excerpt || item.summary || '当前服务器未保存原始文件，仅保留了解析后的文本内容。',
@@ -38,7 +39,7 @@ function buildFallbackPreviewHtml(detail) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
+  <title>${pageTitle}</title>
   <style>
     body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f8fafc; color: #0f172a; }
     .wrap { max-width: 980px; margin: 0 auto; padding: 24px; }

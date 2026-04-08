@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'AI 知识数据管理',
+  title: 'AI智能助手',
   description: '个人知识库，采编写一站式解决',
 };
 
