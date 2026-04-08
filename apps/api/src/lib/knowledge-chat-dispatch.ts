@@ -3,11 +3,15 @@ import { buildKnowledgeContext } from './knowledge-evidence.js';
 import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
 import {
-  prepareKnowledgeSupply,
+  prepareKnowledgeRetrieval,
+  prepareKnowledgeScope,
   type KnowledgeLibraryRef,
 } from './knowledge-supply.js';
 import type { BotDefinition } from './bot-definitions.js';
-import { buildDocumentId } from './document-store.js';
+import { filterDocumentsForBot } from './bot-visibility.js';
+import type { ParsedDocument } from './document-parser.js';
+import { documentMatchesLibrary, loadDocumentLibraries } from './document-libraries.js';
+import { buildDocumentId, loadParsedDocuments } from './document-store.js';
 import {
   buildOpenClawMemorySelectionContextBlock,
   loadOpenClawMemorySelectionState,
@@ -87,6 +91,87 @@ function buildAnswerReferences(documents: Array<{ path?: string; title?: string;
   return references.slice(0, 6);
 }
 
+function extractDocumentTimestamp(item: Pick<ParsedDocument, 'path' | 'detailParsedAt' | 'cloudStructuredAt' | 'retainedAt'>) {
+  const candidates = [
+    Date.parse(String(item.detailParsedAt || '')),
+    Date.parse(String(item.cloudStructuredAt || '')),
+    Date.parse(String(item.retainedAt || '')),
+  ].filter((value) => Number.isFinite(value) && value > 0);
+
+  const match = String(item.path || '').match(/(?:^|[\\/])(\d{13})(?:[-_.]|$)/);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) {
+      candidates.push(value);
+    }
+  }
+
+  return candidates.length ? Math.max(...candidates) : 0;
+}
+
+function isDetailedFullTextDocument(item: ParsedDocument) {
+  return item.parseStatus === 'parsed'
+    && Boolean(String(item.fullText || '').trim())
+    && (
+      item.parseStage === 'detailed'
+      || item.detailParseStatus === 'succeeded'
+      || Boolean(item.detailParsedAt)
+    );
+}
+
+export function selectLatestDetailedFullTextDocument(documents: ParsedDocument[]) {
+  return [...(documents || [])]
+    .filter(isDetailedFullTextDocument)
+    .sort((left, right) => {
+      const leftDetailed = left.parseStage === 'detailed' || left.detailParseStatus === 'succeeded' ? 1 : 0;
+      const rightDetailed = right.parseStage === 'detailed' || right.detailParseStatus === 'succeeded' ? 1 : 0;
+      if (rightDetailed !== leftDetailed) return rightDetailed - leftDetailed;
+      return extractDocumentTimestamp(right) - extractDocumentTimestamp(left);
+    })[0] || null;
+}
+
+export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
+  ParsedDocument,
+  'title' | 'name' | 'path' | 'schemaType' | 'parseStage' | 'detailParseStatus' | 'fullText'
+> | null) {
+  const fullText = String(document?.fullText || '').trim();
+  if (!fullText) return '';
+
+  return [
+    'Latest parsed document full text:',
+    `Title: ${String(document?.title || document?.name || 'Untitled document').trim()}`,
+    `Path: ${String(document?.path || '').trim()}`,
+    `Type: ${String(document?.schemaType || '').trim() || 'generic'}`,
+    `Parse stage: ${String(document?.parseStage || '').trim() || '-'}`,
+    `Detail parse status: ${String(document?.detailParseStatus || '').trim() || '-'}`,
+    `Full text:\n${fullText}`,
+  ].join('\n\n');
+}
+
+async function loadLatestVisibleDetailedDocument(input: {
+  botDefinition?: BotDefinition | null;
+  effectiveVisibleLibraryKeys?: string[];
+}) {
+  const [documentLibraries, documentState] = await Promise.all([
+    loadDocumentLibraries(),
+    loadParsedDocuments(240, false),
+  ]);
+
+  const baseVisibleItems = input.botDefinition
+    ? filterDocumentsForBot(input.botDefinition, documentState.items, documentLibraries)
+    : documentState.items;
+  const effectiveVisibleLibrarySet = Array.isArray(input.effectiveVisibleLibraryKeys)
+    ? new Set(input.effectiveVisibleLibraryKeys.map((item) => String(item || '').trim()).filter(Boolean))
+    : null;
+  const visibleItems = effectiveVisibleLibrarySet
+    ? baseVisibleItems.filter((item) => documentLibraries.some((library) => (
+      effectiveVisibleLibrarySet.has(library.key) && documentMatchesLibrary(item, library)
+    )))
+    : baseVisibleItems;
+
+  return selectLatestDetailedFullTextDocument(visibleItems);
+}
+
 export async function runGeneralKnowledgeAwareChat(input: {
   prompt: string;
   chatHistory: ChatHistoryItem[];
@@ -112,12 +197,21 @@ export async function runGeneralKnowledgeAwareChat(input: {
     limit: 5,
     effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
   });
-  const supply = await prepareKnowledgeSupply({
+  const scopeState = await prepareKnowledgeScope({
     requestText,
     chatHistory: input.chatHistory,
+    preferredDocumentIds: memorySelection.documentIds,
+    botDefinition: input.botDefinition,
+    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+  });
+  const supply = await prepareKnowledgeRetrieval({
+    requestText,
     docLimit: 5,
     evidenceLimit: 6,
     preferredDocumentIds: memorySelection.documentIds,
+    ...scopeState,
+  });
+  const latestDetailedDocument = await loadLatestVisibleDetailedDocument({
     botDefinition: input.botDefinition,
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
@@ -141,12 +235,14 @@ export async function runGeneralKnowledgeAwareChat(input: {
     )
     : '';
   const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(supply.libraries);
-  const fullContextBlocks = [
+  const templateContextBlocks = [
     ...systemContextBlocks,
     buildOpenClawMemorySelectionContextBlock(memorySelection),
     libraryKnowledgePagesContext,
     knowledgeContext,
   ].filter(Boolean);
+  const latestDocumentFullTextBlock = buildLatestParsedDocumentFullTextContextBlock(latestDetailedDocument);
+  const fullContextBlocks = [...templateContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
   const references = buildAnswerReferences(supply.effectiveRetrieval.documents);
 
   const confirmation = input.skipTemplateConfirmation
@@ -156,7 +252,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       chatHistory: input.chatHistory,
       sessionUser: input.sessionUser,
       supply,
-      systemContextBlocks: fullContextBlocks,
+      systemContextBlocks: templateContextBlocks,
     });
 
   if (confirmation) {
@@ -177,6 +273,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       memorySelectedDocuments: memorySelection.documentIds.length,
       supplyDocuments: supply.effectiveRetrieval.documents.length,
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      latestDetailedDocument: latestDetailedDocument?.path || '',
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -215,6 +312,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
+      latestDetailedDocument: latestDetailedDocument?.path || '',
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)

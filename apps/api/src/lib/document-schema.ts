@@ -16,6 +16,46 @@ function normalizeResumeTextValue(value: string) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function hasTenderDocumentHint(text: string) {
+  return includesAnyText(text, [
+    '招标',
+    '投标',
+    '标书',
+    '采购',
+    '评标',
+    '中标',
+    '招标公告',
+    '投标人须知',
+    '投标保证金',
+    '招标控制价',
+    '综合评估法',
+    '否决性条款',
+    '发包人',
+    '联合体协议书',
+    'tender',
+    'bid document',
+    'bidding',
+    'request for proposal',
+    'rfp',
+  ]);
+}
+
+function countResumeSignals(resumeFields?: ResumeFields) {
+  if (!resumeFields) return 0;
+
+  let score = 0;
+  if (resumeFields.candidateName && isLikelyResumePersonName(resumeFields.candidateName)) score += 1;
+  if (resumeFields.education) score += 1;
+  if (resumeFields.latestCompany) score += 1;
+  if (resumeFields.targetRole || resumeFields.currentRole) score += 1;
+  if ((resumeFields.companies?.length || 0) >= 1) score += 1;
+  if ((resumeFields.skills?.length || 0) >= 3) score += 1;
+  if ((resumeFields.highlights?.length || 0) >= 2) score += 1;
+  if ((resumeFields.projectHighlights?.length || 0) >= 1) score += 1;
+
+  return score;
+}
+
 export function isLikelyResumePersonName(value: string) {
   const text = normalizeResumeTextValue(value);
   if (!text) return false;
@@ -36,7 +76,9 @@ export function inferSchemaType(
   summary = '',
 ) {
   const topicEvidence = topicTags.join(' ').toLowerCase();
+  const classificationEvidence = `${category} ${bizCategory || ''} ${title} ${summary} ${topicEvidence}`.toLowerCase();
   const resumeEvidence = `${title} ${summary}`.toLowerCase();
+  const hasTenderHint = hasTenderDocumentHint(classificationEvidence);
   const hasResumeHint = includesAnyText(resumeEvidence, [
     'resume',
     'curriculum vitae',
@@ -49,21 +91,13 @@ export function inferSchemaType(
     '教育经历',
     '工作经历',
   ]);
-  const hasStrongResumeFields = Boolean(
-    resumeFields && (
-      (resumeFields.candidateName && isLikelyResumePersonName(resumeFields.candidateName))
-      || resumeFields.education
-      || resumeFields.latestCompany
-      || resumeFields.targetRole
-      || resumeFields.currentRole
-      || (resumeFields.skills?.length || 0) >= 2
-    )
-  );
-  if (hasResumeHint || hasStrongResumeFields) return 'resume' as const;
+  const hasStrongResumeFields = countResumeSignals(resumeFields) >= 3;
   if (bizCategory === 'order') return 'order' as const;
   if (bizCategory === 'footfall') return 'report' as const;
   if (bizCategory === 'inventory') return 'report' as const;
   if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
+  if (hasTenderHint) return 'technical' as const;
+  if (hasResumeHint || hasStrongResumeFields) return 'resume' as const;
   if (topicTags.includes('奶粉配方')) return 'formula' as const;
   if (
     category === 'report'

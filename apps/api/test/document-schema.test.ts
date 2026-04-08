@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildStructuredProfile, refreshDerivedSchemaProfile } from '../src/lib/document-schema.js';
+import { buildStructuredProfile, inferSchemaType, refreshDerivedSchemaProfile } from '../src/lib/document-schema.js';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
 
 test('refreshDerivedSchemaProfile should preserve manually edited structured profile', () => {
@@ -228,4 +228,36 @@ test('buildStructuredProfile should expose mall-zone footfall fields for footfal
   assert.equal(profile.mallZoneCount, '3');
   assert.equal(profile.aggregationLevel, 'mall-zone');
   assert.deepEqual(profile.mallZones, ['A区', 'B区', 'C区']);
+});
+
+test('inferSchemaType should keep tender-style documents out of resume classification even with polluted resume fields', () => {
+  const schemaType = inferSchemaType(
+    'general',
+    'general',
+    {
+      latestCompany: '某设计院',
+      skills: ['设计', '招投标', '实施'],
+      highlights: ['负责项目投标文件编制'],
+    },
+    ['标书'],
+    '开平市乡镇公共区域停车泊位与新能源汽车充电基础设施建设项目（勘察、设计）',
+    '投标文件否决性条款摘要、招标公告、投标人须知、评标办法（综合评估法）',
+  );
+
+  assert.equal(schemaType, 'technical');
+});
+
+test('inferSchemaType should require stronger resume evidence before classifying a generic document as resume', () => {
+  const schemaType = inferSchemaType(
+    'general',
+    'general',
+    {
+      skills: ['Excel', '沟通'],
+    },
+    [],
+    '培训纪要',
+    '本周内部培训纪要与复盘摘要',
+  );
+
+  assert.equal(schemaType, 'generic');
 });

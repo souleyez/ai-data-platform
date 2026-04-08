@@ -39,6 +39,7 @@ test('buildDocumentAdvancedParseSystemPrompt should include workspace skill cont
 
   assert.match(chatPrompt, /document-structuring assistant/i);
   assert.match(chatPrompt, /resumeFields/);
+  assert.match(chatPrompt, /omit resumeFields entirely/i);
   assert.doesNotMatch(chatPrompt, /Workspace skill: document-deep-parse/);
   assert.match(skillPrompt, /Workspace skill: document-deep-parse/);
   assert.match(skillPrompt, /Document Deep Parse/);

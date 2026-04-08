@@ -30,7 +30,9 @@ function buildSystemPrompt() {
     'Do not invent facts.',
     'Keep 3-8 high-value evidence blocks.',
     'Prefer professional signals for contracts, formulas, technical documents, resumes, and research papers.',
-    'For resumes, populate resumeFields when the source text supports them. Leave unknown fields empty or omit them.',
+    'Only populate resumeFields for explicit resumes, CVs, candidate profiles, or job-application documents.',
+    'For contracts, tenders, technical documents, reports, and research papers, omit resumeFields entirely.',
+    'Do not infer employers, skills, education history, or target roles from non-resume documents.',
   ].join(' ');
 }
 
