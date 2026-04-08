@@ -432,7 +432,7 @@ export default function DatasourcesPage() {
                 <div className="panel-header">
                   <div>
                     <h3>最近运行记录</h3>
-                    <p>查看执行状态、采集数量、落库结果和最近入库成果摘要。</p>
+                    <p>查看执行状态、采集数量和落库结果概览，不在这里展示实际采集正文。</p>
                   </div>
                 </div>
                 {recentRuns.length ? (

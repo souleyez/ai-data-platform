@@ -46,13 +46,11 @@ export default function DatasourceRunCard({ run }) {
         </div>
       ) : null}
       {stability?.note ? <div className="datasource-run-summary">{stability.note}</div> : null}
-      {run.summary ? <div className="datasource-run-summary">{run.summary}</div> : null}
       {resultItems.length ? (
         <div className="capture-result-list">
           {resultItems.map((doc) => (
             <div key={doc.id} className="capture-result-item">
               <strong>{doc.label}</strong>
-              {doc.summary ? <p>{doc.summary}</p> : null}
             </div>
           ))}
         </div>

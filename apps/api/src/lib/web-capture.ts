@@ -15,6 +15,7 @@ const TASKS_FILE = path.join(WEB_CAPTURE_DIR, 'tasks.json');
 const OUTPUT_DIR = path.join(DEFAULT_SCAN_DIR, 'web-captures');
 const DEFAULT_MAX_ITEMS = 5;
 const MAX_FETCH_ATTEMPTS_FACTOR = 3;
+const DEFAULT_RAW_DELETE_AFTER_HOURS = 48;
 const execFileAsync = promisify(execFile);
 
 export type WebCaptureFrequency = 'manual' | 'daily' | 'weekly';
@@ -44,6 +45,9 @@ export type WebCaptureTask = {
   lastSummary?: string;
   documentPath?: string;
   markdownPath?: string;
+  rawDocumentPath?: string;
+  rawDeleteAfterAt?: string;
+  keepOriginalFiles?: boolean;
   title?: string;
   note?: string;
   nextRunAt?: string;
@@ -127,6 +131,12 @@ const SUPPORTED_DOWNLOAD_EXTENSIONS = new Set([
   '.webp',
   '.gif',
   '.bmp',
+]);
+
+const STRUCTURED_DOWNLOAD_EXTENSIONS = new Set([
+  '.xlsx',
+  '.xls',
+  '.csv',
 ]);
 
 const DOWNLOAD_MIME_EXTENSION_MAP: Record<string, string> = {
@@ -662,6 +672,18 @@ function isTaskDue(task: WebCaptureTask, now = Date.now()) {
   const nextRunAt = computeNextRunAt(task);
   if (!nextRunAt) return true;
   return Date.parse(nextRunAt) <= now;
+}
+
+function shouldKeepOriginalDownload(task: Pick<WebCaptureTask, 'keepOriginalFiles'>, extension: string) {
+  const normalizedExtension = String(extension || '').toLowerCase();
+  if (task.keepOriginalFiles) return true;
+  return STRUCTURED_DOWNLOAD_EXTENSIONS.has(normalizedExtension);
+}
+
+function buildRawDeleteAfterAt(nowIso: string) {
+  const baseMs = Date.parse(nowIso);
+  if (Number.isNaN(baseMs)) return '';
+  return new Date(baseMs + DEFAULT_RAW_DELETE_AFTER_HOURS * 60 * 60 * 1000).toISOString();
 }
 
 async function ensureDirs() {
@@ -1227,9 +1249,54 @@ async function writeDownloadedCapture(task: WebCaptureTask, file: DownloadResult
     '',
   ].join('\n');
   await fs.writeFile(markdownPath, markdownContent, 'utf8');
+  const keepOriginal = shouldKeepOriginalDownload(task, file.extension);
   return {
-    filePath,
+    documentPath: keepOriginal ? filePath : markdownPath,
     markdownPath,
+    rawDocumentPath: keepOriginal ? '' : filePath,
+    rawDeleteAfterAt: keepOriginal ? '' : buildRawDeleteAfterAt(new Date().toISOString()),
+  };
+}
+
+async function cleanupExpiredWebCaptureRawFiles(items: WebCaptureTask[], now = new Date()) {
+  const nowMs = now.getTime();
+  let changed = false;
+  let cleanedCount = 0;
+  const nextItems: WebCaptureTask[] = [];
+
+  for (const item of items) {
+    const rawDocumentPath = String(item.rawDocumentPath || '').trim();
+    const rawDeleteAfterAt = String(item.rawDeleteAfterAt || '').trim();
+    if (
+      rawDocumentPath
+      && rawDeleteAfterAt
+      && Date.parse(rawDeleteAfterAt) <= nowMs
+      && !item.keepOriginalFiles
+    ) {
+      try {
+        await fs.rm(rawDocumentPath, { force: true });
+      } catch {
+        // best effort cleanup
+      }
+      nextItems.push({
+        ...item,
+        rawDocumentPath: '',
+        rawDeleteAfterAt: '',
+      });
+      changed = true;
+      cleanedCount += 1;
+      continue;
+    }
+    nextItems.push(item);
+  }
+
+  if (changed) {
+    await writeTasks(nextItems);
+  }
+
+  return {
+    items: nextItems,
+    cleanedCount,
   };
 }
 
@@ -1339,12 +1406,16 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
 
     if (landing.kind === 'download') {
       const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
-      const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+      const summary = shouldKeepOriginalDownload(normalizedTask, landing.extension)
+        ? `本次采集识别为可下载文件，已保留原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
+        : `本次采集识别为可下载文件，已清洗为 Markdown 入库，原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
       return {
         ...normalizedTask,
         title: landing.title || normalizedTask.url,
-        documentPath: storedDownload.filePath,
+        documentPath: storedDownload.documentPath,
         markdownPath: storedDownload.markdownPath,
+        rawDocumentPath: storedDownload.rawDocumentPath,
+        rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
         lastSummary: summary,
         lastStatus: 'success' as const,
         lastRunAt: now,
@@ -1364,12 +1435,16 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
       const loginResult = await submitLoginForm(landing, runtimeAuth, jar);
       if (loginResult.kind === 'download') {
         const storedDownload = await writeDownloadedCapture(normalizedTask, loginResult);
-        const summary = `登录后返回可下载文件，已保存原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+        const summary = shouldKeepOriginalDownload(normalizedTask, loginResult.extension)
+          ? `登录后返回可下载文件，已保留原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
+          : `登录后返回可下载文件，已清洗为 Markdown 入库，原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
         return {
           ...normalizedTask,
           title: loginResult.title || normalizedTask.url,
-          documentPath: storedDownload.filePath,
+          documentPath: storedDownload.documentPath,
           markdownPath: storedDownload.markdownPath,
+          rawDocumentPath: storedDownload.rawDocumentPath,
+          rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
           lastSummary: summary,
           lastStatus: 'success' as const,
           lastRunAt: now,
@@ -1389,12 +1464,16 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
         : loginResult;
       if (landing.kind === 'download') {
         const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
-        const summary = `本次采集识别为可下载文件，已保存原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`;
+        const summary = shouldKeepOriginalDownload(normalizedTask, landing.extension)
+          ? `本次采集识别为可下载文件，已保留原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
+          : `本次采集识别为可下载文件，已清洗为 Markdown 入库，原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
         return {
           ...normalizedTask,
           title: landing.title || normalizedTask.url,
-          documentPath: storedDownload.filePath,
+          documentPath: storedDownload.documentPath,
           markdownPath: storedDownload.markdownPath,
+          rawDocumentPath: storedDownload.rawDocumentPath,
+          rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
           lastSummary: summary,
           lastStatus: 'success' as const,
           lastRunAt: now,
@@ -1436,6 +1515,8 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
       title,
       documentPath,
       markdownPath: '',
+      rawDocumentPath: '',
+      rawDeleteAfterAt: '',
       lastSummary: summary,
       lastStatus: 'success' as const,
       lastRunAt: now,
@@ -1449,6 +1530,8 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
       ...task,
       maxItems: normalizeMaxItems(task.maxItems),
       markdownPath: '',
+      rawDocumentPath: '',
+      rawDeleteAfterAt: '',
       lastRunAt: now,
       updatedAt: now,
       lastStatus: 'error' as const,
@@ -1474,6 +1557,9 @@ export async function listWebCaptureTasks() {
       nextRunAt: item.captureStatus === 'paused' ? '' : (item.nextRunAt || computeNextRunAt(item)),
       lastCollectedCount: item.lastCollectedCount ?? item.lastCollectedItems?.length ?? 0,
       lastCollectedItems: Array.isArray(item.lastCollectedItems) ? item.lastCollectedItems : [],
+      rawDocumentPath: item.rawDocumentPath || '',
+      rawDeleteAfterAt: item.rawDeleteAfterAt || '',
+      keepOriginalFiles: Boolean(item.keepOriginalFiles),
     }))
     .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 }
@@ -1491,6 +1577,7 @@ export async function createAndRunWebCaptureTask(input: {
   auth?: RuntimeAuth;
   credentialRef?: string;
   credentialLabel?: string;
+  keepOriginalFiles?: boolean;
 }) {
   const now = new Date().toISOString();
   const existingItems = await readTasks();
@@ -1507,6 +1594,7 @@ export async function createAndRunWebCaptureTask(input: {
     crawlMode: normalizeCrawlMode(input.crawlMode ?? existing?.crawlMode),
     note: input.note?.trim() || '',
     maxItems: normalizeMaxItems(input.maxItems),
+    keepOriginalFiles: Boolean(input.keepOriginalFiles ?? existing?.keepOriginalFiles),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     captureStatus: 'active',
@@ -1535,6 +1623,7 @@ export async function upsertWebCaptureTask(input: {
   credentialLabel?: string;
   captureStatus?: 'active' | 'paused';
   loginMode?: 'none' | 'credential';
+  keepOriginalFiles?: boolean;
 }) {
   const now = new Date().toISOString();
   const existingItems = await readTasks();
@@ -1552,6 +1641,7 @@ export async function upsertWebCaptureTask(input: {
     crawlMode: normalizeCrawlMode(input.crawlMode ?? existing?.crawlMode),
     note: input.note?.trim() || existing?.note || '',
     maxItems: normalizeMaxItems(input.maxItems ?? existing?.maxItems),
+    keepOriginalFiles: Boolean(input.keepOriginalFiles ?? existing?.keepOriginalFiles),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     captureStatus: input.captureStatus || existing?.captureStatus || 'active',
@@ -1574,7 +1664,8 @@ export async function upsertWebCaptureTask(input: {
 
 export async function runDueWebCaptureTasks(now = new Date()) {
   const nowIso = now.toISOString();
-  const items = await readTasks();
+  const cleanupResult = await cleanupExpiredWebCaptureRawFiles(await readTasks(), now);
+  const items = cleanupResult.items;
   const nextItems: WebCaptureTask[] = [];
   const executed: WebCaptureTask[] = [];
 
@@ -1602,6 +1693,7 @@ export async function runDueWebCaptureTasks(now = new Date()) {
     executedCount: executed.length,
     successCount: executed.filter((item) => item.lastStatus === 'success').length,
     errorCount: executed.filter((item) => item.lastStatus === 'error').length,
+    cleanedRawCount: cleanupResult.cleanedCount,
     items: executed,
   };
 }

@@ -48,6 +48,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       frequency?: WebCaptureFrequency;
       note?: string;
       maxItems?: number;
+      keepOriginalFiles?: boolean;
       datasourceName?: string;
       targetLibraries?: DatasourceTargetLibrary[];
     };
@@ -63,6 +64,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       frequency: (['manual', 'daily', 'weekly'].includes(String(body.frequency)) ? body.frequency : 'daily') as WebCaptureFrequency,
       note: String(body.note || '').trim(),
       maxItems: Number(body.maxItems || 5),
+      keepOriginalFiles: Boolean(body.keepOriginalFiles),
     });
     const definition = await syncWebCaptureTaskToDatasource(task, {
       name: String(body.datasourceName || '').trim(),
@@ -111,6 +113,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       password?: string;
       remember?: boolean;
       maxItems?: number;
+      keepOriginalFiles?: boolean;
       datasourceName?: string;
       targetLibraries?: DatasourceTargetLibrary[];
     };
@@ -164,6 +167,7 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
       auth: { username: stored.username, password: stored.password },
       credentialRef: remember || (!username && !password && stored.id) ? stored.id : '',
       credentialLabel: stored.maskedUsername,
+      keepOriginalFiles: Boolean(body.keepOriginalFiles),
     });
     const definition = await syncWebCaptureTaskToDatasource(task, {
       name: String(body.datasourceName || '').trim(),

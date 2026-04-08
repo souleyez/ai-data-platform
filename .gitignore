@@ -13,6 +13,7 @@ storage/cache/
 storage/files/
 storage/control-plane/
 storage/web-captures/
+storage/config/
 storage/config/document-overrides.json
 storage/config/document-categories.json
 storage/config/document-libraries.json
@@ -33,6 +34,10 @@ storage/config/bots/
 storage/config/datasources/
 memory/catalog/
 tmp/
+
+# local presentation workspaces
+decks/project-overview-apr2026/
+decks/project-overview-apr2026-easy/
 
 # ad-hoc local test artifacts
 apps/api/test/data/

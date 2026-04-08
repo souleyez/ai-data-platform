@@ -116,6 +116,7 @@ async function ensureWebTaskFromDefinition(definition: DatasourceDefinition) {
     credentialLabel: definition.credentialRef?.label || '',
     loginMode: definition.authMode === 'credential' || definition.authMode === 'manual_session' ? 'credential' : 'none',
     captureStatus: definition.status === 'paused' ? 'paused' : 'active',
+    keepOriginalFiles: Boolean(definition.config?.keepOriginalFiles),
   });
 }
 
@@ -291,6 +292,7 @@ export async function runDatasourceDefinition(id: string) {
     maxItems: Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 5),
     credentialRef: definition.credentialRef?.id || '',
     credentialLabel: definition.credentialRef?.label || '',
+    keepOriginalFiles: Boolean(definition.config?.keepOriginalFiles),
   });
 
   const syncedDefinition = await syncWebCaptureTaskToDatasource(task, {

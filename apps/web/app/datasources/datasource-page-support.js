@@ -298,7 +298,13 @@ export async function copyText(value) {
 }
 
 export function buildRunResultItems(run) {
-  if (run?.documentSummaries?.length) return run.documentSummaries;
+  if (run?.documentSummaries?.length) {
+    return run.documentSummaries.map((item, index) => ({
+      id: item?.id || `${run.id || 'run'}-summary-${index}`,
+      label: item?.label || `入库文档 ${index + 1}`,
+      summary: '',
+    }));
+  }
   if (run?.documentLabels?.length) {
     return run.documentLabels.map((label, index) => ({
       id: `${run.id || 'run'}-label-${index}`,

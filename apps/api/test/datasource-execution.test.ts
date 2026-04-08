@@ -22,6 +22,9 @@ const datasourceExecution = await importFresh<typeof import('../src/lib/datasour
 const datasourceService = await importFresh<typeof import('../src/lib/datasource-service.js')>(
   '../src/lib/datasource-service.js',
 );
+const webCapture = await importFresh<typeof import('../src/lib/web-capture.js')>(
+  '../src/lib/web-capture.js',
+);
 const documentParser = await importFresh<typeof import('../src/lib/document-parser.js')>(
   '../src/lib/document-parser.js',
 );
@@ -301,6 +304,8 @@ test('web_public datasource run should preserve downloadable xlsx captures and k
     assert.equal(result.run?.status, 'success');
     assert.equal(runs[0]?.ingestedCount, 1);
     assert.match(documentPath, /\.xlsx$/i);
+    assert.equal(String(result.task?.rawDocumentPath || ''), '');
+    assert.equal(String(result.task?.rawDeleteAfterAt || ''), '');
     assert.match(runs[0]?.summary || '', /可下载文件|XLSX/i);
     assert.ok(markdownPath);
     assert.match(markdownPath, /-normalized\.md$/i);
@@ -311,6 +316,65 @@ test('web_public datasource run should preserve downloadable xlsx captures and k
     assert.equal(parsed.footfallFields?.aggregationLevel, 'mall-zone');
     assert.equal(parsed.footfallFields?.totalFootfall, '360');
     assert.equal(parsed.footfallFields?.topMallZone, '商场');
+  } finally {
+    await server.close();
+  }
+});
+
+test('web_public datasource run should ingest non-tabular downloads as markdown and auto-clean raw originals later', async () => {
+  const server = await startHtmlServer({
+    '/notice.txt': {
+      body: Buffer.from('广州采购平台\n第1页 共1页\n项目概述：高明中港城活动公告。\n执行要求：保留正文，清洗页眉页脚。', 'utf8'),
+      contentType: 'text/plain; charset=utf-8',
+      headers: {
+        'Content-Disposition': "attachment; filename*=UTF-8''%E9%AB%98%E6%98%8E%E4%B8%AD%E6%B8%AF%E5%9F%8E%E5%85%AC%E5%91%8A.txt",
+      },
+    },
+  });
+
+  try {
+    await documentLibraries.createDocumentLibrary({ name: 'capture-md', description: 'Markdown-first capture library', permissionLevel: 0 }).catch(() => undefined);
+    await datasourceDefinitions.upsertDatasourceDefinition({
+      id: 'ds-web-markdown-first',
+      name: 'Markdown first collector',
+      kind: 'web_public',
+      status: 'active',
+      targetLibraries: [{ key: 'capture-md', label: '采集Markdown', mode: 'primary' }],
+      schedule: { kind: 'manual', maxItemsPerRun: 1 },
+      authMode: 'none',
+      config: {
+        url: `${server.baseUrl}/notice.txt`,
+        focus: '公告正文',
+        maxItems: 1,
+      },
+    });
+
+    const result = await datasourceExecution.runDatasourceDefinition('ds-web-markdown-first');
+    const runs = await datasourceDefinitions.listDatasourceRuns('ds-web-markdown-first');
+    const documentPath = runs[0]?.documentIds[0] || '';
+    const rawDocumentPath = String(result.task?.rawDocumentPath || '').trim();
+    const cache = await documentCacheRepository.readDocumentCache();
+
+    assert.equal(result.run?.status, 'success');
+    assert.equal(runs[0]?.ingestedCount, 1);
+    assert.match(documentPath, /-normalized\.md$/i);
+    assert.ok(rawDocumentPath);
+    assert.match(rawDocumentPath, /\.txt$/i);
+    assert.ok(String(result.task?.rawDeleteAfterAt || '').trim());
+    assert.equal(documentPath, String(result.task?.markdownPath || '').trim());
+    assert.ok(cache?.items.some((item) => item.path === documentPath && (item.confirmedGroups || []).includes('capture-md')));
+
+    await webCapture.updateWebCaptureTask(String(result.task?.id || ''), {
+      rawDeleteAfterAt: '2000-01-01T00:00:00.000Z',
+    });
+    const cleanup = await webCapture.runDueWebCaptureTasks(new Date('2026-04-08T00:00:00.000Z'));
+    const tasks = await webCapture.listWebCaptureTasks();
+    const cleanedTask = tasks.find((item) => item.id === result.task?.id);
+
+    assert.equal(cleanup.cleanedRawCount, 1);
+    await assert.rejects(fs.stat(rawDocumentPath));
+    assert.equal(String(cleanedTask?.rawDocumentPath || ''), '');
+    assert.equal(String(cleanedTask?.documentPath || ''), documentPath);
   } finally {
     await server.close();
   }

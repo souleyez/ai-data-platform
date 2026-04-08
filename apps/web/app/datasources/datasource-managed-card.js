@@ -51,7 +51,6 @@ export default function DatasourceManagedCard({
             </div>
           ) : null}
           {stability?.note ? <p>{stability.note}</p> : null}
-          {runtime.lastSummary || item.lastSummary ? <p>{runtime.lastSummary || item.lastSummary}</p> : null}
         </div>
         <div className="datasource-managed-actions">
           <button className="ghost-btn" type="button" onClick={() => onEdit(buildFormFromDefinition(definition || item))}>编辑</button>

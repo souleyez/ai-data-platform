@@ -74,6 +74,7 @@ type AuditCaptureItem = {
   referencedByReports: boolean;
   referencedByAnswers: boolean;
   documentPath?: string;
+  rawDocumentPath?: string;
   storageState: 'live' | 'structured-only' | 'none';
   cleanupRecommended: boolean;
   autoCleanupEligible: boolean;
@@ -319,6 +320,18 @@ async function purgeDocumentRecords(filePaths: string[]) {
   await Promise.all(filePaths.map((filePath) => removeRetainedDocument(filePath)));
 }
 
+function getCaptureFilePaths(task: {
+  documentPath?: string;
+  markdownPath?: string;
+  rawDocumentPath?: string;
+}) {
+  return Array.from(new Set([
+    String(task.documentPath || '').trim(),
+    String(task.markdownPath || '').trim(),
+    String(task.rawDocumentPath || '').trim(),
+  ].filter(Boolean)));
+}
+
 export async function buildAuditSnapshot() {
   const [{ items: documents }, tasks, reportState, auditState, storage, retainedDocuments, answerUsageState] = await Promise.all([
     loadParsedDocuments(5000, false, undefined, {
@@ -463,6 +476,7 @@ export async function buildAuditSnapshot() {
       referencedByReports,
       referencedByAnswers,
       documentPath: task.documentPath,
+      rawDocumentPath: task.rawDocumentPath,
       storageState,
       cleanupRecommended,
       autoCleanupEligible,
@@ -570,7 +584,7 @@ export async function cleanupAuditCaptureTask(taskId: string) {
 
     if (document && auditDoc?.storageState !== 'structured-only') {
       await retainStructuredDocument(document);
-      await removeDocumentFiles([task.documentPath]);
+      await removeDocumentFiles(getCaptureFilePaths(task));
     }
   }
 
@@ -579,6 +593,8 @@ export async function cleanupAuditCaptureTask(taskId: string) {
     pausedAt: new Date().toISOString(),
     nextRunAt: '',
     documentPath: task.documentPath || '',
+    rawDocumentPath: '',
+    rawDeleteAfterAt: '',
   });
 
   await appendAuditLog({
@@ -596,7 +612,7 @@ export async function hardDeleteAuditCaptureTask(taskId: string) {
   const task = tasks.find((item) => item.id === taskId);
   if (!task) throw new Error('capture task not found');
 
-  const filePaths = [task.documentPath].filter(Boolean) as string[];
+  const filePaths = getCaptureFilePaths(task);
   if (filePaths.length) {
     await purgeDocumentRecords(filePaths);
   }
