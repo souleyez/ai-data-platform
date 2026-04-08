@@ -218,6 +218,12 @@ async function writeRuns(items: DatasourceRun[]) {
   await writeDatasourceRunPayload(items);
 }
 
+function sortRunsByLatestTimestamp(items: DatasourceRun[]) {
+  return [...items].sort((a, b) =>
+    String(b.finishedAt || b.startedAt || '').localeCompare(String(a.finishedAt || a.startedAt || '')),
+  );
+}
+
 export async function listDatasourceDefinitions() {
   const items = await readDefinitions();
   return items.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -263,7 +269,7 @@ export async function deleteDatasourceDefinition(id: string) {
 export async function listDatasourceRuns(datasourceId?: string) {
   const items = await readRuns();
   const filtered = datasourceId ? items.filter((item) => item.datasourceId === datasourceId) : items;
-  return filtered.sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+  return sortRunsByLatestTimestamp(filtered);
 }
 
 export async function appendDatasourceRun(input: Partial<DatasourceRun>) {
@@ -298,4 +304,36 @@ export async function appendDatasourceRun(input: Partial<DatasourceRun>) {
   }
 
   return run;
+}
+
+export async function deleteDatasourceRun(id: string) {
+  const runId = String(id || '').trim();
+  if (!runId) return null;
+
+  const items = await readRuns();
+  const index = items.findIndex((item) => item.id === runId);
+  if (index < 0) return null;
+
+  const [removed] = items.splice(index, 1);
+  await writeRuns(items);
+
+  const definitions = await readDefinitions();
+  const definitionIndex = definitions.findIndex((item) => item.id === removed.datasourceId);
+  if (definitionIndex >= 0) {
+    const latestRemainingRun = sortRunsByLatestTimestamp(
+      items.filter((item) => item.datasourceId === removed.datasourceId),
+    )[0] || null;
+    const definition = definitions[definitionIndex];
+    definitions[definitionIndex] = {
+      ...definition,
+      lastRunAt: latestRemainingRun ? (latestRemainingRun.finishedAt || latestRemainingRun.startedAt || '') : '',
+      lastStatus: latestRemainingRun?.status || undefined,
+      lastSummary: latestRemainingRun ? (latestRemainingRun.summary || latestRemainingRun.errorMessage || '') : '',
+      updatedAt: new Date().toISOString(),
+      nextRunAt: computeNextRunAt(definition.schedule.kind, definition.status),
+    };
+    await writeDefinitions(definitions);
+  }
+
+  return removed;
 }

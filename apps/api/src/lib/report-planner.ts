@@ -151,6 +151,8 @@ function buildFallbackSections(templateTaskHint?: KnowledgeTemplateTaskHint | nu
 function buildFallbackTitle(
   templateTaskHint: KnowledgeTemplateTaskHint | null | undefined,
   libraryLabels: string[],
+  requestText = '',
+  documentTitles: string[] = [],
 ) {
   const primaryLabel = libraryLabels[0] || '知识库';
   switch (templateTaskHint) {
@@ -163,12 +165,101 @@ function buildFallbackTitle(
     case 'order-static-page':
       return '客户汇报型多渠道经营驾驶舱';
     case 'footfall-static-page':
-      return '客户汇报型商场客流分区驾驶舱';
+      return buildFootfallFallbackTitle(requestText, libraryLabels, documentTitles);
     case 'iot-static-page':
       return '客户汇报型 IOT 方案静态页';
     default:
       return `${primaryLabel} 客户汇报静态页`;
   }
+}
+
+const FOOTFALL_SUBJECT_STOPWORDS = new Set([
+  '广州AI',
+  '广州ai',
+  '广州 AI',
+  'AI',
+  'ai',
+  '知识库',
+  '商场',
+  '客流',
+  '人流',
+  '采集',
+  '数据',
+  '报表',
+  '静态页',
+  '分析',
+  '输出',
+  '一份',
+  '使用',
+  '基于',
+]);
+
+function normalizeFootfallSubjectKey(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function sanitizeFootfallSubject(value: string, libraryLabels: string[]) {
+  const raw = String(value || '').trim().replace(/[《》"'“”‘’、，。；：:]+$/g, '');
+  if (!raw) return '';
+  if (raw.length < 2 || raw.length > 24) return '';
+  const normalizedRaw = normalizeFootfallSubjectKey(raw);
+  if (FOOTFALL_SUBJECT_STOPWORDS.has(raw) || FOOTFALL_SUBJECT_STOPWORDS.has(normalizedRaw)) return '';
+  if (libraryLabels.some((label) => normalizedRaw === normalizeFootfallSubjectKey(String(label || '').trim()))) return '';
+  if (/^[a-z]{2,4}$/i.test(raw)) return '';
+  if (/知识库|静态页|报表|数据|采集|分析|输出/.test(raw)) return '';
+  return raw;
+}
+
+function extractFootfallSubjectFromText(text: string, libraryLabels: string[]) {
+  const source = String(text || '').trim();
+  if (!source) return '';
+
+  const patterns = [
+    /对\s*([\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,24}?)\s*客流(?:采集)?数据/u,
+    /([\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,24}?)\s*客流(?:采集)?数据/u,
+    /([\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,24}?)\s*客流(?:报表|日报|静态页|分析)/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const candidate = sanitizeFootfallSubject(match?.[1] || '', libraryLabels);
+    if (candidate) return candidate;
+  }
+
+  return '';
+}
+
+function extractFootfallSubjectFromTitle(title: string, libraryLabels: string[]) {
+  const source = String(title || '').trim();
+  if (!source) return '';
+
+  const patterns = [
+    /([\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,24}?)\s*客流(?:日报|报表|数据|分析)/u,
+    /([\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,24}?)\s*商场客流/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const candidate = sanitizeFootfallSubject(match?.[1] || '', libraryLabels);
+    if (candidate) return candidate;
+  }
+
+  return '';
+}
+
+function buildFootfallFallbackTitle(requestText: string, libraryLabels: string[], documentTitles: string[]) {
+  const subject =
+    extractFootfallSubjectFromText(requestText, libraryLabels)
+    || documentTitles.map((item) => extractFootfallSubjectFromTitle(item, libraryLabels)).find(Boolean)
+    || '';
+  if (!subject) return '客户汇报型商场客流分区驾驶舱';
+  return subject.includes('商场')
+    ? `${subject}客流分析报告`
+    : `${subject}商场客流分析报告`;
 }
 
 function resolveBaseEnvelope(input: ReportPlannerInput, libraryLabels: string[]) {
@@ -180,7 +271,12 @@ function resolveBaseEnvelope(input: ReportPlannerInput, libraryLabels: string[])
     : buildFallbackSections(input.templateTaskHint);
 
   return {
-    title: selectedEnvelope?.title || buildFallbackTitle(input.templateTaskHint, libraryLabels),
+    title: selectedEnvelope?.title || buildFallbackTitle(
+      input.templateTaskHint,
+      libraryLabels,
+      input.requestText,
+      input.retrieval.documents.map((item) => String(item.title || item.name || '').trim()).filter(Boolean),
+    ),
     fixedStructure: uniqueNonEmpty([
       ...(selectedEnvelope?.fixedStructure || []),
       'Lead with the business conclusion and keep the page client-facing.',

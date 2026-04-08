@@ -5,9 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 const NAV_LINKS = [
   { label: '智能工作台', href: '/' },
   { label: '文档中心', href: '/documents' },
-  { label: '数据源管理', href: '/datasources' },
   { label: '报告中心', href: '/reports' },
-  { label: '审计日志', href: '/audit' },
 ];
 
 const INITIAL_MODEL_STATE = {
@@ -208,7 +206,8 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
+    <>
+      <aside className="sidebar">
       <div className="brand">
         <div className="brand-logo">AI</div>
         <div>
@@ -405,7 +404,23 @@ export default function Sidebar({
           </div>
         ) : null}
       </section>
-    </aside>
+      </aside>
+
+      <nav className="sidebar-mobile-nav" aria-label="移动端底部目录">
+        {NAV_LINKS.map((item) => {
+          const active = currentPath === item.href;
+          return (
+            <a
+              key={`mobile-${item.label}-${item.href}`}
+              href={item.href}
+              className={`mobile-nav-item ${active ? 'active' : ''}`}
+            >
+              <span className="mobile-nav-label">{item.label}</span>
+            </a>
+          );
+        })}
+      </nav>
+    </>
   );
 }
 

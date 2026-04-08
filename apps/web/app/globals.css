@@ -65,6 +65,7 @@ button, textarea { font: inherit; }
 .nav-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #7f8ca3; }
 .nav-item { padding: 12px 14px; border-radius: 12px; text-decoration: none; background: transparent; }
 .nav-item.active, .nav-item:hover { background: rgba(255, 255, 255, 0.08); }
+.sidebar-mobile-nav { display: none; }
 .side-card {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -790,6 +791,18 @@ button { border: 0; border-radius: 12px; padding: 10px 16px; font-size: 14px; cu
 .report-results-card {
   min-width: 0;
 }
+.report-results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.report-results-stepper {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
 .report-results-home {
   position: sticky;
   top: 18px;
@@ -1312,6 +1325,17 @@ th { color: var(--subtle); font-weight: 600; }
   gap: 20px;
   align-items: start;
 }
+.documents-layout-simple,
+.reports-workbench-simple {
+  grid-template-columns: 1fr;
+}
+.documents-summary-card {
+  padding: 16px 18px;
+}
+.documents-summary-chips {
+  gap: 8px;
+  align-items: center;
+}
 .reports-templates-panel,
 .reports-results-panel,
 .reports-bot-panel {
@@ -1761,6 +1785,49 @@ th { color: var(--subtle); font-weight: 600; }
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+  .sidebar-mobile-nav {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 90;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    padding: 10px;
+    border-radius: 22px;
+    background: rgba(15, 23, 42, 0.92);
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.32);
+    backdrop-filter: blur(14px);
+  }
+  .mobile-nav-item {
+    min-height: 54px;
+    border-radius: 16px;
+    color: #cbd5e1;
+    text-decoration: none;
+    display: grid;
+    place-items: center;
+    padding: 8px 10px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .mobile-nav-item.active {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(20, 184, 166, 0.2));
+    color: #ffffff;
+  }
+  .mobile-nav-label {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .main-panel {
+    padding: 18px 14px 96px;
+  }
+  .main-panel-home {
+    height: 100dvh;
+    padding: 16px 12px calc(108px + env(safe-area-inset-bottom));
+    gap: 12px;
+  }
   .topbar { flex-direction: column; }
   .topbar-actions-bots { justify-content: stretch; }
   .bot-selector-card { max-width: none; width: 100%; }
@@ -1768,7 +1835,128 @@ th { color: var(--subtle); font-weight: 600; }
   .chat-input-row { grid-template-columns: 1fr; }
   .capture-form-row { grid-template-columns: 1fr; }
   .workbench-toolbar { align-items: flex-start; flex-direction: column; }
-  .chat-composer-wrap { position: sticky; bottom: 0; }
+  .homepage-workspace {
+    position: relative;
+    display: block;
+    height: 100%;
+  }
+  .chat-panel {
+    position: relative;
+    height: calc(100dvh - 210px);
+    min-height: 0;
+    padding: 16px 14px calc(26dvh + 40px);
+    border-radius: 24px;
+  }
+  .chat-messages {
+    height: 100%;
+    padding-right: 0;
+  }
+  .chat-composer-wrap {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(88px + env(safe-area-inset-bottom));
+    z-index: 85;
+    min-height: 22dvh;
+    height: 25dvh;
+    display: grid;
+    align-content: stretch;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+  }
+  .chat-input-row {
+    height: 100%;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .chat-input-row textarea {
+    min-height: 100%;
+    height: 100%;
+  }
+  .send-btn {
+    min-height: 52px;
+  }
+  .insight-panel-mobile {
+    position: fixed;
+    top: 92px;
+    right: 0;
+    bottom: calc(28dvh + 108px + env(safe-area-inset-bottom));
+    z-index: 88;
+    width: min(88vw, 430px);
+    pointer-events: none;
+  }
+  .insight-panel-mobile .report-results-card {
+    height: 100%;
+    min-height: 0;
+    padding-top: 68px;
+    border-radius: 24px 0 0 24px;
+    box-shadow: 0 18px 58px rgba(15, 23, 42, 0.22);
+    transition: transform 220ms ease;
+    pointer-events: auto;
+  }
+  .insight-panel-mobile.insight-panel-compact .report-results-card {
+    transform: translateX(calc(100% - 62px));
+  }
+  .insight-panel-mobile.insight-panel-expanded .report-results-card {
+    transform: translateX(0);
+  }
+  .insight-mobile-rail {
+    position: absolute;
+    top: 16px;
+    left: 0;
+    width: 62px;
+    min-height: 148px;
+    padding: 12px 10px;
+    border: none;
+    border-radius: 22px 0 0 22px;
+    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    color: #e2e8f0;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    justify-items: center;
+    text-align: center;
+    pointer-events: auto;
+    box-shadow: 0 18px 46px rgba(15, 23, 42, 0.24);
+  }
+  .insight-mobile-rail-title {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  .insight-mobile-rail-meta,
+  .insight-mobile-rail-hint {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .insight-mobile-rail-hint {
+    color: #94a3b8;
+  }
+  .report-results-toolbar {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .report-results-stepper {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .report-results-stepper .ghost-btn,
+  .report-panel-toggle {
+    min-height: 40px;
+  }
+  .reports-workbench {
+    grid-template-columns: 1fr;
+  }
+  .documents-summary-chips {
+    display: flex;
+    flex-wrap: wrap;
+  }
   .bot-field-grid { grid-template-columns: 1fr; }
   .bot-field-span { grid-column: span 1; }
   .bot-binding-grid { grid-template-columns: 1fr; }
@@ -1817,4 +2005,14 @@ th { color: var(--subtle); font-weight: 600; }
 }
 
 @media (max-width: 720px) {
+  .topbar h2 {
+    font-size: 24px;
+  }
+  .topbar-inline-note {
+    display: none;
+  }
+  .documents-layout-simple,
+  .reports-workbench-simple {
+    gap: 16px;
+  }
 }

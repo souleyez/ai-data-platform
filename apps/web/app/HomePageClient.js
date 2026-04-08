@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import InsightPanel from './components/InsightPanel';
 import ChatPanel from './components/ChatPanel';
 import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
@@ -27,6 +28,7 @@ function buildTopSummary(documentTotal, documentLibraries) {
 }
 
 export default function HomePageClient({ initialModelState }) {
+  const [mobileViewport, setMobileViewport] = useState(false);
   const {
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
@@ -56,8 +58,17 @@ export default function HomePageClient({ initialModelState }) {
     uploadLoading,
   } = useHomePageController();
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mediaQuery = window.matchMedia('(max-width: 900px)');
+    const updateViewport = () => setMobileViewport(mediaQuery.matches);
+    updateViewport();
+    mediaQuery.addEventListener('change', updateViewport);
+    return () => mediaQuery.removeEventListener('change', updateViewport);
+  }, []);
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${mobileViewport ? 'app-shell-mobile-home' : ''}`}>
       <Sidebar sourceItems={sidebarSources} currentPath="/" initialModelState={initialModelState} />
 
       <main className="main-panel main-panel-home">
@@ -97,6 +108,7 @@ export default function HomePageClient({ initialModelState }) {
               onConfirmTemplateOption={confirmTemplateOption}
             />
             <InsightPanel
+              mobileViewport={mobileViewport}
               collapsed={reportCollapsed}
               onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
               reportItems={reportItems}

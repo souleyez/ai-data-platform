@@ -311,6 +311,36 @@ export default function DatasourcesPage() {
     }
   }
 
+  async function handleDeleteRun(run) {
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(`确认删除运行记录「${run.datasourceName || run.datasourceId} / ${run.id}」吗？这不会删除数据源定义或已入库文档。`);
+    if (!confirmed) return;
+
+    try {
+      setBusyId(`${run.id}:delete-run`);
+      setError('');
+      setMessage('');
+      const response = await fetch(buildApiUrl(`/api/datasources/runs/${encodeURIComponent(run.id)}`), {
+        method: 'DELETE',
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || '删除运行记录失败');
+
+      await load();
+      const nextMessage = `已删除运行记录：${run.datasourceName || run.datasourceId}`;
+      setMessage(nextMessage);
+      rememberDatasourceFeedback('数据源运行记录已删除', nextMessage, run.id);
+    } catch (deleteError) {
+      const nextError = deleteError instanceof Error ? deleteError.message : '删除运行记录失败';
+      setError(nextError);
+      rememberDatasourceFeedback('数据源运行记录删除失败', nextError, run.id);
+    } finally {
+      setBusyId('');
+    }
+  }
+
   return (
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/datasources" />
@@ -438,7 +468,12 @@ export default function DatasourcesPage() {
                 {recentRuns.length ? (
                   <div className="datasource-run-list">
                     {recentRuns.map((run) => (
-                      <DatasourceRunCard key={run.id} run={run} />
+                      <DatasourceRunCard
+                        key={run.id}
+                        run={run}
+                        deleting={busyId === `${run.id}:delete-run`}
+                        onDelete={handleDeleteRun}
+                      />
                     ))}
                   </div>
                 ) : (

@@ -7,7 +7,7 @@ import {
   RUN_STATUS_LABELS,
 } from './datasource-page-support';
 
-export default function DatasourceRunCard({ run }) {
+export default function DatasourceRunCard({ run, deleting = false, onDelete = null }) {
   const telemetryItems = buildTelemetryItems(run);
   const resultItems = buildRunResultItems(run);
   const stability = run.stability || null;
@@ -16,9 +16,21 @@ export default function DatasourceRunCard({ run }) {
     <article className="datasource-run-card">
       <div className="datasource-run-head">
         <strong>{run.datasourceName || run.datasourceId}</strong>
-        <DatasourceTag tone={run.status === 'success' ? 'success-tag' : run.status === 'failed' ? 'danger-tag' : 'neutral-tag'}>
-          {RUN_STATUS_LABELS[run.status] || run.status}
-        </DatasourceTag>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <DatasourceTag tone={run.status === 'success' ? 'success-tag' : run.status === 'failed' ? 'danger-tag' : 'neutral-tag'}>
+            {RUN_STATUS_LABELS[run.status] || run.status}
+          </DatasourceTag>
+          {typeof onDelete === 'function' ? (
+            <button
+              className="ghost-btn"
+              type="button"
+              disabled={Boolean(deleting)}
+              onClick={() => onDelete(run)}
+            >
+              {deleting ? '删除中…' : '删除记录'}
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="datasource-managed-meta">
         <span>开始：{formatDateTime(run.startedAt)}</span>

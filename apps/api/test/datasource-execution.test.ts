@@ -125,6 +125,58 @@ test('paused datasource should not execute', async () => {
   assert.equal(runs.length, 0);
 });
 
+test('deleteDatasourceRun should remove a single history item and roll runtime back to the latest remaining run', async () => {
+  await datasourceDefinitions.upsertDatasourceDefinition({
+    id: 'ds-delete-run',
+    name: 'Delete run history demo',
+    kind: 'upload_public',
+    status: 'active',
+    targetLibraries: [{ key: 'resume', label: '简历', mode: 'primary' }],
+    schedule: { kind: 'manual' },
+    authMode: 'none',
+    config: {},
+  });
+
+  await datasourceDefinitions.appendDatasourceRun({
+    id: 'run-delete-old',
+    datasourceId: 'ds-delete-run',
+    startedAt: '2026-04-08T02:00:00.000Z',
+    finishedAt: '2026-04-08T02:03:00.000Z',
+    status: 'success',
+    discoveredCount: 1,
+    capturedCount: 1,
+    ingestedCount: 1,
+    documentIds: ['C:\\temp\\older.md'],
+    libraryKeys: ['resume'],
+    summary: 'older run summary',
+  });
+  await datasourceDefinitions.appendDatasourceRun({
+    id: 'run-delete-new',
+    datasourceId: 'ds-delete-run',
+    startedAt: '2026-04-08T03:00:00.000Z',
+    finishedAt: '2026-04-08T03:05:00.000Z',
+    status: 'failed',
+    discoveredCount: 1,
+    capturedCount: 1,
+    ingestedCount: 0,
+    documentIds: [],
+    libraryKeys: ['resume'],
+    summary: 'newest failed run summary',
+    errorMessage: 'latest failed',
+  });
+
+  const removed = await datasourceDefinitions.deleteDatasourceRun('run-delete-new');
+  const runs = await datasourceDefinitions.listDatasourceRuns('ds-delete-run');
+  const definition = await datasourceDefinitions.getDatasourceDefinition('ds-delete-run');
+
+  assert.equal(removed?.id, 'run-delete-new');
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0]?.id, 'run-delete-old');
+  assert.equal(definition?.lastStatus, 'success');
+  assert.equal(definition?.lastSummary, 'older run summary');
+  assert.equal(definition?.lastRunAt, '2026-04-08T02:03:00.000Z');
+});
+
 test('database datasource run should emit readonly execution summaries', async () => {
   await datasourceDefinitions.upsertDatasourceDefinition({
     id: 'ds-db-run',

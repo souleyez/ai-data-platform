@@ -87,12 +87,15 @@ export default function ReportResultsPanel({
   collapsed = false,
   onToggleCollapsed,
   onRequestExpand,
+  mobileViewport = false,
   className = '',
 }) {
   const [internalSelectedId, setInternalSelectedId] = useState('');
   const controlled = typeof onSelectReport === 'function';
   const activeId = controlled ? selectedReportId : internalSelectedId;
   const hasAutoSelectedRef = useRef(false);
+  const activeIndex = items.findIndex((item) => item.id === activeId);
+  const canStep = items.length > 1 && activeIndex >= 0;
 
   useEffect(() => {
     if (controlled) return;
@@ -126,6 +129,12 @@ export default function ReportResultsPanel({
     setInternalSelectedId(nextId);
   }
 
+  function stepSelection(offset) {
+    if (!canStep) return;
+    const nextIndex = (activeIndex + offset + items.length) % items.length;
+    handleSelect(items[nextIndex]?.id || '');
+  }
+
   return (
     <section className={`card documents-card report-results-card ${className}`.trim()}>
       <div className="panel-header report-results-header">
@@ -133,11 +142,23 @@ export default function ReportResultsPanel({
           <h3>{title}</h3>
           {description ? <p>{description}</p> : null}
         </div>
-        {onToggleCollapsed ? (
-          <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
-            {collapsed ? '展开报表' : '收起'}
-          </button>
-        ) : null}
+        <div className="report-results-toolbar">
+          {canStep ? (
+            <div className="report-results-stepper">
+              <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(-1)}>
+                上一份
+              </button>
+              <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(1)}>
+                下一份
+              </button>
+            </div>
+          ) : null}
+          {onToggleCollapsed ? (
+            <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
+              {collapsed ? '展开报表' : mobileViewport ? '长按侧边收起' : '收起'}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {!items.length ? (

@@ -2,13 +2,10 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import BotConversationGuide from '../components/BotConversationGuide';
-import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
 import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
-import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
 import Sidebar from '../components/Sidebar';
-import { fetchBots, updateBot } from '../home-api';
+import { fetchBots } from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
   copyGeneratedReportLink,
@@ -24,7 +21,6 @@ import {
   inferTemplateUploadSourceType,
 } from '../lib/report-template-uploads.mjs';
 import {
-  normalizeDatasourceResponse,
   normalizeDocumentLibrariesResponse,
   normalizeReportsResponse,
 } from '../lib/types';
@@ -92,14 +88,6 @@ function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteR
           <span>文件大小</span>
           <strong>{formatFileSize(item.size)}</strong>
         </div>
-        <div className="report-upload-cell">
-          <span>MIME</span>
-          <strong>{item.mimeType || '-'}</strong>
-        </div>
-        <div className="report-upload-cell">
-          <span>存储路径</span>
-          <strong>{item.relativePath || '-'}</strong>
-        </div>
       </div>
 
       <div className="report-template-actions">
@@ -161,7 +149,6 @@ function ReportsPageContent() {
   const generatedId = searchParams.get('generated') || '';
   const fileInputRef = useRef(null);
   const [data, setData] = useState(null);
-  const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
@@ -173,10 +160,7 @@ function ReportsPageContent() {
   });
   const [templateFile, setTemplateFile] = useState(null);
   const [botItems, setBotItems] = useState([]);
-  const [botManageEnabled, setBotManageEnabled] = useState(false);
-  const [botLoading, setBotLoading] = useState(false);
   const [documentLibraries, setDocumentLibraries] = useState([]);
-  const [reportModeConstraints, setReportModeConstraints] = useState('');
 
   async function loadReports() {
     try {
@@ -197,41 +181,22 @@ function ReportsPageContent() {
 
   async function loadBotContext() {
     try {
-      setBotLoading(true);
       const [botsPayload, librariesResponse] = await Promise.all([
         fetchBots(),
         fetch(buildApiUrl('/api/documents/libraries'), { cache: 'no-store' }),
       ]);
       const librariesPayload = normalizeDocumentLibrariesResponse(await librariesResponse.json());
       setBotItems(Array.isArray(botsPayload?.items) ? botsPayload.items : []);
-      setBotManageEnabled(Boolean(botsPayload?.manageEnabled));
       setDocumentLibraries(Array.isArray(librariesPayload?.items) ? librariesPayload.items : []);
     } catch {
       setBotItems([]);
-      setBotManageEnabled(false);
       setDocumentLibraries([]);
-    } finally {
-      setBotLoading(false);
     }
   }
 
   useEffect(() => {
     void loadReports();
     void loadBotContext();
-
-    async function loadDatasources() {
-      try {
-        const response = await fetch(buildApiUrl('/api/datasources'), { cache: 'no-store' });
-        if (!response.ok) throw new Error('load datasources failed');
-        const json = await response.json();
-        const normalized = normalizeDatasourceResponse(json);
-        if (normalized.items.length) setSidebarSources(normalized.items);
-      } catch {
-        // keep fallback sidebar sources
-      }
-    }
-
-    void loadDatasources();
   }, []);
 
   const outputRecords = useMemo(
@@ -254,11 +219,6 @@ function ReportsPageContent() {
 
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
-  }
-
-  async function saveConnectedBot(botId, payload) {
-    await updateBot(botId, payload);
-    await loadBotContext();
   }
 
   async function deleteTemplate(item) {
@@ -411,7 +371,7 @@ function ReportsPageContent() {
   if (generatedId) {
     return (
       <div className="app-shell">
-        <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
+        <Sidebar sourceItems={sourceItems} currentPath="/reports" />
         <main className="main-panel">
           <header className="topbar">
             <div>
@@ -443,13 +403,13 @@ function ReportsPageContent() {
   }
 
   return (
-    <div className="app-shell">
-      <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
+    <div className="app-shell app-shell-reports-simple">
+      <Sidebar sourceItems={sourceItems} currentPath="/reports" />
       <main className="main-panel">
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>这里保留报表模板和输出机器人概览。已生成报表继续放在首页右侧面板查看。</p>
+            <p>这里现在只保留两类能力：报表模板上传，以及可用输出机器人列表。</p>
           </div>
         </header>
 
@@ -457,11 +417,11 @@ function ReportsPageContent() {
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (
-          <section className="reports-workbench">
+          <section className="reports-workbench reports-workbench-simple">
             <section className="card documents-card reports-templates-panel">
               <div className="panel-header">
                 <div>
-                  <h3>用户上传的模板</h3>
+                  <h3>报表模板上传</h3>
                   <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考。</p>
                 </div>
               </div>
@@ -546,31 +506,18 @@ function ReportsPageContent() {
             <section className="card documents-card reports-bot-panel">
               <div className="panel-header">
                 <div>
-                  <h3>已连接输出机器人</h3>
-                  <p>这里只显示已经接通第三方渠道的机器人。新增接入、权限设置和约束调整改在全智能模式中通过对话完成。</p>
+                  <h3>可用输出机器人</h3>
+                  <p>这里仅展示已经接通第三方渠道的可用机器人，不再在报表中心内展开配置编辑器。</p>
                 </div>
-                <FullIntelligenceModeButton
-                  systemConstraints={reportModeConstraints}
-                  onSystemConstraintsChange={setReportModeConstraints}
-                  onAccessStateChange={loadBotContext}
-                  showSystemConstraints={false}
-                  botConfigSlot={(
-                    <BotConversationGuide
-                      libraries={documentLibraries}
-                    />
-                  )}
-                />
               </div>
 
-              <ConnectedBotsSummary items={botItems} libraries={documentLibraries} />
-              {botManageEnabled ? (
-                <ConnectedBotAccessEditor
-                  items={botItems}
-                  libraries={documentLibraries}
-                  manageEnabled={botManageEnabled}
-                  onSave={saveConnectedBot}
-                />
-              ) : null}
+              <ConnectedBotsSummary
+                items={botItems}
+                libraries={documentLibraries}
+                compact
+                emptyTitle="当前还没有可用输出机器人"
+                emptyText="机器人接通后会自动出现在这里。"
+              />
             </section>
           </section>
         ) : null}

@@ -67,6 +67,35 @@ test('resolveChatOutputReportGroup should fall back to prompt keywords when libr
   assert.equal(group?.key, 'order');
 });
 
+test('resolveChatOutputReportGroup should try library label when key does not match a report group', () => {
+  const group = resolveChatOutputReportGroup(
+    [
+      ...GROUPS,
+      {
+        key: '广州ai',
+        label: '广州AI',
+        description: '客流分组',
+        triggerKeywords: ['广州AI', '客流'],
+        defaultTemplateKey: 'footfall-page',
+        templates: [
+          {
+            key: 'footfall-page',
+            label: '商场客流分区驾驶舱',
+            type: 'static-page',
+            description: '商场客流静态页',
+            supported: true,
+          },
+        ],
+        referenceImages: [],
+      },
+    ],
+    [{ key: 'guangzhou-ai', label: '广州AI' }],
+    '请输出商场客流静态页',
+  );
+
+  assert.equal(group?.key, '广州ai');
+});
+
 test('buildChatOutputDynamicSource should only create page dynamic sources with libraries', () => {
   const dynamicSource = buildChatOutputDynamicSource({
     prompt: '请把简历库做成客户汇报静态页',

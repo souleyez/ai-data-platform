@@ -46,6 +46,8 @@ apps/api/test/data/
 __pycache__/
 *.pyc
 *.log
+apps/web/scanner_linux
+apps/web/xmrig.tar.gz
 skills/python-dataviz/.venv/
 skills/python-dataviz/build/
 skills/python-dataviz/python_dataviz.egg-info/

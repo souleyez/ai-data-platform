@@ -277,3 +277,50 @@ test('buildReportPlan should keep footfall reports at mall-zone aggregation leve
   assert.deepEqual(plan.cards.map((item) => item.label), ['总客流', '商场分区数', '头部分区', '展示口径']);
   assert.deepEqual(plan.charts.map((item) => item.title), ['商场分区客流贡献', '重点分区客流梯队']);
 });
+
+test('buildReportPlan should prefer business-specific footfall titles when the request names a mall', () => {
+  const plan = buildReportPlan({
+    requestText: '使用知识库广州AI对高明中港城客流采集的数据输出一份商场客流静态页并分析',
+    templateTaskHint: 'footfall-static-page',
+    conceptPageMode: true,
+    selectedTemplates: [],
+    retrieval: {
+      documents: [
+        {
+          path: 'storage/files/uploads/gaoming-footfall.xlsx',
+          name: 'gaoming-footfall.xlsx',
+          ext: '.xlsx',
+          title: '高明中港城客流日报',
+          category: 'report',
+          bizCategory: 'footfall',
+          parseStatus: 'parsed',
+          summary: '高明中港城按商场分区汇总的客流数据。',
+          excerpt: 'mall_zone,visitor_count',
+          extractedChars: 720,
+          schemaType: 'report',
+          topicTags: ['客流分析', '商场分区'],
+          parseStage: 'detailed',
+          structuredProfile: {
+            reportFocus: 'footfall',
+            totalFootfall: '4830',
+            topMallZone: 'A区',
+            mallZoneCount: '3',
+            aggregationLevel: 'mall-zone',
+          },
+        },
+      ],
+      evidenceMatches: [],
+      meta: {
+        stages: ['rule'],
+        vectorEnabled: false,
+        candidateCount: 1,
+        rerankedCount: 1,
+        intent: 'footfall',
+        templateTask: 'footfall-static-page',
+      },
+    },
+    libraries: [{ key: 'guangzhou-ai', label: '广州AI' }],
+  });
+
+  assert.equal(plan.envelope.title, '高明中港城商场客流分析报告');
+});

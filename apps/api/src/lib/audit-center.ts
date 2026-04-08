@@ -255,6 +255,33 @@ async function appendAuditLog(input: Omit<AuditLog, 'id' | 'time'>) {
   return item;
 }
 
+export async function appendDatasourceRunDeletionAuditLog(input: {
+  actor?: 'system' | 'user';
+  datasourceName: string;
+  runId: string;
+  remainingRuns: number;
+  restoredRunId?: string;
+  restoredStatus?: string;
+}) {
+  const restoredLabel = input.restoredRunId
+    ? `最近保留记录 ${input.restoredRunId}`
+    : '最近保留记录';
+  const restoredStatusText = input.restoredStatus
+    ? `，状态 ${input.restoredStatus}`
+    : '';
+  const note = input.remainingRuns > 0
+    ? `已删除运行记录 ${input.runId}，数据源状态已回退至${restoredLabel}${restoredStatusText}。`
+    : `已删除运行记录 ${input.runId}，当前数据源已无历史运行记录。`;
+
+  return appendAuditLog({
+    actor: input.actor || 'user',
+    action: 'delete_datasource_run',
+    target: input.datasourceName,
+    result: 'success',
+    note,
+  });
+}
+
 async function getStorageStats() {
   const stat = await fs.statfs(STORAGE_ROOT);
   const totalBytes = Number(stat.blocks) * Number(stat.bsize);

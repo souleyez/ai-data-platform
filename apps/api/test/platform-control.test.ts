@@ -14,6 +14,9 @@ function importFresh<T>(specifier: string): Promise<T> {
 const datasourceDefinitions = await importFresh<typeof import('../src/lib/datasource-definitions.js')>(
   '../src/lib/datasource-definitions.js',
 );
+const auditCenter = await importFresh<typeof import('../src/lib/audit-center.js')>(
+  '../src/lib/audit-center.js',
+);
 const platformControl = await importFresh<typeof import('../src/lib/platform-control.js')>(
   '../src/lib/platform-control.js',
 );
@@ -57,6 +60,32 @@ test('platform control should run, pause, activate, and list datasource runs', a
   assert.equal(runsResult.action, 'datasources.runs');
   assert.equal(Array.isArray(runsResult.data?.items), true);
   assert.equal((runsResult.data?.items as unknown[])?.length, 1);
+  const runId = ((runsResult.data?.items as Array<{ id?: string }>)?.[0]?.id || '');
+  assert.ok(runId);
+
+  const deleteRunResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'delete-run',
+    '--run',
+    runId,
+  ]);
+  assert.equal(deleteRunResult.ok, true);
+  assert.equal(deleteRunResult.action, 'datasources.delete-run');
+
+  const auditSnapshot = await auditCenter.buildAuditSnapshot();
+  assert.equal(auditSnapshot.logs[0]?.action, 'delete_datasource_run');
+  assert.equal(auditSnapshot.logs[0]?.target, 'External upload intake');
+  assert.match(auditSnapshot.logs[0]?.note || '', /已删除运行记录/);
+
+  const runsAfterDelete = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'runs',
+    '--datasource',
+    'External upload intake',
+    '--limit',
+    '3',
+  ]);
+  assert.equal((runsAfterDelete.data?.items as unknown[])?.length, 0);
 
   const pauseResult = await platformControl.executePlatformControlCommand([
     'datasources',

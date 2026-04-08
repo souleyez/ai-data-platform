@@ -45,6 +45,10 @@ is_protected_worktree_path() {
   normalized="$(normalize_status_path "$1")"
   [[ "$normalized" == storage/files/uploads/* ]] && return 0
   [[ "$normalized" == */storage/files/uploads/* ]] && return 0
+  [[ "$normalized" == apps/web/scanner_linux ]] && return 0
+  [[ "$normalized" == */apps/web/scanner_linux ]] && return 0
+  [[ "$normalized" == apps/web/xmrig.tar.gz ]] && return 0
+  [[ "$normalized" == */apps/web/xmrig.tar.gz ]] && return 0
   [[ "$normalized" == deploy/server/*.env ]] && return 0
   [[ "$normalized" == */deploy/server/*.env ]] && return 0
   return 1

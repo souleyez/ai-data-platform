@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import {
+  deleteDatasourceRun,
   deleteDatasourceDefinition,
   findDatasourceDefinitionByUploadToken,
   getDatasourceDefinition,
@@ -35,6 +36,7 @@ import {
   enrichDatasourceProviderSummary,
   listDatasourceProviderSummaries,
 } from '../lib/datasource-service.js';
+import { logDatasourceRunDeletion } from '../lib/datasource-audit.js';
 import { listDatasourcePresets } from '../lib/datasource-presets.js';
 import { buildDocumentIngestSummaryItems } from '../lib/document-ingest-service.js';
 import { sourceItems } from '../lib/mock-data.js';
@@ -451,6 +453,20 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
     return {
       total: items.length,
       items: runModels,
+    };
+  });
+
+  app.delete('/datasources/runs/:id', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    const removed = id ? await deleteDatasourceRun(id) : null;
+    if (!removed) {
+      return reply.code(404).send({ error: 'datasource run not found' });
+    }
+    await logDatasourceRunDeletion(removed, 'user');
+    return {
+      status: 'deleted',
+      item: removed,
     };
   });
 

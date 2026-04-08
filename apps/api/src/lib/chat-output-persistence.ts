@@ -32,8 +32,11 @@ export function resolveChatOutputReportGroup(
 ) {
   const normalizedLibraries = normalizeLibraries(libraries);
   for (const library of normalizedLibraries) {
-    const match = resolveReportGroup(groups, library.key || library.label);
-    if (match) return match;
+    const references = [library.key, library.label].map((item) => String(item || '').trim()).filter(Boolean);
+    for (const reference of references) {
+      const match = resolveReportGroup(groups, reference);
+      if (match) return match;
+    }
   }
 
   return findReportGroupForPrompt(groups, prompt) || null;

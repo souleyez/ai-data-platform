@@ -5,11 +5,13 @@ import {
   type DocumentLibrary,
 } from './document-libraries.js';
 import {
+  deleteDatasourceRun,
   getDatasourceDefinition,
   listDatasourceDefinitions,
   listDatasourceRuns,
   type DatasourceDefinition,
 } from './datasource-definitions.js';
+import { logDatasourceRunDeletion } from './datasource-audit.js';
 import {
   activateDatasourceDefinition,
   pauseDatasourceDefinition,
@@ -565,6 +567,26 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
       data: {
         datasource: datasource ? { id: datasource.id, name: datasource.name } : null,
         items,
+      },
+    };
+  }
+
+  if (subcommand === 'delete-run') {
+    const runId = String(flags.run || flags.id || '').trim();
+    if (!runId) {
+      throw new Error('Missing --run for datasources delete-run.');
+    }
+    const removed = await deleteDatasourceRun(runId);
+    if (!removed) {
+      throw new Error(`Datasource run "${runId}" not found.`);
+    }
+    await logDatasourceRunDeletion(removed, 'user');
+    return {
+      ok: true,
+      action: 'datasources.delete-run',
+      summary: `Deleted datasource run "${runId}".`,
+      data: {
+        item: removed,
       },
     };
   }

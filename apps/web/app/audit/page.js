@@ -43,6 +43,21 @@ function formatDurationMs(value) {
   return remainMinutes ? `${hours} 小时 ${remainMinutes} 分` : `${hours} 小时`;
 }
 
+function formatAuditAction(value) {
+  const action = String(value || '').trim();
+  const labels = {
+    pause_capture: '停采数据源',
+    cleanup_document_source: '清理文档原文件',
+    hard_delete_document: '彻底删除文档',
+    cleanup_capture_source: '清理采集原文件',
+    hard_delete_capture: '彻底删除采集源',
+    auto_cleanup_check: '自动清理检查',
+    auto_cleanup_execute: '自动清理执行',
+    delete_datasource_run: '删除数据源运行记录',
+  };
+  return labels[action] || action || '-';
+}
+
 function renderStorageState(value) {
   if (value === 'structured-only') return '仅保留结构化数据';
   if (value === 'live') return '保留原文件';
@@ -400,7 +415,7 @@ export default function AuditPage() {
             <div className="panel-header">
               <div>
                 <h3>审计日志</h3>
-                <p>记录停采、原文件清理、彻底删除，以及自动策略执行结果。</p>
+                <p>记录停采、原文件清理、运行记录删除、彻底删除，以及自动策略执行结果。</p>
               </div>
             </div>
             <table>
@@ -419,7 +434,7 @@ export default function AuditPage() {
                   <tr key={item.id}>
                     <td>{formatDate(item.time)}</td>
                     <td>{item.actor === 'system' ? '系统自动' : '用户'}</td>
-                    <td>{item.action}</td>
+                    <td>{formatAuditAction(item.action)}</td>
                     <td>{item.target}</td>
                     <td>{item.result}</td>
                     <td className="summary-cell">{item.note}</td>

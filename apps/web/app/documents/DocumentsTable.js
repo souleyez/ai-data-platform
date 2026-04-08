@@ -46,6 +46,7 @@ function canReparseDocument(item) {
 }
 
 export default function DocumentsTable({
+  simpleMode = false,
   currentPage,
   totalPages,
   pageSize,
@@ -79,7 +80,11 @@ export default function DocumentsTable({
       <div className="panel-header">
         <div>
           <h3>文档列表</h3>
-          <p>上传后先进入快速解析，进阶解析会在后台继续完成。失败文档可在列表里直接手动重新解析。</p>
+          <p>
+            {simpleMode
+              ? '这里只保留文档列表和详情入口。文档治理与高级操作暂时收起。'
+              : '上传后先进入快速解析，进阶解析会在后台继续完成。失败文档可在列表里直接手动重新解析。'}
+          </p>
         </div>
         <div className="table-pagination-summary">
           <span>{`第 ${currentPage} / ${totalPages} 页`}</span>
@@ -122,26 +127,28 @@ export default function DocumentsTable({
                         <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span>
                       ) : null}
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {canReparseDocument(item) ? (
+                    {!simpleMode ? (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {canReparseDocument(item) ? (
+                          <button
+                            type="button"
+                            className="ghost-btn compact-inline-btn"
+                            onClick={() => reparseDocument(item.id)}
+                            disabled={reparseSubmittingId === item.id}
+                          >
+                            {reparseSubmittingId === item.id ? '重新解析中..' : '重新解析'}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className="ghost-btn compact-inline-btn"
-                          onClick={() => reparseDocument(item.id)}
-                          disabled={reparseSubmittingId === item.id}
+                          onClick={() => ignoreDocument(item.id)}
+                          disabled={ignoreSubmittingId === item.id}
                         >
-                          {reparseSubmittingId === item.id ? '重新解析中..' : '重新解析'}
+                          {ignoreSubmittingId === item.id ? '删除中..' : '删除'}
                         </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="ghost-btn compact-inline-btn"
-                        onClick={() => ignoreDocument(item.id)}
-                        disabled={ignoreSubmittingId === item.id}
-                      >
-                        {ignoreSubmittingId === item.id ? '删除中..' : '删除'}
-                      </button>
-                    </div>
+                      </div>
+                    ) : null}
                   </div>
                 </td>
 
@@ -169,7 +176,7 @@ export default function DocumentsTable({
                       }) : <span style={{ color: '#64748b' }}>未加入知识库分组</span>}
                     </div>
 
-                    {suggestedGroups.length ? (
+                    {!simpleMode && suggestedGroups.length ? (
                       <div style={{ display: 'grid', gap: 8 }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                           {suggestedGroups.map((group) => (
@@ -191,7 +198,7 @@ export default function DocumentsTable({
                       </div>
                     ) : null}
 
-                    {availableLibraries.length ? (
+                    {!simpleMode && availableLibraries.length ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {expandedLibraryEditorId === item.id ? (
                           <>

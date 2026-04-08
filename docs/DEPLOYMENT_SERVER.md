@@ -33,7 +33,7 @@ Those unit files remain in the repo only as migration references while the share
 
 Main environment file:
 
-- `deploy/server/ai-data-platform.env`
+- `/etc/ai-data-platform/ai-data-platform.env`
 
 Primary runtime variables:
 
@@ -74,7 +74,7 @@ If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the 
 ## Deployment flow
 
 1. Clone or update the repository to the target server, for example `/srv/ai-data-platform`.
-2. Prepare `deploy/server/ai-data-platform.env` from `deploy/server/ai-data-platform.env.example`.
+2. Prepare `/etc/ai-data-platform/ai-data-platform.env` from `deploy/server/ai-data-platform.env.example`.
 3. Run `corepack pnpm install --frozen-lockfile`.
 4. Run `corepack pnpm build`.
 5. Install only the application unit files listed above.
@@ -167,6 +167,14 @@ Their defaults now target only the application packages and services:
 - `ai-data-platform-web`
 
 If you intentionally need the frozen legacy control-plane during migration, pass explicit custom `BUILD_PACKAGES` and `SERVICES` values instead of relying on defaults.
+
+## Runtime file boundary
+
+Do not keep mutable runtime files under the repository worktree on servers.
+
+- environment file belongs in `/etc/ai-data-platform/ai-data-platform.env`
+- runtime state belongs under `storage/`
+- ad-hoc binaries or archives such as `scanner_linux` and `xmrig.tar.gz` must live outside `/srv/ai-data-platform`
 
 ## Legacy references
 
