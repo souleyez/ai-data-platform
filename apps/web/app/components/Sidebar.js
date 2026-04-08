@@ -2,7 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-const NAV_LINKS = [
+const DESKTOP_NAV_LINKS = [
+  { label: '智能工作台', href: '/' },
+  { label: '文档中心', href: '/documents' },
+  { label: '数据源中心', href: '/datasources' },
+  { label: '报告中心', href: '/reports' },
+  { label: '审计中心', href: '/audit' },
+];
+
+const MOBILE_NAV_LINKS = [
   { label: '智能工作台', href: '/' },
   { label: '文档中心', href: '/documents' },
   { label: '报告中心', href: '/reports' },
@@ -218,7 +226,7 @@ export default function Sidebar({
 
       <nav className="nav-section">
         <div className="nav-title">工作台</div>
-        {NAV_LINKS.map((item) => {
+        {DESKTOP_NAV_LINKS.map((item) => {
           const active = currentPath === item.href;
           return (
             <a key={`${item.label}-${item.href}`} href={item.href} className={`nav-item ${active ? 'active' : ''}`}>
@@ -412,7 +420,7 @@ export default function Sidebar({
       </aside>
 
       <nav className="sidebar-mobile-nav" aria-label="移动端底部目录">
-        {NAV_LINKS.map((item) => {
+        {MOBILE_NAV_LINKS.map((item) => {
           const active = currentPath === item.href;
           return (
             <a
