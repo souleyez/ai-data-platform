@@ -1,4 +1,12 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ensureNativeSearchPreferredConfig, getActiveOpenClawModel } from './model-config.js';
+
+const execFileAsync = promisify(execFile);
+let wslGatewayTokenCache: { token: string; expiresAt: number } = {
+  token: '',
+  expiresAt: 0,
+};
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -72,6 +80,54 @@ function hasUsableGatewayToken(token?: string) {
 function isLocalGatewayUrl(url?: string) {
   const value = String(url || '').trim().toLowerCase();
   return value.startsWith('http://127.0.0.1') || value.startsWith('http://localhost');
+}
+
+function getWslDistro() {
+  return env('OPENCLAW_WSL_DISTRO', 'Ubuntu-24.04') || 'Ubuntu-24.04';
+}
+
+async function readWslGatewayToken(forceRefresh = false) {
+  if (process.platform !== 'win32') return '';
+
+  const now = Date.now();
+  if (!forceRefresh && wslGatewayTokenCache.token && wslGatewayTokenCache.expiresAt > now) {
+    return wslGatewayTokenCache.token;
+  }
+
+  const script = [
+    "python3 - <<'PY'",
+    'import json, pathlib',
+    "path = pathlib.Path.home() / '.openclaw' / 'openclaw.json'",
+    "data = json.loads(path.read_text(encoding='utf-8'))",
+    "print(data.get('gateway', {}).get('auth', {}).get('token', ''))",
+    'PY',
+  ].join('\n');
+
+  try {
+    const result = await execFileAsync(
+      'wsl.exe',
+      ['-d', getWslDistro(), '--', 'bash', '-lc', script],
+      {
+        windowsHide: true,
+        timeout: 3000,
+      },
+    );
+    const token = String(result.stdout || '').trim();
+    if (!token) return '';
+    wslGatewayTokenCache = {
+      token,
+      expiresAt: now + 60_000,
+    };
+    return token;
+  } catch {
+    return '';
+  }
+}
+
+async function resolveGatewayToken(baseUrl?: string, configuredToken?: string) {
+  if (hasUsableGatewayToken(configuredToken)) return String(configuredToken || '').trim();
+  if (!isLocalGatewayUrl(baseUrl)) return '';
+  return readWslGatewayToken();
 }
 
 // The API layer must always speak to gateways using the gateway-scoped model ids:
@@ -309,7 +365,8 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
+  const authToken = await resolveGatewayToken(baseUrl, token);
+  if (hasUsableGatewayToken(authToken)) headers.Authorization = `Bearer ${authToken}`;
   if (agentId) headers['x-openclaw-agent-id'] = agentId;
 
   try {
@@ -370,7 +427,8 @@ export async function isOpenClawGatewayReachable() {
   if (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl)) return false;
 
   const headers: Record<string, string> = {};
-  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
+  const authToken = await resolveGatewayToken(baseUrl, token);
+  if (hasUsableGatewayToken(authToken)) headers.Authorization = `Bearer ${authToken}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 800);
@@ -409,7 +467,8 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (hasUsableGatewayToken(token)) headers.Authorization = `Bearer ${token}`;
+  const authToken = await resolveGatewayToken(baseUrl, token);
+  if (hasUsableGatewayToken(authToken)) headers.Authorization = `Bearer ${authToken}`;
   if (agentId) headers['x-openclaw-agent-id'] = agentId;
 
   const baseMessages = buildMessages(input);
