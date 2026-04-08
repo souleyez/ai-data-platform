@@ -140,6 +140,23 @@ function extractFocusedFieldEntries(profile) {
     .filter(Boolean);
 }
 
+function extractImageUnderstanding(profile) {
+  const value = profile && typeof profile === 'object' && !Array.isArray(profile)
+    ? profile.imageUnderstanding
+    : null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  return {
+    documentKind: String(value.documentKind || '').trim(),
+    layoutType: String(value.layoutType || '').trim(),
+    visualSummary: String(value.visualSummary || '').trim(),
+    chartOrTableDetected: Boolean(value.chartOrTableDetected),
+    tableLikeSignals: Array.isArray(value.tableLikeSignals)
+      ? value.tableLikeSignals.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+  };
+}
+
 function extractFeedbackSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
 
@@ -266,14 +283,20 @@ export default function DocumentAnalysisPanel({
     () => extractFocusedFieldEntries(item?.structuredProfile || {}),
     [item?.structuredProfile],
   );
+  const imageUnderstanding = useMemo(
+    () => extractImageUnderstanding(item?.structuredProfile || {}),
+    [item?.structuredProfile],
+  );
   const detailMeta = useMemo(() => ([
+    { label: '解析链路', value: item?.parseMethod || '-' },
     { label: '深度解析状态', value: item?.detailParseStatus || '-' },
     { label: '最近解析时间', value: formatDateTime(item?.detailParsedAt) },
+    { label: '视觉模型', value: item?.cloudStructuredModel || '-' },
     { label: '手工编辑时间', value: formatDateTime(item?.analysisEditedAt) },
     { label: '证据块数量', value: String(evidenceCount) },
     { label: '字段元数据数量', value: String(fieldDetails.length) },
     { label: '表格摘要', value: tableSummary ? '已提取' : '无' },
-  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.detailParseStatus, item?.detailParsedAt, tableSummary]);
+  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.cloudStructuredModel, item?.detailParseStatus, item?.detailParsedAt, item?.parseMethod, tableSummary]);
 
   function handleStartEdit() {
     setSummaryDraft(String(item?.summary || ''));
@@ -394,6 +417,27 @@ export default function DocumentAnalysisPanel({
               {item?.summary || '-'}
             </div>
           </section>
+
+          {imageUnderstanding ? (
+            <section>
+              <h4 style={{ marginBottom: 8 }}>图片理解</h4>
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div className="message-refs">
+                  <span className="source-chip">文档类型：{imageUnderstanding.documentKind || '-'}</span>
+                  <span className="source-chip">版式：{imageUnderstanding.layoutType || '-'}</span>
+                  <span className="source-chip">表格/图表：{imageUnderstanding.chartOrTableDetected ? '已识别' : '无'}</span>
+                </div>
+                <div className="preview-meta-line" style={{ whiteSpace: 'pre-wrap' }}>
+                  {imageUnderstanding.visualSummary || '当前没有图片视觉摘要。'}
+                </div>
+                {imageUnderstanding.tableLikeSignals.length ? (
+                  <div className="preview-meta-line">
+                    线索：{imageUnderstanding.tableLikeSignals.join(' / ')}
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           {libraryKnowledge.length ? (
             <section>

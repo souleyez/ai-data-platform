@@ -6,8 +6,14 @@ import type {
   StructuredClaim,
   StructuredEntity,
 } from './document-parser.js';
-import { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
+import { DOCUMENT_IMAGE_EXTENSIONS, deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
+import {
+  normalizeDocumentImageFieldCandidateKey,
+  runDocumentImageVlm,
+  type DocumentImageVlmFieldCandidate,
+  type DocumentImageVlmPayload,
+} from './document-image-vlm-provider.js';
 import { mergeResumeFields } from './resume-canonicalizer.js';
 
 type CloudEvidenceBlock = {
@@ -45,6 +51,7 @@ const CLOUD_ENRICH_ENABLED = process.env.ENABLE_OPENCLAW_DOCUMENT_STRUCTURING !=
 const CLOUD_ENRICH_MAX_PER_BATCH = Math.max(0, Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_BATCH_LIMIT || 12));
 const CLOUD_ENRICH_CONCURRENCY = Math.max(1, Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_CONCURRENCY || 2));
 const MAX_PROMPT_CHARS = Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_INPUT_LIMIT || 7000);
+const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
 
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
@@ -64,6 +71,11 @@ function sanitizeText(value: unknown, maxLength = 800) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
 }
 
+function hasStructuredValue(value: unknown) {
+  if (Array.isArray(value)) return value.some((item) => String(item || '').trim());
+  return String(value ?? '').trim().length > 0;
+}
+
 function extractJsonObject(raw: string) {
   const text = String(raw || '').trim();
   if (!text) return null;
@@ -77,6 +89,10 @@ function extractJsonObject(raw: string) {
   } catch {
     return null;
   }
+}
+
+function isImageDocument(item: ParsedDocument) {
+  return IMAGE_EXTENSIONS.has(String(item.ext || '').toLowerCase());
 }
 
 function buildDocumentContext(item: ParsedDocument) {
@@ -104,6 +120,16 @@ function buildDocumentContext(item: ParsedDocument) {
     .filter(Boolean)
     .join('\n\n')
     .slice(0, MAX_PROMPT_CHARS);
+}
+
+function extractImageFieldAliases(item: ParsedDocument) {
+  const template = item.structuredProfile && typeof item.structuredProfile === 'object' && !Array.isArray(item.structuredProfile)
+    ? item.structuredProfile.fieldTemplate as Record<string, unknown> | undefined
+    : undefined;
+  if (!template?.fieldAliases || typeof template.fieldAliases !== 'object' || Array.isArray(template.fieldAliases)) {
+    return {};
+  }
+  return template.fieldAliases as Record<string, string>;
 }
 
 function mergeEvidenceChunks(existing: EvidenceChunk[] | undefined, incoming: CloudEvidenceBlock[] | undefined) {
@@ -219,7 +245,187 @@ function mergeIntentSlots(existing: IntentSlots | undefined, incoming: IntentSlo
   };
 }
 
+function normalizeImageFieldCandidateValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  const text = String(value ?? '').trim();
+  return text || '';
+}
+
+function normalizeImageFieldCandidates(item: ParsedDocument, incoming: DocumentImageVlmFieldCandidate[] | undefined) {
+  const aliases = extractImageFieldAliases(item);
+  const normalized: Array<{
+    key: string;
+    value: string | string[];
+    confidence: number;
+    source: 'vlm';
+    evidenceText: string;
+  }> = [];
+
+  for (const entry of incoming || []) {
+    const key = normalizeDocumentImageFieldCandidateKey(entry?.key, aliases);
+    if (!key) continue;
+    const value = normalizeImageFieldCandidateValue(entry?.value);
+    if (!hasStructuredValue(value)) continue;
+    normalized.push({
+      key,
+      value,
+      confidence: clampConfidence(entry?.confidence, 0.72),
+      source: 'vlm',
+      evidenceText: sanitizeText(entry?.evidenceText, 500),
+    });
+  }
+
+  return normalized;
+}
+
+function mergeStringArray(current: string[] | undefined, incoming: unknown) {
+  const next = Array.isArray(incoming)
+    ? incoming.map((item) => String(item || '').trim()).filter(Boolean)
+    : String(incoming || '').split(/[,\n/|；;、]/).map((item) => item.trim()).filter(Boolean);
+  return [...new Set([...(current || []), ...next])];
+}
+
+function assignCandidateFields(item: ParsedDocument, candidates: Array<{
+  key: string;
+  value: unknown;
+}>) {
+  const next = {
+    ...item,
+    contractFields: { ...(item.contractFields || {}) },
+    enterpriseGuidanceFields: { ...(item.enterpriseGuidanceFields || {}) },
+    orderFields: { ...(item.orderFields || {}) },
+    resumeFields: { ...(item.resumeFields || {}) },
+  };
+
+  for (const candidate of candidates) {
+    const key = candidate.key;
+    const value = candidate.value;
+    if (!hasStructuredValue(value)) continue;
+    if (['contractNo', 'partyA', 'partyB', 'amount', 'signDate', 'effectiveDate', 'paymentTerms', 'duration'].includes(key)) {
+      if (!hasStructuredValue((next.contractFields as Record<string, unknown>)[key])) {
+        (next.contractFields as Record<string, unknown>)[key] = value;
+      }
+      continue;
+    }
+    if (['businessSystem', 'documentKind', 'applicableScope', 'operationEntry'].includes(key)) {
+      if (!hasStructuredValue((next.enterpriseGuidanceFields as Record<string, unknown>)[key])) {
+        (next.enterpriseGuidanceFields as Record<string, unknown>)[key] = value;
+      }
+      continue;
+    }
+    if (['approvalLevels', 'policyFocus', 'contacts'].includes(key)) {
+      const current = (next.enterpriseGuidanceFields as Record<string, unknown>)[key];
+      (next.enterpriseGuidanceFields as Record<string, unknown>)[key] = mergeStringArray(Array.isArray(current) ? current.map((entry) => String(entry || '')) : [], value);
+      continue;
+    }
+    if (['period', 'platform', 'orderCount', 'netSales', 'grossMargin', 'topCategory', 'inventoryStatus', 'replenishmentAction'].includes(key)) {
+      if (!hasStructuredValue((next.orderFields as Record<string, unknown>)[key])) {
+        (next.orderFields as Record<string, unknown>)[key] = value;
+      }
+      continue;
+    }
+    if (['candidateName', 'targetRole', 'currentRole', 'yearsOfExperience', 'education', 'major', 'expectedCity', 'expectedSalary', 'latestCompany'].includes(key)) {
+      if (!hasStructuredValue((next.resumeFields as Record<string, unknown>)[key])) {
+        (next.resumeFields as Record<string, unknown>)[key] = value;
+      }
+      continue;
+    }
+    if (['companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'].includes(key)) {
+      const current = (next.resumeFields as Record<string, unknown>)[key];
+      (next.resumeFields as Record<string, unknown>)[key] = mergeStringArray(Array.isArray(current) ? current.map((entry) => String(entry || '')) : [], value);
+    }
+  }
+
+  return next;
+}
+
+function buildImageStructuredFieldDetails(
+  item: ParsedDocument,
+  candidates: Array<{
+    key: string;
+    value: unknown;
+    confidence: number;
+    source: 'vlm';
+    evidenceText: string;
+  }>,
+  evidenceChunks: EvidenceChunk[] | undefined,
+) {
+  const existing = item.structuredProfile && typeof item.structuredProfile === 'object' && !Array.isArray(item.structuredProfile)
+    ? (item.structuredProfile.fieldDetails as Record<string, unknown> | undefined)
+    : undefined;
+  const next: Record<string, unknown> = { ...(existing || {}) };
+
+  for (const candidate of candidates) {
+    if (!candidate.key || !hasStructuredValue(candidate.value)) continue;
+    if (next[candidate.key]) continue;
+    next[candidate.key] = {
+      value: candidate.value,
+      confidence: candidate.confidence,
+      source: candidate.source,
+      evidenceChunkId: findEvidenceChunkIdByText(evidenceChunks, candidate.evidenceText),
+    };
+  }
+
+  return next;
+}
+
+function buildImageStructuredTopLevelFields(
+  currentProfile: Record<string, unknown>,
+  candidates: Array<{
+    key: string;
+    value: unknown;
+  }>,
+) {
+  const next: Record<string, unknown> = {};
+  for (const candidate of candidates) {
+    if (!candidate.key || !hasStructuredValue(candidate.value)) continue;
+    if (hasStructuredValue(currentProfile[candidate.key])) continue;
+    next[candidate.key] = candidate.value;
+  }
+  return next;
+}
+
+function buildImageUnderstandingPayload(
+  structured: DocumentImageVlmPayload,
+  candidates: Array<{
+    key: string;
+    value: unknown;
+    confidence: number;
+    source: 'vlm';
+    evidenceText: string;
+  }>,
+) {
+  return {
+    documentKind: sanitizeText(structured.documentKind, 120),
+    layoutType: sanitizeText(structured.layoutType, 120),
+    visualSummary: sanitizeText(structured.visualSummary || structured.summary, 600),
+    chartOrTableDetected: Boolean(structured.chartOrTableDetected),
+    tableLikeSignals: uniqStrings((structured.tableLikeSignals || []).map((entry) => sanitizeText(entry, 120))),
+    extractedFields: Object.fromEntries(
+      candidates
+        .filter((entry) => entry.key && hasStructuredValue(entry.value))
+        .map((entry) => [entry.key, entry.value]),
+    ),
+  };
+}
+
+function buildImageFullText(item: ParsedDocument, structured: DocumentImageVlmPayload) {
+  const transcribedText = sanitizeText(structured.transcribedText, 6000);
+  const visualSummary = sanitizeText(structured.visualSummary, 1000);
+  const blocks = [
+    `Image file: ${item.name}`,
+    visualSummary ? `Visual summary:\n${visualSummary}` : '',
+    transcribedText ? `Visual transcription:\n${transcribedText}` : '',
+  ].filter(Boolean);
+  return blocks.join('\n\n');
+}
+
 async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
+  if (isImageDocument(item)) {
+    return enrichImageOne(item);
+  }
   if (item.parseStatus !== 'parsed' || !item.fullText || item.extractedChars < 80) {
     return item;
   }
@@ -277,7 +483,67 @@ async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
   });
 }
 
-export async function enhanceParsedDocumentsWithCloud(items: ParsedDocument[]) {
+async function enrichImageOne(
+  item: ParsedDocument,
+  runImageParse = runDocumentImageVlm,
+): Promise<ParsedDocument> {
+  const result = await runImageParse({ item, imagePath: item.path });
+  if (!result?.parsed) return item;
+
+  const structured = result.parsed;
+  const evidenceChunks = mergeEvidenceChunks(item.evidenceChunks, structured.evidenceBlocks);
+  const entities = mergeEntities(item.entities, structured.entities as CloudEntity[] | undefined, evidenceChunks);
+  const claims = mergeClaims(item.claims, structured.claims as CloudClaim[] | undefined, evidenceChunks);
+  const topicTags = uniqStrings([...(item.topicTags || []), ...(structured.topicTags || [])]).slice(0, 16);
+  const summary = sanitizeText(structured.summary || structured.visualSummary, 500) || item.summary;
+  const fieldCandidates = normalizeImageFieldCandidates(item, structured.fieldCandidates);
+  const withCandidateFields = assignCandidateFields({
+    ...item,
+    parseStatus: 'parsed',
+    parseMethod: item.parseMethod?.includes('image-ocr')
+      ? 'image-ocr+vlm'
+      : 'image-vlm',
+    parseStage: 'detailed',
+    detailParseStatus: 'succeeded',
+    detailParsedAt: new Date().toISOString(),
+    detailParseAttempts: Math.max(1, Number(item.detailParseAttempts || 0)),
+    detailParseError: undefined,
+    summary,
+    excerpt: summary || item.excerpt,
+    fullText: buildImageFullText(item, structured),
+    extractedChars: sanitizeText(structured.transcribedText || structured.visualSummary, 8000).length,
+    topicTags,
+    evidenceChunks,
+    entities,
+    claims,
+    riskLevel: structured.riskLevel || item.riskLevel,
+    cloudStructuredAt: new Date().toISOString(),
+    cloudStructuredModel: result.model,
+  }, fieldCandidates);
+
+  const refreshed = refreshDerivedSchemaProfile(withCandidateFields);
+  const currentProfile = refreshed.structuredProfile && typeof refreshed.structuredProfile === 'object' && !Array.isArray(refreshed.structuredProfile)
+    ? refreshed.structuredProfile as Record<string, unknown>
+    : {};
+
+  return {
+    ...refreshed,
+    structuredProfile: {
+      ...currentProfile,
+      ...buildImageStructuredTopLevelFields(currentProfile, fieldCandidates),
+      fieldDetails: buildImageStructuredFieldDetails(refreshed, fieldCandidates, evidenceChunks),
+      imageUnderstanding: buildImageUnderstandingPayload(structured, fieldCandidates),
+    },
+  };
+}
+
+export async function enhanceParsedDocumentsWithCloud(
+  items: ParsedDocument[],
+  options?: {
+    runTextParse?: typeof runDocumentAdvancedParse;
+    runImageParse?: typeof runDocumentImageVlm;
+  },
+) {
   const providerMode = getDocumentAdvancedParseProviderMode();
   if (
     !CLOUD_ENRICH_ENABLED
@@ -289,7 +555,9 @@ export async function enhanceParsedDocumentsWithCloud(items: ParsedDocument[]) {
 
   const candidateIndexes = items
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.parseStatus === 'parsed' && Boolean(item.fullText))
+    .filter(({ item }) => isImageDocument(item)
+      ? Boolean(item.path)
+      : item.parseStatus === 'parsed' && Boolean(item.fullText))
     .slice(0, CLOUD_ENRICH_MAX_PER_BATCH);
 
   if (!candidateIndexes.length) {
@@ -304,7 +572,9 @@ export async function enhanceParsedDocumentsWithCloud(items: ParsedDocument[]) {
       const current = candidateIndexes[cursor];
       cursor += 1;
       try {
-        output[current.index] = await enrichOne(current.item);
+        output[current.index] = isImageDocument(current.item)
+          ? await enrichImageOne(current.item, options?.runImageParse || runDocumentImageVlm)
+          : await enrichOne(current.item);
       } catch {
         output[current.index] = current.item;
       }

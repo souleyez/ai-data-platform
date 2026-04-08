@@ -78,7 +78,7 @@ export function inferSchemaType(
   return 'generic' as const;
 }
 
-export type StructuredFieldSource = 'rule' | 'derived' | 'manual' | 'ocr';
+export type StructuredFieldSource = 'rule' | 'derived' | 'manual' | 'ocr' | 'vlm';
 
 export type StructuredFieldDetail = {
   value: unknown;
