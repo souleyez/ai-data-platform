@@ -85,6 +85,12 @@ export default function HomePageClient({ initialModelState }) {
           </div>
         </header>
 
+        {mobileViewport ? (
+          <div className="page-note">
+            本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；当前移动端布局以查看结果和轻量对话为主。
+          </div>
+        ) : null}
+
         <section className="homepage-grid homepage-grid-tight">
           <section className={`workspace-grid homepage-workspace ${reportCollapsed ? 'workspace-grid-compact' : 'workspace-grid-expanded'}`}>
             <ChatPanel

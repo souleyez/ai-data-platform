@@ -245,6 +245,11 @@ export default function Sidebar({
         <p>当前系统默认只读：禁止写入、删除、修改客户原系统。</p>
       </section>
 
+      <section className="side-card compact">
+        <div className="card-title">使用建议</div>
+        <p>本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；移动端更适合查看结果和轻量操作。</p>
+      </section>
+
       <section className="side-card compact model-card" style={{ marginTop: 8 }}>
         <div className="card-title">模型配置</div>
         <p>

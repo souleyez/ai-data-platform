@@ -414,6 +414,9 @@ function ReportsPageContent() {
         </header>
 
         {error ? <p>{error}</p> : null}
+        <div className="page-note">
+          本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；移动端更适合查看报表和做轻量配置。
+        </div>
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { sortLibrariesForDisplay, getDocumentLibraryKeys } from '../lib/knowledge-libraries';
 import { formatDocumentBusinessResult } from '../lib/types';
-import { fetchDocuments } from './api';
+import { createDocumentLibrary, fetchDocuments } from './api';
 import DocumentsTable from './DocumentsTable';
 import { buildVisibleItems, countRecentDocuments, paginateItems } from './selectors';
 
@@ -34,7 +34,10 @@ export default function DocumentsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [libraryDraft, setLibraryDraft] = useState('');
+  const [creatingLibrary, setCreatingLibrary] = useState(false);
 
   const loadDocuments = async () => {
     try {
@@ -90,6 +93,23 @@ export default function DocumentsPage() {
     }
   }, [currentPage, totalPages]);
 
+  async function handleCreateLibrary() {
+    const name = String(libraryDraft || '').trim();
+    if (!name || creatingLibrary) return;
+    try {
+      setCreatingLibrary(true);
+      setMessage('');
+      await createDocumentLibrary(name, '', 0);
+      setLibraryDraft('');
+      await loadDocuments();
+      setMessage(`已新建知识库“${name}”`);
+    } catch (createError) {
+      setMessage(createError instanceof Error ? createError.message : '新建知识库失败');
+    } finally {
+      setCreatingLibrary(false);
+    }
+  }
+
   return (
     <div className="app-shell app-shell-documents-simple">
       <Sidebar sourceItems={DEFAULT_SIDEBAR_SOURCES} currentPath="/documents" />
@@ -107,6 +127,10 @@ export default function DocumentsPage() {
 
         {loading ? <p>加载中...</p> : null}
         {error ? <p>{error}</p> : null}
+        <div className="page-note">
+          本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；移动端建议用于查看和轻量处理。
+        </div>
+        {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (
           <section className="documents-layout documents-layout-simple">
@@ -116,6 +140,31 @@ export default function DocumentsPage() {
                 <span className="source-chip">新增 {recentCount}</span>
                 <span className="source-chip">解析 {parseRate}</span>
                 <span className="source-chip">知识库 {libraries.length}</span>
+              </div>
+            </section>
+
+            <section className="card documents-card documents-create-library-card">
+              <div className="panel-header">
+                <div>
+                  <h3>新建知识库</h3>
+                  <p>这里保留一个轻量创建入口，方便先建库再上传文档。</p>
+                </div>
+              </div>
+              <div className="documents-create-library-row">
+                <input
+                  className="filter-input"
+                  value={libraryDraft}
+                  onChange={(event) => setLibraryDraft(event.target.value)}
+                  placeholder="输入知识库名称"
+                />
+                <button
+                  className="primary-btn"
+                  type="button"
+                  onClick={() => void handleCreateLibrary()}
+                  disabled={creatingLibrary || !String(libraryDraft || '').trim()}
+                >
+                  {creatingLibrary ? '创建中...' : '新建知识库'}
+                </button>
               </div>
             </section>
 

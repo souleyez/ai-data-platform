@@ -1332,6 +1332,19 @@ th { color: var(--subtle); font-weight: 600; }
 .documents-summary-card {
   padding: 16px 18px;
 }
+.documents-create-library-card {
+  padding: 18px;
+}
+.documents-create-library-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.documents-create-library-row .filter-input {
+  flex: 1 1 260px;
+  min-width: 0;
+}
 .documents-summary-chips {
   gap: 8px;
   align-items: center;
@@ -1956,6 +1969,12 @@ th { color: var(--subtle); font-weight: 600; }
   .documents-summary-chips {
     display: flex;
     flex-wrap: wrap;
+  }
+  .documents-create-library-row {
+    align-items: stretch;
+  }
+  .documents-create-library-row .primary-btn {
+    width: 100%;
   }
   .bot-field-grid { grid-template-columns: 1fr; }
   .bot-field-span { grid-column: span 1; }
