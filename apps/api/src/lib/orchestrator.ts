@@ -11,7 +11,6 @@ import { loadDocumentLibraries } from './document-libraries.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
-import { executeKnowledgePlan } from './knowledge-plan-execution.js';
 import {
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
@@ -27,7 +26,7 @@ export type ChatRequestInput = {
   prompt: string;
   sessionUser?: string;
   chatHistory?: ChatHistoryItem[];
-  mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+  mode?: 'general' | 'knowledge_output';
   debugResumePage?: boolean;
   confirmedRequest?: string;
   preferredLibraries?: Array<{ key: string; label: string }>;
@@ -143,15 +142,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
 
   if (gatewayConfigured) {
     try {
-      if (requestMode === 'knowledge_plan') {
-        const result = await executeKnowledgePlan(prompt, chatHistory, input.sessionUser);
-        libraries = result.libraries;
-        knowledgePlan = result.knowledgePlan;
-        content = result.content;
-        output = result.output;
-        intent = result.intent;
-        mode = result.mode;
-      } else if (requestMode === 'knowledge_output') {
+      if (requestMode === 'knowledge_output') {
         const result = await executeKnowledgeOutput({
           prompt,
           confirmedRequest: input.confirmedRequest,

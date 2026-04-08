@@ -7,7 +7,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       prompt?: string;
       promptBase64?: string;
       sessionUser?: string;
-      mode?: 'general' | 'knowledge_plan' | 'knowledge_output';
+      mode?: 'general' | 'knowledge_output';
       debugResumePage?: boolean;
       confirmedRequest?: string;
       preferredLibraries?: Array<{ key?: string; label?: string }>;
