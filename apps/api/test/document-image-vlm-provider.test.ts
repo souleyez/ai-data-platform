@@ -58,7 +58,10 @@ test('buildDocumentImageVlmPrompt should include local file path and governed fi
 
   try {
     const prompt = buildDocumentImageVlmPrompt(buildImageItem(filePath), filePath);
-    assert.match(prompt, new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const promptPath = process.platform === 'win32'
+      ? `/mnt/${filePath.slice(0, 1).toLowerCase()}/${filePath.slice(3).replace(/\\/g, '/')}`
+      : filePath;
+    assert.match(prompt, new RegExp(promptPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(prompt, /documentKind/);
     assert.match(prompt, /operationEntry/);
     assert.match(prompt, /文档类型/);
