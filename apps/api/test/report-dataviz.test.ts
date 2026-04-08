@@ -46,12 +46,7 @@ test('attachDatavizRendersToPage should render svg when the local python-dataviz
   const venvAvailable = existsSync(PYTHON_VENV_WINDOWS) || existsSync(PYTHON_VENV_POSIX);
 
   assert.equal(Array.isArray(rendered?.charts), true);
-  if (!venvAvailable) {
-    assert.equal(rendered?.charts?.[0]?.render, undefined);
-    return;
-  }
-
-  assert.equal(rendered?.charts?.[0]?.render?.renderer, 'python-dataviz');
+  assert.equal(rendered?.charts?.[0]?.render?.renderer, venvAvailable ? 'python-dataviz' : 'builtin-svg');
   assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
   assert.match(rendered?.charts?.[0]?.render?.alt || '', /Channel contribution/i);
 });
@@ -75,12 +70,33 @@ test('attachDatavizRendersToPage should render svg for Chinese chart labels', as
   const venvAvailable = existsSync(PYTHON_VENV_WINDOWS) || existsSync(PYTHON_VENV_POSIX);
 
   assert.equal(Array.isArray(rendered?.charts), true);
-  if (!venvAvailable) {
-    assert.equal(rendered?.charts?.[0]?.render, undefined);
-    return;
-  }
-
-  assert.equal(rendered?.charts?.[0]?.render?.renderer, 'python-dataviz');
+  assert.equal(rendered?.charts?.[0]?.render?.renderer, venvAvailable ? 'python-dataviz' : 'builtin-svg');
   assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
   assert.match(rendered?.charts?.[0]?.render?.alt || '', /商场分区客流/i);
+});
+
+test('attachDatavizRendersToPage should fall back to builtin svg when python renderer is disabled', async () => {
+  process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ = '1';
+  const { attachDatavizRendersToPage: attachWithBuiltinFallback } =
+    await importFresh<typeof import('../src/lib/report-dataviz.js')>(
+      '../src/lib/report-dataviz.js',
+    );
+
+  const rendered = await attachWithBuiltinFallback({
+    summary: 'fallback chart',
+    charts: [
+      {
+        title: '商场分区客流贡献',
+        items: [
+          { label: 'A区', value: 2180 },
+          { label: 'B区', value: 1650 },
+        ],
+      },
+    ],
+  });
+
+  delete process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ;
+  assert.equal(rendered?.charts?.[0]?.render?.renderer, 'builtin-svg');
+  assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
+  assert.match(rendered?.charts?.[0]?.render?.svg || '', /商场分区客流贡献/);
 });

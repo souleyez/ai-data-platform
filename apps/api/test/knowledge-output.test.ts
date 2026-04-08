@@ -93,7 +93,7 @@ test('normalizeReportOutput should align page sections to envelope sections', ()
   assert.equal(output.page?.sections?.[3]?.body, '技术关键词内容。');
 });
 
-test('normalizeReportOutput should prefer envelope title for template-aligned pages', () => {
+test('normalizeReportOutput should keep envelope title when generated title is too generic', () => {
   const output = normalizeReportOutput(
     'page',
     '按人才维度生成静态页',

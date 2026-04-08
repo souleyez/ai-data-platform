@@ -81,3 +81,30 @@ test('normalizeReportOutput should emit mall-zone-only table columns for footfal
   assert.deepEqual(output.table?.columns, ['商场分区', '客流', '说明']);
   assert.deepEqual(output.table?.rows?.[0], ['A区', '2,180 人次', '仅输出商场分区汇总，楼层和单间明细不展开']);
 });
+
+test('normalizeReportOutput should preserve specific generated titles for footfall pages', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '使用知识库广州AI对高明中港城客流采集的数据输出一份商场客流静态页并分析',
+    JSON.stringify({
+      title: '高明中港城商场客流分析报告',
+      page: {
+        summary: '基于高明中港城客流数据输出的商场客流分析。',
+        sections: [{ title: '客流总览', body: '按商场分区整理。' }],
+        cards: [{ label: '总客流', value: '4,830 人次' }],
+        charts: [{ title: '商场分区客流贡献', items: [{ label: 'A区', value: 2180 }, { label: 'B区', value: 1650 }] }],
+      },
+    }),
+    {
+      title: '商场客流分区驾驶舱',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '输出商场客流报表，统一按商场分区汇总。',
+      pageSections: ['客流总览', '商场分区贡献', '重点分区对比', '商场动线提示', '行动建议', 'AI综合分析'],
+    },
+    [makeFootfallDocument()],
+  );
+
+  assert.equal(output.type, 'page');
+  assert.equal(output.title, '高明中港城商场客流分析报告');
+});

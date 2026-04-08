@@ -202,6 +202,32 @@ function buildDefaultTitle(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md'
   return '知识库表格';
 }
 
+const REPORT_TITLE_SIGNAL_PATTERN = /(报告|分析|静态页|驾驶舱|看板|概览|汇总|总览|表格|表|文档|方案|画像|清单|复盘|应答|总结)/u;
+const WEAK_GENERATED_TITLE_PATTERN = /^(一个|某个|默认|示例|样例|测试|泛化)/u;
+const TITLE_STOPWORDS = new Set([
+  '请',
+  '基于',
+  '使用',
+  '对',
+  '将',
+  '按',
+  '生成',
+  '输出',
+  '一份',
+  '一个',
+  '知识库',
+  '全部',
+  '当前',
+  '数据',
+  '报告',
+  '分析',
+  '静态页',
+  '表格',
+  '文档',
+  'page',
+  'table',
+]);
+
 function isNarrativeOutputKind(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md') {
   return kind !== 'table';
 }
@@ -216,6 +242,51 @@ function resolveNarrativeOutputFormat(kind: 'page' | 'pdf' | 'ppt' | 'doc' | 'md
 
 function sanitizeText(value: unknown) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function extractMeaningfulTitleTokens(value: string) {
+  return normalizeText(value)
+    .split(' ')
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && !TITLE_STOPWORDS.has(item));
+}
+
+function countTitleTokenOverlap(left: string, right: string) {
+  const leftTokens = extractMeaningfulTitleTokens(left);
+  const rightTokens = new Set(extractMeaningfulTitleTokens(right));
+  if (!leftTokens.length || !rightTokens.size) return 0;
+  return leftTokens.filter((token) => rightTokens.has(token)).length;
+}
+
+function shouldPreferGeneratedTitle(input: {
+  generatedTitle: string;
+  requestText: string;
+  fallbackTitle: string;
+}) {
+  const generatedTitle = sanitizeText(input.generatedTitle);
+  if (!generatedTitle || looksLikeJsonEchoText(generatedTitle)) return false;
+
+  const fallbackTitle = sanitizeText(input.fallbackTitle);
+  if (!fallbackTitle) return true;
+  if (generatedTitle === fallbackTitle) return true;
+  if (WEAK_GENERATED_TITLE_PATTERN.test(generatedTitle)) return false;
+  if (REPORT_TITLE_SIGNAL_PATTERN.test(generatedTitle)) return true;
+
+  const requestOverlap = countTitleTokenOverlap(generatedTitle, input.requestText);
+  const fallbackOverlap = countTitleTokenOverlap(fallbackTitle, input.requestText);
+  if (requestOverlap > fallbackOverlap) return true;
+  if (requestOverlap > 0 && !REPORT_TITLE_SIGNAL_PATTERN.test(fallbackTitle)) return true;
+  return false;
+}
+
+function resolvePreferredNarrativeTitle(input: {
+  generatedTitle: string;
+  requestText: string;
+  fallbackTitle: string;
+}) {
+  return shouldPreferGeneratedTitle(input)
+    ? sanitizeText(input.generatedTitle)
+    : sanitizeText(input.fallbackTitle) || buildDefaultTitle('page');
 }
 
 function sanitizeStringArray(value: unknown) {
@@ -3623,7 +3694,8 @@ export function normalizeReportOutput(
     root.summary,
   );
   const effectivePayload = embeddedPayload || payload;
-  const title = pickString(envelope?.title, effectivePayload.title, payload.title, root.title, buildDefaultTitle(kind));
+  const generatedTitle = pickString(effectivePayload.title, payload.title, root.title);
+  const title = pickString(generatedTitle, envelope?.title, buildDefaultTitle(kind));
   const content = pickString(
     effectivePayload.content,
     effectivePayload.summary,
@@ -3687,13 +3759,18 @@ export function normalizeReportOutput(
       }
       return buildPromptEchoFallbackOutput(kind, title, requestText, envelope);
     }
-    const normalizedTitle = resumeDocuments.length
+    const fallbackNarrativeTitle = resumeDocuments.length
       ? buildResumePageTitle(resumeView, envelope)
       : footfallDocuments.length
         ? buildFootfallPageTitle(envelope)
-      : orderDocuments.length
-        ? buildOrderPageTitle(orderView, envelope)
-        : title;
+        : orderDocuments.length
+          ? buildOrderPageTitle(orderView, envelope)
+          : pickString(envelope?.title, buildDefaultTitle(kind));
+    const normalizedTitle = resolvePreferredNarrativeTitle({
+      generatedTitle,
+      requestText,
+      fallbackTitle: fallbackNarrativeTitle,
+    });
 
     const normalizedOutput: ChatOutput = {
       type: kind === 'page' ? 'page' : kind,
