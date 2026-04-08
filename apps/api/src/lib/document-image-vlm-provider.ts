@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { DocumentExtractionFieldKey } from './document-extraction-governance.js';
 import type { ParsedDocument } from './document-parser.js';
-import { runOpenClawChat } from './openclaw-adapter.js';
+import { runOpenClawChat, type OpenClawChatRequest } from './openclaw-adapter.js';
 import { loadDocumentImageVlmCapability, type DocumentImageVlmCapability } from './document-image-vlm-capability.js';
 
 const execFileAsync = promisify(execFile);
@@ -323,6 +323,26 @@ export function buildDocumentImageVlmPrompt(item: ParsedDocument, imagePath: str
   ].filter(Boolean).join('\n\n');
 }
 
+export function resolveDocumentImageVlmModelOverride(capability: Pick<DocumentImageVlmCapability, 'imageModelId'>) {
+  const imageModelId = String(capability.imageModelId || '').trim();
+  if (!imageModelId) return '';
+  return imageModelId.includes('/') ? imageModelId : `minimax/${imageModelId}`;
+}
+
+export function buildDocumentImageVlmChatRequest(input: {
+  item: ParsedDocument;
+  imagePath: string;
+  imageUrl?: string;
+  capability: Pick<DocumentImageVlmCapability, 'imageModelId'>;
+}): OpenClawChatRequest {
+  return {
+    prompt: buildDocumentImageVlmPrompt(input.item, input.imagePath, input.imageUrl),
+    systemPrompt: buildDocumentImageVlmSystemPrompt(),
+    sessionUser: 'document-image-vlm',
+    modelOverride: resolveDocumentImageVlmModelOverride(input.capability) || undefined,
+  };
+}
+
 export async function runDocumentImageVlm(input: {
   item: ParsedDocument;
   imagePath?: string;
@@ -347,11 +367,12 @@ export async function runDocumentImageVlm(input: {
     capability,
     async () => withHostedDocumentImageUrl(
       imagePath,
-      async (imageUrl) => runOpenClawChat({
-        prompt: buildDocumentImageVlmPrompt(input.item, imagePath, imageUrl),
-        systemPrompt: buildDocumentImageVlmSystemPrompt(),
-        sessionUser: 'document-image-vlm',
-      }),
+      async (imageUrl) => runOpenClawChat(buildDocumentImageVlmChatRequest({
+        item: input.item,
+        imagePath,
+        imageUrl,
+        capability,
+      })),
     ),
   );
 

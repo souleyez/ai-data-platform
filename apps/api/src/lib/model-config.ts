@@ -977,6 +977,36 @@ export async function updateSelectedModel(modelId: string) {
   return loadModelConfigState();
 }
 
+export async function ensureAllowedOpenClawModel(modelId: string) {
+  const normalizedModelId = String(modelId || '').trim();
+  if (!normalizedModelId) return false;
+
+  let changed = false;
+  const { config, source } = await loadCanonicalOpenClawConfig();
+  const normalizedConfig = ensureConfigShape(config);
+  const defaults = normalizedConfig.agents!.defaults!;
+  defaults.models = defaults.models || {};
+
+  if (!defaults.models[normalizedModelId]) {
+    defaults.models[normalizedModelId] = {};
+    await writeCanonicalOpenClawConfig(normalizedConfig, source);
+    changed = true;
+  }
+
+  if (process.platform === 'win32') {
+    const localRuntimeConfig = ensureConfigShape(await readJsonFile(WINDOWS_OPENCLAW_CONFIG_FILE));
+    const localDefaults = localRuntimeConfig.agents!.defaults!;
+    localDefaults.models = localDefaults.models || {};
+    if (!localDefaults.models[normalizedModelId]) {
+      localDefaults.models[normalizedModelId] = {};
+      await writeJsonFile(WINDOWS_OPENCLAW_CONFIG_FILE, localRuntimeConfig);
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
 function applyMiniMaxProviderConfig(config: OpenClawConfig, methodId: string, apiKey: string) {
   const providers = config.models!.providers!;
   const isCn = methodId === 'api-cn';

@@ -4,9 +4,11 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  buildDocumentImageVlmChatRequest,
   buildDocumentImageVlmPrompt,
   buildDocumentImageVlmSystemPrompt,
   normalizeDocumentImageFieldCandidateKey,
+  resolveDocumentImageVlmModelOverride,
   runDocumentImageVlm,
 } from '../src/lib/document-image-vlm-provider.js';
 
@@ -74,6 +76,32 @@ test('normalizeDocumentImageFieldCandidateKey should normalize aliases and canon
   assert.equal(normalizeDocumentImageFieldCandidateKey('document_kind'), 'documentKind');
   assert.equal(normalizeDocumentImageFieldCandidateKey('文档类型', { documentKind: '文档类型' }), 'documentKind');
   assert.equal(normalizeDocumentImageFieldCandidateKey('unknown_key'), '');
+});
+
+test('resolveDocumentImageVlmModelOverride should scope runtime image models to minimax', () => {
+  assert.equal(resolveDocumentImageVlmModelOverride({ imageModelId: 'MiniMax-VL-01' }), 'minimax/MiniMax-VL-01');
+  assert.equal(resolveDocumentImageVlmModelOverride({ imageModelId: 'minimax/MiniMax-VL-01' }), 'minimax/MiniMax-VL-01');
+  assert.equal(resolveDocumentImageVlmModelOverride({ imageModelId: '' }), '');
+});
+
+test('buildDocumentImageVlmChatRequest should pin image parsing to the explicit MiniMax image model', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-image-vlm-provider-'));
+  const filePath = path.join(tempDir, 'screenshot.png');
+  await fs.writeFile(filePath, Buffer.from(PNG_PIXEL_BASE64, 'base64'));
+
+  try {
+    const request = buildDocumentImageVlmChatRequest({
+      item: buildImageItem(filePath),
+      imagePath: filePath,
+      imageUrl: 'http://127.0.0.1:9999/document-image-vlm/test.png',
+      capability: { imageModelId: 'MiniMax-VL-01' },
+    });
+    assert.equal(request.modelOverride, 'minimax/MiniMax-VL-01');
+    assert.equal(request.sessionUser, 'document-image-vlm');
+    assert.match(String(request.prompt || ''), /http:\/\/127\.0\.0\.1:9999\/document-image-vlm\/test\.png/);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('runDocumentImageVlm should return null when image VLM is explicitly disabled', async () => {

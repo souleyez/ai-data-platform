@@ -1,6 +1,10 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { ensureNativeSearchPreferredConfig, getActiveOpenClawModel } from './model-config.js';
+import {
+  ensureAllowedOpenClawModel,
+  ensureNativeSearchPreferredConfig,
+  getActiveOpenClawModel,
+} from './model-config.js';
 
 const execFileAsync = promisify(execFile);
 let wslGatewayTokenCache: { token: string; expiresAt: number } = {
@@ -19,6 +23,7 @@ export type OpenClawChatRequest = {
   contextBlocks?: string[];
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   sessionUser?: string;
+  modelOverride?: string;
 };
 
 export type OpenClawChatResult = {
@@ -148,6 +153,11 @@ export function buildGatewayRequestModel(agentId?: string) {
     return 'openclaw';
   }
   return `openclaw/${normalizedAgentId}`;
+}
+
+export function resolveOpenClawModelOverride(modelOverride?: string) {
+  const normalizedOverride = String(modelOverride || '').trim();
+  return normalizedOverride || '';
 }
 
 function buildDefaultSystemPrompt() {
@@ -332,6 +342,11 @@ export function isRetryableCloudGatewayError(error: unknown) {
   );
 }
 
+export function isOpenClawModelOverrideDeniedError(error: unknown) {
+  const message = String(error instanceof Error ? error.message : error || '').toLowerCase();
+  return message.includes('is not allowed for agent');
+}
+
 function extractResponseOutputText(payload: OpenClawResponsesPayload) {
   const blocks: string[] = [];
   for (const item of payload.output || []) {
@@ -351,6 +366,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
   const selectedModel = await getActiveOpenClawModel();
   const model = buildGatewayRequestModel(agentId);
+  const modelOverride = resolveOpenClawModelOverride(input.modelOverride);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     return null;
@@ -368,6 +384,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
   const authToken = await resolveGatewayToken(baseUrl, token);
   if (hasUsableGatewayToken(authToken)) headers.Authorization = `Bearer ${authToken}`;
   if (agentId) headers['x-openclaw-agent-id'] = agentId;
+  if (modelOverride) headers['x-openclaw-model'] = modelOverride;
 
   try {
     const json = await requestOpenResponses(baseUrl, headers, {
@@ -387,7 +404,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
     return {
       content,
       provider: 'cloud-gateway',
-      model: selectedModel || model || 'cloud-model',
+      model: modelOverride || selectedModel || model || 'cloud-model',
       raw: json,
     };
   } catch {
@@ -412,6 +429,26 @@ async function requestChatCompletionWithRetry(baseUrl: string, headers: Record<s
   }
 
   throw lastError instanceof Error ? lastError : new Error('Cloud gateway request failed');
+}
+
+async function requestChatCompletionAllowingModelOverride(params: {
+  baseUrl: string;
+  headers: Record<string, string>;
+  body: unknown;
+  modelOverride?: string;
+}) {
+  const modelOverride = resolveOpenClawModelOverride(params.modelOverride);
+
+  try {
+    return await requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body);
+  } catch (error) {
+    if (!modelOverride || !isOpenClawModelOverrideDeniedError(error)) {
+      throw error;
+    }
+
+    await ensureAllowedOpenClawModel(modelOverride);
+    return requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body);
+  }
 }
 
 export function isOpenClawGatewayConfigured() {
@@ -453,6 +490,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const agentId = env('OPENCLAW_AGENT_ID', 'main');
   const selectedModel = await getActiveOpenClawModel();
   const model = buildGatewayRequestModel(agentId);
+  const modelOverride = resolveOpenClawModelOverride(input.modelOverride);
 
   if (!baseUrl || (!hasUsableGatewayToken(token) && !isLocalGatewayUrl(baseUrl))) {
     throw new Error('Cloud gateway is not configured');
@@ -470,53 +508,69 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   const authToken = await resolveGatewayToken(baseUrl, token);
   if (hasUsableGatewayToken(authToken)) headers.Authorization = `Bearer ${authToken}`;
   if (agentId) headers['x-openclaw-agent-id'] = agentId;
+  if (modelOverride) headers['x-openclaw-model'] = modelOverride;
 
   const baseMessages = buildMessages(input);
 
-  let result = await requestChatCompletionWithRetry(baseUrl, headers, {
-    model,
-    user: input.sessionUser,
-    temperature: 0.2,
-    messages: baseMessages,
+  let result = await requestChatCompletionAllowingModelOverride({
+    baseUrl,
+    headers,
+    modelOverride,
+    body: {
+      model,
+      user: input.sessionUser,
+      temperature: 0.2,
+      messages: baseMessages,
+    },
   });
 
   if (looksLikeOnboardingDrift(result.content)) {
-    result = await requestChatCompletionWithRetry(baseUrl, headers, {
-      model,
-      user: input.sessionUser,
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content: '直接回答用户当前问题。不要自我介绍，不要谈内部状态，不要说自己没名字、没个性、第一次聊天，也不要让用户给你起名。',
-        },
-        ...baseMessages,
-      ],
+    result = await requestChatCompletionAllowingModelOverride({
+      baseUrl,
+      headers,
+      modelOverride,
+      body: {
+        model,
+        user: input.sessionUser,
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: '直接回答用户当前问题。不要自我介绍，不要谈内部状态，不要说自己没名字、没个性、第一次聊天，也不要让用户给你起名。',
+          },
+          ...baseMessages,
+        ],
+      },
     });
   }
 
   if (looksLikeOnboardingDrift(result.content)) {
-    result = await requestChatCompletionWithRetry(baseUrl, headers, {
-      model,
-      user: input.sessionUser,
-      temperature: 0,
-      messages: [
-        {
-          role: 'system',
-          content: '只回答用户当前问题。禁止自我介绍，禁止让用户给你起名，禁止谈刚启动或记忆状态。',
-        },
-        {
-          role: 'user',
-          content: input.prompt,
-        },
-      ],
+    result = await requestChatCompletionAllowingModelOverride({
+      baseUrl,
+      headers,
+      modelOverride,
+      body: {
+        model,
+        user: input.sessionUser,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: '只回答用户当前问题。禁止自我介绍，禁止让用户给你起名，禁止谈刚启动或记忆状态。',
+          },
+          {
+            role: 'user',
+            content: input.prompt,
+          },
+        ],
+      },
     });
   }
 
   return {
     content: result.content,
     provider: 'cloud-gateway',
-    model: selectedModel || model || 'cloud-model',
+    model: modelOverride || selectedModel || model || 'cloud-model',
     raw: result.json,
   };
 }
