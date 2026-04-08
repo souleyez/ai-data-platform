@@ -118,6 +118,11 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
     }).catch(() => undefined);
     const child = spawn(pythonExecutable, [PYTHON_RENDER_SCRIPT], {
       cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -199,7 +204,7 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
       }
     });
 
-    child.stdin.end(JSON.stringify(payload));
+    child.stdin.end(JSON.stringify(payload), 'utf8');
   });
 }
 

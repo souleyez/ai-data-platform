@@ -55,3 +55,32 @@ test('attachDatavizRendersToPage should render svg when the local python-dataviz
   assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
   assert.match(rendered?.charts?.[0]?.render?.alt || '', /Channel contribution/i);
 });
+
+test('attachDatavizRendersToPage should render svg for Chinese chart labels', async () => {
+  const page = {
+    summary: 'Mall footfall',
+    charts: [
+      {
+        title: '商场分区客流',
+        items: [
+          { label: 'A区', value: 2180 },
+          { label: 'B区', value: 1650 },
+          { label: 'C区', value: 1000 },
+        ],
+      },
+    ],
+  };
+
+  const rendered = await attachDatavizRendersToPage(page);
+  const venvAvailable = existsSync(PYTHON_VENV_WINDOWS) || existsSync(PYTHON_VENV_POSIX);
+
+  assert.equal(Array.isArray(rendered?.charts), true);
+  if (!venvAvailable) {
+    assert.equal(rendered?.charts?.[0]?.render, undefined);
+    return;
+  }
+
+  assert.equal(rendered?.charts?.[0]?.render?.renderer, 'python-dataviz');
+  assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
+  assert.match(rendered?.charts?.[0]?.render?.alt || '', /商场分区客流/i);
+});

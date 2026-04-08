@@ -1,9 +1,13 @@
 import io
 import json
 import math
+import os
 import sys
+from functools import lru_cache
+from pathlib import Path
 
 import matplotlib
+from matplotlib import font_manager
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -13,6 +17,78 @@ import seaborn as sns
 PRIMARY = "#0f766e"
 ACCENT = "#14b8a6"
 GRID = "#d7e3e9"
+CJK_FONT_CANDIDATE_PATHS = [
+    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc",
+    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyhbd.ttc",
+    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "simhei.ttf",
+    Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "Deng.ttf",
+    Path("/System/Library/Fonts/PingFang.ttc"),
+    Path("/Library/Fonts/Arial Unicode.ttf"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf"),
+    Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+]
+CJK_FONT_CANDIDATE_FAMILIES = [
+    "Microsoft YaHei",
+    "SimHei",
+    "DengXian",
+    "PingFang SC",
+    "Noto Sans CJK SC",
+    "WenQuanYi Zen Hei",
+    "Arial Unicode MS",
+]
+
+
+def contains_cjk(text):
+    for char in text or "":
+        codepoint = ord(char)
+        if 0x3400 <= codepoint <= 0x9FFF or 0xF900 <= codepoint <= 0xFAFF:
+            return True
+    return False
+
+
+@lru_cache(maxsize=1)
+def resolve_cjk_font_family():
+    for candidate_path in CJK_FONT_CANDIDATE_PATHS:
+        if not candidate_path.exists():
+            continue
+        try:
+            font_manager.fontManager.addfont(str(candidate_path))
+            family = font_manager.FontProperties(fname=str(candidate_path)).get_name()
+            if family:
+                return family
+        except Exception:
+            continue
+
+    for candidate_family in CJK_FONT_CANDIDATE_FAMILIES:
+        try:
+            resolved_path = font_manager.findfont(
+                font_manager.FontProperties(family=candidate_family),
+                fallback_to_default=False,
+            )
+            if resolved_path and Path(resolved_path).exists():
+                return candidate_family
+        except Exception:
+            continue
+
+    return ""
+
+
+def configure_font_stack(text_samples):
+    font_stack = ["Arial", "DejaVu Sans"]
+    if any(contains_cjk(sample) for sample in text_samples):
+        cjk_family = resolve_cjk_font_family()
+        if cjk_family:
+            font_stack = [cjk_family, *font_stack]
+
+    matplotlib.rcParams.update(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": font_stack,
+            "axes.unicode_minus": False,
+            "svg.fonttype": "path",
+        }
+    )
 
 
 def normalize_payload():
@@ -109,6 +185,7 @@ def main():
     values = [item["value"] for item in items]
 
     sns.set_theme(style="whitegrid")
+    configure_font_stack([title, *labels])
     figure_height = max(3.8, min(8.6, 1.6 + len(labels) * 0.48))
     fig, ax = plt.subplots(figsize=(9.4, figure_height), facecolor="#ffffff")
     configure_axes(ax, title)
