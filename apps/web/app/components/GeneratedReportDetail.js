@@ -120,7 +120,7 @@ function PageDetail({ page, content }) {
     <div className="generated-page-detail">
       {content ? (
         <div className="generated-report-section">
-          <p>{content}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{content}</p>
         </div>
       ) : null}
       {page?.summary ? (
@@ -179,7 +179,7 @@ export default function GeneratedReportDetail({ item }) {
     return (
       <div className="generated-report-detail">
         <div className="generated-report-section">
-          <p>{item.content}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{item.content}</p>
         </div>
       </div>
     );

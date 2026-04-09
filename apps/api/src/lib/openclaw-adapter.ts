@@ -24,6 +24,7 @@ export type OpenClawChatRequest = {
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   sessionUser?: string;
   modelOverride?: string;
+  timeoutMs?: number;
 };
 
 export type OpenClawChatResult = {
@@ -63,6 +64,12 @@ function getGatewayTimeoutMs() {
   const parsed = Number(env('OPENCLAW_GATEWAY_TIMEOUT_MS', '45000'));
   if (!Number.isFinite(parsed) || parsed < 3000) return 45000;
   return parsed;
+}
+
+function resolveGatewayTimeoutMs(timeoutMs?: number) {
+  const parsed = Number(timeoutMs);
+  if (!Number.isFinite(parsed) || parsed < 3000) return getGatewayTimeoutMs();
+  return Math.floor(parsed);
 }
 
 function getGatewayRetryCount() {
@@ -261,9 +268,15 @@ function looksLikeOnboardingDrift(content: string) {
   return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|第一次聊天)/.test(text);
 }
 
-async function requestChatCompletion(baseUrl: string, headers: Record<string, string>, body: unknown) {
+async function requestChatCompletion(
+  baseUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs?: number,
+) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
+  const resolvedTimeoutMs = resolveGatewayTimeoutMs(timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), resolvedTimeoutMs);
 
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
@@ -290,7 +303,7 @@ async function requestChatCompletion(baseUrl: string, headers: Record<string, st
     return { json, content };
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(`Cloud gateway request timed out after ${getGatewayTimeoutMs()}ms`);
+      throw new Error(`Cloud gateway request timed out after ${resolvedTimeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -298,9 +311,15 @@ async function requestChatCompletion(baseUrl: string, headers: Record<string, st
   }
 }
 
-async function requestOpenResponses(baseUrl: string, headers: Record<string, string>, body: unknown) {
+async function requestOpenResponses(
+  baseUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs?: number,
+) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), getGatewayTimeoutMs());
+  const resolvedTimeoutMs = resolveGatewayTimeoutMs(timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), resolvedTimeoutMs);
 
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/v1/responses`, {
@@ -318,7 +337,7 @@ async function requestOpenResponses(baseUrl: string, headers: Record<string, str
     return (await response.json()) as OpenClawResponsesPayload;
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(`OpenResponses request timed out after ${getGatewayTimeoutMs()}ms`);
+      throw new Error(`OpenResponses request timed out after ${resolvedTimeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -397,7 +416,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
         effort: 'medium',
         summary: 'auto',
       },
-    });
+    }, input.timeoutMs);
     const content = extractResponseOutputText(json);
     if (!content) return null;
 
@@ -412,13 +431,18 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
   }
 }
 
-async function requestChatCompletionWithRetry(baseUrl: string, headers: Record<string, string>, body: unknown) {
+async function requestChatCompletionWithRetry(
+  baseUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs?: number,
+) {
   const maxAttempts = 1 + getGatewayRetryCount();
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await requestChatCompletion(baseUrl, headers, body);
+      return await requestChatCompletion(baseUrl, headers, body, timeoutMs);
     } catch (error) {
       lastError = error;
       if (attempt >= maxAttempts || !isRetryableCloudGatewayError(error)) {
@@ -436,18 +460,19 @@ async function requestChatCompletionAllowingModelOverride(params: {
   headers: Record<string, string>;
   body: unknown;
   modelOverride?: string;
+  timeoutMs?: number;
 }) {
   const modelOverride = resolveOpenClawModelOverride(params.modelOverride);
 
   try {
-    return await requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body);
+    return await requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body, params.timeoutMs);
   } catch (error) {
     if (!modelOverride || !isOpenClawModelOverrideDeniedError(error)) {
       throw error;
     }
 
     await ensureAllowedOpenClawModel(modelOverride);
-    return requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body);
+    return requestChatCompletionWithRetry(params.baseUrl, params.headers, params.body, params.timeoutMs);
   }
 }
 
@@ -516,6 +541,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
     baseUrl,
     headers,
     modelOverride,
+    timeoutMs: input.timeoutMs,
     body: {
       model,
       user: input.sessionUser,
@@ -529,6 +555,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
       baseUrl,
       headers,
       modelOverride,
+      timeoutMs: input.timeoutMs,
       body: {
         model,
         user: input.sessionUser,
@@ -549,6 +576,7 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
       baseUrl,
       headers,
       modelOverride,
+      timeoutMs: input.timeoutMs,
       body: {
         model,
         user: input.sessionUser,

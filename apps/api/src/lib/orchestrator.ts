@@ -1,3 +1,7 @@
+import {
+  handoffTimedOutChatToBackground,
+  isChatTimeoutBackgroundCandidate,
+} from './chat-background-jobs.js';
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
 import {
   buildBotConfigurationMemoryContextBlock,
@@ -36,6 +40,8 @@ export type ChatRequestInput = {
   botId?: string;
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
+  cloudTimeoutMs?: number;
+  backgroundContinuation?: boolean;
 };
 
 function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
@@ -52,6 +58,34 @@ function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
 
 function buildCloudUnavailableAnswer() {
   return '当前云端模型暂时不可用，请稍后再试。';
+}
+
+function buildBackgroundContinuationAnswer() {
+  return '这次内容较长，已转入报表中心继续生成。生成完成后会出现在“已出报表”里。';
+}
+
+function getBackgroundHandoffTimeoutMs() {
+  const parsed = Number(process.env.CHAT_BACKGROUND_HANDOFF_TIMEOUT_MS || '45000');
+  if (!Number.isFinite(parsed) || parsed < 5000) return 45000;
+  return Math.floor(parsed);
+}
+
+async function withBackgroundHandoffTimeout<T>(promise: Promise<T>) {
+  const timeoutMs = getBackgroundHandoffTimeoutMs();
+  let timer: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Chat background handoff timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function summarizeError(error: unknown) {
@@ -133,6 +167,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let routeKind = 'general';
   let evidenceMode: string | null = null;
   let savedReport: Record<string, unknown> | null = null;
+  let backgroundHandoff = false;
   let references: Array<{ id: string; name: string; path?: string }> = [];
   let guard = {
     requiresConfirmation: false,
@@ -163,7 +198,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         debug = result.debug || null;
         routeKind = 'knowledge_output';
       } else {
-        const result = await runGeneralKnowledgeAwareChat({
+        const generalChatPromise = runGeneralKnowledgeAwareChat({
           prompt,
           chatHistory,
           existingState,
@@ -174,7 +209,13 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           botDefinition,
           effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
           accessContext: input.accessContext || null,
+          cloudTimeoutMs: input.cloudTimeoutMs,
         });
+        const result = await (
+          requestMode === 'general' && !input.backgroundContinuation
+            ? withBackgroundHandoffTimeout(generalChatPromise)
+            : generalChatPromise
+        );
         libraries = result.libraries;
         output = result.output;
         content = result.content;
@@ -193,18 +234,57 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       }
     } catch (error) {
       fallbackReason = summarizeError(error);
-      console.warn(`[chat:fallback] trace=${traceId} reason=${fallbackReason}`);
-      content = buildCloudUnavailableAnswer();
-      output = { type: 'answer', content };
-      mode = 'fallback';
-      conversationState = null;
-      routeKind = 'general';
-      evidenceMode = null;
-      guard = {
-        requiresConfirmation: false,
-        reason: '',
-      };
-      confirmation = null;
+      if (
+        requestMode === 'general'
+        && !input.backgroundContinuation
+        && isChatTimeoutBackgroundCandidate(error)
+      ) {
+        try {
+          const handoff = await handoffTimedOutChatToBackground({
+            prompt,
+            sessionUser: input.sessionUser,
+            chatHistory,
+            systemConstraints: input.systemConstraints,
+            botId: input.botId,
+            botDefinition,
+            effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+            accessContext: input.accessContext || null,
+          });
+          backgroundHandoff = true;
+          savedReport = handoff.savedReport as Record<string, unknown>;
+          libraries = Array.isArray(handoff.savedReport?.libraries)
+            ? handoff.savedReport.libraries as Array<{ key: string; label: string }>
+            : [];
+          content = buildBackgroundContinuationAnswer();
+          output = { type: 'answer', content };
+          mode = 'fallback';
+          conversationState = null;
+          routeKind = 'general';
+          evidenceMode = null;
+          guard = {
+            requiresConfirmation: false,
+            reason: '',
+          };
+          confirmation = null;
+        } catch (handoffError) {
+          console.warn(`[chat:background-handoff] trace=${traceId} reason=${summarizeError(handoffError)}`);
+        }
+      }
+
+      if (!backgroundHandoff) {
+        console.warn(`[chat:fallback] trace=${traceId} reason=${fallbackReason}`);
+        content = buildCloudUnavailableAnswer();
+        output = { type: 'answer', content };
+        mode = 'fallback';
+        conversationState = null;
+        routeKind = 'general';
+        evidenceMode = null;
+        guard = {
+          requiresConfirmation: false,
+          reason: '',
+        };
+        confirmation = null;
+      }
     }
   }
 
@@ -252,7 +332,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       role: 'assistant' as const,
       content,
       output,
-      meta: mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用',
+      meta: backgroundHandoff
+        ? '已转报表中心后台生成'
+        : (mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用'),
       references,
       confirmation,
     },
@@ -270,6 +352,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       gatewayConfigured,
       intelligenceMode: intelligence.mode,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
+      backgroundContinuation: backgroundHandoff,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
       botId: botDefinition?.id || '',

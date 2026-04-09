@@ -105,6 +105,8 @@ export type ReportDynamicSource = {
   planUpdatedAt?: string;
 };
 
+export type ReportOutputStatus = 'processing' | 'ready' | 'failed';
+
 export type ReportOutputRecord = {
   id: string;
   groupKey: string;
@@ -116,7 +118,7 @@ export type ReportOutputRecord = {
   kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   format?: string;
   createdAt: string;
-  status: 'ready';
+  status: ReportOutputStatus;
   summary: string;
   triggerSource: 'report-center' | 'chat';
   content?: string;
@@ -421,6 +423,7 @@ async function buildCloudReportAnalysis(record: {
 }
 
 async function attachReportAnalysis(record: ReportOutputRecord) {
+  if (record.status !== 'ready' || record.kind === 'md') return record;
   const analysis =
     (await buildCloudReportAnalysis(record)) ||
     buildLocalReportAnalysis(record);
@@ -470,7 +473,14 @@ async function attachReportDataviz(record: ReportOutputRecord) {
   return page ? { ...record, page } : record;
 }
 
+async function finalizeReportOutputRecord(record: ReportOutputRecord) {
+  if (record.status !== 'ready') return record;
+  if (record.kind === 'md') return record;
+  return attachReportAnalysis(await attachReportDataviz(record));
+}
+
 function attachLocalReportAnalysis(record: ReportOutputRecord) {
+  if (record.status !== 'ready' || record.kind === 'md') return record;
   const analysis = buildLocalReportAnalysis(record);
   if (!analysis) return record;
 
@@ -1207,9 +1217,15 @@ function normalizeStoredTable(value: unknown): ReportOutputRecord['table'] | nul
 
 function normalizeStoredOutputKind(value: unknown): ReportOutputRecord['kind'] | undefined {
   const normalized = normalizeTextField(value);
-  return ['table', 'page', 'ppt', 'pdf'].includes(normalized)
+  return ['table', 'page', 'ppt', 'pdf', 'doc', 'md'].includes(normalized)
     ? (normalized as ReportOutputRecord['kind'])
     : undefined;
+}
+
+function normalizeReportOutputStatus(value: unknown): ReportOutputStatus {
+  const normalized = normalizeTextField(value);
+  if (normalized === 'processing' || normalized === 'failed') return normalized;
+  return 'ready';
 }
 
 function normalizeStoredOutput(value: unknown): ReportOutputRecord | null {
@@ -1239,7 +1255,7 @@ function normalizeStoredOutput(value: unknown): ReportOutputRecord | null {
     kind,
     format: normalizeTextField(value.format),
     createdAt: normalizeTextField(value.createdAt) || '1970-01-01T00:00:00.000Z',
-    status: 'ready',
+    status: normalizeReportOutputStatus(value.status),
     summary,
     triggerSource: normalizeTextField(value.triggerSource) === 'chat' ? 'chat' : 'report-center',
     content: normalizeTextField(value.content),
@@ -1837,6 +1853,8 @@ export async function createReportOutput(input: {
   triggerSource?: 'report-center' | 'chat';
   kind?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
   format?: string;
+  status?: ReportOutputStatus;
+  summary?: string;
   content?: string;
   table?: ReportOutputRecord['table'];
   page?: ReportOutputRecord['page'];
@@ -1858,6 +1876,7 @@ export async function createReportOutput(input: {
 
   const createdAt = new Date().toISOString();
   const resolvedKind = input.kind || resolveDefaultReportKind(template.type);
+  const resolvedStatus = input.status || 'ready';
   const baseRecord: ReportOutputRecord = {
     id: buildId('report'),
     groupKey: group.key,
@@ -1869,8 +1888,13 @@ export async function createReportOutput(input: {
     kind: resolvedKind,
     format: input.format || resolveDefaultReportFormat(resolvedKind),
     createdAt,
-    status: 'ready',
-    summary: `${group.label} 分组已按 ${template.label} 模板生成成型报表。`,
+    status: resolvedStatus,
+    summary: String(input.summary || '').trim()
+      || (resolvedStatus === 'processing'
+        ? `${group.label} 分组内容已转入后台继续生成。`
+        : resolvedStatus === 'failed'
+          ? `${group.label} 分组内容生成失败。`
+          : `${group.label} 分组已按 ${template.label} 模板生成成型报表。`),
     triggerSource: input.triggerSource || 'report-center',
     content: input.content || '',
     table: input.table || null,
@@ -1885,14 +1909,51 @@ export async function createReportOutput(input: {
       libraries: Array.isArray(input.libraries) && input.libraries.length
         ? input.libraries
         : [{ key: group.key, label: group.label }],
-    }),
+      }),
   };
 
-  const record = await attachReportAnalysis(await attachReportDataviz(baseRecord));
+  const record = await finalizeReportOutputRecord(baseRecord);
 
   const nextOutputs = [record, ...state.outputs].slice(0, 100);
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
   return record;
+}
+
+export async function updateReportOutput(outputId: string, patch: {
+  title?: string;
+  kind?: ReportOutputRecord['kind'];
+  format?: string;
+  status?: ReportOutputStatus;
+  summary?: string;
+  content?: string;
+  table?: ReportOutputRecord['table'];
+  page?: ReportOutputRecord['page'];
+  libraries?: ReportOutputRecord['libraries'];
+  downloadUrl?: string;
+  dynamicSource?: ReportOutputRecord['dynamicSource'];
+}) {
+  const state = await loadReportCenterState();
+  const current = state.outputs.find((item) => item.id === outputId);
+  if (!current) throw new Error('report output not found');
+
+  const nextBase: ReportOutputRecord = {
+    ...current,
+    title: patch.title !== undefined ? String(patch.title || '').trim() || current.title : current.title,
+    kind: patch.kind !== undefined ? patch.kind : current.kind,
+    format: patch.format !== undefined ? String(patch.format || '').trim() || current.format : current.format,
+    status: patch.status || current.status,
+    summary: patch.summary !== undefined ? String(patch.summary || '').trim() || current.summary : current.summary,
+    content: patch.content !== undefined ? String(patch.content || '') : current.content,
+    table: patch.table !== undefined ? patch.table || null : current.table,
+    page: patch.page !== undefined ? patch.page || null : current.page,
+    libraries: patch.libraries !== undefined ? (Array.isArray(patch.libraries) ? patch.libraries : []) : current.libraries,
+    downloadUrl: patch.downloadUrl !== undefined ? String(patch.downloadUrl || '').trim() : current.downloadUrl,
+    dynamicSource: patch.dynamicSource !== undefined ? patch.dynamicSource || null : current.dynamicSource,
+  };
+  const nextRecord = await finalizeReportOutputRecord(nextBase);
+  const nextOutputs = state.outputs.map((item) => (item.id === outputId ? nextRecord : item));
+  await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
+  return nextRecord;
 }
 
 export async function deleteReportOutput(outputId: string) {

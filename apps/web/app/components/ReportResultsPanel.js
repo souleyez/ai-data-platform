@@ -9,6 +9,7 @@ import {
 } from '../lib/generated-reports';
 
 function ReportShareActions({ item }) {
+  if (item?.status === 'processing') return null;
   const actions = getGeneratedReportShareActions(item);
   if (!actions.length) return null;
 
@@ -28,6 +29,12 @@ function ReportShareActions({ item }) {
   );
 }
 
+function formatReportStatus(status) {
+  if (status === 'processing') return '生成中';
+  if (status === 'failed') return '生成失败';
+  return '已完成';
+}
+
 function ReportResultItem({
   item,
   expanded,
@@ -37,6 +44,7 @@ function ReportResultItem({
   onRequestExpand,
 }) {
   const metaLabel = item.templateLabel || item.outputType || item.kind || '报表';
+  const statusLabel = formatReportStatus(item.status);
 
   return (
     <article className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`}>
@@ -53,7 +61,7 @@ function ReportResultItem({
       >
         <span className="report-list-title-row">
           <span className="report-list-title">{item.title}</span>
-          <span className="report-list-meta">{formatGeneratedReportTime(item.createdAt)}</span>
+          <span className="report-list-meta">{formatGeneratedReportTime(item.createdAt)} · {statusLabel}</span>
         </span>
         <span className="report-list-subtitle">{metaLabel}</span>
       </button>

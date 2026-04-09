@@ -97,6 +97,14 @@ export function useHomePageController() {
   }, []);
 
   useEffect(() => {
+    if (!reportItems.some((item) => item?.status === 'processing')) return undefined;
+    const timer = setInterval(() => {
+      void loadReports();
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [reportItems]);
+
+  useEffect(() => {
     persistChatMessages(messages);
   }, [messages]);
 

@@ -195,6 +195,7 @@ export function normalizeGeneratedReportRecord(item) {
     format: resolveGeneratedReportFormat(item?.kind, item?.format, Boolean(item?.table)),
     source: item?.triggerSource || item?.source || 'chat',
     createdAt: item?.createdAt || new Date().toISOString(),
+    status: item?.status || 'ready',
     summary: item?.summary || '',
     content: item?.content || '',
     table: item?.table || null,

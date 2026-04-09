@@ -47,8 +47,9 @@ async function runCloudChatWithSearchFallback(input: {
   chatHistory: ChatHistoryItem[];
   sessionUser?: string;
   systemContextBlocks?: string[];
+  cloudTimeoutMs?: number;
 }) {
-  const { prompt, chatHistory, sessionUser, systemContextBlocks } = input;
+  const { prompt, chatHistory, sessionUser, systemContextBlocks, cloudTimeoutMs } = input;
   const needsWebSearch = shouldUseWebSearchForPrompt(prompt);
   const contextBlocks = [...(systemContextBlocks || [])];
 
@@ -58,6 +59,7 @@ async function runCloudChatWithSearchFallback(input: {
       sessionUser,
       chatHistory,
       contextBlocks,
+      timeoutMs: cloudTimeoutMs,
     });
     if (native) return native;
   }
@@ -68,6 +70,7 @@ async function runCloudChatWithSearchFallback(input: {
     sessionUser,
     chatHistory,
     contextBlocks: fallbackContext ? [...contextBlocks, fallbackContext] : contextBlocks,
+    timeoutMs: cloudTimeoutMs,
   });
 }
 
@@ -166,7 +169,7 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ].join('\n\n');
 }
 
-async function loadLatestVisibleDetailedDocument(input: {
+export async function loadLatestVisibleDetailedDocumentContext(input: {
   botDefinition?: BotDefinition | null;
   effectiveVisibleLibraryKeys?: string[];
 }) {
@@ -187,7 +190,23 @@ async function loadLatestVisibleDetailedDocument(input: {
     )))
     : baseVisibleItems;
 
-  return selectLatestDetailedFullTextDocument(visibleItems);
+  const document = selectLatestDetailedFullTextDocument(visibleItems);
+  const libraries = document
+    ? documentLibraries
+      .filter((library) => (
+        (!effectiveVisibleLibrarySet || effectiveVisibleLibrarySet.has(library.key))
+        && documentMatchesLibrary(document, library)
+      ))
+      .map((library): KnowledgeLibraryRef => ({
+        key: library.key,
+        label: library.label,
+      }))
+    : [];
+
+  return {
+    document,
+    libraries,
+  };
 }
 
 export async function runGeneralKnowledgeAwareChat(input: {
@@ -201,6 +220,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   botDefinition?: BotDefinition | null;
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
+  cloudTimeoutMs?: number;
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
@@ -229,10 +249,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
     preferredDocumentIds: memorySelection.documentIds,
     ...scopeState,
   });
-  const latestDetailedDocument = await loadLatestVisibleDetailedDocument({
+  const latestDetailedDocumentContext = await loadLatestVisibleDetailedDocumentContext({
     botDefinition: input.botDefinition,
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
+  const latestDetailedDocument = latestDetailedDocumentContext.document;
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -315,6 +336,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     sessionUser: input.sessionUser,
     chatHistory: input.chatHistory,
     systemContextBlocks: chatContextBlocks,
+    cloudTimeoutMs: input.cloudTimeoutMs,
   });
 
   return {
