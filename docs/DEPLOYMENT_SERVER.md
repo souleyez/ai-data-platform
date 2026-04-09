@@ -95,6 +95,7 @@ Production servers should bind the application services to loopback and expose o
 If you want explicit host-level rejection in addition to loopback binding, use:
 
 - [harden-public-entry.sh](C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/server/harden-public-entry.sh)
+- [ai-data-platform.conf.example](C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/server/nginx/ai-data-platform.conf.example)
 
 That helper installs a dedicated `nftables` include snippet which rejects direct access to:
 
@@ -102,6 +103,25 @@ That helper installs a dedicated `nftables` include snippet which rejects direct
 - `3002`
 - `3100`
 - `3210`
+
+## Reverse proxy timeouts
+
+Long-running chat requests can finish successfully at `127.0.0.1:3002` while still being cut off by `nginx` if the proxy timeout is left at the short default.
+
+For production reverse proxies:
+
+- keep `/api/` routed through the web service at `127.0.0.1:3002`
+- keep `/api/health` and any direct API-only probe routed to `127.0.0.1:3100`
+- set `proxy_connect_timeout 30s`
+- set `proxy_send_timeout 300s`
+- set `proxy_read_timeout 300s`
+- set `send_timeout 300s`
+
+If the app works through `curl http://127.0.0.1:3002/api/chat` on the server but the public domain returns `504 Gateway Time-out`, treat the reverse proxy timeout as the first suspect.
+
+Reference config:
+
+- [ai-data-platform.conf.example](C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/server/nginx/ai-data-platform.conf.example)
 
 ## Health checks
 
@@ -144,6 +164,8 @@ This drop-in is required because the 120 server uses the local model bridge serv
 2. `systemctl restart ai-data-platform-model-bridge.service`
 
 The current 120 deployment also keeps the app services bound to `127.0.0.1` and rejects direct public access to `3001/3002/3100/3210` at the host firewall layer. Preserve that boundary when rebuilding the machine.
+
+The current 120 deployment also requires longer `nginx` proxy timeouts on `/api/` because chat requests can legitimately run longer than the default reverse-proxy window. If the domain starts returning `504` while local loopback calls still succeed, restore the timeout values from the example `nginx` config before touching the app code.
 
 ### Expected bridge health on 120
 
