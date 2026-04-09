@@ -89,3 +89,21 @@ export function getOcrMyPdfCommandCandidates() {
   commands.push('ocrmypdf');
   return unique(commands);
 }
+
+export function getSofficeCommandCandidates() {
+  const commands = [process.env.SOFFICE_BIN || ''];
+
+  if (process.platform === 'win32') {
+    commands.push(
+      'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+      'C:\\Program Files\\LibreOffice\\program\\soffice.com',
+      'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
+      'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.com',
+    );
+  } else if (process.platform === 'darwin') {
+    commands.push('/Applications/LibreOffice.app/Contents/MacOS/soffice');
+  }
+
+  commands.push('soffice', 'libreoffice');
+  return unique(commands);
+}

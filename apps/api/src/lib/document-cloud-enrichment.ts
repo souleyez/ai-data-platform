@@ -6,7 +6,13 @@ import type {
   StructuredClaim,
   StructuredEntity,
 } from './document-parser.js';
-import { DOCUMENT_IMAGE_EXTENSIONS, deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-parser.js';
+import {
+  DOCUMENT_IMAGE_EXTENSIONS,
+  DOCUMENT_PRESENTATION_EXTENSIONS,
+  deriveSchemaProfile,
+  refreshDerivedSchemaProfile,
+  renderPresentationDocumentToImages,
+} from './document-parser.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
 import {
   normalizeDocumentImageFieldCandidateKey,
@@ -52,6 +58,8 @@ const CLOUD_ENRICH_MAX_PER_BATCH = Math.max(0, Number(process.env.OPENCLAW_DOCUM
 const CLOUD_ENRICH_CONCURRENCY = Math.max(1, Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_CONCURRENCY || 2));
 const MAX_PROMPT_CHARS = Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_INPUT_LIMIT || 7000);
 const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
+const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS);
+const PRESENTATION_VLM_MAX_SLIDES = Math.max(1, Number(process.env.DOCUMENT_PRESENTATION_VLM_MAX_SLIDES || 12));
 
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
@@ -93,6 +101,10 @@ function extractJsonObject(raw: string) {
 
 function isImageDocument(item: ParsedDocument) {
   return IMAGE_EXTENSIONS.has(String(item.ext || '').toLowerCase());
+}
+
+function isPresentationDocument(item: ParsedDocument) {
+  return PRESENTATION_EXTENSIONS.has(String(item.ext || '').toLowerCase());
 }
 
 function buildDocumentContext(item: ParsedDocument) {
@@ -422,15 +434,28 @@ function buildImageFullText(item: ParsedDocument, structured: DocumentImageVlmPa
   return blocks.join('\n\n');
 }
 
-async function enrichOne(item: ParsedDocument): Promise<ParsedDocument> {
-  if (isImageDocument(item)) {
-    return enrichImageOne(item);
-  }
+function buildPresentationSlideBlock(input: {
+  pageNumber: number;
+  payload: DocumentImageVlmPayload;
+}) {
+  const visualSummary = sanitizeText(input.payload.visualSummary || input.payload.summary, 1200);
+  const transcribedText = sanitizeText(input.payload.transcribedText, 6000);
+  return [
+    `# Slide ${input.pageNumber}`,
+    visualSummary ? `Visual summary:\n${visualSummary}` : '',
+    transcribedText ? `Visual transcription:\n${transcribedText}` : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+async function enrichTextOne(
+  item: ParsedDocument,
+  runTextParse = runDocumentAdvancedParse,
+): Promise<ParsedDocument> {
   if (item.parseStatus !== 'parsed' || !item.fullText || item.extractedChars < 80) {
     return item;
   }
 
-  const result = await runDocumentAdvancedParse({
+  const result = await runTextParse({
     prompt: buildDocumentContext(item),
   });
   if (!result) return item;
@@ -537,27 +562,153 @@ async function enrichImageOne(
   };
 }
 
+async function enrichPresentationOne(
+  item: ParsedDocument,
+  runImageParse = runDocumentImageVlm,
+  runTextParse = runDocumentAdvancedParse,
+  renderPresentation = renderPresentationDocumentToImages,
+): Promise<ParsedDocument> {
+  const rendered = await renderPresentation(item.path, { maxSlides: PRESENTATION_VLM_MAX_SLIDES });
+  if (!rendered?.images?.length) {
+    return enrichTextOne(item, runTextParse);
+  }
+
+  try {
+    const slideResults: Array<{
+      pageNumber: number;
+      model: string;
+      parsed: DocumentImageVlmPayload;
+    }> = [];
+
+    for (const image of rendered.images) {
+      const slideItem: ParsedDocument = {
+        ...item,
+        title: `${item.title || item.name} - Slide ${image.pageNumber}`,
+      };
+      const result = await runImageParse({ item: slideItem, imagePath: image.imagePath });
+      if (result?.parsed) {
+        slideResults.push({
+          pageNumber: image.pageNumber,
+          model: result.model,
+          parsed: result.parsed,
+        });
+      }
+    }
+
+    if (!slideResults.length) {
+      return enrichTextOne(item, runTextParse);
+    }
+
+    const evidenceBlocks = slideResults.flatMap(({ pageNumber, parsed }) => (parsed.evidenceBlocks || []).map((block) => ({
+      title: sanitizeText(block.title, 120) ? `Slide ${pageNumber} · ${sanitizeText(block.title, 120)}` : `Slide ${pageNumber}`,
+      text: sanitizeText(block.text, 1000),
+    })));
+    const evidenceChunks = mergeEvidenceChunks(item.evidenceChunks, evidenceBlocks);
+    const incomingEntities = slideResults.flatMap(({ parsed }) => (parsed.entities as CloudEntity[] | undefined) || []);
+    const incomingClaims = slideResults.flatMap(({ parsed }) => (parsed.claims as CloudClaim[] | undefined) || []);
+    const entities = mergeEntities(
+      item.entities,
+      incomingEntities,
+      evidenceChunks,
+    );
+    const claims = mergeClaims(
+      item.claims,
+      incomingClaims,
+      evidenceChunks,
+    );
+    const topicTags = uniqStrings([
+      ...(item.topicTags || []),
+      ...slideResults.flatMap(({ parsed }) => parsed.topicTags || []),
+    ]).slice(0, 16);
+    const firstSummary = slideResults
+      .map(({ parsed }) => sanitizeText(parsed.summary || parsed.visualSummary, 500))
+      .find(Boolean);
+    const summary = firstSummary || item.summary;
+    const fieldCandidates = normalizeImageFieldCandidates(
+      item,
+      slideResults.flatMap(({ parsed }) => parsed.fieldCandidates || []),
+    );
+    const presentationFullText = [
+      item.fullText || '',
+      '[Presentation VLM understanding]',
+      ...slideResults.map(({ pageNumber, parsed }) => buildPresentationSlideBlock({ pageNumber, payload: parsed })),
+    ].filter(Boolean).join('\n\n');
+    const withCandidateFields = assignCandidateFields({
+      ...item,
+      parseStatus: 'parsed',
+      parseMethod: item.parseMethod?.includes('presentation-vlm')
+        ? item.parseMethod
+        : `${item.parseMethod || 'presentation'}+presentation-vlm`,
+      parseStage: 'detailed',
+      detailParseStatus: 'succeeded',
+      detailParsedAt: new Date().toISOString(),
+      detailParseAttempts: Math.max(1, Number(item.detailParseAttempts || 0)),
+      detailParseError: undefined,
+      summary,
+      excerpt: summary || item.excerpt,
+      fullText: presentationFullText,
+      extractedChars: sanitizeText(presentationFullText, 20000).length,
+      topicTags,
+      evidenceChunks,
+      entities,
+      claims,
+      riskLevel: slideResults.map(({ parsed }) => parsed.riskLevel).find(Boolean) || item.riskLevel,
+      cloudStructuredAt: new Date().toISOString(),
+      cloudStructuredModel: uniqStrings(slideResults.map(({ model }) => model)).join(', '),
+    }, fieldCandidates);
+
+    const refreshed = refreshDerivedSchemaProfile(withCandidateFields);
+    const currentProfile = refreshed.structuredProfile && typeof refreshed.structuredProfile === 'object' && !Array.isArray(refreshed.structuredProfile)
+      ? refreshed.structuredProfile as Record<string, unknown>
+      : {};
+
+    return {
+      ...refreshed,
+      structuredProfile: {
+        ...currentProfile,
+        ...buildImageStructuredTopLevelFields(currentProfile, fieldCandidates),
+        fieldDetails: buildImageStructuredFieldDetails(refreshed, fieldCandidates, evidenceChunks),
+        presentationUnderstanding: {
+          slideCount: slideResults.length,
+          slides: slideResults.map(({ pageNumber, parsed }) => ({
+            pageNumber,
+            documentKind: sanitizeText(parsed.documentKind, 120),
+            layoutType: sanitizeText(parsed.layoutType, 120),
+            visualSummary: sanitizeText(parsed.visualSummary || parsed.summary, 600),
+            transcribedText: sanitizeText(parsed.transcribedText, 2000),
+          })),
+        },
+      },
+    };
+  } finally {
+    await rendered.cleanup().catch(() => undefined);
+  }
+}
+
 export async function enhanceParsedDocumentsWithCloud(
   items: ParsedDocument[],
   options?: {
     runTextParse?: typeof runDocumentAdvancedParse;
     runImageParse?: typeof runDocumentImageVlm;
+    renderPresentation?: typeof renderPresentationDocumentToImages;
   },
 ) {
   const providerMode = getDocumentAdvancedParseProviderMode();
   if (
     !CLOUD_ENRICH_ENABLED
     || CLOUD_ENRICH_MAX_PER_BATCH <= 0
-    || providerMode === 'disabled'
   ) {
     return items;
   }
 
   const candidateIndexes = items
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => isImageDocument(item)
-      ? Boolean(item.path)
-      : item.parseStatus === 'parsed' && Boolean(item.fullText))
+    .filter(({ item }) => {
+      if (isImageDocument(item) || isPresentationDocument(item)) {
+        return Boolean(item.path);
+      }
+      return providerMode !== 'disabled' && item.parseStatus === 'parsed' && Boolean(item.fullText);
+    })
     .slice(0, CLOUD_ENRICH_MAX_PER_BATCH);
 
   if (!candidateIndexes.length) {
@@ -574,7 +725,14 @@ export async function enhanceParsedDocumentsWithCloud(
       try {
         output[current.index] = isImageDocument(current.item)
           ? await enrichImageOne(current.item, options?.runImageParse || runDocumentImageVlm)
-          : await enrichOne(current.item);
+          : isPresentationDocument(current.item)
+            ? await enrichPresentationOne(
+              current.item,
+              options?.runImageParse || runDocumentImageVlm,
+              options?.runTextParse || runDocumentAdvancedParse,
+              options?.renderPresentation || renderPresentationDocumentToImages,
+            )
+            : await enrichTextOne(current.item, options?.runTextParse || runDocumentAdvancedParse);
       } catch {
         output[current.index] = current.item;
       }

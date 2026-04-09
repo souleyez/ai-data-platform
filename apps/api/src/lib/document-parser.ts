@@ -17,6 +17,7 @@ import {
   buildAugmentedEnv,
   getOcrMyPdfCommandCandidates,
   getPythonCommandCandidates,
+  getSofficeCommandCandidates,
   getTesseractLanguageCandidates,
 } from './runtime-executables.js';
 import { extractWithUIEWorker } from './uie-process-client.js';
@@ -331,6 +332,7 @@ const RESUME_HINTS = ['简历', '履历', '候选人', '应聘', '求职', '教�
 type KeywordRule = string | RegExp;
 const execFileAsync = promisify(execFile);
 export const DOCUMENT_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'] as const;
+export const DOCUMENT_PRESENTATION_EXTENSIONS = ['.ppt', '.pptx', '.pptm'] as const;
 export const DOCUMENT_PARSE_SUPPORTED_EXTENSIONS = [
   '.pdf',
   '.txt',
@@ -343,10 +345,12 @@ export const DOCUMENT_PARSE_SUPPORTED_EXTENSIONS = [
   '.xml',
   '.xlsx',
   '.xls',
+  ...DOCUMENT_PRESENTATION_EXTENSIONS,
   ...DOCUMENT_IMAGE_EXTENSIONS,
 ] as const;
 const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
-const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、png、jpg、jpeg、webp、gif、bmp。';
+const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS);
+const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、ppt、pptx、pptm、png、jpg、jpeg、webp、gif、bmp。';
 
 type PdfExtractionResult = {
   text: string;
@@ -402,6 +406,239 @@ async function withTemporaryAsciiCopy<T>(filePath: string, run: (inputPath: stri
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+function decodeXmlEntities(input: string) {
+  return String(input || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, '\'')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, value: string) => String.fromCodePoint(Number.parseInt(value, 10)));
+}
+
+function extractPresentationXmlText(xml: string) {
+  const values = Array.from(String(xml || '').matchAll(/<(?:a:)?t\b[^>]*>([\s\S]*?)<\/(?:a:)?t>/gi))
+    .map((match) => decodeXmlEntities(match[1] || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return [...new Set(values)].join('\n');
+}
+
+function extractPresentationSequenceNumber(entryPath: string) {
+  const match = path.basename(entryPath).match(/(\d+)/);
+  return Number.parseInt(match?.[1] || '0', 10) || 0;
+}
+
+function toLocalFileUri(filePath: string) {
+  const resolved = path.resolve(filePath).replace(/\\/g, '/');
+  return process.platform === 'win32'
+    ? `file:///${resolved}`
+    : `file://${resolved}`;
+}
+
+async function extractPptxTextFromArchive(filePath: string) {
+  const { default: JSZip } = await import('jszip');
+  const buffer = await fs.readFile(filePath);
+  const archive = await JSZip.loadAsync(buffer);
+  const slidePaths = Object.keys(archive.files)
+    .filter((entryPath) => /^ppt\/slides\/slide\d+\.xml$/i.test(entryPath))
+    .sort((left, right) => extractPresentationSequenceNumber(left) - extractPresentationSequenceNumber(right));
+
+  if (!slidePaths.length) return '';
+
+  const noteTexts = new Map<number, string>();
+  const notePaths = Object.keys(archive.files)
+    .filter((entryPath) => /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(entryPath))
+    .sort((left, right) => extractPresentationSequenceNumber(left) - extractPresentationSequenceNumber(right));
+
+  for (const notePath of notePaths) {
+    const noteXml = await archive.file(notePath)?.async('text');
+    const noteText = extractPresentationXmlText(noteXml || '');
+    if (noteText) {
+      noteTexts.set(extractPresentationSequenceNumber(notePath), noteText);
+    }
+  }
+
+  const blocks: string[] = [];
+  for (const slidePath of slidePaths) {
+    const slideNumber = extractPresentationSequenceNumber(slidePath);
+    const slideXml = await archive.file(slidePath)?.async('text');
+    const slideText = extractPresentationXmlText(slideXml || '');
+    const noteText = noteTexts.get(slideNumber) || '';
+    if (!slideText && !noteText) continue;
+    blocks.push([
+      `# Slide ${slideNumber || blocks.length + 1}`,
+      slideText,
+      noteText ? `Speaker notes:\n${noteText}` : '',
+    ].filter(Boolean).join('\n\n'));
+  }
+
+  return blocks.join('\n\n');
+}
+
+async function convertPresentationToPdf(filePath: string) {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-presentation-'));
+  const profileDir = path.join(workDir, 'libreoffice-profile');
+  await fs.mkdir(profileDir, { recursive: true });
+
+  try {
+    const converted = await withTemporaryAsciiCopy(filePath, async (inputPath) => {
+      const outputName = `${path.parse(inputPath).name}.pdf`;
+      for (const command of getSofficeCommandCandidates()) {
+        try {
+          await execFileAsync(command, [
+            '--headless',
+            `-env:UserInstallation=${toLocalFileUri(profileDir)}`,
+            '--convert-to',
+            'pdf',
+            '--outdir',
+            workDir,
+            inputPath,
+          ], {
+            maxBuffer: 32 * 1024 * 1024,
+            timeout: 120000,
+            env: buildAugmentedEnv(),
+          });
+
+          const pdfPath = path.join(workDir, outputName);
+          const stat = await fs.stat(pdfPath).catch(() => null);
+          if (stat?.isFile() && stat.size > 0) {
+            return pdfPath;
+          }
+        } catch {
+          // try next soffice candidate
+        }
+      }
+      return '';
+    });
+
+    if (!converted) {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+      return null;
+    }
+
+    return { pdfPath: converted, workDir };
+  } catch {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    return null;
+  }
+}
+
+async function extractPresentationTextViaPdf(filePath: string) {
+  const converted = await convertPresentationToPdf(filePath);
+  if (!converted) {
+    return { text: '', parseMethod: 'presentation-pdf-convert-unavailable' };
+  }
+
+  try {
+    const result = await extractPdfText(converted.pdfPath);
+    return {
+      text: result.text,
+      parseMethod: result.method === 'ocrmypdf'
+        ? 'presentation-pdf-ocr'
+        : 'presentation-pdf-convert',
+    };
+  } finally {
+    await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+async function renderPdfPagesToImages(filePath: string, maxPages = 12) {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-presentation-render-'));
+  const pythonScript = [
+    'import json, sys',
+    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
+    'from pathlib import Path',
+    'try:',
+    '    import pypdfium2 as pdfium',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+    '    sys.exit(0)',
+    'pdf_path = sys.argv[1]',
+    'work_dir = Path(sys.argv[2])',
+    'max_pages = max(1, int(sys.argv[3]))',
+    'work_dir.mkdir(parents=True, exist_ok=True)',
+    'images = []',
+    'try:',
+    '    pdf = pdfium.PdfDocument(pdf_path)',
+    '    page_count = len(pdf)',
+    '    for index in range(min(page_count, max_pages)):',
+    '        page = pdf[index]',
+    '        bitmap = page.render(scale=2)',
+    '        image = bitmap.to_pil()',
+    '        image_path = work_dir / f"page-{index + 1}.png"',
+    '        image.save(image_path)',
+    '        images.append({"pageNumber": index + 1, "imagePath": str(image_path)})',
+    '    print(json.dumps({"ok": True, "images": images}, ensure_ascii=False))',
+    'except Exception as exc:',
+    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
+  ].join('\n');
+
+  try {
+    const rendered = await withTemporaryAsciiCopy(filePath, async (inputPath) => {
+      const candidates = getPythonCommandCandidates().map((command) => ({
+        command,
+        args: ['-c', pythonScript, inputPath, workDir, String(Math.max(1, maxPages))],
+      }));
+
+      for (const candidate of candidates) {
+        try {
+          const { stdout } = await execFileAsync(candidate.command, candidate.args, {
+            maxBuffer: 64 * 1024 * 1024,
+            timeout: 120000,
+            env: buildAugmentedEnv(),
+          });
+          const parsed = JSON.parse(String(stdout || '{}')) as {
+            ok?: boolean;
+            images?: Array<{ pageNumber?: number; imagePath?: string }>;
+          };
+          if (!parsed.ok || !Array.isArray(parsed.images) || !parsed.images.length) continue;
+          const images = parsed.images
+            .map((entry) => ({
+              pageNumber: Number(entry.pageNumber || 0) || 0,
+              imagePath: String(entry.imagePath || '').trim(),
+            }))
+            .filter((entry) => entry.pageNumber > 0 && entry.imagePath);
+          if (images.length) return images;
+        } catch {
+          // try next python candidate
+        }
+      }
+
+      return [];
+    });
+
+    if (!rendered.length) {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+      return null;
+    }
+
+    return { images: rendered, workDir };
+  } catch {
+    await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    return null;
+  }
+}
+
+export async function renderPresentationDocumentToImages(filePath: string, options?: { maxSlides?: number }) {
+  const converted = await convertPresentationToPdf(filePath);
+  if (!converted) return null;
+
+  const rendered = await renderPdfPagesToImages(converted.pdfPath, Math.max(1, Number(options?.maxSlides || 12)));
+  if (!rendered) {
+    await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
+    return null;
+  }
+
+  return {
+    images: rendered.images,
+    cleanup: async () => {
+      await fs.rm(rendered.workDir, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
+    },
+  };
 }
 
 function stripMarkdownSyntax(text: string) {
@@ -3289,6 +3526,34 @@ async function extractText(filePath: string, ext: string) {
     return { status: 'parsed' as const, text: result.value || '', parseMethod: 'mammoth' };
   }
 
+  if (ext === '.pptx' || ext === '.pptm') {
+    const archiveText = await extractPptxTextFromArchive(filePath).catch(() => '');
+    if (normalizeText(archiveText)) {
+      return { status: 'parsed' as const, text: archiveText, parseMethod: 'pptx-ooxml' };
+    }
+    const fallback = await extractPresentationTextViaPdf(filePath);
+    if (normalizeText(fallback.text)) {
+      return { status: 'parsed' as const, text: fallback.text, parseMethod: fallback.parseMethod };
+    }
+    return {
+      status: 'error' as const,
+      text: `Presentation file: ${path.basename(filePath)}\n\nText was not extracted from this presentation.`,
+      parseMethod: fallback.parseMethod,
+    };
+  }
+
+  if (ext === '.ppt') {
+    const fallback = await extractPresentationTextViaPdf(filePath);
+    if (normalizeText(fallback.text)) {
+      return { status: 'parsed' as const, text: fallback.text, parseMethod: fallback.parseMethod };
+    }
+    return {
+      status: 'error' as const,
+      text: `Presentation file: ${path.basename(filePath)}\n\nText was not extracted from this presentation.`,
+      parseMethod: fallback.parseMethod,
+    };
+  }
+
   if (ext === '.xlsx' || ext === '.xls') {
     const xlsx = await import('xlsx');
     const workbook = xlsx.default?.readFile
@@ -3344,6 +3609,8 @@ function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
   if (ext === '.json') return 'json-utf8';
   if (ext === '.html' || ext === '.htm' || ext === '.xml') return 'html-utf8';
   if (ext === '.docx') return 'mammoth';
+  if (ext === '.pptx' || ext === '.pptm') return 'pptx-ooxml';
+  if (ext === '.ppt') return 'presentation-pdf-convert';
   if (ext === '.xlsx' || ext === '.xls') return 'xlsx-sheet-reader';
   if (IMAGE_EXTENSIONS.has(ext)) return text.includes('OCR text:') ? 'image-ocr' : 'image-metadata';
   if (ext === '.pdf') {
@@ -3438,6 +3705,8 @@ export async function parseDocument(
       );
       const fallbackSummary = IMAGE_EXTENSIONS.has(ext)
         ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
+        : PRESENTATION_EXTENSIONS.has(ext)
+          ? 'PPT 解析失败，当前未提取到可用正文；可安装 LibreOffice 后重新解析，详细解析阶段会优先尝试 VLM。'
         : (topicTags.length
           ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
           : '文档解析失败，后续可补充依赖后手动重新解析。');
@@ -3466,7 +3735,11 @@ export async function parseDocument(
         detailParseQueuedAt: defaultDetailQueuedAt,
         detailParsedAt: defaultDetailParsedAt,
         detailParseAttempts: defaultDetailAttempts,
-        detailParseError: IMAGE_EXTENSIONS.has(ext) ? 'ocr-text-not-extracted' : 'parse-error',
+        detailParseError: IMAGE_EXTENSIONS.has(ext)
+          ? 'ocr-text-not-extracted'
+          : PRESENTATION_EXTENSIONS.has(ext)
+            ? 'presentation-text-not-extracted'
+            : 'parse-error',
         schemaType,
         structuredProfile: buildStructuredProfile({
           schemaType,

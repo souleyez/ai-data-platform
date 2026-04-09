@@ -38,6 +38,35 @@ function buildImageItem(overrides: Partial<ParsedDocument> = {}): ParsedDocument
   };
 }
 
+function buildPresentationItem(overrides: Partial<ParsedDocument> = {}): ParsedDocument {
+  return {
+    path: '/tmp/bid-deck.pptx',
+    name: 'bid-deck.pptx',
+    ext: '.pptx',
+    title: '投标汇报',
+    category: 'technical',
+    bizCategory: 'general',
+    parseStatus: 'parsed',
+    parseMethod: 'pptx-ooxml',
+    summary: '投标汇报初步解析',
+    excerpt: '投标汇报初步解析',
+    fullText: '# Slide 1\n项目概览\n\n# Slide 2\n实施计划',
+    extractedChars: 48,
+    evidenceChunks: [],
+    entities: [],
+    claims: [],
+    intentSlots: {},
+    topicTags: ['投标', '汇报'],
+    groups: ['广州AI'],
+    parseStage: 'quick',
+    detailParseStatus: 'queued',
+    detailParseAttempts: 0,
+    schemaType: 'technical',
+    structuredProfile: {},
+    ...overrides,
+  };
+}
+
 test('enhanceParsedDocumentsWithCloud should enrich parsed image documents with VLM output', async () => {
   const [item] = await enhanceParsedDocumentsWithCloud(
     [buildImageItem()],
@@ -130,4 +159,62 @@ test('enhanceParsedDocumentsWithCloud should promote OCR-failed image documents 
   assert.equal(item.detailParseStatus, 'succeeded');
   assert.match(String(item.fullText || ''), /A区 2180 人次/);
   assert.ok((item.extractedChars || 0) > 0);
+});
+
+test('enhanceParsedDocumentsWithCloud should use image VLM for presentation documents by default', async () => {
+  const [item] = await enhanceParsedDocumentsWithCloud(
+    [buildPresentationItem()],
+    {
+      runTextParse: async () => {
+        throw new Error('text parse should not be used when presentation rendering succeeds');
+      },
+      renderPresentation: async () => ({
+        images: [
+          { pageNumber: 1, imagePath: '/tmp/slide-1.png' },
+          { pageNumber: 2, imagePath: '/tmp/slide-2.png' },
+        ],
+        cleanup: async () => undefined,
+      }),
+      runImageParse: async ({ imagePath }) => ({
+        content: '{"summary":"投标汇报","layoutType":"slide","topicTags":["投标","建设规模"],"visualSummary":"演示页展示项目规模。","evidenceBlocks":[{"title":"规模","text":"建设 8 个乡镇，4499 个车位"}],"transcribedText":"建设 8 个乡镇 4499 个车位"}',
+        model: 'minimax/MiniMax-VL-01',
+        provider: 'openclaw-skill',
+        capability: {
+          enabled: true,
+          available: true,
+          providerMode: 'openclaw-skill',
+          toolName: 'image',
+          reason: 'ready',
+        },
+        parsed: String(imagePath || '').includes('slide-1')
+          ? {
+            summary: '投标汇报',
+            layoutType: 'slide',
+            topicTags: ['投标', '建设规模'],
+            visualSummary: '演示页展示项目规模。',
+            evidenceBlocks: [{ title: '规模', text: '建设 8 个乡镇，4499 个车位' }],
+            transcribedText: '建设 8 个乡镇 4499 个车位',
+          }
+          : {
+            summary: '投标汇报',
+            layoutType: 'slide',
+            topicTags: ['投标', '实施计划'],
+            visualSummary: '演示页展示实施工期与里程碑。',
+            evidenceBlocks: [{ title: '工期', text: '设计周期 45 日历天' }],
+            transcribedText: '设计周期 45 日历天',
+          },
+      }),
+    },
+  );
+
+  assert.equal(item.parseStatus, 'parsed');
+  assert.equal(item.detailParseStatus, 'succeeded');
+  assert.match(String(item.parseMethod || ''), /presentation-vlm/);
+  assert.equal(item.cloudStructuredModel, 'minimax/MiniMax-VL-01');
+  assert.match(String(item.fullText || ''), /\[Presentation VLM understanding\]/);
+  assert.match(String(item.fullText || ''), /4499 个车位/);
+  assert.equal(
+    Number(((item.structuredProfile as Record<string, unknown>)?.presentationUnderstanding as Record<string, unknown>)?.slideCount || 0),
+    2,
+  );
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getTesseractLanguageCandidates } from '../src/lib/runtime-executables.js';
+import { getSofficeCommandCandidates, getTesseractLanguageCandidates } from '../src/lib/runtime-executables.js';
 
 test('getTesseractLanguageCandidates should prefer configured values and keep chinese defaults', () => {
   const previousLang = process.env.TESSERACT_LANG;
@@ -38,5 +38,17 @@ test('getTesseractLanguageCandidates should default to chinese plus english OCR'
 
     if (previousLangs === undefined) delete process.env.TESSERACT_LANGS;
     else process.env.TESSERACT_LANGS = previousLangs;
+  }
+});
+
+test('getSofficeCommandCandidates should prefer configured binary', () => {
+  const previous = process.env.SOFFICE_BIN;
+  process.env.SOFFICE_BIN = '/opt/custom/soffice';
+
+  try {
+    assert.equal(getSofficeCommandCandidates()[0], '/opt/custom/soffice');
+  } finally {
+    if (previous === undefined) delete process.env.SOFFICE_BIN;
+    else process.env.SOFFICE_BIN = previous;
   }
 });
