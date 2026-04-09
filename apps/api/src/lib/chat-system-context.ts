@@ -46,6 +46,8 @@ export function buildSystemCapabilityContextBlock(input: {
     ...buildPlatformCapabilityContextLines(),
     writeLabel,
     'When users ask what the system can do, or ask for an action that matches the platform surface, answer as someone who already understands these features and can choose the next appropriate action.',
+    'Capability awareness is descriptive. In ordinary chat, do not emit raw tool-call markup, invoke tags, Bash plans, or CLI command blocks unless the user explicitly asks for command text.',
+    'If the host has not supplied an execution result, answer directly from the available context instead of planning commands.',
     'Do not describe internal routing or orchestration. Answer naturally and act as if you understand the platform surface already.',
     'If no execution result is supplied by the host, never claim a system action has already been completed.',
   ].join('\n');

@@ -197,6 +197,7 @@ function buildMessages(input: OpenClawChatRequest): ChatMessage[] {
     const role = item?.role === 'assistant' ? 'assistant' : 'user';
     const content = String(item?.content || '').trim();
     if (!content) continue;
+    if (role === 'assistant' && shouldSuppressAssistantHistoryMessage(content)) continue;
     messages.push({ role, content });
   }
 
@@ -238,6 +239,7 @@ function buildResponsesInput(input: OpenClawChatRequest): OpenClawResponseInputI
     const role = item?.role === 'assistant' ? 'assistant' : 'user';
     const content = String(item?.content || '').trim();
     if (!content) continue;
+    if (role === 'assistant' && shouldSuppressAssistantHistoryMessage(content)) continue;
     items.push({
       type: 'message',
       role,
@@ -263,9 +265,35 @@ function sanitizeModelContent(content: string) {
     .trim();
 }
 
+export function looksLikeLeakedToolCallContent(content: string) {
+  const text = String(content || '').trim();
+  if (!text) return false;
+
+  return (
+    /<\s*tool_(?:call|code)\b/i.test(text)
+    || /<\s*minimax:tool_call\b/i.test(text)
+    || /<\s*invoke\b/i.test(text)
+    || /<\s*parameter\b/i.test(text)
+    || /<\/\s*invoke\s*>/i.test(text)
+  );
+}
+
 function looksLikeOnboardingDrift(content: string) {
   const text = String(content || '');
   return /(刚上线|给我起个名字|怎么称呼你|记忆是空的|我可以先介绍自己|你想叫我什么|没名字|第一次聊天)/.test(text);
+}
+
+function shouldSuppressAssistantHistoryMessage(content: string) {
+  return looksLikeLeakedToolCallContent(content);
+}
+
+function buildNoToolLeakSystemPrompt() {
+  return [
+    '不要输出任何原始工具调用标记、XML 风格的 invoke 或 parameter 标签、<tool_call>、<tool_code>、Bash 计划或命令执行步骤。',
+    '当前宿主不会执行你输出的这些工具指令。',
+    '如果用户是在提问、分析、总结、写作或生成交付物，请直接基于已有上下文给出最终结果或可直接使用的草稿。',
+    '只有在用户明确要求命令文本时，才可以给命令；否则禁止把命令或执行计划当作答案主体。',
+  ].join('\n');
 }
 
 async function requestChatCompletion(
@@ -418,7 +446,7 @@ export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatReque
       },
     }, input.timeoutMs);
     const content = extractResponseOutputText(json);
-    if (!content) return null;
+    if (!content || looksLikeLeakedToolCallContent(content)) return null;
 
     return {
       content,
@@ -585,6 +613,54 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
           {
             role: 'system',
             content: '只回答用户当前问题。禁止自我介绍，禁止让用户给你起名，禁止谈刚启动或记忆状态。',
+          },
+          {
+            role: 'user',
+            content: input.prompt,
+          },
+        ],
+      },
+    });
+  }
+
+  if (looksLikeLeakedToolCallContent(result.content)) {
+    result = await requestChatCompletionAllowingModelOverride({
+      baseUrl,
+      headers,
+      modelOverride,
+      timeoutMs: input.timeoutMs,
+      body: {
+        model,
+        user: input.sessionUser,
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: buildNoToolLeakSystemPrompt(),
+          },
+          ...baseMessages,
+        ],
+      },
+    });
+  }
+
+  if (looksLikeLeakedToolCallContent(result.content)) {
+    result = await requestChatCompletionAllowingModelOverride({
+      baseUrl,
+      headers,
+      modelOverride,
+      timeoutMs: input.timeoutMs,
+      body: {
+        model,
+        user: input.sessionUser,
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              buildNoToolLeakSystemPrompt(),
+              '直接回答当前问题，不要先说“让我先查看”或“我先执行”。',
+            ].join('\n'),
           },
           {
             role: 'user',

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildGatewayRequestModel,
   isRetryableCloudGatewayError,
+  looksLikeLeakedToolCallContent,
   resolveOpenClawModelOverride,
 } from '../src/lib/openclaw-adapter.js';
 
@@ -35,6 +36,17 @@ test('isRetryableCloudGatewayError should not retry prompt or auth errors', () =
   );
   assert.equal(
     isRetryableCloudGatewayError(new Error('Cloud gateway request failed (401): {"error":"unauthorized"}')),
+    false,
+  );
+});
+
+test('looksLikeLeakedToolCallContent should detect leaked tool markup and ignore normal answers', () => {
+  assert.equal(
+    looksLikeLeakedToolCallContent('<tool_call><invoke name="Bash"><parameter name="command">pnpm system:control -- documents list</parameter></invoke></tool_call>'),
+    true,
+  );
+  assert.equal(
+    looksLikeLeakedToolCallContent('我来根据招标文件先提炼要点，再输出一份投标草稿。'),
     false,
   );
 });
