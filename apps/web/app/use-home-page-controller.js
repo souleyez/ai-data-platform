@@ -26,6 +26,7 @@ import { normalizeGeneratedReportRecord } from './lib/generated-reports';
 import { initialMessages, sourceItems } from './lib/mock-data';
 
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
+const CHAT_CONVERSATION_STATE_STORAGE_KEY = 'aidp_home_chat_conversation_state_v1';
 
 function loadStoredSystemConstraints() {
   if (typeof window === 'undefined') return '';
@@ -33,6 +34,18 @@ function loadStoredSystemConstraints() {
     return String(window.localStorage.getItem(CHAT_CONSTRAINTS_STORAGE_KEY) || '').trim();
   } catch {
     return '';
+  }
+}
+
+function loadStoredConversationState() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(CHAT_CONVERSATION_STATE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
   }
 }
 
@@ -52,6 +65,7 @@ export function useHomePageController() {
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
+  const [conversationState, setConversationState] = useState(() => loadStoredConversationState());
 
   async function loadDatasources() {
     try {
@@ -118,6 +132,19 @@ export function useHomePageController() {
   }, [systemConstraints]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (conversationState) {
+        window.localStorage.setItem(CHAT_CONVERSATION_STATE_STORAGE_KEY, JSON.stringify(conversationState));
+      } else {
+        window.localStorage.removeItem(CHAT_CONVERSATION_STATE_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore local persistence failures.
+    }
+  }, [conversationState]);
+
+  useEffect(() => {
     if (!reportItems.length) {
       hasAutoSelectedReportRef.current = false;
       setSelectedReportId('');
@@ -143,6 +170,7 @@ export function useHomePageController() {
     clearStoredChatMessages();
     setInput('');
     setReportCollapsed(true);
+    setConversationState(null);
   }
 
   async function deleteReport(reportId) {
@@ -167,7 +195,9 @@ export function useHomePageController() {
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
+    setConversationState,
     systemConstraints,
+    conversationState,
     setUploadLoading,
     uploadInputRef,
   };
@@ -183,6 +213,7 @@ export function useHomePageController() {
     reportItems,
     selectedReportId,
     selectedManualLibraries,
+    conversationState,
     systemConstraints,
     sidebarSources,
     uploadInputRef,
@@ -191,6 +222,7 @@ export function useHomePageController() {
     setReportCollapsed,
     setSelectedManualLibraries,
     setSelectedReportId,
+    setConversationState,
     setSystemConstraints,
     deleteReport,
     resetConversation,

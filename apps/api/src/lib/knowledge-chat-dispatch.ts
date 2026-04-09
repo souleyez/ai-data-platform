@@ -2,6 +2,7 @@ import path from 'node:path';
 import { buildKnowledgeContext } from './knowledge-evidence.js';
 import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
+import { buildGeneralKnowledgeConversationState } from './knowledge-request-state.js';
 import {
   prepareKnowledgeRetrieval,
   prepareKnowledgeScope,
@@ -32,7 +33,7 @@ export type GeneralKnowledgeDispatchResult = {
   intent: 'general';
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
-  conversationState: null;
+  conversationState: ReturnType<typeof buildGeneralKnowledgeConversationState>;
   routeKind?: 'general' | 'template_confirmation';
   evidenceMode?: 'supply_only' | null;
   guard?: {
@@ -269,6 +270,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     preferredDocumentPath: input.preferredDocumentPath,
   });
   const latestDetailedDocument = latestDetailedDocumentContext.document;
+  const conversationState = buildGeneralKnowledgeConversationState(latestDetailedDocument?.path);
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -335,7 +337,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
         : (input.botDefinition?.visibleLibraryKeys || []),
       accessContext: input.accessContext || null,
     },
-      conversationState: null,
+      conversationState,
       routeKind: 'template_confirmation',
       evidenceMode: 'supply_only',
       guard: {
@@ -375,7 +377,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
         : (input.botDefinition?.visibleLibraryKeys || []),
       accessContext: input.accessContext || null,
     },
-    conversationState: null,
+    conversationState,
     routeKind: 'general',
     evidenceMode: 'supply_only',
     guard: {

@@ -84,6 +84,7 @@ function buildChatOptions(context, overrides = {}) {
     confirmedRequest: overrides.confirmedRequest || '',
     confirmedAction: overrides.confirmedAction || '',
     preferredLibraries: Array.isArray(overrides.preferredLibraries) ? overrides.preferredLibraries : [],
+    conversationState: overrides.conversationState ?? context.conversationState ?? null,
     systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
     botId: overrides.botId ?? context.selectedBotId ?? '',
   };
@@ -143,7 +144,7 @@ export async function runDocumentUpload(files, context) {
 }
 
 export async function submitQuestion(value, context) {
-  const { inputState, messages, setInput, setIsLoading, setMessages } = context;
+  const { inputState, messages, setConversationState, setInput, setIsLoading, setMessages } = context;
 
   const text = String(value || '').trim();
   if (!text || inputState.isLoading || inputState.uploadLoading) return;
@@ -156,6 +157,7 @@ export async function submitQuestion(value, context) {
   try {
     const data = await sendChatPrompt(text, buildRecentChatHistory([...messages, userMessage]), buildChatOptions(context));
     const normalized = normalizeChatResponse(data, null);
+    setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
     await persistGeneratedReport(normalized, message, context, text);
@@ -173,7 +175,7 @@ export async function submitQuestion(value, context) {
 }
 
 export async function confirmTemplateOption(option, context) {
-  const { inputState, messages, setIsLoading, setMessages } = context;
+  const { inputState, messages, setConversationState, setIsLoading, setMessages } = context;
   if (!option || inputState.isLoading || inputState.uploadLoading) return;
 
   const choiceText = `选择：${option.title || '继续执行'}`;
@@ -197,6 +199,7 @@ export async function confirmTemplateOption(option, context) {
       }),
     );
     const normalized = normalizeChatResponse(data, null);
+    setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
     await persistGeneratedReport(

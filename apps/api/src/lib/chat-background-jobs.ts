@@ -269,10 +269,12 @@ export async function handoffTimedOutChatToBackground(input: {
   botDefinition?: BotDefinition | null;
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
+  preferredDocumentPath?: string;
 }) {
   const latestContext = await loadLatestVisibleDetailedDocumentContext({
     botDefinition: input.botDefinition,
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+    preferredDocumentPath: input.preferredDocumentPath,
   });
   const candidateLibraries = latestContext.libraries;
   const reportState = await loadReportCenterState();

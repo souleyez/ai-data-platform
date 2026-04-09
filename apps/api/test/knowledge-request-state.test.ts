@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildGeneralKnowledgeConversationState,
   buildKnowledgeRequest,
   buildMissingKnowledgeSlotMessage,
   extractExplicitKnowledgeFocus,
   extractNormalizedContentFocus,
   extractNormalizedTimeRange,
   mergeKnowledgeConversationState,
+  parseGeneralKnowledgeConversationState,
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from '../src/lib/knowledge-request-state.js';
@@ -36,6 +38,23 @@ test('mergeKnowledgeConversationState should fill all slots for explicit request
   assert.equal(merged.state.timeRange, '全部时间');
   assert.equal(merged.state.outputType, 'table');
   assert.match(merged.state.contentFocus, /公司维度|IT 项目/);
+});
+
+test('parseGeneralKnowledgeConversationState should accept a persisted preferred document path', () => {
+  const state = parseGeneralKnowledgeConversationState({
+    kind: 'general',
+    preferredDocumentPath: 'C:/storage/files/uploads/1775000000000-bid.pdf',
+  });
+
+  assert.equal(state?.kind, 'general');
+  assert.equal(state?.preferredDocumentPath, 'C:/storage/files/uploads/1775000000000-bid.pdf');
+});
+
+test('buildGeneralKnowledgeConversationState should normalize and reject empty paths', () => {
+  assert.equal(buildGeneralKnowledgeConversationState('   '), null);
+
+  const state = buildGeneralKnowledgeConversationState(' C:/docs/bid.pdf ');
+  assert.equal(state?.preferredDocumentPath, 'C:/docs/bid.pdf');
 });
 
 test('extractNormalizedTimeRange should normalize all-time and recent-upload phrases', () => {

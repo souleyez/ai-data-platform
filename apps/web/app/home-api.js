@@ -167,6 +167,7 @@ export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
       confirmedRequest: options.confirmedRequest || '',
       confirmedAction: options.confirmedAction || '',
       preferredLibraries: Array.isArray(options.preferredLibraries) ? options.preferredLibraries : [],
+      conversationState: options.conversationState || null,
       systemConstraints: options.systemConstraints || '',
       botId: options.botId || '',
     }),

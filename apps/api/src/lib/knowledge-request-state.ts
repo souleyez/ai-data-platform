@@ -9,6 +9,11 @@ export type KnowledgeConversationState = {
   missingSlot: 'time' | 'content' | 'output';
 };
 
+export type GeneralKnowledgeConversationState = {
+  kind: 'general';
+  preferredDocumentPath: string;
+};
+
 const TIME_RANGE_RULES: Array<{ pattern: RegExp; value: string }> = [
   { pattern: /\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|recent upload|latest upload/i, value: '最近上传' },
   { pattern: /\u4eca\u5929|\u4eca\u65e5|today/i, value: '今天' },
@@ -28,6 +33,28 @@ const TIME_RANGE_RULES: Array<{ pattern: RegExp; value: string }> = [
 
 function normalizeText(text: string) {
   return String(text || '').trim();
+}
+
+export function buildGeneralKnowledgeConversationState(preferredDocumentPath?: string) {
+  const normalizedPath = normalizeText(preferredDocumentPath || '');
+  if (!normalizedPath) return null;
+  return {
+    kind: 'general' as const,
+    preferredDocumentPath: normalizedPath,
+  };
+}
+
+export function parseGeneralKnowledgeConversationState(value: unknown): GeneralKnowledgeConversationState | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.kind !== 'general') return null;
+  const preferredDocumentPath = normalizeText(String(raw.preferredDocumentPath || ''));
+  if (!preferredDocumentPath) return null;
+
+  return {
+    kind: 'general',
+    preferredDocumentPath,
+  };
 }
 
 export function parseKnowledgeConversationState(value: unknown): KnowledgeConversationState | null {
