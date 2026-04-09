@@ -140,9 +140,16 @@ function isDetailedFullTextDocument(item: ParsedDocument) {
     );
 }
 
+function isGeneratedReportLibraryDocument(item: Pick<ParsedDocument, 'path'>) {
+  return /[\\/]generated-report-library[\\/]/i.test(String(item.path || ''));
+}
+
 export function selectLatestDetailedFullTextDocument(documents: ParsedDocument[]) {
-  return [...(documents || [])]
-    .filter(isDetailedFullTextDocument)
+  const detailedDocuments = [...(documents || [])].filter(isDetailedFullTextDocument);
+  const preferredDocuments = detailedDocuments.filter((item) => !isGeneratedReportLibraryDocument(item));
+  const candidates = preferredDocuments.length ? preferredDocuments : detailedDocuments;
+
+  return candidates
     .sort((left, right) => {
       const leftDetailed = left.parseStage === 'detailed' || left.detailParseStatus === 'succeeded' ? 1 : 0;
       const rightDetailed = right.parseStage === 'detailed' || right.detailParseStatus === 'succeeded' ? 1 : 0;

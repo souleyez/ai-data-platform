@@ -57,6 +57,32 @@ test('selectLatestDetailedFullTextDocument should prefer the latest detailed par
   assert.equal(selected?.fullText, 'latest full text');
 });
 
+test('selectLatestDetailedFullTextDocument should prefer uploaded documents over generated report library items', () => {
+  const documents = [
+    createDocument({
+      path: 'C:/storage/files/generated-report-library/report-output-report-1776000000000.md',
+      title: 'generated-report',
+      fullText: 'generated report text',
+      parseStage: 'detailed',
+      detailParseStatus: 'succeeded',
+      detailParsedAt: '2026-04-09T12:00:00.000Z',
+    }),
+    createDocument({
+      path: 'C:/storage/files/uploads/1775000000000-bid.pdf',
+      title: 'uploaded-bid',
+      fullText: 'bid full text',
+      parseStage: 'detailed',
+      detailParseStatus: 'succeeded',
+      detailParsedAt: '2026-04-09T11:00:00.000Z',
+    }),
+  ];
+
+  const selected = selectLatestDetailedFullTextDocument(documents);
+
+  assert.equal(selected?.title, 'uploaded-bid');
+  assert.equal(selected?.fullText, 'bid full text');
+});
+
 test('buildLatestParsedDocumentFullTextContextBlock should include full text without additional routing instructions', () => {
   const block = buildLatestParsedDocumentFullTextContextBlock({
     title: '开平市停车项目招标文件',
