@@ -42,6 +42,7 @@ export type ChatRequestInput = {
   accessContext?: ResolvedChannelAccess | null;
   cloudTimeoutMs?: number;
   backgroundContinuation?: boolean;
+  preferredDocumentPath?: string;
 };
 
 function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
@@ -210,6 +211,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
           accessContext: input.accessContext || null,
           cloudTimeoutMs: input.cloudTimeoutMs,
+          preferredDocumentPath: input.preferredDocumentPath,
         });
         const result = await (
           requestMode === 'general' && !input.backgroundContinuation

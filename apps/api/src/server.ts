@@ -44,6 +44,7 @@ app.listen({ port, host }).then(() => {
         backgroundContinuation: true,
         cloudTimeoutMs: getChatBackgroundGatewayTimeoutMs(job.attemptCount || 1),
         systemConstraints: buildBackgroundContinuationSystemConstraints(job.request.systemConstraints),
+        preferredDocumentPath: job.latestDocumentPath || undefined,
       });
       const content = sanitizeBackgroundMarkdownContent(String(response.message?.content || '').trim());
       if (response.mode !== 'openclaw' || !content) {

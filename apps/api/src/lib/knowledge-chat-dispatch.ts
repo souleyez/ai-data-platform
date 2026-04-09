@@ -144,8 +144,13 @@ function isGeneratedReportLibraryDocument(item: Pick<ParsedDocument, 'path'>) {
   return /[\\/]generated-report-library[\\/]/i.test(String(item.path || ''));
 }
 
-export function selectLatestDetailedFullTextDocument(documents: ParsedDocument[]) {
+export function selectLatestDetailedFullTextDocument(documents: ParsedDocument[], preferredPath?: string) {
   const detailedDocuments = [...(documents || [])].filter(isDetailedFullTextDocument);
+  const normalizedPreferredPath = String(preferredPath || '').trim().toLowerCase();
+  if (normalizedPreferredPath) {
+    const preferredDocument = detailedDocuments.find((item) => String(item.path || '').trim().toLowerCase() === normalizedPreferredPath);
+    if (preferredDocument) return preferredDocument;
+  }
   const preferredDocuments = detailedDocuments.filter((item) => !isGeneratedReportLibraryDocument(item));
   const candidates = preferredDocuments.length ? preferredDocuments : detailedDocuments;
 
@@ -179,6 +184,7 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
 export async function loadLatestVisibleDetailedDocumentContext(input: {
   botDefinition?: BotDefinition | null;
   effectiveVisibleLibraryKeys?: string[];
+  preferredDocumentPath?: string;
 }) {
   const [documentLibraries, documentState] = await Promise.all([
     loadDocumentLibraries(),
@@ -197,7 +203,7 @@ export async function loadLatestVisibleDetailedDocumentContext(input: {
     )))
     : baseVisibleItems;
 
-  const document = selectLatestDetailedFullTextDocument(visibleItems);
+  const document = selectLatestDetailedFullTextDocument(visibleItems, input.preferredDocumentPath);
   const libraries = document
     ? documentLibraries
       .filter((library) => (
@@ -228,6 +234,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
   cloudTimeoutMs?: number;
+  preferredDocumentPath?: string;
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
@@ -259,6 +266,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const latestDetailedDocumentContext = await loadLatestVisibleDetailedDocumentContext({
     botDefinition: input.botDefinition,
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+    preferredDocumentPath: input.preferredDocumentPath,
   });
   const latestDetailedDocument = latestDetailedDocumentContext.document;
 
