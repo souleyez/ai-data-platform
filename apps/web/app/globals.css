@@ -1325,6 +1325,9 @@ th { color: var(--subtle); font-weight: 600; }
   gap: 20px;
   align-items: start;
 }
+.reports-workbench-single {
+  grid-template-columns: minmax(0, 1fr);
+}
 .documents-layout-simple,
 .reports-workbench-simple {
   grid-template-columns: 1fr;

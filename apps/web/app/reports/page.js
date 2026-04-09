@@ -5,10 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
 import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
-import ReportResultsPanel from '../components/ReportResultsPanel';
 import Sidebar from '../components/Sidebar';
 import {
-  deleteReportOutput,
   fetchBots,
   fetchDatasources,
   updateBot,
@@ -163,8 +161,6 @@ function ReportsPageContent() {
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
   const [generatedReport, setGeneratedReport] = useState(null);
-  const [selectedReportId, setSelectedReportId] = useState('');
-  const hasAutoSelectedReportRef = useRef(false);
   const [templateDraft, setTemplateDraft] = useState({
     label: '',
     description: '',
@@ -252,29 +248,6 @@ function ReportsPageContent() {
     setGeneratedReport(outputRecords.find((item) => item.id === generatedId) || null);
   }, [generatedId, outputRecords]);
 
-  useEffect(() => {
-    if (generatedId) return;
-
-    if (!outputRecords.length) {
-      hasAutoSelectedReportRef.current = false;
-      setSelectedReportId('');
-      return;
-    }
-
-    if (selectedReportId) {
-      if (!outputRecords.some((item) => item.id === selectedReportId)) {
-        setSelectedReportId(outputRecords[0].id);
-      }
-      hasAutoSelectedReportRef.current = true;
-      return;
-    }
-
-    if (!hasAutoSelectedReportRef.current) {
-      setSelectedReportId(outputRecords[0].id);
-      hasAutoSelectedReportRef.current = true;
-    }
-  }, [generatedId, outputRecords, selectedReportId]);
-
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
   }
@@ -282,16 +255,6 @@ function ReportsPageContent() {
   async function saveConnectedBot(botId, payload) {
     await updateBot(botId, payload);
     await loadBotContext();
-  }
-
-  async function deleteReport(reportId) {
-    if (!reportId) return;
-    try {
-      await deleteReportOutput(reportId);
-      await loadReports();
-    } catch (deleteError) {
-      setMessage(deleteError instanceof Error ? deleteError.message : '删除报表失败。');
-    }
   }
 
   async function deleteTemplate(item) {
@@ -497,7 +460,7 @@ function ReportsPageContent() {
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (
-          <section className={`reports-workbench ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
+          <section className={`reports-workbench reports-workbench-single ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
             <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
               <section className="card documents-card reports-templates-panel">
                 <div className="panel-header">
@@ -614,17 +577,6 @@ function ReportsPageContent() {
                 ) : null}
               </section>
             </div>
-
-            <ReportResultsPanel
-              title="已出报表"
-              description={mobileViewport ? '移动端按单栏查看报表结果。' : 'PC 端右侧固定查看已出报表、下载和删除。'}
-              items={outputRecords}
-              selectedReportId={selectedReportId}
-              onSelectReport={setSelectedReportId}
-              onDeleteReport={deleteReport}
-              mobileViewport={mobileViewport}
-              className="reports-results-panel"
-            />
           </section>
         ) : null}
       </main>
