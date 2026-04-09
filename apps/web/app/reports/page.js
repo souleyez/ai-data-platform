@@ -2,10 +2,17 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
 import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
+import ReportResultsPanel from '../components/ReportResultsPanel';
 import Sidebar from '../components/Sidebar';
-import { fetchBots } from '../home-api';
+import {
+  deleteReportOutput,
+  fetchBots,
+  fetchDatasources,
+  updateBot,
+} from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
   copyGeneratedReportLink,
@@ -151,10 +158,13 @@ function ReportsPageContent() {
   const generatedId = searchParams.get('generated') || '';
   const fileInputRef = useRef(null);
   const [data, setData] = useState(null);
+  const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
   const [generatedReport, setGeneratedReport] = useState(null);
+  const [selectedReportId, setSelectedReportId] = useState('');
+  const hasAutoSelectedReportRef = useRef(false);
   const [templateDraft, setTemplateDraft] = useState({
     label: '',
     description: '',
@@ -162,6 +172,7 @@ function ReportsPageContent() {
   });
   const [templateFile, setTemplateFile] = useState(null);
   const [botItems, setBotItems] = useState([]);
+  const [botManageEnabled, setBotManageEnabled] = useState(false);
   const [documentLibraries, setDocumentLibraries] = useState([]);
 
   async function loadReports() {
@@ -181,6 +192,17 @@ function ReportsPageContent() {
     }
   }
 
+  async function loadSidebarSources() {
+    try {
+      const normalized = await fetchDatasources();
+      if (normalized.items.length) {
+        setSidebarSources(normalized.items);
+      }
+    } catch {
+      setSidebarSources(sourceItems);
+    }
+  }
+
   async function loadBotContext() {
     try {
       const [botsPayload, librariesResponse] = await Promise.all([
@@ -189,15 +211,18 @@ function ReportsPageContent() {
       ]);
       const librariesPayload = normalizeDocumentLibrariesResponse(await librariesResponse.json());
       setBotItems(Array.isArray(botsPayload?.items) ? botsPayload.items : []);
+      setBotManageEnabled(Boolean(botsPayload?.manageEnabled));
       setDocumentLibraries(Array.isArray(librariesPayload?.items) ? librariesPayload.items : []);
     } catch {
       setBotItems([]);
+      setBotManageEnabled(false);
       setDocumentLibraries([]);
     }
   }
 
   useEffect(() => {
     void loadReports();
+    void loadSidebarSources();
     void loadBotContext();
   }, []);
 
@@ -212,6 +237,14 @@ function ReportsPageContent() {
   );
 
   useEffect(() => {
+    if (!outputRecords.some((item) => item?.status === 'processing')) return undefined;
+    const timer = setInterval(() => {
+      void loadReports();
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [outputRecords]);
+
+  useEffect(() => {
     if (!generatedId) {
       setGeneratedReport(null);
       return;
@@ -219,8 +252,46 @@ function ReportsPageContent() {
     setGeneratedReport(outputRecords.find((item) => item.id === generatedId) || null);
   }, [generatedId, outputRecords]);
 
+  useEffect(() => {
+    if (generatedId) return;
+
+    if (!outputRecords.length) {
+      hasAutoSelectedReportRef.current = false;
+      setSelectedReportId('');
+      return;
+    }
+
+    if (selectedReportId) {
+      if (!outputRecords.some((item) => item.id === selectedReportId)) {
+        setSelectedReportId(outputRecords[0].id);
+      }
+      hasAutoSelectedReportRef.current = true;
+      return;
+    }
+
+    if (!hasAutoSelectedReportRef.current) {
+      setSelectedReportId(outputRecords[0].id);
+      hasAutoSelectedReportRef.current = true;
+    }
+  }, [generatedId, outputRecords, selectedReportId]);
+
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
+  }
+
+  async function saveConnectedBot(botId, payload) {
+    await updateBot(botId, payload);
+    await loadBotContext();
+  }
+
+  async function deleteReport(reportId) {
+    if (!reportId) return;
+    try {
+      await deleteReportOutput(reportId);
+      await loadReports();
+    } catch (deleteError) {
+      setMessage(deleteError instanceof Error ? deleteError.message : '删除报表失败。');
+    }
   }
 
   async function deleteTemplate(item) {
@@ -373,7 +444,7 @@ function ReportsPageContent() {
   if (generatedId) {
     return (
       <div className="app-shell">
-        <Sidebar sourceItems={sourceItems} currentPath="/reports" />
+        <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
         <main className="main-panel">
           <header className="topbar">
             <div>
@@ -406,15 +477,15 @@ function ReportsPageContent() {
 
   return (
     <div className={`app-shell ${mobileViewport ? 'app-shell-reports-simple' : ''}`.trim()}>
-      <Sidebar sourceItems={sourceItems} currentPath="/reports" />
+      <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
       <main className="main-panel">
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
             <p>
               {mobileViewport
-                ? '移动端只保留轻量报表工作台，模板与结果会压缩成单栏浏览。'
-                : 'PC 端按完整报表工作台展示模板与输出列表，移动端会自动切换成轻量布局。'}
+                ? '移动端按单栏浏览模板、机器人和报表结果。'
+                : 'PC 端恢复完整报表工作台，左侧管理模板与机器人，右侧查看已出报表。'}
             </p>
           </div>
         </header>
@@ -427,107 +498,133 @@ function ReportsPageContent() {
 
         {data ? (
           <section className={`reports-workbench ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
-            <section className="card documents-card reports-templates-panel">
-              <div className="panel-header">
-                <div>
-                  <h3>报表模板上传</h3>
-                  <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考。</p>
-                </div>
-              </div>
-
-              <section className="capture-task-card">
-                <div className="capture-task-heading">
+            <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+              <section className="card documents-card reports-templates-panel">
+                <div className="panel-header">
                   <div>
-                    <h4>上传模板</h4>
-                    <p>保留模板名称和说明即可，文件与网页链接二选一。</p>
+                    <h3>报表模板上传</h3>
+                    <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考。</p>
                   </div>
                 </div>
 
-                <div className="filter-row report-template-create-row">
-                  <input
-                    className="filter-input"
-                    placeholder="模板名称"
-                    value={templateDraft.label}
-                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, label: event.target.value }))}
-                  />
-                  <input
-                    className="filter-input"
-                    placeholder="模板说明（可选）"
-                    value={templateDraft.description}
-                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </div>
+                <section className="capture-task-card">
+                  <div className="capture-task-heading">
+                    <div>
+                      <h4>上传模板</h4>
+                      <p>保留模板名称和说明即可，文件与网页链接二选一。</p>
+                    </div>
+                  </div>
 
-                <div className="filter-row report-template-create-row">
-                  <input
-                    ref={fileInputRef}
-                    className="filter-input"
-                    type="file"
-                    accept="image/*,.doc,.docx,.rtf,.odt,.ppt,.pptx,.pptm,.xls,.xlsx,.csv,.tsv,.ods"
-                    onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
-                  />
-                  <input
-                    className="filter-input"
-                    placeholder="或填写网页链接，例如 https://example.com/template"
-                    value={templateDraft.link}
-                    onChange={(event) => setTemplateDraft((prev) => ({ ...prev, link: event.target.value }))}
-                  />
-                  <button
-                    className="primary-btn"
-                    type="button"
-                    onClick={() => void uploadTemplate()}
-                    disabled={submittingKey === 'upload-template'}
-                  >
-                    {submittingKey === 'upload-template' ? '上传中...' : '上传模板'}
-                  </button>
-                </div>
+                  <div className="filter-row report-template-create-row">
+                    <input
+                      className="filter-input"
+                      placeholder="模板名称"
+                      value={templateDraft.label}
+                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, label: event.target.value }))}
+                    />
+                    <input
+                      className="filter-input"
+                      placeholder="模板说明（可选）"
+                      value={templateDraft.description}
+                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
+                    />
+                  </div>
 
-                <div className="capture-task-meta">
-                  {templateFile
-                    ? `已选择文件：${templateFile.name}`
-                    : templateDraft.link
-                      ? `已填写链接：${templateDraft.link}`
-                      : '支持上传 Word、PPT、表格、图片，或直接填写网页链接。'}
-                </div>
+                  <div className="filter-row report-template-create-row">
+                    <input
+                      ref={fileInputRef}
+                      className="filter-input"
+                      type="file"
+                      accept="image/*,.doc,.docx,.rtf,.odt,.ppt,.pptx,.pptm,.xls,.xlsx,.csv,.tsv,.ods"
+                      onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
+                    />
+                    <input
+                      className="filter-input"
+                      placeholder="或填写网页链接，例如 https://example.com/template"
+                      value={templateDraft.link}
+                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, link: event.target.value }))}
+                    />
+                    <button
+                      className="primary-btn"
+                      type="button"
+                      onClick={() => void uploadTemplate()}
+                      disabled={submittingKey === 'upload-template'}
+                    >
+                      {submittingKey === 'upload-template' ? '上传中...' : '上传模板'}
+                    </button>
+                  </div>
+
+                  <div className="capture-task-meta">
+                    {templateFile
+                      ? `已选择文件：${templateFile.name}`
+                      : templateDraft.link
+                        ? `已填写链接：${templateDraft.link}`
+                        : '支持上传 Word、PPT、表格、图片，或直接填写网页链接。'}
+                  </div>
+                </section>
+
+                {!uploadedTemplateItems.length ? (
+                  <section className="report-empty-card">
+                    <h4>还没有上传模板</h4>
+                    <p>上传完成后，这里会列出所有模板文件和网页链接的详细信息。</p>
+                  </section>
+                ) : (
+                  <div className="capture-result-list reports-scroll-panel report-upload-list">
+                    {uploadedTemplateItems.map((item) => (
+                      <UploadedTemplateItem
+                        key={item.id}
+                        item={item}
+                        submittingKey={submittingKey}
+                        onDeleteTemplate={deleteTemplate}
+                        onDeleteReference={deleteTemplateReference}
+                        buildDownloadUrl={buildTemplateReferenceDownloadUrl}
+                      />
+                    ))}
+                  </div>
+                )}
               </section>
 
-              {!uploadedTemplateItems.length ? (
-                <section className="report-empty-card">
-                  <h4>还没有上传模板</h4>
-                  <p>上传完成后，这里会列出所有模板文件和网页链接的详细信息。</p>
-                </section>
-              ) : (
-                <div className="capture-result-list reports-scroll-panel report-upload-list">
-                  {uploadedTemplateItems.map((item) => (
-                    <UploadedTemplateItem
-                      key={item.id}
-                      item={item}
-                      submittingKey={submittingKey}
-                      onDeleteTemplate={deleteTemplate}
-                      onDeleteReference={deleteTemplateReference}
-                      buildDownloadUrl={buildTemplateReferenceDownloadUrl}
-                    />
-                  ))}
+              <section className="card documents-card reports-bot-panel">
+                <div className="panel-header">
+                  <div>
+                    <h3>输出机器人</h3>
+                    <p>
+                      {mobileViewport
+                        ? '移动端保留机器人概览。'
+                        : 'PC 端恢复机器人可见库和权限编辑，移动端仍保持概览优先。'}
+                    </p>
+                  </div>
                 </div>
-              )}
-            </section>
 
-            <section className="card documents-card reports-bot-panel">
-              <div className="panel-header">
-                <div>
-                  <h3>可用输出机器人</h3>
-                  <p>这里仅展示已经接通第三方渠道的可用机器人，不再在报表中心内展开配置编辑器。</p>
-                </div>
-              </div>
+                <ConnectedBotsSummary
+                  items={botItems}
+                  libraries={documentLibraries}
+                  compact={mobileViewport}
+                  emptyTitle="当前还没有可用输出机器人"
+                  emptyText="机器人接通后会自动出现在这里。"
+                />
 
-              <ConnectedBotsSummary
-                items={botItems}
-                libraries={documentLibraries}
-                compact
-                emptyTitle="当前还没有可用输出机器人"
-                emptyText="机器人接通后会自动出现在这里。"
-              />
-            </section>
+                {!mobileViewport && botManageEnabled ? (
+                  <ConnectedBotAccessEditor
+                    items={botItems}
+                    libraries={documentLibraries}
+                    manageEnabled={botManageEnabled}
+                    onSave={saveConnectedBot}
+                  />
+                ) : null}
+              </section>
+            </div>
+
+            <ReportResultsPanel
+              title="已出报表"
+              description={mobileViewport ? '移动端按单栏查看报表结果。' : 'PC 端右侧固定查看已出报表、下载和删除。'}
+              items={outputRecords}
+              selectedReportId={selectedReportId}
+              onSelectReport={setSelectedReportId}
+              onDeleteReport={deleteReport}
+              mobileViewport={mobileViewport}
+              className="reports-results-panel"
+            />
           </section>
         ) : null}
       </main>
