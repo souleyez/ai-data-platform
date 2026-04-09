@@ -349,20 +349,27 @@ export function getPlatformIntegration(id: string) {
   return PLATFORM_INTEGRATIONS.find((item) => item.id === id) || null;
 }
 
-export function buildPlatformCapabilityContextLines() {
+export function buildPlatformCapabilityContextLines(options?: { includeCommands?: boolean }) {
+  const includeCommands = options?.includeCommands === true;
   const lines: string[] = [
-    'Core platform areas are defined by a capability registry and a command registry, not by ad-hoc chat orchestration.',
+    'Core platform areas are defined by a capability registry, not by ad-hoc chat orchestration.',
     ...PLATFORM_BASE_RULES.map((rule) => `- Rule: ${rule}`),
     `- Output formats: ${PLATFORM_OUTPUT_FORMATS.join(', ')}.`,
   ];
+
+  if (!includeCommands) {
+    lines.push('- Detailed CLI syntax exists in the host command registry and should only be surfaced when explicit execution or command help is requested.');
+  }
 
   for (const area of PLATFORM_CAPABILITY_AREAS) {
     lines.push(`- ${area.label}: ${area.description}`);
     for (const ability of area.abilities) {
       lines.push(`  - ${ability}`);
     }
-    for (const command of area.commands) {
-      lines.push(`  - Command: ${command.command}`);
+    if (includeCommands) {
+      for (const command of area.commands) {
+        lines.push(`  - Command: ${command.command}`);
+      }
     }
   }
 

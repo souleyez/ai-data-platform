@@ -81,4 +81,5 @@ test('system capability context should always mention default web search', () =>
   assert.match(text, /Web search/i);
   assert.match(text, /service/i);
   assert.match(text, /do not emit raw tool-call markup/i);
+  assert.doesNotMatch(text, /Command:\s+pnpm system:control/i);
 });
