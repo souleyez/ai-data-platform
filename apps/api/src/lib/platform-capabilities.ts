@@ -173,7 +173,9 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
     description: 'Generate and revise outputs from matched library material across all supported output formats.',
     abilities: [
       'Generate table, static page, DOC/DOCX-style document, Markdown document, PDF, and PPT outputs.',
+      'List reusable output templates and persist a document-center file as a reusable report template.',
       'List saved outputs and revise an existing output by instruction.',
+      'Store generated report-center outputs back into the corresponding knowledge library as Markdown documents by default.',
       'Keep report generation available on the CLI as the canonical execution layer.',
     ],
     commands: [
@@ -181,6 +183,16 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         key: 'reports.generate',
         command: 'pnpm system:control -- reports generate --library "<library>" --format table|page|doc|md|pdf|ppt [--template "<template>"] [--time-range "<range>"] [--focus "<focus>"] [--request "<request>"]',
         description: 'Generate one report output from a library request.',
+      },
+      {
+        key: 'reports.templates',
+        command: 'pnpm system:control -- reports templates [--type table|static-page|ppt|document] [--limit 20]',
+        description: 'List reusable report templates that can be passed to report generation.',
+      },
+      {
+        key: 'reports.template-from-document',
+        command: 'pnpm system:control -- reports template-from-document --document "<document-id>" [--label "<template-name>"] [--type table|static-page|ppt|document] [--default true]',
+        description: 'Promote one document-center file into a reusable report template reference.',
       },
       {
         key: 'reports.outputs',

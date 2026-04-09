@@ -27,6 +27,15 @@ const documentLibraries = await importFresh<typeof import('../src/lib/document-l
 const documentCacheRepository = await importFresh<typeof import('../src/lib/document-cache-repository.js')>(
   '../src/lib/document-cache-repository.js',
 );
+const documentConfig = await importFresh<typeof import('../src/lib/document-config.js')>(
+  '../src/lib/document-config.js',
+);
+const documentStore = await importFresh<typeof import('../src/lib/document-store.js')>(
+  '../src/lib/document-store.js',
+);
+const documentUploadIngest = await importFresh<typeof import('../src/lib/document-upload-ingest.js')>(
+  '../src/lib/document-upload-ingest.js',
+);
 const syncStatusFile = path.join(storageRoot, 'config', 'openclaw-memory-sync-status.json');
 
 async function startHtmlServer(routes: Record<string, string>) {
@@ -181,6 +190,9 @@ test('platform control should expose capability registry metadata', async () => 
   const areas = (listResult.data?.areas as Array<{ id?: string; commands?: Array<{ key?: string }> }>) || [];
   const datasourceArea = areas.find((item) => item.id === 'datasources');
   assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.capture-url'));
+  const reportsArea = areas.find((item) => item.id === 'reports');
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.templates'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-from-document'));
 
   const integrations = (listResult.data?.integrations as Array<{ id?: string }>) || [];
   assert.ok(integrations.some((item) => item.id === 'web-capture'));
@@ -276,4 +288,60 @@ test('platform control should capture one url into the requested knowledge libra
   } finally {
     await server.close();
   }
+});
+
+test('platform control should promote a document-center file into a reusable report template', async () => {
+  const library = await documentLibraries.createDocumentLibrary({
+    name: 'bids',
+    description: 'Bid knowledge base',
+    permissionLevel: 0,
+  }).catch(async () => {
+    const libraries = await documentLibraries.loadDocumentLibraries();
+    return libraries.find((item) => item.key === 'bids')!;
+  });
+
+  const uploadDir = path.join(storageRoot, 'files', 'uploads');
+  await fs.mkdir(uploadDir, { recursive: true });
+  const filePath = path.join(uploadDir, '投标模板.md');
+  await fs.writeFile(filePath, '# 投标模板\n\n## 项目概况\n\n- 示例段落', 'utf8');
+
+  const config = await documentConfig.loadDocumentCategoryConfig(documentStore.DEFAULT_SCAN_DIR);
+  const libraries = await documentLibraries.loadDocumentLibraries();
+  await documentUploadIngest.ingestExistingLocalFiles({
+    filePaths: [filePath],
+    documentConfig: config,
+    libraries,
+    forcedLibraryKeys: [library.key],
+    preferredLibraryKeys: [library.key],
+  });
+
+  const documentId = documentStore.buildDocumentId(filePath);
+  const result = await platformControl.executePlatformControlCommand([
+    'reports',
+    'template-from-document',
+    '--document',
+    documentId,
+    '--label',
+    '投标输出模板',
+    '--default',
+    'true',
+  ]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'reports.template-from-document');
+  assert.equal((result.data?.template as { label?: string })?.label, '投标输出模板');
+  assert.equal((result.data?.document as { id?: string })?.id, documentId);
+
+  const templatesResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'templates',
+    '--type',
+    'document',
+  ]);
+  assert.equal(templatesResult.ok, true);
+  assert.equal(templatesResult.action, 'reports.templates');
+  assert.ok(
+    ((templatesResult.data?.items as Array<{ label?: string }>) || [])
+      .some((item) => item.label === '投标输出模板'),
+  );
 });

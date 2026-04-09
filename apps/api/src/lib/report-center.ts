@@ -3,9 +3,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { MultipartFile } from '@fastify/multipart';
+import { loadDocumentCategoryConfig } from './document-config.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
-import { loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
+import { ingestExistingLocalFiles } from './document-upload-ingest.js';
+import { DEFAULT_SCAN_DIR, loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
 import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
 import { attachDatavizRendersToPage } from './report-dataviz.js';
@@ -23,6 +25,7 @@ import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-fil
 
 const REPORT_CONFIG_DIR = STORAGE_CONFIG_DIR;
 const REPORT_REFERENCE_DIR = path.join(STORAGE_FILES_DIR, 'report-references');
+const REPORT_LIBRARY_EXPORT_DIR = path.join(STORAGE_FILES_DIR, 'generated-report-library');
 const REPORT_STATE_FILE = path.join(REPORT_CONFIG_DIR, 'report-center.json');
 
 export type ReportTemplateType = 'table' | 'static-page' | 'ppt' | 'document';
@@ -301,6 +304,201 @@ function resolveReferenceFilePath(reference: ReportReferenceImage) {
 
   const resolved = normalizePath(path.resolve(STORAGE_ROOT, relativePath));
   return startsWithPath(resolved, REPORT_REFERENCE_DIR) ? resolved : '';
+}
+
+function sanitizeMarkdownTableCell(value: unknown) {
+  return String(value ?? '')
+    .replace(/\r\n/g, ' ')
+    .replace(/\n/g, ' ')
+    .replace(/\|/g, '\\|')
+    .trim();
+}
+
+function buildTableMarkdownBlock(table?: ReportOutputRecord['table']) {
+  const columns = Array.isArray(table?.columns) ? table.columns.map((item) => String(item || '').trim()).filter(Boolean) : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  if (!columns.length && !rows.length) return '';
+
+  const effectiveColumns = columns.length
+    ? columns
+    : rows[0]?.map((_, index) => `列${index + 1}`) || [];
+
+  const headerRow = `| ${effectiveColumns.map(sanitizeMarkdownTableCell).join(' | ')} |`;
+  const separatorRow = `| ${effectiveColumns.map(() => '---').join(' | ')} |`;
+  const bodyRows = rows.map((row) => {
+    const cells = Array.isArray(row) ? row : [];
+    return `| ${effectiveColumns.map((_, index) => sanitizeMarkdownTableCell(cells[index])).join(' | ')} |`;
+  });
+
+  const lines: string[] = ['## 表格内容'];
+  if (table?.title) {
+    lines.push('', table.title);
+  }
+  lines.push('', headerRow, separatorRow, ...bodyRows);
+  return lines.join('\n').trim();
+}
+
+function buildPageMarkdownBlock(page?: ReportOutputRecord['page']) {
+  if (!page) return '';
+
+  const lines: string[] = [];
+  if (page.summary) {
+    lines.push('## 摘要', '', String(page.summary || '').trim());
+  }
+
+  if (Array.isArray(page.cards) && page.cards.length) {
+    lines.push(lines.length ? '' : '', '## 关键指标', '');
+    lines.push(
+      ...page.cards.map((item) => {
+        const label = String(item?.label || '指标').trim();
+        const value = String(item?.value || '').trim();
+        const note = String(item?.note || '').trim();
+        return `- ${label}${value ? `：${value}` : ''}${note ? ` (${note})` : ''}`;
+      }),
+    );
+  }
+
+  for (const section of page.sections || []) {
+    const title = String(section?.title || '').trim() || '内容';
+    const body = String(section?.body || '').trim();
+    const bullets = Array.isArray(section?.bullets) ? section.bullets.map((item) => String(item || '').trim()).filter(Boolean) : [];
+    lines.push(lines.length ? '' : '', `## ${title}`);
+    if (body) {
+      lines.push('', body);
+    }
+    if (bullets.length) {
+      lines.push('', ...bullets.map((item) => `- ${item}`));
+    }
+  }
+
+  if (Array.isArray(page.charts) && page.charts.length) {
+    lines.push(lines.length ? '' : '', '## 图表数据');
+    for (const chart of page.charts) {
+      const title = String(chart?.title || '').trim() || '图表';
+      lines.push('', `### ${title}`);
+      const items = Array.isArray(chart?.items) ? chart.items : [];
+      if (items.length) {
+        lines.push('', ...items.map((item) => `- ${String(item?.label || '项').trim()}：${Number(item?.value || 0)}`));
+      }
+    }
+  }
+
+  return lines.join('\n').trim();
+}
+
+function buildReportOutputKnowledgeMarkdown(record: ReportOutputRecord) {
+  const lines: string[] = [
+    `# ${record.title}`,
+    '',
+    `- 报表ID：${record.id}`,
+    `- 分组：${record.groupLabel}`,
+    `- 模板：${record.templateLabel}`,
+    `- 生成时间：${record.createdAt}`,
+    `- 原始格式：${record.kind || record.outputType || 'unknown'}/${record.format || 'unknown'}`,
+  ];
+
+  const libraryLabels = (record.libraries || [])
+    .map((item) => String(item?.label || item?.key || '').trim())
+    .filter(Boolean);
+  if (libraryLabels.length) {
+    lines.push(`- 对应知识库：${libraryLabels.join('、')}`);
+  }
+  if (record.summary) {
+    lines.push(`- 生成摘要：${record.summary}`);
+  }
+
+  const sections: string[] = [];
+  if (record.kind === 'table' && record.table) {
+    sections.push(buildTableMarkdownBlock(record.table));
+  } else if (record.kind === 'page' && record.page) {
+    sections.push(buildPageMarkdownBlock(record.page));
+  }
+
+  const normalizedContent = String(record.content || '').trim();
+  if (normalizedContent && (record.kind === 'md' || record.kind === 'doc' || record.kind === 'pdf' || record.kind === 'ppt' || !sections.length)) {
+    sections.unshift(normalizedContent);
+  }
+  if (!sections.length && record.summary) {
+    sections.push(`## 内容\n\n${record.summary}`);
+  }
+
+  if (sections.length) {
+    lines.push('', ...sections.filter(Boolean));
+  }
+
+  return `${lines.join('\n').trim()}\n`;
+}
+
+function resolveReportOutputLibraryKeys(
+  record: ReportOutputRecord,
+  libraries: Awaited<ReturnType<typeof loadDocumentLibraries>>,
+) {
+  const knownKeys = new Set(libraries.map((item) => item.key));
+  const keys = new Set<string>();
+
+  for (const entry of record.libraries || []) {
+    const key = String(entry?.key || '').trim();
+    const label = String(entry?.label || '').trim();
+    if (key && knownKeys.has(key)) {
+      keys.add(key);
+      continue;
+    }
+    if (label) {
+      const matched = libraries.find((item) => item.label === label);
+      if (matched) keys.add(matched.key);
+    }
+  }
+
+  if (!keys.size) {
+    if (record.groupKey && knownKeys.has(record.groupKey)) {
+      keys.add(record.groupKey);
+    } else if (record.groupLabel) {
+      const matched = libraries.find((item) => item.label === record.groupLabel);
+      if (matched) keys.add(matched.key);
+    }
+  }
+
+  return [...keys];
+}
+
+async function syncReportOutputToKnowledgeLibrary(record: ReportOutputRecord) {
+  if (record.status !== 'ready') return null;
+
+  const libraries = await loadDocumentLibraries();
+  const libraryKeys = resolveReportOutputLibraryKeys(record, libraries);
+  if (!libraryKeys.length) return null;
+
+  const documentConfig = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+  const markdown = buildReportOutputKnowledgeMarkdown(record);
+  await fs.mkdir(REPORT_LIBRARY_EXPORT_DIR, { recursive: true });
+  const outputPath = path.join(REPORT_LIBRARY_EXPORT_DIR, `report-output-${record.id}.md`);
+  await fs.writeFile(outputPath, markdown, 'utf8');
+
+  const ingestResult = await ingestExistingLocalFiles({
+    filePaths: [outputPath],
+    documentConfig,
+    libraries,
+    preferredLibraryKeys: libraryKeys,
+    forcedLibraryKeys: libraryKeys,
+  });
+
+  return {
+    outputPath,
+    libraryKeys,
+    ingestResult,
+  };
+}
+
+async function syncReportOutputToKnowledgeLibrarySafely(record: ReportOutputRecord) {
+  try {
+    return await syncReportOutputToKnowledgeLibrary(record);
+  } catch (error) {
+    console.warn('[report-center] failed to sync report output into knowledge library', {
+      reportOutputId: record.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 async function deleteStoredReferenceFile(reference: ReportReferenceImage) {
@@ -1916,6 +2114,7 @@ export async function createReportOutput(input: {
 
   const nextOutputs = [record, ...state.outputs].slice(0, 100);
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
+  await syncReportOutputToKnowledgeLibrarySafely(record);
   return record;
 }
 
@@ -1953,6 +2152,7 @@ export async function updateReportOutput(outputId: string, patch: {
   const nextRecord = await finalizeReportOutputRecord(nextBase);
   const nextOutputs = state.outputs.map((item) => (item.id === outputId ? nextRecord : item));
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
+  await syncReportOutputToKnowledgeLibrarySafely(nextRecord);
   return nextRecord;
 }
 
@@ -2111,6 +2311,63 @@ export async function uploadSharedTemplateReference(templateKey: string, file: M
     kind: 'file',
     sourceType: inferReportReferenceSourceType({ fileName: safeName, mimeType: file.mimetype }),
     mimeType: String(file.mimetype || '').trim(),
+    size: stats.size,
+  });
+  if (!uploaded) throw new Error('shared template reference is invalid');
+
+  const nextTemplates = state.templates.map((item) => (
+    item.key === templateKey
+      ? { ...item, referenceImages: [uploaded, ...item.referenceImages].slice(0, 16) }
+      : item
+  ));
+  await saveGroupsAndOutputs(state.groups, state.outputs, nextTemplates);
+  return uploaded;
+}
+
+export async function addSharedTemplateReferenceFileFromPath(templateKey: string, input: {
+  filePath: string;
+  originalName?: string;
+  sourceType?: ReportReferenceSourceType;
+  mimeType?: string;
+}) {
+  const state = await loadReportCenterState();
+  const template = state.templates.find((item) => item.key === templateKey);
+  if (!template) throw new Error('shared report template not found');
+  if (!isUserSharedReportTemplate(template)) throw new Error('system template cannot accept uploaded references');
+
+  const sourcePath = normalizePath(input.filePath);
+  if (!sourcePath) throw new Error('template source file path is invalid');
+
+  let stats: Awaited<ReturnType<typeof fs.stat>> | null = null;
+  try {
+    stats = await fs.stat(sourcePath);
+  } catch {
+    stats = null;
+  }
+  if (!stats?.isFile()) throw new Error('template source file not found');
+
+  const safeName = sanitizeFileName(input.originalName || path.basename(sourcePath) || 'template-reference');
+  const duplicate = findDuplicateSharedTemplateReference(state.templates, { fileName: safeName });
+  if (duplicate) {
+    throw new Error(`template reference already exists in ${duplicate.templateLabel}`);
+  }
+
+  await ensureDirs();
+  const id = buildId('tmplref');
+  const ext = path.extname(safeName) || path.extname(sourcePath) || '.dat';
+  const outputName = `${id}${ext}`;
+  const fullPath = path.join(REPORT_REFERENCE_DIR, outputName);
+  await fs.copyFile(sourcePath, fullPath);
+
+  const uploaded = normalizeReportReferenceImage({
+    id,
+    fileName: outputName,
+    originalName: safeName,
+    uploadedAt: new Date().toISOString(),
+    relativePath: path.relative(STORAGE_ROOT, fullPath).replace(/\\/g, '/'),
+    kind: 'file',
+    sourceType: input.sourceType || inferReportReferenceSourceType({ fileName: safeName, mimeType: input.mimeType }),
+    mimeType: String(input.mimeType || '').trim(),
     size: stats.size,
   });
   if (!uploaded) throw new Error('shared template reference is invalid');

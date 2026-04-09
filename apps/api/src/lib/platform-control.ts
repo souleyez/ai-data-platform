@@ -55,8 +55,13 @@ import {
   type PlatformIntegration,
 } from './platform-capabilities.js';
 import {
+  addSharedTemplateReferenceFileFromPath,
+  createSharedReportTemplate,
+  deleteSharedReportTemplate,
+  inferReportTemplateTypeFromSource,
   loadReportCenterState,
   reviseReportOutput,
+  type ReportTemplateType,
 } from './report-center.js';
 import type { KnowledgeOutputKind } from './knowledge-template.js';
 import { createAndRunWebCaptureTask } from './web-capture.js';
@@ -276,6 +281,16 @@ function resolveOutputKind(value: string): KnowledgeOutputKind {
   throw new Error(`Unsupported output format "${value}". Supported: ${PLATFORM_OUTPUT_FORMATS.join(', ')}`);
 }
 
+function resolveReportTemplateType(value: string | undefined): ReportTemplateType | undefined {
+  const normalized = normalizeText(value || '');
+  if (!normalized) return undefined;
+  if (['table', 'sheet', 'spreadsheet'].includes(normalized)) return 'table';
+  if (['static-page', 'page', 'html', 'static page'].includes(normalized)) return 'static-page';
+  if (['ppt', 'slides', 'pptx'].includes(normalized)) return 'ppt';
+  if (['document', 'doc', 'docx', 'word'].includes(normalized)) return 'document';
+  throw new Error('Unsupported template type. Supported: table, static-page, ppt, document');
+}
+
 function formatOutputKindLabel(kind: KnowledgeOutputKind) {
   if (kind === 'table') return 'table';
   if (kind === 'page') return 'static page';
@@ -313,6 +328,20 @@ function summarizeDocumentItem(item: Awaited<ReturnType<typeof loadParsedDocumen
     detailParseStatus: item.detailParseStatus,
     summary: item.summary || '',
   };
+}
+
+async function resolveDocumentSnapshotItem(documentId: string) {
+  const normalizedId = String(documentId || '').trim();
+  if (!normalizedId) {
+    throw new Error('Missing --document.');
+  }
+
+  const snapshot = await loadParsedDocuments(5000, false);
+  const item = snapshot.items.find((entry) => buildDocumentId(entry.path) === normalizedId);
+  if (!item) {
+    throw new Error(`Document "${normalizedId}" was not found.`);
+  }
+  return item;
 }
 
 function describeCapabilityArea(area: PlatformCapabilityArea) {
@@ -724,6 +753,81 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
 }
 
 async function runReportCommand(subcommand: string, flags: CommandFlags): Promise<PlatformControlResult> {
+  if (subcommand === 'templates') {
+    const state = await loadReportCenterState();
+    const templateType = resolveReportTemplateType(flags.type);
+    const limit = clampLimit(flags.limit, 20, 100);
+    const items = state.templates
+      .filter((item) => !templateType || item.type === templateType)
+      .slice(0, limit)
+      .map((item) => ({
+        key: item.key,
+        label: item.label,
+        type: item.type,
+        description: item.description,
+        isDefault: item.isDefault === true,
+        origin: item.origin || 'system',
+        referenceCount: Array.isArray(item.referenceImages) ? item.referenceImages.length : 0,
+      }));
+
+    return {
+      ok: true,
+      action: 'reports.templates',
+      summary: `Loaded ${items.length} reusable report templates${templateType ? ` of type ${templateType}` : ''}.`,
+      data: {
+        items,
+      },
+    };
+  }
+
+  if (subcommand === 'template-from-document') {
+    const documentId = String(flags.document || flags.id || '').trim();
+    if (!documentId) throw new Error('Missing --document for reports template-from-document.');
+
+    const document = await resolveDocumentSnapshotItem(documentId);
+    const templateType = resolveReportTemplateType(flags.type)
+      || inferReportTemplateTypeFromSource({ fileName: document.name });
+    const templateLabel = String(flags.label || document.title || document.name || '').trim();
+    if (!templateLabel) throw new Error('Template label is required.');
+
+    let createdTemplate: Awaited<ReturnType<typeof createSharedReportTemplate>> | null = null;
+    try {
+      createdTemplate = await createSharedReportTemplate({
+        label: templateLabel,
+        type: templateType,
+        description: String(flags.description || '').trim()
+          || `由文档中心文件“${document.title || document.name}”创建的输出模板。`,
+        isDefault: resolveBooleanFlag(flags.default),
+      });
+      const reference = await addSharedTemplateReferenceFileFromPath(createdTemplate.key, {
+        filePath: document.path,
+        originalName: document.name,
+      });
+
+      return {
+        ok: true,
+        action: 'reports.template-from-document',
+        summary: `Created reusable template "${createdTemplate.label}" from document "${document.title || document.name}".`,
+        data: {
+          template: {
+            key: createdTemplate.key,
+            label: createdTemplate.label,
+            type: createdTemplate.type,
+            description: createdTemplate.description,
+            isDefault: createdTemplate.isDefault === true,
+          },
+          reference,
+          document: summarizeDocumentItem(document),
+        },
+      };
+    } catch (error) {
+      if (createdTemplate?.key) {
+        await deleteSharedReportTemplate(createdTemplate.key).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
   if (!subcommand || subcommand === 'outputs') {
     const state = await loadReportCenterState();
     const scopeLibrary = flags.library ? await resolveLibraryReference(flags.library) : null;
