@@ -461,7 +461,7 @@ function ReportsPageContent() {
 
         {data ? (
           <section className={`reports-workbench reports-workbench-single ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
-            <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
+            <div className={`reports-management-grid ${mobileViewport ? 'reports-management-grid-simple' : ''}`.trim()}>
               <section className="card documents-card reports-templates-panel">
                 <div className="panel-header">
                   <div>

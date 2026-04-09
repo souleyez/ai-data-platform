@@ -1328,6 +1328,16 @@ th { color: var(--subtle); font-weight: 600; }
 .reports-workbench-single {
   grid-template-columns: minmax(0, 1fr);
 }
+.reports-management-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.18fr) minmax(320px, 0.82fr);
+  gap: 20px;
+  min-width: 0;
+  align-items: start;
+}
+.reports-management-grid-simple {
+  grid-template-columns: 1fr;
+}
 .documents-layout-simple,
 .reports-workbench-simple {
   grid-template-columns: 1fr;
@@ -1637,6 +1647,10 @@ th { color: var(--subtle); font-weight: 600; }
 }
 @media (max-width: 1100px) {
   .reports-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .reports-management-grid {
     grid-template-columns: 1fr;
   }
 
