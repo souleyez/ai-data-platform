@@ -20,6 +20,7 @@ import {
   formatTemplateUploadSourceTypeLabel,
   inferTemplateUploadSourceType,
 } from '../lib/report-template-uploads.mjs';
+import useMobileViewport from '../lib/use-mobile-viewport';
 import {
   normalizeDocumentLibrariesResponse,
   normalizeReportsResponse,
@@ -145,6 +146,7 @@ function SingleReportActions({ item }) {
 }
 
 function ReportsPageContent() {
+  const mobileViewport = useMobileViewport();
   const searchParams = useSearchParams();
   const generatedId = searchParams.get('generated') || '';
   const fileInputRef = useRef(null);
@@ -403,13 +405,17 @@ function ReportsPageContent() {
   }
 
   return (
-    <div className="app-shell app-shell-reports-simple">
+    <div className={`app-shell ${mobileViewport ? 'app-shell-reports-simple' : ''}`.trim()}>
       <Sidebar sourceItems={sourceItems} currentPath="/reports" />
       <main className="main-panel">
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>这里现在只保留两类能力：报表模板上传，以及可用输出机器人列表。</p>
+            <p>
+              {mobileViewport
+                ? '移动端只保留轻量报表工作台，模板与结果会压缩成单栏浏览。'
+                : 'PC 端按完整报表工作台展示模板与输出列表，移动端会自动切换成轻量布局。'}
+            </p>
           </div>
         </header>
 
@@ -420,7 +426,7 @@ function ReportsPageContent() {
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (
-          <section className="reports-workbench reports-workbench-simple">
+          <section className={`reports-workbench ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
             <section className="card documents-card reports-templates-panel">
               <div className="panel-header">
                 <div>

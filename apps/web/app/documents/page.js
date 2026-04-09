@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
 import { sortLibrariesForDisplay, getDocumentLibraryKeys } from '../lib/knowledge-libraries';
+import useMobileViewport from '../lib/use-mobile-viewport';
 import { formatDocumentBusinessResult } from '../lib/types';
 import { createDocumentLibrary, fetchDocuments } from './api';
 import DocumentsTable from './DocumentsTable';
@@ -31,6 +32,7 @@ const DEFAULT_SIDEBAR_SOURCES = [
 ];
 
 export default function DocumentsPage() {
+  const mobileViewport = useMobileViewport();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -111,13 +113,17 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div className="app-shell app-shell-documents-simple">
+    <div className={`app-shell ${mobileViewport ? 'app-shell-documents-simple' : ''}`.trim()}>
       <Sidebar sourceItems={DEFAULT_SIDEBAR_SOURCES} currentPath="/documents" />
       <main className="main-panel">
         <header className="topbar">
           <div>
             <h2>AI 知识库</h2>
-            <p>文档页只保留上传入口和文档列表，移动端不再展开知识库治理工具栏。</p>
+            <p>
+              {mobileViewport
+                ? '移动端只保留上传入口和文档列表，知识库治理工具栏会自动收起。'
+                : 'PC 端保留文档治理与知识库操作，移动端会自动切换成轻量布局。'}
+            </p>
           </div>
           <div className="topbar-actions">
             <a className="ghost-btn" href="/#upload-document">添加文档</a>
@@ -133,7 +139,7 @@ export default function DocumentsPage() {
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (
-          <section className="documents-layout documents-layout-simple">
+          <section className={`documents-layout ${mobileViewport ? 'documents-layout-simple' : ''}`.trim()}>
             <section className="card documents-card documents-summary-card">
               <div className="message-refs documents-summary-chips">
                 <span className="source-chip">总数 {totalFiles}</span>
@@ -169,7 +175,7 @@ export default function DocumentsPage() {
             </section>
 
             <DocumentsTable
-              simpleMode
+              simpleMode={mobileViewport}
               currentPage={currentPage}
               totalPages={totalPages}
               pageSize={PAGE_SIZE}
