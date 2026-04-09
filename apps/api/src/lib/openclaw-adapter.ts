@@ -296,6 +296,27 @@ function buildNoToolLeakSystemPrompt() {
   ].join('\n');
 }
 
+function withAdditionalSystemInstruction(messages: ChatMessage[], instruction: string): ChatMessage[] {
+  const normalizedInstruction = String(instruction || '').trim();
+  if (!normalizedInstruction) return messages;
+  if (!Array.isArray(messages) || !messages.length) {
+    return [{ role: 'system', content: normalizedInstruction }];
+  }
+
+  const [first, ...rest] = messages;
+  if (first.role !== 'system') {
+    return [{ role: 'system', content: normalizedInstruction }, first, ...rest];
+  }
+
+  return [
+    {
+      role: 'system',
+      content: `${first.content}\n\n${normalizedInstruction}`.trim(),
+    },
+    ...rest,
+  ];
+}
+
 async function requestChatCompletion(
   baseUrl: string,
   headers: Record<string, string>,
@@ -588,13 +609,10 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
         model,
         user: input.sessionUser,
         temperature: 0.1,
-        messages: [
-          {
-            role: 'system',
-            content: '直接回答用户当前问题。不要自我介绍，不要谈内部状态，不要说自己没名字、没个性、第一次聊天，也不要让用户给你起名。',
-          },
-          ...baseMessages,
-        ],
+        messages: withAdditionalSystemInstruction(
+          baseMessages,
+          '直接回答用户当前问题。不要自我介绍，不要谈内部状态，不要说自己没名字、没个性、第一次聊天，也不要让用户给你起名。',
+        ),
       },
     });
   }
@@ -624,51 +642,53 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   }
 
   if (looksLikeLeakedToolCallContent(result.content)) {
-    result = await requestChatCompletionAllowingModelOverride({
-      baseUrl,
-      headers,
-      modelOverride,
-      timeoutMs: input.timeoutMs,
-      body: {
-        model,
-        user: input.sessionUser,
-        temperature: 0.1,
-        messages: [
-          {
-            role: 'system',
-            content: buildNoToolLeakSystemPrompt(),
-          },
-          ...baseMessages,
-        ],
-      },
-    });
+    try {
+      result = await requestChatCompletionAllowingModelOverride({
+        baseUrl,
+        headers,
+        modelOverride,
+        timeoutMs: input.timeoutMs,
+        body: {
+          model,
+          user: input.sessionUser,
+          temperature: 0.1,
+          messages: withAdditionalSystemInstruction(baseMessages, buildNoToolLeakSystemPrompt()),
+        },
+      });
+    } catch {
+      // Keep the original answer if the corrective retry is rejected by the provider.
+    }
   }
 
   if (looksLikeLeakedToolCallContent(result.content)) {
-    result = await requestChatCompletionAllowingModelOverride({
-      baseUrl,
-      headers,
-      modelOverride,
-      timeoutMs: input.timeoutMs,
-      body: {
-        model,
-        user: input.sessionUser,
-        temperature: 0,
-        messages: [
-          {
-            role: 'system',
-            content: [
-              buildNoToolLeakSystemPrompt(),
-              '直接回答当前问题，不要先说“让我先查看”或“我先执行”。',
-            ].join('\n'),
-          },
-          {
-            role: 'user',
-            content: input.prompt,
-          },
-        ],
-      },
-    });
+    try {
+      result = await requestChatCompletionAllowingModelOverride({
+        baseUrl,
+        headers,
+        modelOverride,
+        timeoutMs: input.timeoutMs,
+        body: {
+          model,
+          user: input.sessionUser,
+          temperature: 0,
+          messages: [
+            {
+              role: 'system',
+              content: [
+                buildNoToolLeakSystemPrompt(),
+                '直接回答当前问题，不要先说“让我先查看”或“我先执行”。',
+              ].join('\n'),
+            },
+            {
+              role: 'user',
+              content: input.prompt,
+            },
+          ],
+        },
+      });
+    } catch {
+      // Keep the original answer if the fallback retry is rejected by the provider.
+    }
   }
 
   return {
