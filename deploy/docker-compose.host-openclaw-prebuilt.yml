@@ -1,0 +1,61 @@
+name: ai-data-platform
+
+services:
+  api:
+    image: langfuse/langfuse:3
+    working_dir: /srv/ai-data-platform/apps/api
+    entrypoint: ["node", "dist/server.js"]
+    env_file:
+      - ../apps/api/.env
+    environment:
+      PORT: 3100
+      HOST: 0.0.0.0
+      AI_DATA_PLATFORM_STORAGE_ROOT: /data/storage
+      OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:18789}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${API_PORT:-3100}:3100"
+    volumes:
+      - ../prebuilt-runtime:/srv/ai-data-platform:ro
+      - /home/xigma01/.openclaw:/home/xigma01/.openclaw:ro
+      - /home/xigma01/.openclaw:/home/nextjs/.openclaw:ro
+      - ai_data_platform_storage:/data/storage
+    restart: unless-stopped
+
+  web:
+    image: langfuse/langfuse:3
+    working_dir: /srv/ai-data-platform/apps/web
+    entrypoint: ["node", "server.js"]
+    env_file:
+      - ../apps/web/.env
+    environment:
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      BACKEND_API_BASE_URL: http://api:3100
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3002}:3000"
+    volumes:
+      - ../prebuilt-runtime:/srv/ai-data-platform:ro
+    restart: unless-stopped
+
+  worker:
+    image: langfuse/langfuse:3
+    working_dir: /srv/ai-data-platform/apps/worker
+    entrypoint: ["node", "dist/index.js"]
+    env_file:
+      - ../apps/worker/.env
+    environment:
+      API_BASE_URL: http://api:3100
+      DOCUMENT_SCAN_DIR: /data/storage/files
+    depends_on:
+      - api
+    volumes:
+      - ../prebuilt-runtime:/srv/ai-data-platform:ro
+      - ai_data_platform_storage:/data/storage
+    restart: unless-stopped
+
+volumes:
+  ai_data_platform_storage:

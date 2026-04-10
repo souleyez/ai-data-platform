@@ -1,0 +1,27 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "ollama/qwen2.5:7b",
+        "fallbacks": []
+      },
+      "models": {
+        "ollama/qwen2.5:7b": {}
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "qwen2.5:7b",
+            "name": "Qwen 2.5 7B"
+          }
+        ]
+      }
+    }
+  }
+}
