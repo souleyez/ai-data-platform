@@ -310,7 +310,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     }
   }
 
-  if (output.type !== 'answer') {
+  if (!backgroundHandoff && !guard.requiresConfirmation && mode !== 'fallback' && output.type !== 'answer') {
     try {
       savedReport = await persistChatOutputIfNeeded({
         prompt,

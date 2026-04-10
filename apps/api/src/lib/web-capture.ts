@@ -1497,7 +1497,7 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     const title = landing.title || normalizedTask.url;
     const entries = await collectRankedEntries(normalizedTask, landing, runtimeAuth, jar);
     const summary = entries.length
-      ? `本次按“优先高评价、不求抓全”的策略筛出 ${entries.length} 篇候选内容，已去重后写入文档中心。`
+      ? `本次按“优先高评价、不求抓全”的策略筛出 ${entries.length} 篇候选内容，已去重后写入数据集。`
       : normalizedTask.crawlMode === 'listing-detail'
         ? 'Discovery mode did not find listing/detail candidates; kept the landing page overview only. Check seed URLs or use browser/API capture for shell pages.'
         : summarizeText(landing.text, normalizedTask.focus);

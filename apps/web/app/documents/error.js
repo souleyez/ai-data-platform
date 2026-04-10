@@ -19,7 +19,7 @@ export default function DocumentsError({ error, reset }) {
         <section className="card documents-card" style={{ maxWidth: 760 }}>
           <div className="panel-header">
             <div>
-              <h3>文档中心加载异常</h3>
+              <h3>数据集加载异常</h3>
               <p>下面是当前前端异常信息，可以直接复制给我。</p>
             </div>
           </div>

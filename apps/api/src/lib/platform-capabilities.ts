@@ -57,8 +57,8 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
   },
   {
     id: 'documents',
-    label: 'Document center',
-    description: 'Browse library material, inspect parsed detail, and run maintenance actions on the document base.',
+    label: 'Dataset center',
+    description: 'Browse dataset material, inspect parsed detail, and run maintenance actions on the indexed dataset base.',
     abilities: [
       'List libraries and documents.',
       'Inspect one document with parsed detail and source availability.',
@@ -170,10 +170,10 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
   {
     id: 'reports',
     label: 'Report center',
-    description: 'Generate and revise outputs from matched library material across all supported output formats.',
+    description: 'Generate, revise, and persist outputs from matched library material across all supported output formats.',
     abilities: [
       'Generate table, static page, DOC/DOCX-style document, Markdown document, PDF, and PPT outputs.',
-      'List reusable output templates and persist a document-center file as a reusable report template.',
+      'List reusable output templates and persist a dataset file as a reusable report template.',
       'List saved outputs and revise an existing output by instruction.',
       'Store generated report-center outputs back into the corresponding knowledge library as Markdown documents by default.',
       'Keep report generation available on the CLI as the canonical execution layer.',
@@ -192,7 +192,7 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
       {
         key: 'reports.template-from-document',
         command: 'pnpm system:control -- reports template-from-document --document "<document-id>" [--label "<template-name>"] [--type table|static-page|ppt|document] [--default true]',
-        description: 'Promote one document-center file into a reusable report template reference.',
+        description: 'Promote one dataset file into a reusable report template reference.',
       },
       {
         key: 'reports.outputs',
@@ -253,6 +253,7 @@ export const PLATFORM_INTEGRATIONS: PlatformIntegration[] = [
     description: 'Primary model gateway and agent runtime used by the platform.',
     capabilities: [
       'Normal and full chat both supply context into OpenClaw.',
+      'Full mode should avoid unnecessary host-side restrictions and let OpenClaw continue multi-step work when possible.',
       'Native search is preferred when available.',
       'CLI should be treated as the canonical system action surface.',
     ],
@@ -337,6 +338,7 @@ export const PLATFORM_INTEGRATIONS: PlatformIntegration[] = [
 export const PLATFORM_BASE_RULES = [
   'Treat the CLI command domains as the canonical execution surface for platform actions.',
   'Chat orchestration should stay minimal: supply context, enforce template confirmation, and otherwise let OpenClaw decide.',
+  'In full mode, keep host-side restrictions light and let OpenClaw decide most platform actions.',
   'Never claim an action completed unless the host returns an execution result.',
   'Default web search is available for realtime questions.',
 ];

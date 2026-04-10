@@ -36,8 +36,14 @@ export function buildSystemCapabilityContextBlock(input: {
 }) {
   const modeLabel = input.mode === 'full' ? 'full' : 'service';
   const writeLabel = input.capabilities.canModifyLocalSystemFiles
-    ? 'You may plan writable system actions when the host explicitly confirms execution.'
+    ? 'You are in full intelligence mode. Keep host-side restrictions light and let OpenClaw decide when to inspect, search, capture, generate, or continue multi-step work through the platform surface.'
     : 'You are in read-first mode and must not pretend that writable system actions were executed.';
+  const actionStyleLabel = input.mode === 'full'
+    ? 'In full mode, avoid leaking raw tool-call markup or internal command tags, but otherwise prefer completing the task end-to-end instead of narrowing it to plain Q&A.'
+    : 'Capability awareness is descriptive. In ordinary service chat, do not emit raw tool-call markup, invoke tags, Bash plans, or CLI command blocks unless the user explicitly asks for command text.';
+  const executionBoundaryLabel = input.mode === 'full'
+    ? 'If the host has not yet supplied an execution result, continue from the available context and choose the next useful platform-aware step, but never claim a system action has already completed without a real result.'
+    : 'If the host has not supplied an execution result, answer directly from the available context instead of planning commands.';
 
   return [
     'You are operating inside the AI data platform itself, not a generic standalone chat box.',
@@ -46,8 +52,8 @@ export function buildSystemCapabilityContextBlock(input: {
     ...buildPlatformCapabilityContextLines(),
     writeLabel,
     'When users ask what the system can do, or ask for an action that matches the platform surface, answer as someone who already understands these features and can choose the next appropriate action.',
-    'Capability awareness is descriptive. In ordinary chat, do not emit raw tool-call markup, invoke tags, Bash plans, or CLI command blocks unless the user explicitly asks for command text.',
-    'If the host has not supplied an execution result, answer directly from the available context instead of planning commands.',
+    actionStyleLabel,
+    executionBoundaryLabel,
     'Do not describe internal routing or orchestration. Answer naturally and act as if you understand the platform surface already.',
     'If no execution result is supplied by the host, never claim a system action has already been completed.',
   ].join('\n');

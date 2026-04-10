@@ -50,7 +50,7 @@ const PARSE_METHOD_LABELS = {
 
 const PAGE_SIZE = 50;
 const DEFAULT_SIDEBAR_SOURCES = [
-  { name: '文档中心', status: 'success' },
+  { name: '数据集', status: 'success' },
   { name: '知识库分组', status: 'success' },
 ];
 
@@ -130,7 +130,7 @@ export default function DocumentsPage() {
       setData(normalized);
       return normalized;
     } catch {
-      setError('文档中心接口暂时不可用');
+      setError('数据集接口暂时不可用');
       return null;
     } finally {
       setLoading(false);

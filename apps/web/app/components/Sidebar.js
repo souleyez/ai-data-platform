@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const DESKTOP_NAV_LINKS = [
   { label: '智能工作台', href: '/' },
-  { label: '文档中心', href: '/documents' },
+  { label: '数据集', href: '/documents' },
   { label: '数据源中心', href: '/datasources' },
   { label: '报告中心', href: '/reports' },
   { label: '审计中心', href: '/audit' },
@@ -12,7 +12,7 @@ const DESKTOP_NAV_LINKS = [
 
 const MOBILE_NAV_LINKS = [
   { label: '智能工作台', href: '/' },
-  { label: '文档中心', href: '/documents' },
+  { label: '数据集', href: '/documents' },
   { label: '报告中心', href: '/reports' },
 ];
 

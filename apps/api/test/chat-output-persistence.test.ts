@@ -96,6 +96,35 @@ test('resolveChatOutputReportGroup should try library label when key does not ma
   assert.equal(group?.key, '广州ai');
 });
 
+test('resolveChatOutputReportGroup should fall back to the ungrouped or first available group', () => {
+  const group = resolveChatOutputReportGroup(
+    [
+      {
+        key: 'ungrouped',
+        label: '未分组',
+        description: 'fallback group',
+        triggerKeywords: [],
+        defaultTemplateKey: 'ungrouped-page',
+        templates: [
+          {
+            key: 'ungrouped-page',
+            label: '默认静态页',
+            type: 'static-page',
+            description: '默认页面模板',
+            supported: true,
+          },
+        ],
+        referenceImages: [],
+      },
+      ...GROUPS,
+    ],
+    [],
+    '',
+  );
+
+  assert.equal(group?.key, 'ungrouped');
+});
+
 test('buildChatOutputDynamicSource should only create page dynamic sources with libraries', () => {
   const dynamicSource = buildChatOutputDynamicSource({
     prompt: '请把简历库做成客户汇报静态页',

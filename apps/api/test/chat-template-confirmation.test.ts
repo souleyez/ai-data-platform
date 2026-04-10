@@ -83,3 +83,19 @@ test('system capability context should always mention default web search', () =>
   assert.match(text, /do not emit raw tool-call markup/i);
   assert.doesNotMatch(text, /Command:\s+pnpm system:control/i);
 });
+
+test('system capability context should keep full mode permissive while still hiding raw tool markup', () => {
+  const text = buildSystemCapabilityContextBlock({
+    mode: 'full',
+    capabilities: {
+      canReadLocalFiles: true,
+      canImportLocalFiles: true,
+      canModifyLocalSystemFiles: true,
+    },
+  });
+
+  assert.match(text, /full/i);
+  assert.match(text, /keep host-side restrictions light/i);
+  assert.match(text, /avoid leaking raw tool-call markup/i);
+  assert.doesNotMatch(text, /answer directly from the available context instead of planning commands/i);
+});

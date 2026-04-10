@@ -252,7 +252,7 @@ export default function DatasourceComposerCard({
           </button>
         ) : null}
         <span className="datasource-inline-note">
-          当前会优先保留文档中心能力，采集与深度解析继续走后台任务。
+          当前会优先保留数据集能力，采集与深度解析继续走后台任务。
         </span>
       </div>
     </section>

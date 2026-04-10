@@ -54,10 +54,10 @@ export default async function DocumentPreviewPage({ params }) {
           <header className="topbar">
             <div>
               <h2>文件预览</h2>
-              <p>未找到对应文档，请返回文档中心重试。</p>
+              <p>未找到对应文档，请返回数据集重试。</p>
             </div>
             <div className="topbar-actions">
-              <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
+              <a href="/documents" className="ghost-btn back-link">返回数据集</a>
             </div>
           </header>
         </main>
@@ -95,7 +95,7 @@ export default async function DocumentPreviewPage({ params }) {
             ) : (
               <span className="ghost-btn disabled-btn" aria-disabled="true">原文件暂不可下载</span>
             )}
-            <a href="/documents" className="ghost-btn back-link">返回文档中心</a>
+            <a href="/documents" className="ghost-btn back-link">返回数据集</a>
           </div>
         </header>
 

@@ -39,7 +39,10 @@ export function resolveChatOutputReportGroup(
     }
   }
 
-  return findReportGroupForPrompt(groups, prompt) || null;
+  return findReportGroupForPrompt(groups, prompt)
+    || resolveReportGroup(groups, 'ungrouped')
+    || groups[0]
+    || null;
 }
 
 export function buildChatOutputDynamicSource(input: {
@@ -48,20 +51,20 @@ export function buildChatOutputDynamicSource(input: {
   libraries: ChatLibraryRef[];
   reportTemplate?: ChatReportTemplateRef;
 }) {
-  if (input.output.type !== 'page') return null;
-
   const libraries = normalizeLibraries(input.libraries);
   if (!libraries.length) return null;
 
   const now = new Date().toISOString();
   const templateKey = String(input.reportTemplate?.key || '').trim();
   const templateLabel = String(input.reportTemplate?.label || '').trim();
+  const outputType = input.output.type === 'answer' ? 'md' : input.output.type;
+  if (outputType !== 'page' && outputType !== 'md') return null;
   const conceptMode = !templateKey;
 
   const dynamicSource: ReportDynamicSource = {
     enabled: true,
-    request: String(input.prompt || input.output.title || '').trim(),
-    outputType: 'page',
+    request: String(input.prompt || ('title' in input.output ? input.output.title : '') || '').trim(),
+    outputType,
     conceptMode,
     templateKey: conceptMode ? '' : templateKey,
     templateLabel: conceptMode ? '' : templateLabel,
@@ -83,16 +86,16 @@ export async function persistChatOutputIfNeeded(input: {
   reportTemplate?: ChatReportTemplateRef;
 }) {
   if (!shouldPersistChatOutput(input.output)) return null;
+  const output = input.output as Exclude<ChatOutput, { type: 'answer' }>;
 
   const state = await loadReportCenterState();
   const group = resolveChatOutputReportGroup(state.groups, input.libraries, input.prompt);
   if (!group) return null;
-
-  const output = input.output as Exclude<ChatOutput, { type: 'answer' }>;
+  const normalizedLibraries = normalizeLibraries(input.libraries);
   const dynamicSource = buildChatOutputDynamicSource({
     prompt: input.prompt,
     output,
-    libraries: input.libraries,
+    libraries: normalizedLibraries,
     reportTemplate: input.reportTemplate,
   });
 
@@ -112,7 +115,7 @@ export async function persistChatOutputIfNeeded(input: {
         }
       : null,
     page: output.page || null,
-    libraries: normalizeLibraries(input.libraries),
+    libraries: normalizedLibraries,
     dynamicSource,
   });
 

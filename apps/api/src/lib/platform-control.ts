@@ -796,7 +796,7 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
         label: templateLabel,
         type: templateType,
         description: String(flags.description || '').trim()
-          || `由文档中心文件“${document.title || document.name}”创建的输出模板。`,
+          || `由数据集文件“${document.title || document.name}”创建的输出模板。`,
         isDefault: resolveBooleanFlag(flags.default),
       });
       const reference = await addSharedTemplateReferenceFileFromPath(createdTemplate.key, {

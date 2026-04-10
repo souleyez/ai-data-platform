@@ -114,7 +114,7 @@ export default function IngestFeedback({
                       加入指定分组
                     </button>
                     {!availableLibraries.length ? (
-                      <span style={{ fontSize: 13, color: '#64748b' }}>先去文档中心创建知识库分组。</span>
+                      <span style={{ fontSize: 13, color: '#64748b' }}>先去数据集创建知识库分组。</span>
                     ) : null}
                   </div>
                 </>
@@ -130,7 +130,7 @@ export default function IngestFeedback({
 
       {fallbackLink ? (
         <a href="/documents" className="ref-chip" style={{ display: 'inline-block', marginTop: 12 }}>
-          前往文档中心
+          前往数据集
         </a>
       ) : null}
     </div>
