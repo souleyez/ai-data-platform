@@ -128,71 +128,23 @@ Reference config:
 - `curl http://127.0.0.1:3100/api/health`
 - open the app frontend and verify the main user flows
 
-## Current production integration on `120.24.251.24`
+## Deployment profiles
 
-The current `120.24.251.24` deployment keeps the application in local-provider-first mode and uses `home` only as a fallback path for model access.
+This document only covers the common application-node deployment flow.
 
-### Runtime intent
+Server-specific runtime differences should live under:
 
-- local provider first
-- `home` shared platform as model fallback only
-- temporary tests may switch to `HOME_PLATFORM_BRIDGE_MODE=home-first`, but production should stay `local-first`
+- [deploy/profiles/120](/C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/profiles/120)
+- [deploy/profiles/10](/C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/profiles/10)
 
-### Server-specific manual override
+The intended node model is:
 
-The current production server uses a `systemd` drop-in file that is not stored in this repository:
+- every node stays independently runnable
+- local capability remains preferred when present
+- `home` acts as shared fallback for model access
+- stable node identity is reported through `HOME_PLATFORM_*`
 
-- `/etc/systemd/system/ai-data-platform-model-bridge.service.d/home-platform.conf`
-
-It currently defines:
-
-```ini
-[Service]
-Environment="HOME_PLATFORM_BASE_URL=http://ad.goods-editor.com/platform-api/api"
-Environment="HOME_PLATFORM_BRIDGE_MODE=local-first"
-Environment="HOME_PLATFORM_PROJECT_KEY=ai-data-platform"
-Environment="HOME_PLATFORM_PRINCIPAL_KEY=server:120.24.251.24"
-Environment="HOME_PLATFORM_PRINCIPAL_LABEL=AI-120"
-Environment="HOME_PLATFORM_DEVICE_FINGERPRINT=bridge:120.24.251.24:18790"
-Environment="HOME_PLATFORM_PROVIDER=minimax"
-Environment="HOME_PLATFORM_MODEL=MiniMax-M2.7"
-```
-
-This drop-in is required because the 120 server uses the local model bridge service as the stable switching point. After recreating or replacing the server, restore this file, then run:
-
-1. `systemctl daemon-reload`
-2. `systemctl restart ai-data-platform-model-bridge.service`
-
-The current 120 deployment also keeps the app services bound to `127.0.0.1` and rejects direct public access to `3001/3002/3100/3210` at the host firewall layer. Preserve that boundary when rebuilding the machine.
-
-The current 120 deployment also requires longer `nginx` proxy timeouts on `/api/` because chat requests can legitimately run longer than the default reverse-proxy window. If the domain starts returning `504` while local loopback calls still succeed, restore the timeout values from the example `nginx` config before touching the app code.
-
-### Expected bridge health on 120
-
-In the normal production configuration, this command should show local-first mode:
-
-```bash
-curl http://127.0.0.1:18790/health
-```
-
-Expected shape:
-
-```json
-{
-  "status": "ok",
-  "service": "http-model-bridge",
-  "mode": "local-provider-preferred",
-  "provider": "minimax",
-  "model": "minimax/MiniMax-M2.7",
-  "fallback": "home-platform"
-}
-```
-
-That output means:
-
-- 120 uses its local MiniMax key first
-- if the local path fails, it can fall back to `home`
-- `home` is not the primary production dependency for model serving
+If you need the current production details for `120.24.251.24`, use the 120 profile files instead of embedding that state into the common deployment guide.
 
 ## Remote deploy helper
 

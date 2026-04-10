@@ -1,0 +1,9 @@
+[Service]
+Environment="HOME_PLATFORM_BASE_URL=http://<server-1-home-host>/platform-api/api"
+Environment="HOME_PLATFORM_BRIDGE_MODE=local-first"
+Environment="HOME_PLATFORM_PROJECT_KEY=ai-data-platform"
+Environment="HOME_PLATFORM_PRINCIPAL_KEY=server:<server-10-host>"
+Environment="HOME_PLATFORM_PRINCIPAL_LABEL=AI-10"
+Environment="HOME_PLATFORM_DEVICE_FINGERPRINT=bridge:<server-10-host>:18790"
+Environment="HOME_PLATFORM_PROVIDER=minimax"
+Environment="HOME_PLATFORM_MODEL=MiniMax-M2.7"
