@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OLLAMA_BIN="${OLLAMA_BIN:-ollama}"
+OLLAMA_HOST_URL="${OLLAMA_HOST_URL:-http://127.0.0.1:11435}"
+BASE_MODEL="${OLLAMA_PROFILE_BASE_MODEL:-gemma4:31b}"
+TARGET_MODEL="${OLLAMA_PROFILE_TARGET_MODEL:-gemma4:31b-tuned}"
+NUM_CTX="${OLLAMA_PROFILE_NUM_CTX:-32768}"
+NUM_GPU="${OLLAMA_PROFILE_NUM_GPU:-30}"
+NUM_THREAD="${OLLAMA_PROFILE_NUM_THREAD:-6}"
+USE_MMAP="${OLLAMA_PROFILE_USE_MMAP:-false}"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+cat >"${TMP_DIR}/Modelfile" <<EOF
+FROM ${BASE_MODEL}
+PARAMETER num_ctx ${NUM_CTX}
+PARAMETER num_gpu ${NUM_GPU}
+PARAMETER num_thread ${NUM_THREAD}
+PARAMETER use_mmap ${USE_MMAP}
+EOF
+
+echo "Creating ${TARGET_MODEL} from ${BASE_MODEL}"
+OLLAMA_HOST="${OLLAMA_HOST_URL}" "${OLLAMA_BIN}" create "${TARGET_MODEL}" -f "${TMP_DIR}/Modelfile"
+
+echo "---"
+OLLAMA_HOST="${OLLAMA_HOST_URL}" "${OLLAMA_BIN}" show --parameters "${TARGET_MODEL}"

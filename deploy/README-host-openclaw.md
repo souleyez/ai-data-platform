@@ -117,3 +117,51 @@ OLLAMA_MODELS="$HOME/.ollama-host/models" \
 Then update `~/.openclaw/openclaw.json` so the Ollama provider `baseUrl` points to
 `http://127.0.0.1:11435`, restart the host OpenClaw gateway, and verify the app through
 `/api/chat`.
+
+## Containerized GPU Ollama
+
+If the host binary does not detect CUDA correctly, prefer a standalone Ollama container with
+ GPU passthrough and keep the same loopback port for OpenClaw:
+
+- `deploy/server/start-container-ollama.sh`
+- `deploy/server/stop-container-ollama.sh`
+
+Recommended host pattern:
+
+```bash
+mkdir -p "$HOME/.ollama-host/models"
+OLLAMA_IMAGE_REF=ollama/ollama:0.20.4 \
+OLLAMA_HOST_PORT=11435 \
+OLLAMA_CONTEXT_LENGTH=32768 \
+OLLAMA_NUM_PARALLEL=1 \
+OLLAMA_FLASH_ATTENTION=true \
+OLLAMA_KV_CACHE_TYPE=q8_0 \
+bash deploy/server/start-container-ollama.sh
+```
+
+This shape expects Docker with NVIDIA runtime support and mounts `~/.ollama-host` into the
+container as `/root/.ollama`, so pulled models can be reused across restarts or between host
+and container deployments.
+
+## Ollama Runtime Profile
+
+To create a reusable tuned model alias with runtime parameters baked into the Modelfile:
+
+- `deploy/server/create-ollama-profile.sh`
+
+Example:
+
+```bash
+OLLAMA_BIN="docker exec ollama-gpu ollama" \
+OLLAMA_HOST_URL=http://127.0.0.1:11435 \
+OLLAMA_PROFILE_BASE_MODEL=gemma4:31b \
+OLLAMA_PROFILE_TARGET_MODEL=gemma4:31b-tuned \
+OLLAMA_PROFILE_NUM_CTX=32768 \
+OLLAMA_PROFILE_NUM_GPU=30 \
+OLLAMA_PROFILE_NUM_THREAD=6 \
+OLLAMA_PROFILE_USE_MMAP=false \
+bash deploy/server/create-ollama-profile.sh
+```
+
+This is useful when you want the application to always select a specific profile such as
+`gemma4:31b-tuned` instead of the base model.
