@@ -29,6 +29,7 @@ function formatBotChannels(item) {
 
 function buildDraft(item) {
   return {
+    intelligenceMode: String(item?.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: String(item?.systemPrompt || item?.systemPromptSummary || '').trim(),
     libraryAccessLevel: Number.isFinite(Number(item?.libraryAccessLevel))
       ? Math.max(0, Math.floor(Number(item.libraryAccessLevel)))
@@ -147,6 +148,7 @@ export default function ConnectedBotAccessEditor({
     setError('');
     try {
       await onSave(item.id, {
+        intelligenceMode: draft.intelligenceMode === 'full' ? 'full' : 'service',
         systemPrompt: String(draft.systemPrompt || '').trim(),
         libraryAccessLevel: Math.max(0, Math.floor(Number(draft.libraryAccessLevel || 0))),
         visibleLibraryKeys: Array.isArray(draft.visibleLibraryKeys) ? draft.visibleLibraryKeys : [],
@@ -224,6 +226,23 @@ export default function ConnectedBotAccessEditor({
 
               <div className="connected-bot-editor-grid">
                 <label className="bot-field">
+                  <span>智能模式</span>
+                  <select
+                    disabled={!manageEnabled}
+                    value={draft.intelligenceMode}
+                    onChange={(event) => setDrafts((prev) => ({
+                      ...prev,
+                      [item.id]: {
+                        ...draft,
+                        intelligenceMode: event.target.value === 'full' ? 'full' : 'service',
+                      },
+                    }))}
+                  >
+                    <option value="service">普通一问一答</option>
+                    <option value="full">全智能</option>
+                  </select>
+                </label>
+                <label className="bot-field">
                   <span>文档权限等级</span>
                   <input
                     type="number"
@@ -256,6 +275,15 @@ export default function ConnectedBotAccessEditor({
                   />
                   <span>设为默认机器人</span>
                 </label>
+
+                <div className="bot-field bot-field-readonly">
+                  <span>模式说明</span>
+                  <div className="bot-config-subtle">
+                    {draft.intelligenceMode === 'full'
+                      ? '已开启全智能。机器人会优先按全智能方式处理任务，但文档库仍只按当前权限规则可见。'
+                      : '保持普通一问一答模式，只按常规聊天方式工作。'}
+                  </div>
+                </div>
 
                 <label className="bot-field connected-bot-editor-prompt">
                   <span>自然语言约束</span>

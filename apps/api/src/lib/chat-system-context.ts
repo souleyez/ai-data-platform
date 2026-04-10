@@ -71,7 +71,8 @@ export function buildBotConfigurationMemoryContextBlock(input: {
       const visibleLibraries = bot.visibleLibraryKeys.length
         ? bot.visibleLibraryKeys.join(' | ')
         : 'access-level only';
-      return `- ${bot.name} [${bot.id}] | channels: ${summarizeBotChannels(bot)} | access level: L${bot.libraryAccessLevel}+ | visible libraries: ${visibleLibraries} | guidance: ${summarizeBotPrompt(bot.systemPrompt)}`;
+      const intelligenceMode = bot.intelligenceMode === 'full' ? 'full' : 'service';
+      return `- ${bot.name} [${bot.id}] | mode: ${intelligenceMode} | channels: ${summarizeBotChannels(bot)} | access level: L${bot.libraryAccessLevel}+ | visible libraries: ${visibleLibraries} | guidance: ${summarizeBotPrompt(bot.systemPrompt)}`;
     })
     : ['- No bots are configured yet.'];
   const libraryLines = libraries.length
@@ -131,6 +132,7 @@ export function buildBotIdentityContextBlock(input: {
     `Bot name: ${input.bot.name}`,
     `Bot id: ${input.bot.id}`,
     `Current channel: ${input.channel}`,
+    `Bot intelligence mode: ${input.bot.intelligenceMode === 'full' ? 'full' : 'service'}`,
     `Library access level: ${input.bot.libraryAccessLevel}`,
     `Additional library filter: ${additionalLibraryFilter}`,
     `Include ungrouped: ${input.bot.includeUngrouped ? 'yes' : 'no'}`,

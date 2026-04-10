@@ -39,6 +39,10 @@ function normalizeMode(value: unknown): IntelligenceMode {
   return String(value || '').trim().toLowerCase() === 'full' ? 'full' : 'service';
 }
 
+export function resolveEffectiveIntelligenceMode(...modes: Array<unknown>): IntelligenceMode {
+  return modes.some((item) => normalizeMode(item) === 'full') ? 'full' : 'service';
+}
+
 function normalizePersistedIntelligenceModeState(value: unknown): IntelligenceModeState {
   const source = isRecord(value) ? value as PersistedIntelligenceModeState : {};
   return {

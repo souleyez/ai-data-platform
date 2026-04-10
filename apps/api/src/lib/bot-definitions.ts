@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { verifyAccessKey } from './access-keys.js';
 import { loadDocumentLibraries } from './document-libraries.js';
-import { getIntelligenceModeStatus } from './intelligence-mode.js';
+import { getIntelligenceModeStatus, type IntelligenceMode } from './intelligence-mode.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { REPO_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
 
@@ -24,6 +24,7 @@ export type BotDefinition = {
   description: string;
   enabled: boolean;
   isDefault: boolean;
+  intelligenceMode?: IntelligenceMode;
   systemPrompt: string;
   libraryAccessLevel: number;
   visibleLibraryKeys: string[];
@@ -45,6 +46,7 @@ export type PublicBotSummary = {
   description: string;
   enabled: boolean;
   isDefault: boolean;
+  intelligenceMode?: IntelligenceMode;
   libraryAccessLevel: number;
   systemPromptSummary: string;
   channelBindings: Array<{ channel: BotChannel; enabled: boolean; configured: boolean }>;
@@ -121,6 +123,7 @@ function normalizeBotDefinition(value: unknown, fallbackId = ''): BotDefinition 
     description: normalizeText(source.description),
     enabled: source.enabled !== false,
     isDefault: source.isDefault === true,
+    intelligenceMode: String(source.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: normalizeText(source.systemPrompt),
     libraryAccessLevel: normalizeLibraryAccessLevel(source.libraryAccessLevel),
     visibleLibraryKeys: uniqueList(Array.isArray(source.visibleLibraryKeys) ? source.visibleLibraryKeys : []),
@@ -349,6 +352,7 @@ export function buildPublicBotSummary(bot: BotDefinition): PublicBotSummary {
     description: bot.description,
     enabled: bot.enabled,
     isDefault: bot.isDefault,
+    intelligenceMode: bot.intelligenceMode === 'full' ? 'full' : 'service',
     libraryAccessLevel: bot.libraryAccessLevel,
     systemPromptSummary: bot.systemPrompt,
     channelBindings: bot.channelBindings.map((item) => ({

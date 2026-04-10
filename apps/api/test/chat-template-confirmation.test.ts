@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSystemCapabilityContextBlock } from '../src/lib/chat-system-context.js';
+import { buildBotIdentityContextBlock, buildSystemCapabilityContextBlock } from '../src/lib/chat-system-context.js';
 import { shouldRequireTemplateConfirmation } from '../src/lib/chat-template-confirmation.js';
 
 function buildSupply(overrides = {}) {
@@ -98,4 +98,30 @@ test('system capability context should keep full mode permissive while still hid
   assert.match(text, /keep host-side restrictions light/i);
   assert.match(text, /avoid leaking raw tool-call markup/i);
   assert.doesNotMatch(text, /answer directly from the available context instead of planning commands/i);
+});
+
+test('bot identity context should include bot intelligence mode while keeping library boundaries', () => {
+  const text = buildBotIdentityContextBlock({
+    channel: 'web',
+    bot: {
+      id: 'contract-bot',
+      name: '合同助手',
+      slug: 'contract-bot',
+      description: '',
+      enabled: true,
+      isDefault: false,
+      intelligenceMode: 'full',
+      systemPrompt: '只处理合同问题',
+      libraryAccessLevel: 1,
+      visibleLibraryKeys: ['contract'],
+      includeUngrouped: false,
+      includeFailedParseDocuments: false,
+      channelBindings: [{ channel: 'web', enabled: true }],
+      updatedAt: '2026-04-11T00:00:00.000Z',
+    },
+  });
+
+  assert.match(text, /Bot intelligence mode: full/);
+  assert.match(text, /Library access level: 1/);
+  assert.match(text, /must not imply access to knowledge outside the visible libraries/i);
 });

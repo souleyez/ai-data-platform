@@ -23,7 +23,11 @@ import {
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
-import { getIntelligenceModeStatus } from './intelligence-mode.js';
+import {
+  getIntelligenceModeStatus,
+  resolveEffectiveIntelligenceMode,
+  resolveIntelligenceCapabilities,
+} from './intelligence-mode.js';
 import type { ChatOutput } from './knowledge-output.js';
 import type { ResolvedChannelAccess } from './channel-access-resolver.js';
 
@@ -134,6 +138,11 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     listBotDefinitionsForManage(),
     loadDocumentLibraries(),
   ]);
+  const effectiveIntelligenceMode = resolveEffectiveIntelligenceMode(
+    intelligence.mode,
+    botDefinition?.intelligenceMode,
+  );
+  const effectiveIntelligenceCapabilities = resolveIntelligenceCapabilities(effectiveIntelligenceMode);
   const traceId = `trace_${Date.now()}`;
   const requestMode = input.mode || 'general';
   const existingKnowledgeState = requestMode === 'knowledge_output'
@@ -144,8 +153,8 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     : null;
   const systemContextBlocks = [
     buildSystemCapabilityContextBlock({
-      mode: intelligence.mode,
-      capabilities: intelligence.capabilities,
+      mode: effectiveIntelligenceMode,
+      capabilities: effectiveIntelligenceCapabilities,
     }),
     buildBotIdentityContextBlock({
       bot: botDefinition,
@@ -349,9 +358,9 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     },
     sources: [],
     permissions: {
-      mode: intelligence.mode,
-      readOnly: !intelligence.capabilities.canModifyLocalSystemFiles,
-      capabilities: intelligence.capabilities,
+      mode: effectiveIntelligenceMode,
+      readOnly: !effectiveIntelligenceCapabilities.canModifyLocalSystemFiles,
+      capabilities: effectiveIntelligenceCapabilities,
     },
     orchestration: {
       mode,
@@ -359,7 +368,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       docMatches: libraries.length,
       evidenceMode,
       gatewayConfigured,
-      intelligenceMode: intelligence.mode,
+      intelligenceMode: effectiveIntelligenceMode,
       fallbackReason: mode === 'fallback' ? fallbackReason : '',
       backgroundContinuation: backgroundHandoff,
       searchEnabledByDefault: true,

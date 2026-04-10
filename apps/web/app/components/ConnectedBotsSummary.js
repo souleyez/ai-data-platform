@@ -65,6 +65,12 @@ function summarizeExternalDirectorySources(item) {
   return `${labels.slice(0, 2).join(' / ')} 等 ${labels.length} 个映射`;
 }
 
+function formatIntelligenceMode(item) {
+  return String(item?.intelligenceMode || '').trim().toLowerCase() === 'full'
+    ? '全智能'
+    : '普通一问一答';
+}
+
 export function filterConnectedBots(items = []) {
   return (Array.isArray(items) ? items : []).filter((item) => (
     item?.enabled !== false && getConnectedBindings(item).length > 0
@@ -112,6 +118,10 @@ export default function ConnectedBotsSummary({
               </span>
             </div>
             {item?.description ? <p className="connected-bot-description">{item.description}</p> : null}
+            <div className="connected-bot-guidance">
+              <span>智能模式</span>
+              <strong>{formatIntelligenceMode(item)}</strong>
+            </div>
             <div className="connected-bot-guidance">
               <span>自然语言约束</span>
               <strong>{summarizePrompt(item)}</strong>

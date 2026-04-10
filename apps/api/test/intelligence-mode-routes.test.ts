@@ -14,6 +14,9 @@ function importFresh<T>(specifier: string): Promise<T> {
 const appModule = await importFresh<typeof import('../src/app.js')>(
   '../src/app.js',
 );
+const intelligenceModeModule = await importFresh<typeof import('../src/lib/intelligence-mode.js')>(
+  '../src/lib/intelligence-mode.js',
+);
 const app = appModule.createApp();
 
 test.after(async () => {
@@ -120,4 +123,10 @@ test('root and health endpoints should expose current intelligence mode', async 
   assert.equal(health.json().readOnly, false);
   assert.equal(health.json().intelligenceMode, 'full');
   assert.equal(health.json().capabilities.canModifyLocalSystemFiles, true);
+});
+
+test('resolveEffectiveIntelligenceMode should allow bot full mode to elevate service mode', () => {
+  assert.equal(intelligenceModeModule.resolveEffectiveIntelligenceMode('service', 'service'), 'service');
+  assert.equal(intelligenceModeModule.resolveEffectiveIntelligenceMode('service', 'full'), 'full');
+  assert.equal(intelligenceModeModule.resolveEffectiveIntelligenceMode('full', 'service'), 'full');
 });
