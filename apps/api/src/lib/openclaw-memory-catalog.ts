@@ -128,7 +128,7 @@ function extractDocumentUpdatedAt(item: ParsedDocument) {
     item.cloudStructuredAt,
     item.retainedAt,
     item.originalDeletedAt,
-    item.categoryConfirmedAt,
+    item.groupConfirmedAt,
   ]
     .map((value) => String(value || '').trim())
     .filter(Boolean)

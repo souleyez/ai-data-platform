@@ -17,6 +17,7 @@ const readOperations = await importFresh<typeof import('../src/lib/document-rout
 
 const cacheFile = path.join(storageRoot, 'cache', 'documents-cache.json');
 const documentConfigFile = path.join(storageRoot, 'config', 'document-categories.json');
+const librariesFile = path.join(storageRoot, 'config', 'document-libraries.json');
 const queueFile = path.join(storageRoot, 'cache', 'document-deep-parse-queue.json');
 
 test.after(async () => {
@@ -26,12 +27,24 @@ test.after(async () => {
 async function seedDocumentCache() {
   await fs.mkdir(path.dirname(cacheFile), { recursive: true });
   const generatedAt = '2026-04-07T09:30:00.000Z';
+  const legacyConfirmedAt = '2026-04-06T08:00:00.000Z';
   const scanRoot = path.join(storageRoot, 'files');
   await fs.mkdir(path.dirname(documentConfigFile), { recursive: true });
   await fs.writeFile(documentConfigFile, JSON.stringify({
     scanRoot,
     scanRoots: [scanRoot],
     updatedAt: generatedAt,
+  }, null, 2), 'utf8');
+  await fs.writeFile(librariesFile, JSON.stringify({
+    items: [
+      {
+        key: 'order',
+        label: '订单分析',
+        description: '订单与库存运营资料',
+        permissionLevel: 0,
+        createdAt: generatedAt,
+      },
+    ],
   }, null, 2), 'utf8');
   await fs.writeFile(cacheFile, JSON.stringify({
     generatedAt,
@@ -54,6 +67,7 @@ async function seedDocumentCache() {
         extractedChars: 120,
         groups: ['order'],
         confirmedGroups: ['order'],
+        categoryConfirmedAt: legacyConfirmedAt,
         parseStage: 'quick',
         schemaType: 'order',
         topicTags: ['订单', '经营'],
@@ -63,7 +77,7 @@ async function seedDocumentCache() {
       },
     ],
   }, null, 2), 'utf8');
-  return generatedAt;
+  return { generatedAt, legacyConfirmedAt };
 }
 
 async function fileExists(filePath: string) {
@@ -76,7 +90,7 @@ async function fileExists(filePath: string) {
 }
 
 test('document read operations should stay read-only and expose read telemetry', async () => {
-  const generatedAt = await seedDocumentCache();
+  const { generatedAt, legacyConfirmedAt } = await seedDocumentCache();
 
   const indexPayload = await readOperations.loadDocumentsIndexRoutePayload();
   const overviewPayload = await readOperations.loadDocumentsOverviewRoutePayload();
@@ -88,12 +102,14 @@ test('document read operations should stay read-only and expose read telemetry',
   assert.equal(indexPayload.lastScanAt, generatedAt);
   assert.equal(typeof indexPayload.durationMs, 'number');
   assert.equal(indexPayload.items.length, 1);
+  assert.equal(indexPayload.items[0]?.groupConfirmedAt, legacyConfirmedAt);
 
   assert.equal(overviewPayload.cacheHit, true);
   assert.equal(overviewPayload.loadedFrom, 'cache');
   assert.equal(overviewPayload.generatedAt, generatedAt);
   assert.equal(overviewPayload.lastScanAt, generatedAt);
   assert.equal(typeof overviewPayload.durationMs, 'number');
+  assert.equal('scenarioKey' in (overviewPayload.libraries.find((library) => library.key === 'order') || {}), false);
 
   assert.equal(librariesPayload.loadedFrom, 'cache');
   assert.equal(librariesPayload.generatedAt, generatedAt);

@@ -41,12 +41,3 @@ export function sortLibrariesForDisplay(libraries = [], items = []) {
     return String(a?.label || '').localeCompare(String(b?.label || ''), 'zh-CN');
   });
 }
-
-export function resolveLibraryScenarioKey(library, items = [], libraries = []) {
-  if (!library) return 'default';
-
-  if (['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'].includes(String(library.key || ''))) {
-    return library.key === 'paper' ? 'paper' : library.key;
-  }
-  return 'default';
-}

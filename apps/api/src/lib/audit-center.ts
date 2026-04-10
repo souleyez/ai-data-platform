@@ -392,7 +392,7 @@ export async function buildAuditSnapshot() {
 
   const rawDocumentItems = await Promise.all(documents.map(async (item) => {
     const createdAt = item.originalDeletedAt || await statCreatedAt(item.path);
-    const ageDays = diffDays(createdAt || item.categoryConfirmedAt || new Date().toISOString());
+    const ageDays = diffDays(createdAt || item.groupConfirmedAt || new Date().toISOString());
     const libraries = getDocumentGroups(item);
     const documentId = buildDocumentId(item.path);
     const reportReferenceCount = reportState.outputs.filter((output) => libraries.includes(String(output.groupKey || ''))).length;

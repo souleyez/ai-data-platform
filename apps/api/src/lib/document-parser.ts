@@ -31,7 +31,7 @@ export type ParsedDocument = {
   title: string;
   category: string;
   bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'footfall' | 'general';
-  categoryConfirmedAt?: string;
+  groupConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   parseMethod?: string;
   summary: string;

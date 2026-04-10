@@ -104,7 +104,7 @@ export function applyDocumentOverrides(items: ParsedDocument[], overrides: Recor
       confirmedGroups: hasGroups ? (matched.groups || []) : item.confirmedGroups,
       suggestedGroups: matched.suggestedGroups?.length ? matched.suggestedGroups : item.suggestedGroups,
       ignored: matched.ignored === true,
-      categoryConfirmedAt: hasGroups ? matched.confirmedAt : item.categoryConfirmedAt,
+      groupConfirmedAt: hasGroups ? matched.confirmedAt : item.groupConfirmedAt,
     };
   });
 }

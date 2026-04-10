@@ -10,6 +10,11 @@ function normalizeLegacyBizCategory(value: ParsedDocument['bizCategory'] | undef
   return 'general';
 }
 
+function resolveGroupConfirmedAt(item: ParsedDocument & { categoryConfirmedAt?: string }) {
+  const value = String(item.groupConfirmedAt || item.categoryConfirmedAt || '').trim();
+  return value || undefined;
+}
+
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
 }
@@ -57,6 +62,8 @@ function normalizeDoseLabel(value: string) {
 }
 
 export function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
+  const legacyItem = item as ParsedDocument & { categoryConfirmedAt?: string };
+  const { categoryConfirmedAt: _legacyCategoryConfirmedAt, ...baseItem } = legacyItem;
   const allowedStrains = uniqStrings(item.intentSlots?.strains)
     .filter(isValidStrainCandidate)
     .map(normalizeStrainLabel)
@@ -92,10 +99,11 @@ export function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
   const bizCategory = forceGenericNoise ? 'general' : normalizeLegacyBizCategory(item.bizCategory);
 
   return refreshDerivedSchemaProfile({
-    ...item,
+    ...baseItem,
     schemaType,
     category,
     bizCategory,
+    groupConfirmedAt: resolveGroupConfirmedAt(legacyItem),
     claims: (item.claims || [])
       .map((claim) => ({
         ...claim,

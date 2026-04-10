@@ -91,7 +91,7 @@ export async function saveConfirmedDocumentGroups(updates: Array<{ id?: string; 
     acc.push(buildPreviewItemFromDocument({
       ...found,
       confirmedGroups: result.groups,
-      categoryConfirmedAt: result.confirmedAt,
+      groupConfirmedAt: result.confirmedAt,
     }, 'file', undefined, libraries));
     return acc;
   }, []);

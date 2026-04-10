@@ -32,6 +32,7 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     parseStage?: string;
     schemaType?: string;
     structuredProfile?: Record<string, unknown>;
+    groupConfirmedAt?: string;
     categoryConfirmedAt?: string;
     retainedAt?: string;
     originalDeletedAt?: string;
@@ -63,7 +64,7 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     parseStage: source.parseStage,
     schemaType: source.schemaType,
     structuredProfile: source.structuredProfile,
-    groupConfirmedAt: source.categoryConfirmedAt,
+    groupConfirmedAt: source.groupConfirmedAt || source.categoryConfirmedAt,
     retainedAt: source.retainedAt,
     originalDeletedAt: source.originalDeletedAt,
     detailParseStatus: source.detailParseStatus,
@@ -78,16 +79,6 @@ export function extractDocumentTimestamp(item: { name?: string; path?: string })
   const text = `${item?.name || ''} ${item?.path || ''}`;
   const match = text.match(/(\d{13})/);
   return match ? Number(match[1]) : 0;
-}
-
-export function resolveLibraryScenarioKey(
-  library: { key: string },
-  _items: Array<Record<string, unknown>>,
-) {
-  if (['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'].includes(String(library.key || ''))) {
-    return library.key === 'paper' ? 'paper' : library.key;
-  }
-  return 'default';
 }
 
 export function buildMatchedFolders(
@@ -185,7 +176,6 @@ export function buildDocumentsOverviewPayload(input: {
         ...library,
         documentCount: matchedItems.length,
         lastUpdatedAt,
-        scenarioKey: resolveLibraryScenarioKey(library, matchedItems),
       };
     })
     .sort((a, b) => {

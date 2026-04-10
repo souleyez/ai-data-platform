@@ -792,9 +792,10 @@ function buildDocumentTimestamp(item: {
   detailParsedAt?: string;
   cloudStructuredAt?: string;
   retainedAt?: string;
+  groupConfirmedAt?: string;
   categoryConfirmedAt?: string;
 }) {
-  const timestamps = [item.detailParsedAt, item.cloudStructuredAt, item.retainedAt, item.categoryConfirmedAt]
+  const timestamps = [item.detailParsedAt, item.cloudStructuredAt, item.retainedAt, item.groupConfirmedAt, item.categoryConfirmedAt]
     .map((value) => {
       const date = value ? new Date(value) : null;
       return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
@@ -825,7 +826,7 @@ function matchesDynamicLibraries(
 }
 
 function matchesTimeRange(
-  item: { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; categoryConfirmedAt?: string },
+  item: { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; groupConfirmedAt?: string; categoryConfirmedAt?: string },
   timeRange?: string,
 ) {
   const text = String(timeRange || '').trim();
@@ -1013,7 +1014,7 @@ async function buildDynamicPageRecord(
 
   const scopedDocuments = documents
     .filter((item) => matchesDynamicLibraries(item as { groups?: string[]; confirmedGroups?: string[]; suggestedGroups?: string[] }, source.libraries))
-    .filter((item) => matchesTimeRange(item as { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; categoryConfirmedAt?: string }, source.timeRange));
+    .filter((item) => matchesTimeRange(item as { detailParsedAt?: string; cloudStructuredAt?: string; retainedAt?: string; groupConfirmedAt?: string; categoryConfirmedAt?: string }, source.timeRange));
 
   const query = [source.contentFocus, source.request].filter(Boolean).join(' ').trim();
   const rankedDocuments = query
