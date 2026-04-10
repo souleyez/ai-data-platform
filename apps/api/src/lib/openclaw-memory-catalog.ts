@@ -9,27 +9,17 @@ import {
   type ReportOutputRecord,
   type SharedReportTemplate,
 } from './report-center.js';
-import {
-  MEMORY_ROOT,
-  STORAGE_CONFIG_DIR,
-} from './paths.js';
+import { MEMORY_ROOT, STORAGE_CONFIG_DIR } from './paths.js';
 import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 import {
   diffOpenClawMemoryState,
   OPENCLAW_MEMORY_STATE_VERSION,
-  type OpenClawMemoryChange,
   type OpenClawMemoryDocumentState,
   type OpenClawMemoryState,
 } from './openclaw-memory-changes.js';
 import { refreshBotMemoryCatalogs } from './bot-memory-catalog.js';
 
-const CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
-const LIBRARIES_DIR = path.join(CATALOG_ROOT, 'libraries');
-const DOCUMENTS_DIR = path.join(CATALOG_ROOT, 'documents');
-const TEMPLATES_DIR = path.join(CATALOG_ROOT, 'templates');
-const REPORTS_DIR = path.join(CATALOG_ROOT, 'reports');
-const CHANGES_DIR = path.join(CATALOG_ROOT, 'changes');
-const ARCHIVE_DIR = path.join(CHANGES_DIR, 'archive');
+const LEGACY_CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
 const STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
 const CATALOG_DOCUMENT_LIMIT = Math.max(1000, Number(process.env.OPENCLAW_MEMORY_CATALOG_DOCUMENT_LIMIT || 20000));
 const SMALL_LIBRARY_DETAIL_LIMIT = Math.max(3, Number(process.env.OPENCLAW_MEMORY_SMALL_LIBRARY_DETAIL_LIMIT || 20));
@@ -123,22 +113,6 @@ function sanitizeList(values: unknown[], maxLength = 80, limit = 6) {
 
 function sanitizeFact(value: unknown, maxLength = 160) {
   return sanitizeText(value, maxLength).replace(/^[-:：\s]+/, '').trim();
-}
-
-function slugifyKey(value: string) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '') || 'default';
-}
-
-function formatIsoDateTime(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return '-';
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : date.toISOString();
 }
 
 function extractDocumentUpdatedAt(item: ParsedDocument) {
@@ -647,12 +621,7 @@ export async function buildOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemo
   };
 }
 
-async function ensureCatalogDirs() {
-  await fs.mkdir(LIBRARIES_DIR, { recursive: true });
-  await fs.mkdir(DOCUMENTS_DIR, { recursive: true });
-  await fs.mkdir(TEMPLATES_DIR, { recursive: true });
-  await fs.mkdir(REPORTS_DIR, { recursive: true });
-  await fs.mkdir(ARCHIVE_DIR, { recursive: true });
+async function ensureStateDir() {
   await fs.mkdir(STORAGE_CONFIG_DIR, { recursive: true });
 }
 
@@ -676,187 +645,12 @@ async function writeState(state: OpenClawMemoryState) {
   });
 }
 
-function renderIndex(snapshot: OpenClawMemoryCatalogSnapshot, recentChanges: OpenClawMemoryChange[]) {
-  const topLibraries = snapshot.libraries
-    .slice(0, 10)
-    .map((library) => `- ${library.label} (${library.documentCount} docs, ${library.availableCount} available)`)
-    .join('\n');
-  const topChanges = recentChanges
-    .slice(0, 20)
-    .map((item) => `- ${item.happenedAt} | ${item.type} | ${item.title}`)
-    .join('\n');
-
-  return [
-    '# OpenClaw Knowledge Catalog',
-    '',
-    `- Last sync: ${formatIsoDateTime(snapshot.generatedAt)}`,
-    `- Libraries: ${snapshot.libraryCount}`,
-    `- Documents: ${snapshot.documentCount}`,
-    `- Templates: ${snapshot.templateCount}`,
-    `- Saved outputs: ${snapshot.outputCount}`,
-    '',
-    '## Libraries',
-    topLibraries || '- None',
-    '',
-    '## Recent Changes',
-    topChanges || '- None',
-    '',
-  ].join('\n');
-}
-
-function renderLibraryFile(library: OpenClawMemoryLibrarySnapshot) {
-  return [
-    `# Library: ${library.label}`,
-    '',
-    `- Key: ${library.key}`,
-    `- Description: ${library.description || '-'}`,
-    `- Documents: ${library.documentCount}`,
-    `- Available: ${library.availableCount}`,
-    `- Audit excluded: ${library.auditExcludedCount}`,
-    `- Structured only: ${library.structuredOnlyCount}`,
-    `- Unsupported or parse error: ${library.unsupportedCount}`,
-    `- Latest update: ${formatIsoDateTime(library.latestUpdateAt)}`,
-    `- Memory detail level: ${library.memoryDetailLevel}`,
-    '',
-    '## Representative Documents',
-    ...(library.representativeDocumentTitles.length
-      ? library.representativeDocumentTitles.map((item) => `- ${item}`)
-      : ['- None']),
-    '',
-    '## Suggested Question Types',
-    ...(library.suggestedQuestionTypes.length
-      ? library.suggestedQuestionTypes.map((item) => `- ${item}`)
-      : ['- None']),
-    '',
-  ].join('\n');
-}
-
-function renderDocumentsFile(library: OpenClawMemoryLibrarySnapshot, cards: CatalogDocumentCard[]) {
-  const sections = cards.map((item) => [
-    `## ${item.title}`,
-    `- Document ID: ${item.id}`,
-    `- Name: ${item.name}`,
-    `- Availability: ${item.availability}`,
-    `- Updated at: ${formatIsoDateTime(item.updatedAt)}`,
-    `- Schema: ${item.schemaType || '-'}`,
-    `- Business category: ${item.bizCategory || '-'}`,
-    `- Parse status: ${item.parseStatus || '-'}`,
-    `- Parse stage: ${item.parseStage || '-'}`,
-    `- Detail parse status: ${item.detailParseStatus || '-'}`,
-    `- Memory detail level: ${item.detailLevel}`,
-    `- Summary: ${item.summary || '-'}`,
-    ...(item.topicTags.length
-      ? [`- Topic tags: ${item.topicTags.join(', ')}`]
-      : []),
-    ...(item.keyFacts.length
-      ? ['- Key facts:', ...item.keyFacts.map((fact) => `  - ${fact}`)]
-      : []),
-    ...(item.evidenceHighlights.length
-      ? ['- Evidence hints:', ...item.evidenceHighlights.map((fact) => `  - ${fact}`)]
-      : []),
-    '',
-  ].join('\n'));
-
-  return [
-    `# Documents: ${library.label}`,
-    '',
-    `- Key: ${library.key}`,
-    `- Card count: ${cards.length}`,
-    '',
-    ...(sections.length ? sections : ['No documents.']),
-    '',
-  ].join('\n');
-}
-
-function renderRecentChanges(changes: OpenClawMemoryChange[]) {
-  return [
-    '# Recent Catalog Changes',
-    '',
-    ...(changes.length
-      ? changes.map((item) => `- ${item.happenedAt} | ${item.type} | ${item.title} | ${item.note}`)
-      : ['- None']),
-    '',
-  ].join('\n');
-}
-
-function renderTemplatesFile(templates: OpenClawMemoryTemplateSnapshot[]) {
-  return [
-    '# Shared Template Catalog',
-    '',
-    'Reusable page, table, and document results can be published into the local report center for preview, revision, and reopening.',
-    'The templates below are optional publishing skeletons and reference layouts, not mandatory routing rules.',
-    '',
-    ...(templates.length
-      ? templates.map((template) => [
-        `## ${template.label}`,
-        `- Template key: ${template.key}`,
-        `- Type: ${template.type}`,
-        `- Origin: ${template.origin}${template.isDefault ? ' | default' : ''}`,
-        `- Description: ${template.description || '-'}`,
-        `- Matched libraries: ${template.groupLabels.join(' | ') || '-'}`,
-        `- Output hint: ${template.outputHint || '-'}`,
-        ...(template.pageSections.length ? [`- Page sections: ${template.pageSections.join(' | ')}`] : []),
-        ...(template.tableColumns.length ? [`- Table columns: ${template.tableColumns.join(' | ')}`] : []),
-        ...(template.fixedStructure.length ? [`- Fixed structure: ${template.fixedStructure.join(' | ')}`] : []),
-        ...(template.variableZones.length ? [`- Variable zones: ${template.variableZones.join(' | ')}`] : []),
-        ...(template.referenceNames.length ? [`- Reference files: ${template.referenceNames.join(' | ')}`] : []),
-        '',
-      ].join('\n'))
-      : ['- None', '']),
-  ].join('\n');
-}
-
-function renderOutputsFile(outputs: OpenClawMemoryReportOutputSnapshot[]) {
-  return [
-    '# Saved Report Outputs',
-    '',
-    'These are reusable outputs already published into the local report center. They can be reopened, revised, and reused.',
-    '',
-    ...(outputs.length
-      ? outputs.map((item) => [
-        `## ${item.title || item.id}`,
-        `- Output id: ${item.id}`,
-        `- Kind: ${item.kind}`,
-        `- Template: ${item.templateLabel || '-'}`,
-        `- Libraries: ${item.libraryLabels.join(' | ') || '-'}`,
-        `- Trigger source: ${item.triggerSource}`,
-        `- Created at: ${formatIsoDateTime(item.createdAt)}`,
-        `- Updated at: ${formatIsoDateTime(item.updatedAt)}`,
-        `- Reusable: ${item.reusable ? 'yes' : 'no'}`,
-        `- Summary: ${item.summary || '-'}`,
-        '',
-      ].join('\n'))
-      : ['- None', '']),
-  ].join('\n');
-}
-
-async function writeCatalogFiles(
-  snapshot: OpenClawMemoryCatalogSnapshot,
-  state: OpenClawMemoryState,
-) {
-  const cards = sortDocumentCards(snapshot.documents);
-  await fs.rm(CATALOG_ROOT, { recursive: true, force: true });
-  await ensureCatalogDirs();
-
-  await fs.writeFile(path.join(CATALOG_ROOT, 'index.md'), renderIndex(snapshot, state.recentChanges), 'utf8');
-  await fs.writeFile(path.join(CHANGES_DIR, 'recent.md'), renderRecentChanges(state.recentChanges), 'utf8');
-  await fs.writeFile(path.join(TEMPLATES_DIR, 'index.md'), renderTemplatesFile(snapshot.templates), 'utf8');
-  await fs.writeFile(path.join(REPORTS_DIR, 'index.md'), renderOutputsFile(snapshot.outputs), 'utf8');
-
-  for (const library of snapshot.libraries) {
-    const fileKey = slugifyKey(library.key);
-    await fs.writeFile(path.join(LIBRARIES_DIR, `${fileKey}.md`), renderLibraryFile(library), 'utf8');
-    const libraryCards = cards.filter((item) => item.libraryKeys.includes(library.key));
-    await fs.writeFile(
-      path.join(DOCUMENTS_DIR, `${fileKey}.md`),
-      renderDocumentsFile(library, libraryCards),
-      'utf8',
-    );
-  }
+async function removeLegacyCatalogFiles() {
+  await fs.rm(LEGACY_CATALOG_ROOT, { recursive: true, force: true });
 }
 
 export async function refreshOpenClawMemoryCatalog() {
-  await ensureCatalogDirs();
+  await ensureStateDir();
   const snapshot = await buildOpenClawMemoryCatalogSnapshot();
   const previousState = await readPreviousState();
   const nextState = diffOpenClawMemoryState({
@@ -875,7 +669,7 @@ export async function refreshOpenClawMemoryCatalog() {
     })),
     generatedAt: snapshot.generatedAt,
   });
-  await writeCatalogFiles(snapshot, nextState);
+  await removeLegacyCatalogFiles();
   await writeState(nextState);
   const botRefresh = await refreshBotMemoryCatalogs(nextState);
   return {
@@ -887,6 +681,5 @@ export async function refreshOpenClawMemoryCatalog() {
     changeCount: nextState.recentChanges.length,
     changedThisRun: nextState.recentChanges.filter((item) => item.happenedAt === snapshot.generatedAt).length,
     botCount: botRefresh.botCount,
-    memoryRoot: CATALOG_ROOT,
   };
 }
