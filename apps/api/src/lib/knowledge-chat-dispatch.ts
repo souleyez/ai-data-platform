@@ -72,6 +72,7 @@ async function runCloudChatWithSearchFallback(input: {
     chatHistory,
     contextBlocks: fallbackContext ? [...contextBlocks, fallbackContext] : contextBlocks,
     timeoutMs: cloudTimeoutMs,
+    preferResponses: true,
   });
 }
 

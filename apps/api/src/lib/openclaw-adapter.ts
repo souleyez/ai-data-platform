@@ -25,6 +25,7 @@ export type OpenClawChatRequest = {
   sessionUser?: string;
   modelOverride?: string;
   timeoutMs?: number;
+  preferResponses?: boolean;
 };
 
 export type OpenClawChatResult = {
@@ -394,12 +395,37 @@ async function requestOpenResponses(
   }
 }
 
+async function requestOpenResponsesWithRetry(
+  baseUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  timeoutMs?: number,
+) {
+  const maxAttempts = 1 + getGatewayRetryCount();
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await requestOpenResponses(baseUrl, headers, body, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableCloudGatewayError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, getGatewayRetryDelayMs(attempt)));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('OpenResponses request failed');
+}
+
 export function isRetryableCloudGatewayError(error: unknown) {
   const message = String(error instanceof Error ? error.message : error || '').toLowerCase();
   if (!message) return false;
 
   return (
-    /cloud gateway request failed \((500|502|503|504)\)/.test(message)
+    /(?:cloud gateway|openresponses)\s+request failed \((500|502|503|504)\)/.test(message)
+    || /request failed \((500|502|503|504)\)/.test(message)
     || message.includes('unknown error, 520')
     || message.includes('"type":"server_error"')
     || message.includes('temporarily unavailable')
@@ -426,6 +452,27 @@ function extractResponseOutputText(payload: OpenClawResponsesPayload) {
     }
   }
   return blocks.join('\n\n').trim();
+}
+
+async function requestOpenResponsesAllowingModelOverride(params: {
+  baseUrl: string;
+  headers: Record<string, string>;
+  body: unknown;
+  modelOverride?: string;
+  timeoutMs?: number;
+}) {
+  const modelOverride = resolveOpenClawModelOverride(params.modelOverride);
+
+  try {
+    return await requestOpenResponsesWithRetry(params.baseUrl, params.headers, params.body, params.timeoutMs);
+  } catch (error) {
+    if (!modelOverride || !isOpenClawModelOverrideDeniedError(error)) {
+      throw error;
+    }
+
+    await ensureAllowedOpenClawModel(modelOverride);
+    return requestOpenResponsesWithRetry(params.baseUrl, params.headers, params.body, params.timeoutMs);
+  }
 }
 
 export async function tryRunOpenClawNativeWebSearchChat(input: OpenClawChatRequest): Promise<OpenClawChatResult | null> {
@@ -585,6 +632,40 @@ export async function runOpenClawChat(input: OpenClawChatRequest): Promise<OpenC
   if (modelOverride) headers['x-openclaw-model'] = modelOverride;
 
   const baseMessages = buildMessages(input);
+
+  if (input.preferResponses) {
+    try {
+      const responsePayload = await requestOpenResponsesAllowingModelOverride({
+        baseUrl,
+        headers,
+        modelOverride,
+        timeoutMs: input.timeoutMs,
+        body: {
+          model,
+          user: input.sessionUser,
+          input: buildResponsesInput(input),
+          instructions: buildResponsesInstructions(input, false),
+          temperature: 0.2,
+          reasoning: {
+            effort: 'medium',
+            summary: 'auto',
+          },
+        },
+      });
+      const responseContent = extractResponseOutputText(responsePayload);
+      if (responseContent && !looksLikeLeakedToolCallContent(responseContent) && !looksLikeOnboardingDrift(responseContent)) {
+        return {
+          content: responseContent,
+          provider: 'cloud-gateway',
+          model: modelOverride || selectedModel || model || 'cloud-model',
+          raw: responsePayload,
+        };
+      }
+    } catch {
+      // Fall back to chat completions for gateways or bridges that do not yet
+      // support the responses endpoint or fail to complete tool execution.
+    }
+  }
 
   let result = await requestChatCompletionAllowingModelOverride({
     baseUrl,

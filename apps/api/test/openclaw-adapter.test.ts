@@ -27,6 +27,10 @@ test('isRetryableCloudGatewayError should treat provider 500 and 520 failures as
     isRetryableCloudGatewayError(new Error('Cloud gateway request failed (502): upstream connect error or disconnect/reset before headers')),
     true,
   );
+  assert.equal(
+    isRetryableCloudGatewayError(new Error('OpenResponses request failed (503): upstream temporarily unavailable')),
+    true,
+  );
 });
 
 test('isRetryableCloudGatewayError should not retry prompt or auth errors', () => {

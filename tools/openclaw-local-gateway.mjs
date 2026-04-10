@@ -245,6 +245,57 @@ function sendJson(reply, statusCode, payload) {
   reply.end(JSON.stringify(payload));
 }
 
+function buildResponsesPayloadFromChatPayload(chatPayload, requestedModel) {
+  const text = String(chatPayload?.choices?.[0]?.message?.content || '').trim();
+  return {
+    id: chatPayload?.id || `openclaw-response-${Date.now()}`,
+    object: 'response',
+    model: chatPayload?.model || requestedModel || 'openclaw',
+    output: text
+      ? [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text }],
+          },
+        ]
+      : [],
+  };
+}
+
+function buildChatBodyFromResponsesRequest(body) {
+  const inputItems = Array.isArray(body?.input) ? body.input : [];
+  const messages = [];
+  const instructions = String(body?.instructions || '').trim();
+  if (instructions) {
+    messages.push({
+      role: 'system',
+      content: instructions,
+    });
+  }
+
+  for (const item of inputItems) {
+    if (String(item?.type || '') !== 'message') continue;
+    const role = String(item?.role || '').trim().toLowerCase();
+    const content = String(item?.content || '').trim();
+    if (!content) continue;
+    if (role === 'assistant' || role === 'user') {
+      messages.push({ role, content });
+      continue;
+    }
+    if (role === 'system' || role === 'developer') {
+      messages.push({ role: 'system', content });
+    }
+  }
+
+  return {
+    model: body?.model,
+    user: body?.user,
+    temperature: body?.temperature ?? 0.2,
+    messages,
+  };
+}
+
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -401,6 +452,94 @@ async function handleChat(request, reply) {
   }
 }
 
+async function handleResponses(request, reply) {
+  try {
+    const body = await readJsonBody(request);
+    const payloadText = JSON.stringify(body);
+    const wslResponse = await tryWslGateway('POST', '/v1/responses', payloadText);
+    if (wslResponse?.status) {
+      let payload;
+      try {
+        payload = JSON.parse(wslResponse.body);
+      } catch {
+        payload = buildResponsesPayloadFromChatPayload({
+          id: `openclaw-wsl-response-${Date.now()}`,
+          model: body.model || 'openclaw',
+          choices: [
+            {
+              message: { content: wslResponse.body },
+            },
+          ],
+        }, body.model);
+      }
+
+      return sendJson(reply, wslResponse.status, payload);
+    }
+
+    if (!allowDirectProviderFallback()) {
+      throw new Error('local gateway could not reach the WSL OpenClaw gateway');
+    }
+
+    const chatBody = buildChatBodyFromResponsesRequest(body);
+    const config = await loadConfig();
+    const { provider, modelId, displayModel } = resolveRequestedModel(config, chatBody.model);
+    const headers = buildHeaders(provider, modelId);
+    const upstreamUrl = buildUpstreamUrl(provider.baseUrl);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), getProviderTimeoutMs());
+    const response = await fetch(upstreamUrl, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: modelId,
+        messages: Array.isArray(chatBody.messages) ? chatBody.messages : [],
+        temperature: chatBody.temperature ?? 0.2,
+        user: chatBody.user,
+        stream: false,
+      }),
+    });
+    clearTimeout(timer);
+
+    const text = await response.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = {
+        id: `openclaw-local-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: displayModel,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: text },
+            finish_reason: 'stop',
+          },
+        ],
+      };
+    }
+
+    if (!response.ok) {
+      return sendJson(reply, response.status, {
+        error: 'upstream_error',
+        detail: json,
+      });
+    }
+
+    return sendJson(reply, 200, buildResponsesPayloadFromChatPayload(json, displayModel));
+  } catch (error) {
+    const message = String(error?.message || error);
+    sendJson(reply, 500, {
+      error: 'gateway_error',
+      detail: message.includes('timed out after') || message.includes('The operation was aborted')
+        ? `local gateway upstream timed out: ${message}`
+        : message,
+    });
+  }
+}
+
 const server = http.createServer(async (request, reply) => {
   if (!request.url) {
     return sendJson(reply, 404, { error: 'not_found' });
@@ -412,6 +551,10 @@ const server = http.createServer(async (request, reply) => {
 
   if (request.method === 'POST' && request.url === '/v1/chat/completions') {
     return handleChat(request, reply);
+  }
+
+  if (request.method === 'POST' && request.url === '/v1/responses') {
+    return handleResponses(request, reply);
   }
 
   if (request.method === 'OPTIONS') {

@@ -148,6 +148,57 @@ function json(reply, statusCode, payload) {
   reply.end(JSON.stringify(payload));
 }
 
+function buildResponsesPayloadFromChatPayload(chatPayload, requestedModel) {
+  const text = String(chatPayload?.choices?.[0]?.message?.content || '').trim();
+  return {
+    id: chatPayload?.id || `bridge-response-${Date.now()}`,
+    object: 'response',
+    model: chatPayload?.model || requestedModel || defaultModel,
+    output: text
+      ? [
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text }],
+          },
+        ]
+      : [],
+  };
+}
+
+function buildChatBodyFromResponsesRequest(body) {
+  const inputItems = Array.isArray(body?.input) ? body.input : [];
+  const messages = [];
+  const instructions = String(body?.instructions || '').trim();
+  if (instructions) {
+    messages.push({
+      role: 'system',
+      content: instructions,
+    });
+  }
+
+  for (const item of inputItems) {
+    if (String(item?.type || '') !== 'message') continue;
+    const role = String(item?.role || '').trim().toLowerCase();
+    const content = String(item?.content || '').trim();
+    if (!content) continue;
+    if (role === 'assistant' || role === 'user') {
+      messages.push({ role, content });
+      continue;
+    }
+    if (role === 'system' || role === 'developer') {
+      messages.push({ role: 'system', content });
+    }
+  }
+
+  return {
+    model: body?.model,
+    user: body?.user,
+    temperature: body?.temperature ?? 0.2,
+    messages,
+  };
+}
+
 function readBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -390,6 +441,77 @@ async function handleChat(request, reply) {
   }
 }
 
+async function handleResponses(request, reply) {
+  try {
+    const body = await readBody(request);
+    const chatBody = buildChatBodyFromResponsesRequest(body);
+    const platformConfigured = hasPlatformProxyConfigured();
+    const bridgeMode = resolvePlatformBridgeMode();
+
+    if (platformConfigured && bridgeMode === 'home-first') {
+      try {
+        const { response, payload } = await requestHomePlatformChat(chatBody);
+        return json(reply, response.status, buildResponsesPayloadFromChatPayload(payload, chatBody.model));
+      } catch (error) {
+        if (!hasDirectProviderFallback()) {
+          throw error;
+        }
+      }
+    }
+
+    let lastDirectFailure = null;
+    if (hasDirectProviderFallback()) {
+      try {
+        const provider = resolveProvider(chatBody.model);
+        let { response, payload } = await requestChatCompletion(provider, chatBody);
+
+        if (fallbackModel && shouldFallback(response, payload)) {
+          const fallbackProvider = resolveProvider(fallbackModel);
+          const fallbackResult = await requestChatCompletion(fallbackProvider, chatBody);
+          response = fallbackResult.response;
+          payload = fallbackResult.payload;
+        }
+
+        if (response.ok) {
+          return json(reply, response.status, buildResponsesPayloadFromChatPayload(payload, chatBody.model));
+        }
+
+        lastDirectFailure = { response, payload };
+        if (!platformConfigured || bridgeMode === 'home-first') {
+          return json(reply, response.status, payload);
+        }
+      } catch (error) {
+        if (!platformConfigured || bridgeMode === 'home-first') {
+          throw error;
+        }
+      }
+    }
+
+    if (platformConfigured) {
+      try {
+        const { response, payload } = await requestHomePlatformChat(chatBody);
+        return json(reply, response.status, buildResponsesPayloadFromChatPayload(payload, chatBody.model));
+      } catch (error) {
+        if (lastDirectFailure) {
+          return json(reply, lastDirectFailure.response.status, lastDirectFailure.payload);
+        }
+        throw error;
+      }
+    }
+
+    if (lastDirectFailure) {
+      return json(reply, lastDirectFailure.response.status, lastDirectFailure.payload);
+    }
+
+    throw new Error('MODEL_BRIDGE_NO_PROVIDER_AVAILABLE');
+  } catch (error) {
+    return json(reply, 500, {
+      error: 'model_bridge_error',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 const server = http.createServer(async (request, reply) => {
   if (!request.url) {
     return json(reply, 404, { error: 'not_found' });
@@ -478,6 +600,10 @@ const server = http.createServer(async (request, reply) => {
 
   if (request.method === 'POST' && request.url === '/v1/chat/completions') {
     return handleChat(request, reply);
+  }
+
+  if (request.method === 'POST' && request.url === '/v1/responses') {
+    return handleResponses(request, reply);
   }
 
   return json(reply, 404, { error: 'not_found' });
