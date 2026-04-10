@@ -1,6 +1,11 @@
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
 import {
+  isFootfallDocumentSignal,
+  isIotDocumentSignal,
+  isPaperDocumentSignal,
+} from './document-domain-signals.js';
+import {
   matchDocumentEvidenceByPrompt,
   matchDocumentsByPrompt,
   type DocumentEvidenceMatch,
@@ -277,7 +282,7 @@ function scoreCandidatePreference(item: ParsedDocument, templateTask: TemplateTa
 }
 
 function isPaperLikeDocument(item: ParsedDocument) {
-  return item.schemaType === 'paper' || item.category === 'paper' || item.bizCategory === 'paper';
+  return isPaperDocumentSignal(item);
 }
 
 function isPurePaperCandidate(item: ParsedDocument) {
@@ -332,7 +337,7 @@ function isFootfallTemplateCandidate(item: ParsedDocument) {
   const profileText = JSON.stringify(item.structuredProfile || {}).toLowerCase();
   const summaryText = `${item.title || ''} ${item.summary || ''} ${(item.topicTags || []).join(' ')}`.toLowerCase();
   return (
-    String(item.bizCategory || '').toLowerCase() === 'footfall'
+    isFootfallDocumentSignal(item)
     || (
       String(item.schemaType || '').toLowerCase() === 'report'
       && /(footfall|visitor|客流|人流|商场分区|mall zone|shopping zone)/.test(`${summaryText} ${profileText}`)
@@ -344,7 +349,7 @@ function isFootfallTemplateCandidate(item: ParsedDocument) {
 function isIotTemplateCandidate(item: ParsedDocument) {
   const text = `${(item.confirmedGroups || []).join(' ')} ${(item.groups || []).join(' ')} ${item.title || ''} ${item.summary || ''}`.toLowerCase();
   return (
-    (String(item.bizCategory || '') === 'iot' || item.schemaType === 'technical' || item.category === 'technical')
+    isIotDocumentSignal(item)
     && /(iot|物联网|设备|网关|传感|平台|解决方案)/.test(text)
     && isHighValueKnowledgeDocument(item)
   );

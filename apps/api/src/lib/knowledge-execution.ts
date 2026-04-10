@@ -17,6 +17,7 @@ import {
   selectOpenClawMemoryDocumentCandidatesFromState,
   type OpenClawMemorySelection,
 } from './openclaw-memory-selection.js';
+import { isOrderInventoryDocumentSignal } from './document-domain-signals.js';
 import type { BotDefinition } from './bot-definitions.js';
 import type {
   OpenClawMemoryChange,
@@ -656,8 +657,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     const canComposeOrderInventoryPage = requestedKind === 'page'
       && templateTaskHint === 'order-static-page'
       && effectiveRetrieval.documents.some((item) => (
-        item.bizCategory === 'order'
-        || item.bizCategory === 'inventory'
+        isOrderInventoryDocumentSignal(item)
         || String(item.schemaType || '').toLowerCase() === 'report'
         || String(item.schemaType || '').toLowerCase() === 'order'
       ));

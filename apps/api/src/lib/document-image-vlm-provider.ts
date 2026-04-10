@@ -313,7 +313,6 @@ export function buildDocumentImageVlmPrompt(item: ParsedDocument, imagePath: str
     readablePath !== normalizedPath ? `Original Windows file path: ${normalizedPath}` : '',
     `Document title: ${item.title || item.name}`,
     `Category: ${item.category}`,
-    `Business category: ${item.bizCategory}`,
     `Current parse method: ${item.parseMethod || '-'}`,
     `Current summary: ${sanitizeText(item.summary, 400)}`,
     existingText ? `Existing OCR text or parse text:\n${existingText}` : '',

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
+import { isContractDocumentSignal, isPaperDocumentSignal } from './document-domain-signals.js';
 import { REPO_ROOT, STORAGE_FILES_DIR } from './paths.js';
 
 export type DocumentEvidenceMatch = {
@@ -177,18 +178,26 @@ function scoreDocumentMatch(item: ParsedDocument, keywords: string[], promptInte
     if (keywords.includes(keyword)) score += 3;
   }
 
-  for (const keyword of CATEGORY_KEYWORDS[item.bizCategory] ?? []) {
-    if (keywords.includes(keyword)) score += 4;
+  if (isContractDocumentSignal(item)) {
+    for (const keyword of CATEGORY_KEYWORDS.contract) {
+      if (keywords.includes(keyword)) score += 4;
+    }
+  }
+
+  if (isPaperDocumentSignal(item)) {
+    for (const keyword of CATEGORY_KEYWORDS.paper) {
+      if (keywords.includes(keyword)) score += 4;
+    }
   }
 
   if (promptIntent === 'contract') {
-    if (item.category === 'contract' || item.bizCategory === 'contract') score += 10;
-    else if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'paper') score -= 6;
+    if (isContractDocumentSignal(item)) score += 10;
+    else if (item.category === 'technical' || isPaperDocumentSignal(item)) score -= 6;
   }
 
   if (promptIntent === 'paper') {
-    if (item.category === 'technical' || item.category === 'paper' || item.bizCategory === 'paper') score += 10;
-    else if (item.category === 'contract' || item.bizCategory === 'contract') score -= 6;
+    if (item.category === 'technical' || isPaperDocumentSignal(item)) score += 10;
+    else if (isContractDocumentSignal(item)) score -= 6;
   }
 
   if (item.parseStatus === 'unsupported') score -= 18;

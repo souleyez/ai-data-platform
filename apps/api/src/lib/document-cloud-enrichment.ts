@@ -42,6 +42,14 @@ type CloudClaim = {
   evidenceText?: string;
 };
 
+function normalizeLegacyBizCategory(value: ParsedDocument['bizCategory'] | undefined): ParsedDocument['bizCategory'] {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'order' || normalized === 'inventory' || normalized === 'footfall') {
+    return normalized as ParsedDocument['bizCategory'];
+  }
+  return 'general';
+}
+
 type CloudDocumentStructure = {
   summary?: string;
   topicTags?: string[];
@@ -121,7 +129,6 @@ function buildDocumentContext(item: ParsedDocument) {
   return [
     `Title: ${item.title || item.name}`,
     `Category: ${item.category}`,
-    `Business category: ${item.bizCategory}`,
     `Existing summary: ${sanitizeText(item.summary, 500)}`,
     `Existing tags: ${(item.topicTags || []).join(', ') || 'none'}`,
     existingResumeFields,
@@ -480,7 +487,7 @@ async function enrichTextOne(
   );
   const schemaDerived = deriveSchemaProfile({
     category: item.category,
-    bizCategory: item.bizCategory,
+    bizCategory: normalizeLegacyBizCategory(item.bizCategory),
     title: item.title || item.name,
     topicTags,
     summary,

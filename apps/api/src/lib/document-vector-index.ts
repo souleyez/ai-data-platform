@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
+import { isFootfallDocumentSignal, isOrderDocumentSignal } from './document-domain-signals.js';
 import { REPO_ROOT, STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
 import { buildVectorRecordsForDocument, type DocumentVectorRecord } from './document-vector-records.js';
 
@@ -185,7 +186,7 @@ function isEligibleVectorCandidate(item: ParsedDocument) {
   }
 
   if (hasAssignedLibrary(item)) return true;
-  if ((item.schemaType || 'generic') === 'report' && !['order', 'footfall'].includes(String(item.bizCategory || ''))) return false;
+  if ((item.schemaType || 'generic') === 'report' && !isOrderDocumentSignal(item) && !isFootfallDocumentSignal(item)) return false;
   if (hasStrongBusinessSchema(item) && hasHighQualitySignals(item)) return true;
   return false;
 }

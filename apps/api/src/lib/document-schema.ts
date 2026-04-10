@@ -76,7 +76,10 @@ export function inferSchemaType(
   summary = '',
 ) {
   const topicEvidence = topicTags.join(' ').toLowerCase();
-  const classificationEvidence = `${category} ${bizCategory || ''} ${title} ${summary} ${topicEvidence}`.toLowerCase();
+  const heuristicBizCategory = ['order', 'inventory', 'footfall'].includes(String(bizCategory || '').toLowerCase())
+    ? String(bizCategory || '').toLowerCase()
+    : '';
+  const classificationEvidence = `${category} ${heuristicBizCategory} ${title} ${summary} ${topicEvidence}`.toLowerCase();
   const resumeEvidence = `${title} ${summary}`.toLowerCase();
   const hasTenderHint = hasTenderDocumentHint(classificationEvidence);
   const hasResumeHint = includesAnyText(resumeEvidence, [
@@ -95,20 +98,19 @@ export function inferSchemaType(
   if (bizCategory === 'order') return 'order' as const;
   if (bizCategory === 'footfall') return 'report' as const;
   if (bizCategory === 'inventory') return 'report' as const;
-  if (category === 'contract' || bizCategory === 'contract') return 'contract' as const;
+  if (category === 'contract') return 'contract' as const;
   if (hasTenderHint) return 'technical' as const;
   if (hasResumeHint || hasStrongResumeFields) return 'resume' as const;
   if (topicTags.includes('奶粉配方')) return 'formula' as const;
   if (
     category === 'report'
-    || bizCategory === 'daily'
     || (
-      ['order', 'inventory', 'service'].includes(bizCategory)
+      ['order', 'inventory'].includes(String(bizCategory || '').toLowerCase())
       && includesAnyText(topicEvidence, ['report', 'dashboard', 'analysis', 'sales', 'inventory', 'forecast', 'yoy', 'mom', 'gmv', 'stock'])
     )
   ) return 'report' as const;
   if (category === 'technical') return 'technical' as const;
-  if (category === 'paper' || bizCategory === 'paper') return 'paper' as const;
+  if (category === 'paper') return 'paper' as const;
   return 'generic' as const;
 }
 

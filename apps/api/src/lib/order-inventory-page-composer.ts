@@ -1,5 +1,10 @@
 import path from 'node:path';
 import type { ParsedDocument } from './document-parser.js';
+import {
+  isInventoryDocumentSignal,
+  isOrderDocumentSignal,
+  isOrderInventoryDocumentSignal,
+} from './document-domain-signals.js';
 import { isOpenClawGatewayConfigured, runOpenClawChat } from './openclaw-adapter.js';
 import type { ReportPlan } from './report-planner.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
@@ -277,9 +282,8 @@ export function isOrderInventoryEvidenceDocument(item: ParsedDocument) {
   if (containsSignal(evidenceText, ORDER_EVIDENCE_EXCLUDE_SIGNALS)) return false;
   if (/[\\/](skills|docs)[\\/]/i.test(String(item.path || ''))) return false;
 
-  const bizCategory = String(item.bizCategory || '').toLowerCase();
   const schemaType = String(item.schemaType || '').toLowerCase();
-  if (bizCategory === 'order' || bizCategory === 'inventory') return true;
+  if (isOrderInventoryDocumentSignal(item)) return true;
   if (schemaType === 'order') return true;
   if (hasStructuredOrderSignals(item)) return true;
   if (schemaType === 'report' && containsSignal(evidenceText, ORDER_EVIDENCE_INCLUDE_SIGNALS)) return true;
@@ -287,12 +291,11 @@ export function isOrderInventoryEvidenceDocument(item: ParsedDocument) {
 }
 
 function scoreOrderInventoryEvidenceDocument(item: ParsedDocument) {
-  const bizCategory = String(item.bizCategory || '').toLowerCase();
   const schemaType = String(item.schemaType || '').toLowerCase();
   let score = 0;
 
-  if (bizCategory === 'order') score += 60;
-  else if (bizCategory === 'inventory') score += 56;
+  if (isOrderDocumentSignal(item)) score += 60;
+  else if (isInventoryDocumentSignal(item)) score += 56;
 
   if (schemaType === 'order') score += 24;
   else if (schemaType === 'report') score += 18;
@@ -328,7 +331,9 @@ export function selectOrderInventoryEvidenceDocuments(
 
   return [...effective]
     .sort((left, right) => (
-      scoreOrderInventoryEvidenceDocument(right) - scoreOrderInventoryEvidenceDocument(left)
+      Number(isOrderDocumentSignal(right)) - Number(isOrderDocumentSignal(left))
+      || scoreOrderInventoryEvidenceDocument(right) - scoreOrderInventoryEvidenceDocument(left)
+      || Number(isInventoryDocumentSignal(right)) - Number(isInventoryDocumentSignal(left))
       || sanitizeText(left.title || left.name).localeCompare(sanitizeText(right.title || right.name), 'zh-CN')
     ))
     .slice(0, maxDocuments);
@@ -351,7 +356,6 @@ function buildDocumentSnapshot(item: ParsedDocument, compact = false) {
   return {
     name: sanitizeText(item.name, 120),
     title: selectOrderComposerDocumentTitle(item),
-    bizCategory: sanitizeText(item.bizCategory, 40),
     summary: sanitizeText(item.summary || item.excerpt, compact ? 100 : 160),
     topicTags: toStringArray(item.topicTags).slice(0, compact ? 2 : 4),
     structuredSignals: keys.reduce<JsonRecord>((acc, key) => {

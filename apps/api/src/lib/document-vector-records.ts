@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { ParsedDocument } from './document-parser.js';
+import {
+  isFootfallDocumentSignal,
+  isInventoryDocumentSignal,
+  isIotDocumentSignal,
+  isOrderDocumentSignal,
+} from './document-domain-signals.js';
 
 export type DocumentVectorRecordKind =
   | 'summary'
@@ -41,7 +47,6 @@ function buildContextPrefix(item: ParsedDocument) {
   return [
     item.schemaType || 'generic',
     item.category || '',
-    item.bizCategory || '',
     groups,
     tags,
   ]
@@ -52,11 +57,11 @@ function buildContextPrefix(item: ParsedDocument) {
 function buildTemplateTaskTags(item: ParsedDocument) {
   const tags = new Set<string>();
 
-  if (item.bizCategory === 'order') {
+  if (isOrderDocumentSignal(item) || isInventoryDocumentSignal(item)) {
     tags.add('order-static-page');
     tags.add('order-table');
   }
-  if (item.bizCategory === 'footfall') {
+  if (isFootfallDocumentSignal(item)) {
     tags.add('footfall-static-page');
     tags.add('footfall-table');
   }
@@ -84,11 +89,11 @@ function buildTemplateTaskTags(item: ParsedDocument) {
   }
   if (item.schemaType === 'report') {
     tags.add('report-dashboard');
-    if (item.bizCategory === 'order') {
+    if (isOrderDocumentSignal(item) || isInventoryDocumentSignal(item)) {
       tags.add('order-static-page');
       tags.add('order-table');
     }
-    if (item.bizCategory === 'footfall') {
+    if (isFootfallDocumentSignal(item)) {
       tags.add('footfall-static-page');
       tags.add('footfall-table');
     }
@@ -99,7 +104,7 @@ function buildTemplateTaskTags(item: ParsedDocument) {
     tags.add('bids-table');
     tags.add('bids-static-page');
   }
-  if (/(iot|物联网|设备|网关|解决方案)/.test(groupText) || String(item.bizCategory || '') === 'iot') {
+  if (/(iot|物联网|设备|网关|解决方案)/.test(groupText) || isIotDocumentSignal(item)) {
     tags.add('iot-static-page');
     tags.add('iot-table');
   }
@@ -382,7 +387,6 @@ export function buildVectorRecordsForDocument(item: ParsedDocument): DocumentVec
   const contextPrefix = buildContextPrefix(item);
   const baseMetadata = {
     category: item.category,
-    bizCategory: item.bizCategory,
     groups: item.confirmedGroups || item.groups || [],
     topicTags: item.topicTags || [],
     cloudStructuredAt: item.cloudStructuredAt,

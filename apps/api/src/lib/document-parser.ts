@@ -2915,7 +2915,7 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     return [...new Set(tags)];
   }
 
-  if (category !== 'technical' && category !== 'paper' && bizCategory !== 'paper') return [];
+  if (category !== 'technical' && category !== 'paper') return [];
 
   const normalized = text.toLowerCase();
   const tagRules: Array<[string, KeywordRule[]]> = [

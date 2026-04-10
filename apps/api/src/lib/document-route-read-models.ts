@@ -82,7 +82,7 @@ export function extractDocumentTimestamp(item: { name?: string; path?: string })
 
 export function resolveLibraryScenarioKey(
   library: { key: string },
-  _items: Array<{ bizCategory?: string }>,
+  _items: Array<Record<string, unknown>>,
 ) {
   if (['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'].includes(String(library.key || ''))) {
     return library.key === 'paper' ? 'paper' : library.key;

@@ -1,6 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { buildDocumentId, loadParsedDocuments } from './document-store.js';
+import {
+  isContractDocumentSignal,
+  isFootfallDocumentSignal,
+  isInventoryDocumentSignal,
+  isIotDocumentSignal,
+  isOrderDocumentSignal,
+  isPaperDocumentSignal,
+} from './document-domain-signals.js';
 import { loadDocumentLibraries, documentMatchesLibrary, type DocumentLibrary } from './document-libraries.js';
 import type { ParsedDocument } from './document-parser.js';
 import {
@@ -200,7 +208,15 @@ function hasMeaningfulResumeSignals(item: ParsedDocument) {
 
 function shouldIncludeResumeMemoryFacts(item: ParsedDocument) {
   if (item.category === 'resume') return hasMeaningfulResumeSignals(item);
-  if (item.bizCategory && item.bizCategory !== 'general') return false;
+  if (
+    isOrderDocumentSignal(item)
+    || isInventoryDocumentSignal(item)
+    || isFootfallDocumentSignal(item)
+    || isContractDocumentSignal(item)
+    || isPaperDocumentSignal(item)
+    || isIotDocumentSignal(item)
+    || (item.category && item.category !== 'general')
+  ) return false;
   return item.schemaType === 'resume' && hasMeaningfulResumeSignals(item);
 }
 
@@ -226,7 +242,7 @@ function hasMeaningfulContractSignals(item: ParsedDocument) {
 }
 
 function shouldIncludeContractMemoryFacts(item: ParsedDocument) {
-  if (item.category === 'contract' || item.bizCategory === 'contract') {
+  if (isContractDocumentSignal(item)) {
     return hasMeaningfulContractSignals(item);
   }
   return item.schemaType === 'contract' && hasMeaningfulContractSignals(item);
@@ -243,7 +259,7 @@ function resolveStructuredProfileKeys(item: ParsedDocument) {
   if (shouldIncludeResumeMemoryFacts(item)) {
     return ['companies', 'skills', 'highlights', 'projectHighlights', 'itProjectHighlights'];
   }
-  if (item.bizCategory === 'order' || item.bizCategory === 'inventory') {
+  if (isOrderDocumentSignal(item) || isInventoryDocumentSignal(item)) {
     return [
       'platforms',
       'platformSignals',

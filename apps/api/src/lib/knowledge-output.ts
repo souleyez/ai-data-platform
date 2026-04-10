@@ -4,6 +4,7 @@ import type { ReportTemplateEnvelope } from './report-center.js';
 import { sanitizeResumeDisplayCompany } from './resume-display-company.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
 import { isWeakResumeCandidateName, mergeResumeFields } from './resume-canonicalizer.js';
+import { isFootfallDocumentSignal, isOrderInventoryDocumentSignal } from './document-domain-signals.js';
 
 export type ChatOutput =
   | { type: 'answer'; content: string }
@@ -258,6 +259,13 @@ function countTitleTokenOverlap(left: string, right: string) {
   return leftTokens.filter((token) => rightTokens.has(token)).length;
 }
 
+function extractSpecificTitleFragments(value: string) {
+  return sanitizeText(value)
+    .split(/(?:分析报告|分析|报告|报表|静态页|驾驶舱|看板|概览|总览|汇总|清单|方案|文档|画像|订单|库存|补货|客流|商场|多渠道|sku|品类|渠道|平台)/iu)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2);
+}
+
 function shouldPreferGeneratedTitle(input: {
   generatedTitle: string;
   requestText: string;
@@ -270,11 +278,17 @@ function shouldPreferGeneratedTitle(input: {
   if (!fallbackTitle) return true;
   if (generatedTitle === fallbackTitle) return true;
   if (WEAK_GENERATED_TITLE_PATTERN.test(generatedTitle)) return false;
-  if (REPORT_TITLE_SIGNAL_PATTERN.test(generatedTitle)) return true;
 
   const requestOverlap = countTitleTokenOverlap(generatedTitle, input.requestText);
   const fallbackOverlap = countTitleTokenOverlap(fallbackTitle, input.requestText);
   if (requestOverlap > fallbackOverlap) return true;
+  const specificGeneratedFragments = extractSpecificTitleFragments(generatedTitle);
+  if (specificGeneratedFragments.some((fragment) => (
+    input.requestText.includes(fragment)
+    && !fallbackTitle.includes(fragment)
+  ))) {
+    return true;
+  }
   if (requestOverlap > 0 && !REPORT_TITLE_SIGNAL_PATTERN.test(fallbackTitle)) return true;
   return false;
 }
@@ -479,7 +493,7 @@ function getFootfallRecordInsights(item: ParsedDocument) {
 }
 
 function isFootfallReportDocument(item: ParsedDocument) {
-  if (String(item.bizCategory || '').toLowerCase() === 'footfall') return true;
+  if (isFootfallDocumentSignal(item)) return true;
   const profile = getStructuredProfileRecord(item);
   if (String(profile.reportFocus || '').toLowerCase() === 'footfall') return true;
   return String(item.schemaType || '').toLowerCase() === 'report'
@@ -2409,9 +2423,8 @@ function hydrateResumePageVisualShell(
 }
 
 function isOrderInventoryDocument(item: ParsedDocument) {
-  const bizCategory = String(item.bizCategory || '').toLowerCase();
   const schemaType = String(item.schemaType || '').toLowerCase();
-  if (bizCategory === 'order' || bizCategory === 'inventory') return true;
+  if (isOrderInventoryDocumentSignal(item)) return true;
   if (schemaType === 'order') return true;
   if (schemaType === 'report' && containsAny(normalizeText([
     item.title,

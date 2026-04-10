@@ -11,6 +11,7 @@ import {
   updateWebCaptureTaskStatus,
 } from './web-capture.js';
 import { loadDocumentOverrides, saveDocumentOverrides } from './document-overrides.js';
+import { resolveDocumentSimilarityScopeKey } from './document-domain-signals.js';
 import { STORAGE_CONFIG_DIR, STORAGE_ROOT, STORAGE_CACHE_DIR } from './paths.js';
 import { loadRetainedDocuments, removeRetainedDocument, retainStructuredDocument } from './retained-documents.js';
 import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
@@ -122,12 +123,17 @@ function buildDocumentSimilaritySeed(item: {
   summary?: string;
   excerpt?: string;
   evidenceChunks?: Array<{ text?: string }>;
-  bizCategory?: string;
+  schemaType?: string;
+  category?: string;
+  topicTags?: string[];
+  groups?: string[];
+  confirmedGroups?: string[];
+  structuredProfile?: unknown;
 }) {
   const titleKey = normalizeSimilarityText(item.title || item.name);
   const leadChunk = item.evidenceChunks?.[0]?.text || item.excerpt || item.summary || '';
   const contentKey = normalizeSimilarityText(leadChunk).slice(0, 220);
-  const fingerprint = `${item.bizCategory || 'general'}|${titleKey}|${contentKey}`;
+  const fingerprint = `${resolveDocumentSimilarityScopeKey(item)}|${titleKey}|${contentKey}`;
   return {
     titleKey,
     fingerprint,
@@ -167,7 +173,12 @@ function buildSimilarityRecommendations(items: Array<{
   summary?: string;
   excerpt?: string;
   evidenceChunks?: Array<{ text?: string }>;
-  bizCategory?: string;
+  schemaType?: string;
+  category?: string;
+  topicTags?: string[];
+  groups?: string[];
+  confirmedGroups?: string[];
+  structuredProfile?: unknown;
   createdAt: string;
   referenceCount: number;
   storageState: 'live' | 'structured-only';
@@ -177,7 +188,7 @@ function buildSimilarityRecommendations(items: Array<{
 
   for (const item of items) {
     const seed = buildDocumentSimilaritySeed(item);
-    const bucketKey = `${item.bizCategory || 'general'}|${seed.titleKey || normalizeSimilarityText(item.name)}`;
+    const bucketKey = `${resolveDocumentSimilarityScopeKey(item)}|${seed.titleKey || normalizeSimilarityText(item.name)}`;
     const existing = buckets.get(bucketKey) || [];
     existing.push(item);
     buckets.set(bucketKey, existing);
@@ -419,7 +430,12 @@ export async function buildAuditSnapshot() {
     summary: entry.item.summary,
     excerpt: entry.item.excerpt,
     evidenceChunks: entry.item.evidenceChunks,
-    bizCategory: entry.item.bizCategory,
+    schemaType: entry.item.schemaType,
+    category: entry.item.category,
+    topicTags: entry.item.topicTags,
+    groups: entry.item.groups,
+    confirmedGroups: entry.item.confirmedGroups,
+    structuredProfile: entry.item.structuredProfile,
     createdAt: entry.createdAt,
     referenceCount: entry.referenceCount,
     storageState: entry.storageState,

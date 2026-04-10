@@ -2,6 +2,14 @@ import { refreshDerivedSchemaProfile, type ParsedDocument } from './document-par
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
 import { loadRetainedDocuments } from './retained-documents.js';
 
+function normalizeLegacyBizCategory(value: ParsedDocument['bizCategory'] | undefined): ParsedDocument['bizCategory'] {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'order' || normalized === 'inventory' || normalized === 'footfall') {
+    return normalized as ParsedDocument['bizCategory'];
+  }
+  return 'general';
+}
+
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
 }
@@ -81,7 +89,7 @@ export function sanitizeParsedDocument(item: ParsedDocument): ParsedDocument {
   const category = forceGenericNoise && (item.category === 'report' || item.category === 'technical' || item.category === 'contract')
     ? 'general'
     : item.category;
-  const bizCategory = forceGenericNoise ? 'general' : item.bizCategory;
+  const bizCategory = forceGenericNoise ? 'general' : normalizeLegacyBizCategory(item.bizCategory);
 
   return refreshDerivedSchemaProfile({
     ...item,
