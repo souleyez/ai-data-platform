@@ -329,7 +329,7 @@ export async function loadOperationsOverviewPayload() {
     }));
 
   const recentDocuments = [...(documentsPayload.items || [])]
-    .sort((a, b) => String(b.detailParsedAt || b.categoryConfirmedAt || '').localeCompare(String(a.detailParsedAt || a.categoryConfirmedAt || '')))
+    .sort((a, b) => String(b.detailParsedAt || b.groupConfirmedAt || '').localeCompare(String(a.detailParsedAt || a.groupConfirmedAt || '')))
     .slice(0, 10)
     .map((item) => ({
       id: item.id,
@@ -337,7 +337,6 @@ export async function loadOperationsOverviewPayload() {
       ext: item.ext,
       parseStatus: item.parseStatus,
       detailParseStatus: item.detailParseStatus || 'idle',
-      bizCategory: item.confirmedBizCategory || item.bizCategory || '',
       libraries: item.confirmedGroups?.length ? item.confirmedGroups : item.groups || [],
     }));
 

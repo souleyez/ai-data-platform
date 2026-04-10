@@ -157,7 +157,6 @@ async function seedDocumentCache() {
       contract: { label: '合同库' },
       ioa: { label: '新世界IOA' },
     },
-    customCategories: [],
     updatedAt: '2026-04-07T00:00:00.000Z',
   }, null, 2), 'utf8');
   await fs.writeFile(path.join(pathsModule.STORAGE_CONFIG_DIR, 'retained-documents.json'), JSON.stringify({ items: [] }, null, 2), 'utf8');

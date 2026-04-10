@@ -20,6 +20,7 @@ const reportCenter = await importFresh<typeof import('../src/lib/report-center.j
 
 const cacheFile = path.join(storageRoot, 'cache', 'documents-cache.json');
 const documentConfigFile = path.join(storageRoot, 'config', 'document-categories.json');
+const documentLibrariesFile = path.join(storageRoot, 'config', 'document-libraries.json');
 const queueFile = path.join(storageRoot, 'cache', 'document-deep-parse-queue.json');
 const reportStateFile = path.join(storageRoot, 'config', 'report-center.json');
 
@@ -45,6 +46,18 @@ async function seedState() {
     scanRoot,
     scanRoots: [scanRoot],
     updatedAt: generatedAt,
+  }, null, 2), 'utf8');
+  await fs.writeFile(documentLibrariesFile, JSON.stringify({
+    items: [
+      {
+        key: 'order',
+        label: '订单分析',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: generatedAt,
+      },
+    ],
   }, null, 2), 'utf8');
   await fs.writeFile(cacheFile, JSON.stringify({
     generatedAt,

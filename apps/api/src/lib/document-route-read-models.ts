@@ -18,8 +18,6 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     ext?: string;
     title?: string;
     category?: string;
-    bizCategory?: string;
-    confirmedBizCategory?: string;
     parseStatus?: string;
     parseMethod?: string;
     summary?: string;
@@ -51,8 +49,6 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     ext: source.ext,
     title: source.title,
     category: source.category,
-    bizCategory: source.bizCategory,
-    confirmedBizCategory: source.confirmedBizCategory,
     parseStatus: source.parseStatus,
     parseMethod: source.parseMethod,
     summary: truncateText(source.summary, 220),
@@ -67,7 +63,7 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     parseStage: source.parseStage,
     schemaType: source.schemaType,
     structuredProfile: source.structuredProfile,
-    categoryConfirmedAt: source.categoryConfirmedAt,
+    groupConfirmedAt: source.categoryConfirmedAt,
     retainedAt: source.retainedAt,
     originalDeletedAt: source.originalDeletedAt,
     detailParseStatus: source.detailParseStatus,
@@ -85,21 +81,13 @@ export function extractDocumentTimestamp(item: { name?: string; path?: string })
 }
 
 export function resolveLibraryScenarioKey(
-  library: { isDefault?: boolean; sourceCategoryKey?: string; key: string },
-  items: Array<{ bizCategory?: string; confirmedBizCategory?: string }>,
+  library: { key: string },
+  _items: Array<{ bizCategory?: string }>,
 ) {
-  if (library.isDefault && library.sourceCategoryKey) {
-    return library.sourceCategoryKey === 'paper' ? 'paper' : library.sourceCategoryKey;
+  if (['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'].includes(String(library.key || ''))) {
+    return library.key === 'paper' ? 'paper' : library.key;
   }
-
-  const counts = items.reduce<Record<string, number>>((acc, item) => {
-    const key = item.confirmedBizCategory || item.bizCategory || 'default';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'default';
-  return dominant === 'paper' ? 'paper' : dominant;
+  return 'default';
 }
 
 export function buildMatchedFolders(
@@ -134,11 +122,6 @@ export function buildDocumentsIndexPayload(input: {
     return acc;
   }, {});
 
-  const byBizCategory = input.items.reduce<Record<string, number>>((acc, item) => {
-    acc[item.bizCategory] = (acc[item.bizCategory] || 0) + 1;
-    return acc;
-  }, {});
-
   const byStatus = input.items.reduce<Record<string, number>>((acc, item) => {
     acc[item.parseStatus] = (acc[item.parseStatus] || 0) + 1;
     return acc;
@@ -160,10 +143,9 @@ export function buildDocumentsIndexPayload(input: {
     totalFiles: input.totalFiles ?? input.files.length,
     byExtension,
     byCategory,
-    byBizCategory,
     byStatus,
     items: input.items.map((item) => toListItem({ ...item, id: buildDocumentId(item.path) })),
-    capabilities: ['scan', 'summarize', 'classify'],
+    capabilities: ['scan', 'summarize', 'group'],
     cacheHit: input.cacheHit,
     generatedAt,
     loadedFrom,
@@ -175,7 +157,6 @@ export function buildDocumentsIndexPayload(input: {
       parsed: byStatus.parsed || 0,
       unsupported: byStatus.unsupported || 0,
       error: byStatus.error || 0,
-      bizCategories: byBizCategory,
       libraryCounts,
       memorySync: input.memorySync || null,
     },
@@ -214,8 +195,8 @@ export function buildDocumentsOverviewPayload(input: {
       const updatedDiff = b.lastUpdatedAt - a.lastUpdatedAt;
       if (updatedDiff !== 0) return updatedDiff;
 
-      if (Boolean(b.isDefault) !== Boolean(a.isDefault)) {
-        return a.isDefault ? 1 : -1;
+      if (a.key === 'ungrouped' || b.key === 'ungrouped') {
+        return a.key === 'ungrouped' ? 1 : -1;
       }
 
       return String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN');

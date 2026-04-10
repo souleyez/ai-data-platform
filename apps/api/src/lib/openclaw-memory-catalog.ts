@@ -59,7 +59,6 @@ type CatalogDocumentCard = OpenClawMemoryDocumentState & {
   path: string;
   title: string;
   name: string;
-  bizCategory: string;
   schemaType: string;
   parseStatus: string;
   parseStage: string;
@@ -423,7 +422,6 @@ function buildDocumentCard(
     path: item.path,
     title,
     name: sanitizeText(item.name || path.basename(item.path), 160),
-    bizCategory: sanitizeText(item.bizCategory, 40),
     schemaType: sanitizeText(item.schemaType, 40),
     libraryKeys,
     summary,

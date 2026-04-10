@@ -35,9 +35,6 @@ test('mergeDocumentCategoryConfig overlays runtime overrides on repo defaults', 
       service: { label: 'Service', folders: ['service'] },
       inventory: { label: 'Inventory', folders: ['inventory'] },
     },
-    customCategories: [
-      { key: 'ioa', label: 'IOA', parent: 'paper', keywords: ['ioa'], createdAt: '2026-04-06T00:00:00.000Z' },
-    ],
   };
 
   const merged = mergeDocumentCategoryConfig(defaults, {
@@ -45,15 +42,9 @@ test('mergeDocumentCategoryConfig overlays runtime overrides on repo defaults', 
     categories: {
       contract: { label: 'Contracts', folders: ['contracts'] },
     },
-    customCategories: [
-      { key: 'ioa', label: 'IOA', parent: 'paper', keywords: ['ioa', 'guide'], createdAt: '2026-04-06T01:00:00.000Z' },
-      { key: 'resume-x', label: 'ResumeX', parent: 'paper', keywords: ['resume'], createdAt: '2026-04-06T02:00:00.000Z' },
-    ],
   }, defaults.scanRoot);
 
   assert.deepEqual(merged.scanRoots, ['C:\\repo\\storage\\files', 'C:\\repo\\extra']);
   assert.equal(merged.categories.contract.label, 'Contracts');
   assert.deepEqual(merged.categories.contract.folders, ['contracts']);
-  assert.deepEqual(merged.customCategories.find((item) => item.key === 'ioa')?.keywords, ['ioa', 'guide']);
-  assert.ok(merged.customCategories.some((item) => item.key === 'resume-x'));
 });

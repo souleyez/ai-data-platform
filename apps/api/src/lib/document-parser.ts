@@ -31,7 +31,6 @@ export type ParsedDocument = {
   title: string;
   category: string;
   bizCategory: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'footfall' | 'general';
-  confirmedBizCategory?: 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory' | 'footfall' | 'general';
   categoryConfirmedAt?: string;
   parseStatus: 'parsed' | 'unsupported' | 'error';
   parseMethod?: string;
@@ -2947,14 +2946,6 @@ function detectTopicTags(text: string, category: string, bizCategory: ParsedDocu
     .map(([label]) => label);
 }
 
-function detectGroups(filePath: string, text: string, topicTags: string[], config?: DocumentCategoryConfig) {
-  if (!config?.customCategories?.length) return [];
-  const evidence = buildEvidence(filePath, `${text} ${(topicTags || []).join(' ')}`);
-  return config.customCategories
-    .filter((group) => (group.keywords || [group.label]).some((keyword) => matchesKeyword(evidence, String(keyword).toLowerCase())))
-    .map((group) => group.key);
-}
-
 function shouldForceExtraction(profile: DocumentExtractionProfile | null | undefined, fieldSet: DocumentExtractionProfile['fieldSet']) {
   return profile?.fieldSet === fieldSet;
 }
@@ -3651,7 +3642,6 @@ export async function parseDocument(
         detectTopicTags(buildEvidence(filePath), category, bizCategory),
         extractionProfile,
       );
-      const groups = detectGroups(filePath, '', topicTags, config);
       const schemaType = applyGovernedSchemaType(
         inferSchemaType(category, bizCategory, undefined, topicTags),
         extractionProfile,
@@ -3674,7 +3664,7 @@ export async function parseDocument(
         claims: [],
         intentSlots: {},
         topicTags,
-        groups,
+        groups: [],
         parseStage,
         detailParseStatus: defaultDetailParseStatus,
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3698,7 +3688,6 @@ export async function parseDocument(
         detectTopicTags(buildEvidence(filePath), category, bizCategory),
         extractionProfile,
       );
-      const groups = detectGroups(filePath, '', topicTags, config);
       const schemaType = applyGovernedSchemaType(
         inferSchemaType(category, bizCategory, undefined, topicTags),
         extractionProfile,
@@ -3729,7 +3718,7 @@ export async function parseDocument(
         claims: [],
         intentSlots: {},
         topicTags,
-        groups,
+        groups: [],
         parseStage,
         detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3757,7 +3746,6 @@ export async function parseDocument(
       detectTopicTags(`${name} ${normalizedText}`, category, bizCategory),
       extractionProfile,
     );
-    const groups = detectGroups(filePath, normalizedText, topicTags, config);
     const feedbackLibraryKeys = options?.libraryContext?.keys?.length
       ? options.libraryContext.keys
       : [];
@@ -3841,7 +3829,7 @@ export async function parseDocument(
         footfallFields,
         riskLevel: detectRiskLevel(normalizedText, category),
         topicTags,
-        groups,
+        groups: [],
         parseStage,
         detailParseStatus: defaultDetailParseStatus,
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3941,7 +3929,7 @@ export async function parseDocument(
       footfallFields,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
-      groups,
+      groups: [],
       contractFields,
       parseStage,
       detailParseStatus: defaultDetailParseStatus,
@@ -3971,7 +3959,6 @@ export async function parseDocument(
       detectTopicTags(buildEvidence(filePath), category, bizCategory),
       extractionProfile,
     );
-    const groups = detectGroups(filePath, '', topicTags, config);
     const schemaType = applyGovernedSchemaType(
       inferSchemaType(category, bizCategory, undefined, topicTags),
       extractionProfile,
@@ -3998,7 +3985,7 @@ export async function parseDocument(
       claims: [],
       intentSlots: {},
       topicTags,
-      groups,
+      groups: [],
       parseStage,
       detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
       detailParseQueuedAt: defaultDetailQueuedAt,

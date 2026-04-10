@@ -12,16 +12,7 @@ export function extractDocumentTimestamp(item) {
 
 export function getDocumentLibraryKeys(item, libraries = []) {
   const explicitGroups = item?.confirmedGroups?.length ? item.confirmedGroups : (item?.groups || []);
-  const keys = new Set(explicitGroups);
-  const effectiveCategory = item?.confirmedBizCategory || item?.bizCategory;
-
-  for (const library of libraries) {
-    if (library?.isDefault && library?.sourceCategoryKey === effectiveCategory) {
-      keys.add(library.key);
-    }
-  }
-
-  return [...keys];
+  return [...new Set(explicitGroups)];
 }
 
 export function getLibraryDocumentCount(library, items = [], libraries = []) {
@@ -43,8 +34,8 @@ export function sortLibrariesForDisplay(libraries = [], items = []) {
     const updatedDiff = getLibraryLastUpdatedAt(b, items, libraries) - getLibraryLastUpdatedAt(a, items, libraries);
     if (updatedDiff !== 0) return updatedDiff;
 
-    if (Boolean(b?.isDefault) !== Boolean(a?.isDefault)) {
-      return a?.isDefault ? 1 : -1;
+    if (String(a?.key || '') === 'ungrouped' || String(b?.key || '') === 'ungrouped') {
+      return String(a?.key || '') === 'ungrouped' ? 1 : -1;
     }
 
     return String(a?.label || '').localeCompare(String(b?.label || ''), 'zh-CN');
@@ -54,21 +45,8 @@ export function sortLibrariesForDisplay(libraries = [], items = []) {
 export function resolveLibraryScenarioKey(library, items = [], libraries = []) {
   if (!library) return 'default';
 
-  if (library.isDefault && library.sourceCategoryKey) {
-    if (library.sourceCategoryKey === 'paper') return 'paper';
-    return library.sourceCategoryKey;
+  if (['paper', 'contract', 'daily', 'invoice', 'order', 'service', 'inventory'].includes(String(library.key || ''))) {
+    return library.key === 'paper' ? 'paper' : library.key;
   }
-
-  const matchingItems = items.filter((item) => getDocumentLibraryKeys(item, libraries).includes(library.key));
-  if (!matchingItems.length) return 'default';
-
-  const counts = matchingItems.reduce((acc, item) => {
-    const key = item?.confirmedBizCategory || item?.bizCategory || 'default';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'default';
-  if (dominant === 'paper') return 'paper';
-  return dominant;
+  return 'default';
 }

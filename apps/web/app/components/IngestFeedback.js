@@ -61,7 +61,7 @@ export default function IngestFeedback({
 
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <span className="source-chip">
-                      分类：{item.classification?.selectedLabel || item.recommendation?.category || item.preview?.docType || '-'}
+                      解析类型：{item.preview?.docType || '-'}
                     </span>
                     {item.groupSuggestion?.suggestedGroups?.length ? (
                       item.groupSuggestion.suggestedGroups.map((group) => (
@@ -76,7 +76,7 @@ export default function IngestFeedback({
                   </div>
 
                   <div style={{ marginTop: 8, fontSize: 13, color: '#64748b', lineHeight: 1.6 }}>
-                    {item.groupSuggestion?.basis || item.recommendation?.reason || '已完成自动分类。'}
+                    {item.groupSuggestion?.basis || item.recommendation?.reason || '已完成知识库分组建议。'}
                   </div>
 
                   {item.groupSuggestion?.suggestedGroups?.length && !item.groupSuggestion?.accepted ? (

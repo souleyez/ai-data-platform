@@ -2,7 +2,7 @@ import Sidebar from '../../components/Sidebar';
 import DocumentAnalysisPanel from '../DocumentAnalysisPanel';
 import { buildBackendApiUrl, buildApiUrl } from '../../lib/config';
 import { sourceItems } from '../../lib/mock-data';
-import { getDocumentGroupLabel, getPrimaryCategoryLabel } from '../../lib/document-taxonomy';
+import { getDocumentGroupLabel } from '../../lib/document-taxonomy';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,7 +101,6 @@ export default async function DocumentPreviewPage({ params }) {
 
         <section className="card table-card">
           <div className="message-refs">
-            <span className="source-chip">业务分类：{getPrimaryCategoryLabel(meta?.bizCategory || item?.bizCategory)}</span>
             <span className="source-chip">知识库：{joinGroups(item.confirmedGroups || item.groups || [])}</span>
             <span className="source-chip">文件类型：{item.ext || '-'}</span>
           </div>

@@ -15,12 +15,14 @@ import { STORAGE_CACHE_DIR, STORAGE_CONFIG_DIR } from '../src/lib/paths.js';
 const DOCUMENT_CACHE_FILE = path.join(STORAGE_CACHE_DIR, 'documents-cache.json');
 const DOCUMENT_OVERRIDES_FILE = path.join(STORAGE_CONFIG_DIR, 'document-overrides.json');
 const DOCUMENT_CONFIG_FILE = path.join(STORAGE_CONFIG_DIR, 'document-categories.json');
+const DOCUMENT_LIBRARIES_FILE = path.join(STORAGE_CONFIG_DIR, 'document-libraries.json');
 const RETAINED_DOCUMENTS_FILE = path.join(STORAGE_CONFIG_DIR, 'retained-documents.json');
 
 async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, fn: () => Promise<T>) {
   let previousCache: string | null = null;
   let previousOverrides: string | null = null;
   let previousConfig: string | null = null;
+  let previousLibraries: string | null = null;
   let previousRetained: string | null = null;
 
   try {
@@ -42,6 +44,12 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
   }
 
   try {
+    previousLibraries = await fs.readFile(DOCUMENT_LIBRARIES_FILE, 'utf8');
+  } catch {
+    previousLibraries = null;
+  }
+
+  try {
     previousRetained = await fs.readFile(RETAINED_DOCUMENTS_FILE, 'utf8');
   } catch {
     previousRetained = null;
@@ -55,7 +63,6 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
     scanRoot: payload.scanRoot,
     scanRoots: payload.scanRoots,
     categories: {},
-    customCategories: [],
     updatedAt: '2026-03-31T10:00:00.000Z',
   }, null, 2), 'utf8');
   await fs.writeFile(RETAINED_DOCUMENTS_FILE, JSON.stringify({ items: [] }, null, 2), 'utf8');
@@ -79,6 +86,12 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
       await fs.rm(DOCUMENT_CONFIG_FILE, { force: true });
     } else {
       await fs.writeFile(DOCUMENT_CONFIG_FILE, previousConfig, 'utf8');
+    }
+
+    if (previousLibraries === null) {
+      await fs.rm(DOCUMENT_LIBRARIES_FILE, { force: true });
+    } else {
+      await fs.writeFile(DOCUMENT_LIBRARIES_FILE, previousLibraries, 'utf8');
     }
 
     if (previousRetained === null) {
@@ -412,13 +425,41 @@ test('prepareKnowledgeScope should honor preferred document ids before fallback 
       },
     ],
   }, async () => {
+    await fs.writeFile(DOCUMENT_LIBRARIES_FILE, JSON.stringify({
+      items: [
+        {
+          key: 'ungrouped',
+          label: '未分组',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+        {
+          key: 'contract',
+          label: '合同协议',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+        {
+          key: 'resume',
+          label: '人才简历',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+      ],
+    }, null, 2), 'utf8');
+
     await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
       scanRoot: 'C:\\uploads',
       scanRoots: ['C:\\uploads'],
       categories: {
         contract: { label: '合同协议' },
       },
-      customCategories: [],
       updatedAt: '2026-03-31T10:00:00.000Z',
     }, null, 2), 'utf8');
 
@@ -489,6 +530,35 @@ test('prepareKnowledgeScope should enforce bot visibility before recent parsed f
       },
     ],
   }, async () => {
+    await fs.writeFile(DOCUMENT_LIBRARIES_FILE, JSON.stringify({
+      items: [
+        {
+          key: 'ungrouped',
+          label: '未分组',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+        {
+          key: 'contract',
+          label: '合同协议',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+        {
+          key: 'resume',
+          label: '人才简历',
+          permissionLevel: 0,
+          knowledgePagesEnabled: false,
+          knowledgePagesMode: 'none',
+          createdAt: '2026-04-03T10:00:00.000Z',
+        },
+      ],
+    }, null, 2), 'utf8');
+
     await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
       scanRoot: 'C:\\uploads',
       scanRoots: ['C:\\uploads'],
@@ -496,7 +566,6 @@ test('prepareKnowledgeScope should enforce bot visibility before recent parsed f
         contract: { label: '合同协议' },
         resume: { label: '人才简历' },
       },
-      customCategories: [],
       updatedAt: '2026-04-03T10:00:00.000Z',
     }, null, 2), 'utf8');
 
@@ -574,7 +643,6 @@ test('prepareKnowledgeScope should not backfill unrelated visible libraries when
         paper: { label: 'Paper' },
         resume: { label: 'Resume' },
       },
-      customCategories: [],
       updatedAt: '2026-04-04T09:00:00.000Z',
     }, null, 2), 'utf8');
 

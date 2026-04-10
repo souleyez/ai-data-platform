@@ -13,7 +13,6 @@ test('documentMatchesLibrary should match ungrouped documents to the ungrouped l
     key: UNGROUPED_LIBRARY_KEY,
     label: UNGROUPED_LIBRARY_LABEL,
     createdAt: '2026-03-31T00:00:00.000Z',
-    isDefault: true,
   };
   const item = {
     path: 'C:\\tmp\\image-upload.png',
@@ -31,4 +30,28 @@ test('documentMatchesLibrary should match ungrouped documents to the ungrouped l
   } satisfies ParsedDocument;
 
   assert.equal(documentMatchesLibrary(item, library), true);
+});
+
+test('documentMatchesLibrary should not rely on legacy bizCategory when no explicit groups exist', () => {
+  const library: DocumentLibrary = {
+    key: 'order',
+    label: '订单分析',
+    createdAt: '2026-03-31T00:00:00.000Z',
+  };
+  const item = {
+    path: 'C:\\tmp\\legacy-order.csv',
+    name: 'legacy-order.csv',
+    ext: '.csv',
+    title: 'legacy-order',
+    category: 'general',
+    bizCategory: 'order',
+    parseStatus: 'parsed',
+    summary: 'legacy order data',
+    excerpt: 'legacy order data',
+    extractedChars: 17,
+    groups: [],
+    confirmedGroups: [],
+  } satisfies ParsedDocument;
+
+  assert.equal(documentMatchesLibrary(item, library), false);
 });

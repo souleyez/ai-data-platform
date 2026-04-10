@@ -9,9 +9,7 @@ type LoadedLibraries = Awaited<ReturnType<typeof loadDocumentLibraries>>;
 
 export function resolveAutomaticLibraryGroups(
   item: Pick<ParsedDocumentItem,
-    'bizCategory'
-    | 'confirmedBizCategory'
-    | 'category'
+    'category'
     | 'schemaType'
     | 'parseStatus'
     | 'title'
@@ -19,24 +17,21 @@ export function resolveAutomaticLibraryGroups(
     | 'excerpt'
     | 'topicTags'
     | 'groups'
+    | 'confirmedGroups'
   >,
   libraries: LoadedLibraries,
 ) {
+  if (item.confirmedGroups?.length || item.groups?.length) {
+    return [];
+  }
+
   const suggestedGroups = resolveSuggestedLibraryKeys(item as ParsedDocumentItem, libraries).filter((key) => {
     const matched = libraries.find((library) => library.key === key);
-    return matched && !matched.isDefault;
+    return matched && matched.key !== UNGROUPED_LIBRARY_KEY;
   });
 
   if (suggestedGroups.length) return suggestedGroups;
-
-  const effectiveCategory = item.confirmedBizCategory || item.bizCategory || 'general';
-  const shouldFallbackToUngrouped =
-    item.parseStatus !== 'parsed'
-    || effectiveCategory === 'general'
-    || item.category === 'resume'
-    || item.schemaType === 'resume';
-
-  return shouldFallbackToUngrouped ? [UNGROUPED_LIBRARY_KEY] : [];
+  return [UNGROUPED_LIBRARY_KEY];
 }
 
 export async function autoAssignSuggestedLibraries(items: ParsedDocumentItem[], libraries: LoadedLibraries) {

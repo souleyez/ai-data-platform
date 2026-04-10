@@ -130,7 +130,6 @@ export function normalizeDocumentsResponse(data) {
     totalFiles: data?.totalFiles || 0,
     byExtension: data?.byExtension || {},
     byCategory: data?.byCategory || {},
-    byBizCategory: data?.byBizCategory || {},
     byStatus: data?.byStatus || {},
     items: Array.isArray(data?.items) ? data.items.map(normalizeDocumentItem) : [],
     capabilities: Array.isArray(data?.capabilities) ? data.capabilities : [],
@@ -139,7 +138,6 @@ export function normalizeDocumentsResponse(data) {
     config: data?.config || null,
     libraries: Array.isArray(data?.libraries) ? data.libraries : [],
     meta: data?.meta || null,
-    customCategories: Array.isArray(data?.config?.customCategories) ? data.config.customCategories : [],
   };
 }
 

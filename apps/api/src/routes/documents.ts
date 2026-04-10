@@ -1,19 +1,11 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
-import {
-  loadDocumentCategoryConfig,
-  type BizCategory,
-} from '../lib/document-config.js';
-import { DEFAULT_SCAN_DIR } from '../lib/document-store.js';
 import { loadDocumentVectorIndexMeta } from '../lib/document-vector-index.js';
 import {
   acceptDocumentSuggestions,
   createManagedDocumentLibrary,
   deleteManagedDocumentLibrary,
   updateManagedDocumentLibrary,
-  saveAcceptedCategorySuggestions,
-  saveConfiguredDocumentCategories,
-  saveConfirmedDocumentClassifications,
   saveConfirmedDocumentGroups,
   saveIgnoredDocuments,
   clearDocumentAnalysisFeedback,
@@ -41,32 +33,6 @@ import {
 } from '../lib/document-route-detail-loaders.js';
 
 export async function registerDocumentRoutes(app: FastifyInstance) {
-  app.get('/documents/config', async () => {
-    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
-    return {
-      mode: 'read-only',
-      config,
-    };
-  });
-
-  app.post('/documents/config', async (request) => {
-    const body = (request.body || {}) as {
-      categories?: Record<string, { label?: string; folders?: string[] | string }>;
-    };
-    const { config, exists, files } = await saveConfiguredDocumentCategories(body.categories || {});
-
-    return {
-      status: 'saved',
-      mode: 'read-only',
-      config,
-      rescanned: true,
-      totalFiles: files.length,
-      message: exists
-        ? '分类目录配置已保存，并自动重扫文档。'
-        : '分类目录配置已保存，但当前扫描目录不存在。',
-    };
-  });
-
   app.get('/documents', async () => {
     return loadDocumentsIndexRoutePayload();
   });
@@ -260,8 +226,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       if (error instanceof Error && error.message === 'library not found') {
         return reply.code(404).send({ error: 'library not found' });
       }
-      if (error instanceof Error && error.message === 'default library cannot be deleted') {
-        return reply.code(400).send({ error: 'default library cannot be deleted' });
+      if (error instanceof Error && error.message === 'reserved library cannot be deleted') {
+        return reply.code(400).send({ error: 'reserved library cannot be deleted', message: '系统保留分组不可删除' });
       }
       throw error;
     }
@@ -313,47 +279,6 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       status: 'accepted',
       updatedCount: results.length,
       message: `已接受 ${results.length} 条建议分组。`,
-    };
-  });
-
-  app.post('/documents/classify', async (request, reply) => {
-    const body = (request.body || {}) as { items?: Array<{ id?: string; bizCategory?: BizCategory }> };
-    const updates = Array.isArray(body.items) ? body.items : [];
-
-    if (!updates.length) {
-      return reply.code(400).send({ error: 'classification items are required' });
-    }
-
-    const { ingestItems } = await saveConfirmedDocumentClassifications(updates);
-
-    return {
-      status: 'confirmed',
-      updatedCount: ingestItems.length,
-      message: ingestItems.length
-        ? `已确认 ${ingestItems.length} 项分类。`
-        : '没有可更新的分类项。',
-      ingestItems,
-    };
-  });
-
-  app.post('/documents/category-suggestions', async (request, reply) => {
-    const body = (request.body || {}) as {
-      items?: Array<{ id?: string; suggestedName?: string; parentCategoryKey?: BizCategory }>;
-    };
-    const updates = Array.isArray(body.items) ? body.items : [];
-
-    if (!updates.length) {
-      return reply.code(400).send({ error: 'category suggestion items are required' });
-    }
-
-    const { accepted, config } = await saveAcceptedCategorySuggestions(updates);
-    return {
-      status: 'accepted',
-      message: accepted.length
-        ? `已接纳 ${accepted.length} 条新增分类建议。`
-        : '没有可接纳的分类建议。',
-      accepted,
-      config,
     };
   });
 

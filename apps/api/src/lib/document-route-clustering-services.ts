@@ -1,4 +1,4 @@
-import { createDocumentLibrary, loadDocumentLibraries } from './document-libraries.js';
+import { createDocumentLibrary, loadDocumentLibraries, UNGROUPED_LIBRARY_KEY } from './document-libraries.js';
 import { saveDocumentOverride, saveDocumentSuggestion } from './document-overrides.js';
 import { mergeParsedDocumentsForPaths } from './document-store.js';
 import { enqueueDetailedParse, runDetailedParseBatch } from './document-deep-parse-queue.js';
@@ -73,7 +73,7 @@ export async function reclusterUngroupedDocuments() {
   for (const item of candidates) {
     const matched = resolveSuggestedLibraryKeys(item, libraries).filter((key) => {
       const library = libraries.find((entry) => entry.key === key);
-      return Boolean(library && !library.isDefault);
+      return Boolean(library && library.key !== UNGROUPED_LIBRARY_KEY);
     });
 
     if (matched.length) {

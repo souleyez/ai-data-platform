@@ -1,13 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { BizCategory } from './document-config.js';
 import type { ParsedDocument } from './document-parser.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
 import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
 export type DocumentOverride = {
-  bizCategory?: BizCategory;
   groups?: string[];
   suggestedGroups?: string[];
   ignored?: boolean;
@@ -30,12 +28,11 @@ export async function loadDocumentOverrides() {
   return data;
 }
 
-export async function saveDocumentOverride(filePath: string, input: { bizCategory?: BizCategory; groups?: string[]; ignored?: boolean }) {
+export async function saveDocumentOverride(filePath: string, input: { groups?: string[]; ignored?: boolean }) {
   const current = await loadDocumentOverrides();
   const previous = current[filePath] || { confirmedAt: new Date().toISOString() };
   current[filePath] = {
     ...previous,
-    ...(input.bizCategory ? { bizCategory: input.bizCategory } : {}),
     ...(input.groups ? { groups: [...new Set(input.groups.map((item) => String(item).trim()).filter(Boolean))] } : {}),
     ...(typeof input.ignored === 'boolean' ? { ignored: input.ignored } : {}),
     confirmedAt: new Date().toISOString(),
@@ -101,15 +98,13 @@ export function applyDocumentOverrides(items: ParsedDocument[], overrides: Recor
   return items.map((item) => {
     const matched = overrides[item.path];
     if (!matched) return item;
-    const hasBizCategory = Object.prototype.hasOwnProperty.call(matched, 'bizCategory');
     const hasGroups = Object.prototype.hasOwnProperty.call(matched, 'groups');
     return {
       ...item,
-      confirmedBizCategory: hasBizCategory ? matched.bizCategory : item.confirmedBizCategory,
       confirmedGroups: hasGroups ? (matched.groups || []) : item.confirmedGroups,
       suggestedGroups: matched.suggestedGroups?.length ? matched.suggestedGroups : item.suggestedGroups,
       ignored: matched.ignored === true,
-      categoryConfirmedAt: matched.confirmedAt,
+      categoryConfirmedAt: hasGroups ? matched.confirmedAt : item.categoryConfirmedAt,
     };
   });
 }

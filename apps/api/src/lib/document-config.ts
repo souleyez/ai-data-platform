@@ -5,19 +5,10 @@ import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-fil
 
 export type BizCategory = 'paper' | 'contract' | 'daily' | 'invoice' | 'order' | 'service' | 'inventory';
 
-export type ProjectCustomCategory = {
-  key: string;
-  label: string;
-  parent: BizCategory;
-  keywords: string[];
-  createdAt: string;
-};
-
 export type DocumentCategoryConfig = {
   scanRoot: string;
   scanRoots: string[];
   categories: Record<BizCategory, { label: string; folders: string[] }>;
-  customCategories: ProjectCustomCategory[];
   updatedAt: string;
 };
 
@@ -79,48 +70,6 @@ function buildDefault(scanRoot: string): DocumentCategoryConfig {
       service: { label: '客服采集', folders: ['service', 'customer-service', '客服', '工单', '投诉'] },
       inventory: { label: '库存监控', folders: ['inventory', 'stock', '库存', 'sku', '出入库'] },
     },
-    customCategories: [
-      {
-        key: 'formula',
-        label: '奶粉配方',
-        parent: 'paper',
-        keywords: [
-          '奶粉配方',
-          '配方',
-          '乳粉',
-          '婴配粉',
-          '婴幼儿配方',
-          '配方奶',
-          'formula',
-          'nutrition',
-          'nutritional',
-          'infant',
-          'children',
-          'pediatric',
-          'probiotic',
-          'prebiotic',
-          'synbiotic',
-          'lactobacillus',
-          'bifidobacterium',
-          'hmos',
-        ],
-        createdAt: now,
-      },
-      {
-        key: 'brain-health',
-        label: '脑健康',
-        parent: 'paper',
-        keywords: ['脑健康', 'brain', '认知', '阿尔茨海默'],
-        createdAt: now,
-      },
-      {
-        key: 'gut-health',
-        label: '肠道健康',
-        parent: 'paper',
-        keywords: ['肠道健康', 'gut', '肠道', '菌群', 'intestinal', 'microbiome'],
-        createdAt: now,
-      },
-    ],
   };
 }
 
@@ -140,24 +89,6 @@ export function mergeDocumentCategoryConfig(
         : (parsed.scanRoot ? [parsed.scanRoot] : [effectiveScanRoot]),
     effectiveScanRoot,
   );
-  const parsedCustomCategories = Array.isArray(parsed.customCategories) ? parsed.customCategories : [];
-  const mergedCustomCategories = defaults.customCategories.map((defaultItem) => {
-    const existing = parsedCustomCategories.find((item) => item.key === defaultItem.key);
-    if (!existing) return defaultItem;
-
-    return {
-      ...defaultItem,
-      ...existing,
-      keywords: Array.from(new Set([...(defaultItem.keywords || []), ...((existing.keywords || []).map(String))])),
-    };
-  });
-
-  for (const item of parsedCustomCategories) {
-    if (!mergedCustomCategories.some((existing) => existing.key === item.key)) {
-      mergedCustomCategories.push(item);
-    }
-  }
-
   return {
     ...defaults,
     ...parsed,
@@ -167,7 +98,6 @@ export function mergeDocumentCategoryConfig(
       ...defaults.categories,
       ...(parsed.categories || {}),
     },
-    customCategories: mergedCustomCategories,
     updatedAt: parsed.updatedAt || defaults.updatedAt,
   } satisfies DocumentCategoryConfig;
 }
@@ -214,7 +144,6 @@ export async function saveDocumentCategoryConfig(scanRoot: string, input: Partia
       ...current.categories,
       ...(input.categories || {}),
     },
-    customCategories: input.customCategories || current.customCategories || [],
   };
 
   await fs.mkdir(CONFIG_DIR, { recursive: true });

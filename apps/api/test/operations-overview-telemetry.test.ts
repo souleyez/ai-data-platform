@@ -20,6 +20,7 @@ const reportCenter = await importFresh<typeof import('../src/lib/report-center.j
 
 const cacheFile = path.join(storageRoot, 'cache', 'documents-cache.json');
 const documentConfigFile = path.join(storageRoot, 'config', 'document-categories.json');
+const documentLibrariesFile = path.join(storageRoot, 'config', 'document-libraries.json');
 const datasourceDefinitionsFile = path.join(storageRoot, 'config', 'datasources', 'definitions.json');
 const datasourceRunsFile = path.join(storageRoot, 'config', 'datasources', 'runs.json');
 const queueFile = path.join(storageRoot, 'cache', 'document-deep-parse-queue.json');
@@ -50,6 +51,34 @@ async function seedTelemetryState() {
     scanRoot,
     scanRoots: [scanRoot],
     updatedAt: generatedAt,
+  }, null, 2), 'utf8');
+  await fs.writeFile(documentLibrariesFile, JSON.stringify({
+    items: [
+      {
+        key: 'ioa',
+        label: 'IOA',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: generatedAt,
+      },
+      {
+        key: 'order',
+        label: '订单分析',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: generatedAt,
+      },
+      {
+        key: 'guangzhou-ai',
+        label: '广州AI',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: generatedAt,
+      },
+    ],
   }, null, 2), 'utf8');
   await fs.writeFile(cacheFile, JSON.stringify({
     generatedAt,

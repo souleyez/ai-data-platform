@@ -22,6 +22,7 @@ const pathsModule = await importFresh<typeof import('../src/lib/paths.js')>(
 const DOCUMENT_CACHE_FILE = path.join(pathsModule.STORAGE_CACHE_DIR, 'documents-cache.json');
 const DOCUMENT_OVERRIDES_FILE = path.join(pathsModule.STORAGE_CONFIG_DIR, 'document-overrides.json');
 const DOCUMENT_CONFIG_FILE = path.join(pathsModule.STORAGE_CONFIG_DIR, 'document-categories.json');
+const DOCUMENT_LIBRARIES_FILE = path.join(pathsModule.STORAGE_CONFIG_DIR, 'document-libraries.json');
 const RETAINED_DOCUMENTS_FILE = path.join(pathsModule.STORAGE_CONFIG_DIR, 'retained-documents.json');
 
 async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, fn: () => Promise<T>) {
@@ -29,6 +30,26 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
   await fs.mkdir(pathsModule.STORAGE_CONFIG_DIR, { recursive: true });
   await fs.writeFile(DOCUMENT_CACHE_FILE, JSON.stringify(payload, null, 2), 'utf8');
   await fs.writeFile(DOCUMENT_OVERRIDES_FILE, JSON.stringify({}, null, 2), 'utf8');
+  await fs.writeFile(DOCUMENT_LIBRARIES_FILE, JSON.stringify({
+    items: [
+      {
+        key: 'contract',
+        label: '合同协议',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: '2026-04-07T00:00:00.000Z',
+      },
+      {
+        key: 'resume',
+        label: '人才简历',
+        permissionLevel: 0,
+        knowledgePagesEnabled: false,
+        knowledgePagesMode: 'none',
+        createdAt: '2026-04-07T00:00:00.000Z',
+      },
+    ],
+  }, null, 2), 'utf8');
   await fs.writeFile(DOCUMENT_CONFIG_FILE, JSON.stringify({
     scanRoot: payload.scanRoot,
     scanRoots: payload.scanRoots,
@@ -36,7 +57,6 @@ async function withTemporaryDocumentCache<T>(payload: Record<string, unknown>, f
       contract: { label: '合同协议' },
       resume: { label: '人才简历' },
     },
-    customCategories: [],
     updatedAt: '2026-04-07T00:00:00.000Z',
   }, null, 2), 'utf8');
   await fs.writeFile(RETAINED_DOCUMENTS_FILE, JSON.stringify({ items: [] }, null, 2), 'utf8');

@@ -8,14 +8,11 @@ const libraries: DocumentLibrary[] = [
     key: 'ungrouped',
     label: '未分组',
     createdAt: '2026-01-01T00:00:00.000Z',
-    isDefault: true,
   },
   {
     key: 'order',
     label: '订单分析',
     createdAt: '2026-01-01T00:00:00.000Z',
-    isDefault: true,
-    sourceCategoryKey: 'order',
   },
   {
     key: 'resume',
@@ -24,14 +21,14 @@ const libraries: DocumentLibrary[] = [
   },
 ];
 
-test('resolveAutomaticLibraryGroups keeps default business-category documents out of ungrouped', () => {
+test('resolveAutomaticLibraryGroups falls back to ungrouped when no explicit group or library suggestion exists', () => {
   const groups = resolveAutomaticLibraryGroups({
     bizCategory: 'order',
     category: 'general',
     parseStatus: 'parsed',
   }, libraries);
 
-  assert.deepEqual(groups, []);
+  assert.deepEqual(groups, ['ungrouped']);
 });
 
 test('resolveAutomaticLibraryGroups falls back to ungrouped for unresolved general documents', () => {
@@ -65,4 +62,16 @@ test('resolveAutomaticLibraryGroups falls back to ungrouped when parsing fails',
   }, libraries);
 
   assert.deepEqual(groups, ['ungrouped']);
+});
+
+test('resolveAutomaticLibraryGroups leaves already grouped documents unchanged', () => {
+  const groups = resolveAutomaticLibraryGroups({
+    bizCategory: 'general',
+    category: 'general',
+    parseStatus: 'parsed',
+    groups: ['order'],
+    confirmedGroups: [],
+  }, libraries);
+
+  assert.deepEqual(groups, []);
 });

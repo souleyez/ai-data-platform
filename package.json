@@ -18,6 +18,7 @@
     "openclaw:skills:list": "corepack pnpm exec clawhub list --workdir .",
     "openclaw:skills:update": "corepack pnpm exec clawhub update --all --workdir .",
     "openclaw:memory:refresh": "corepack pnpm --filter api memory:refresh",
+    "document:groups:migrate": "corepack pnpm --filter api document:groups:migrate",
     "dataviz:setup": "powershell -ExecutionPolicy Bypass -File tools/setup-python-dataviz.ps1",
     "dataviz:verify": "powershell -ExecutionPolicy Bypass -File tools/verify-python-dataviz.ps1",
     "system:control": "corepack pnpm --filter api platform:control",

@@ -1,9 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { loadDocumentCategoryConfig, type BizCategory } from './document-config.js';
 import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } from './document-overrides.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
-import { STORAGE_CONFIG_DIR, STORAGE_FILES_DIR } from './paths.js';
+import { STORAGE_CONFIG_DIR } from './paths.js';
 import type { ParsedDocument } from './document-parser.js';
 import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
 
@@ -15,8 +14,6 @@ export type DocumentLibrary = {
   knowledgePagesEnabled?: boolean;
   knowledgePagesMode?: 'none' | 'overview' | 'topics';
   createdAt: string;
-  isDefault?: boolean;
-  sourceCategoryKey?: BizCategory;
 };
 
 export const UNGROUPED_LIBRARY_KEY = 'ungrouped';
@@ -78,9 +75,18 @@ function normalizeLibrary(input: Partial<DocumentLibrary> & Pick<DocumentLibrary
     knowledgePagesEnabled: knowledgePagesMode !== 'none',
     knowledgePagesMode,
     createdAt: String(input.createdAt || '').trim() || new Date().toISOString(),
-    isDefault: input.isDefault === true,
-    sourceCategoryKey: input.sourceCategoryKey,
   } satisfies DocumentLibrary;
+}
+
+function buildRequiredLibraries(createdAt: string) {
+  return [
+    {
+      key: UNGROUPED_LIBRARY_KEY,
+      label: UNGROUPED_LIBRARY_LABEL,
+      permissionLevel: 0,
+      createdAt,
+    } satisfies DocumentLibrary,
+  ];
 }
 
 async function writeLibrariesFile(items: DocumentLibrary[]) {
@@ -88,7 +94,7 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
   await writeRuntimeStateJson({
     filePath: LIBRARIES_FILE,
     payload: {
-      items: items.map(({ isDefault: _isDefault, sourceCategoryKey: _sourceCategoryKey, ...rest }) => ({
+      items: items.map((rest) => ({
         ...rest,
         permissionLevel: normalizePermissionLevel(rest.permissionLevel),
         knowledgePagesEnabled: Boolean(rest.knowledgePagesEnabled),
@@ -97,26 +103,6 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
     },
   });
   scheduleOpenClawMemoryCatalogSync('document-libraries-write');
-}
-
-function buildDefaultLibraries(categories: Awaited<ReturnType<typeof loadDocumentCategoryConfig>>['categories'], createdAt: string) {
-  return [
-    {
-      key: UNGROUPED_LIBRARY_KEY,
-      label: UNGROUPED_LIBRARY_LABEL,
-      permissionLevel: 0,
-      createdAt,
-      isDefault: true,
-    } satisfies DocumentLibrary,
-    ...(Object.entries(categories) as Array<[BizCategory, { label: string }]>).map(([key, value]) => ({
-      key,
-      label: value.label || key,
-      permissionLevel: 0,
-      createdAt,
-      isDefault: true,
-      sourceCategoryKey: key,
-    } satisfies DocumentLibrary)),
-  ];
 }
 
 function mergeLibraries(...groups: DocumentLibrary[][]) {
@@ -128,8 +114,6 @@ function mergeLibraries(...groups: DocumentLibrary[][]) {
       merged.set(normalized.key, existing ? {
         ...existing,
         ...normalized,
-        isDefault: normalized.isDefault || existing.isDefault,
-        sourceCategoryKey: normalized.sourceCategoryKey || existing.sourceCategoryKey,
       } : normalized);
     }
   }
@@ -144,16 +128,11 @@ export function documentMatchesLibrary(item: ParsedDocument, library: DocumentLi
     return groups.length === 0;
   }
 
-  if (library.isDefault && library.sourceCategoryKey) {
-    return (item.confirmedBizCategory || item.bizCategory) === library.sourceCategoryKey;
-  }
-
   return false;
 }
 
 export async function loadDocumentLibraries() {
   const stored = await readLibrariesFile();
-  const categoryConfig = await loadDocumentCategoryConfig(STORAGE_FILES_DIR);
   const overrides = await loadDocumentOverrides();
   const derived = Object.values(overrides)
     .flatMap((item) => item.groups || [])
@@ -168,8 +147,8 @@ export async function loadDocumentLibraries() {
       return acc;
     }, []);
 
-  const defaultLibraries = buildDefaultLibraries(categoryConfig.categories, categoryConfig.updatedAt);
-  const merged = mergeLibraries(defaultLibraries, derived, stored);
+  const requiredLibraries = buildRequiredLibraries(new Date().toISOString());
+  const merged = mergeLibraries(requiredLibraries, derived, stored);
   return merged.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 }
 
@@ -243,8 +222,11 @@ export async function updateDocumentLibrary(
 export async function deleteDocumentLibrary(key: string) {
   const current = await loadDocumentLibraries();
   const target = current.find((item) => item.key === key);
-  if (target?.isDefault) {
-    throw new Error('default library cannot be deleted');
+  if (!target) {
+    throw new Error('library not found');
+  }
+  if (target.key === UNGROUPED_LIBRARY_KEY) {
+    throw new Error('reserved library cannot be deleted');
   }
   const filtered = current.filter((item) => item.key !== key);
   await writeLibrariesFile(filtered);

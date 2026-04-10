@@ -46,7 +46,6 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
     libraryKnowledge,
     meta: {
       category: detailItem.category,
-      bizCategory: detailItem.bizCategory,
       parseStatus: detailItem.parseStatus,
       matchedFolders: buildMatchedFolders(documentConfig.categories, found.path),
     },

@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "test": "tsx --test test/**/*.test.ts",
     "memory:refresh": "tsx src/scripts/refresh-openclaw-memory-catalog.ts",
+    "document:groups:migrate": "tsx src/scripts/migrate-document-groups-from-legacy-categories.ts",
     "validate:au20260316": "tsx src/scripts/validate-au20260316.ts",
     "platform:control": "tsx src/scripts/platform-control.ts"
   },

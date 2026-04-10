@@ -114,7 +114,7 @@ export default function DocumentsTable({
             const groups = item.confirmedGroups || item.groups || [];
             const suggestedGroups = item.confirmedGroups?.length ? [] : (item.suggestedGroups || []);
             const effectiveGroups = getDocumentLibraryKeys(item, libraries);
-            const availableLibraries = libraries.filter((library) => !effectiveGroups.includes(library.key));
+            const availableLibraries = libraries.filter((library) => library.key !== 'ungrouped' && !effectiveGroups.includes(library.key));
             const draftValue = libraryDrafts[item.id] || availableLibraries[0]?.key || '';
 
             return (
@@ -157,7 +157,7 @@ export default function DocumentsTable({
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {effectiveGroups.length ? effectiveGroups.map((group) => {
                         const matchedLibrary = libraries.find((library) => library.key === group);
-                        const removable = groups.includes(group) && !matchedLibrary?.isDefault;
+                        const removable = groups.includes(group) && matchedLibrary?.key !== 'ungrouped';
                         return (
                           <span key={group} className="source-chip" style={{ gap: 8 }}>
                             {itemLabelMap.get(group) || group}
