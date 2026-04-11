@@ -195,6 +195,41 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         description: 'Promote one dataset file into a reusable report template reference.',
       },
       {
+        key: 'reports.create-template',
+        command: 'pnpm system:control -- reports create-template --label "<template-name>" [--type table|static-page|ppt|document] [--description "<description>"] [--default true]',
+        description: 'Create one reusable report template shell.',
+      },
+      {
+        key: 'reports.update-template',
+        command: 'pnpm system:control -- reports update-template --template "<template-key>" [--label "<template-name>"] [--description "<description>"] [--default true|false]',
+        description: 'Update one reusable report template.',
+      },
+      {
+        key: 'reports.delete-template',
+        command: 'pnpm system:control -- reports delete-template --template "<template-key>"',
+        description: 'Delete one user-created reusable report template.',
+      },
+      {
+        key: 'reports.group-templates',
+        command: 'pnpm system:control -- reports group-templates --library "<library>"',
+        description: 'List built-in templates currently available to one library/group.',
+      },
+      {
+        key: 'reports.set-group-template',
+        command: 'pnpm system:control -- reports set-group-template --library "<library>" --template "<template-key>"',
+        description: 'Set the default output template for one library/group.',
+      },
+      {
+        key: 'reports.template-reference-file',
+        command: 'pnpm system:control -- reports template-reference-file --template "<template-key>" --path "<file-path>" [--name "<display-name>"]',
+        description: 'Attach one local file as a reusable template reference.',
+      },
+      {
+        key: 'reports.template-reference-link',
+        command: 'pnpm system:control -- reports template-reference-link --template "<template-key>" --url "<url>" [--label "<display-name>"]',
+        description: 'Attach one public URL as a reusable template reference.',
+      },
+      {
         key: 'reports.outputs',
         command: 'pnpm system:control -- reports outputs [--library "<library>"] [--limit 10]',
         description: 'List saved outputs, optionally scoped to one library/group.',
@@ -203,6 +238,11 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         key: 'reports.revise',
         command: 'pnpm system:control -- reports revise --output "<output-id>" --instruction "<instruction>"',
         description: 'Revise one saved output in place.',
+      },
+      {
+        key: 'reports.delete-output',
+        command: 'pnpm system:control -- reports delete-output --output "<output-id>"',
+        description: 'Delete one saved output from the report center.',
       },
     ],
   },

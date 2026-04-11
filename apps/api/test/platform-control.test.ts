@@ -36,6 +36,9 @@ const documentStore = await importFresh<typeof import('../src/lib/document-store
 const documentUploadIngest = await importFresh<typeof import('../src/lib/document-upload-ingest.js')>(
   '../src/lib/document-upload-ingest.js',
 );
+const reportCenter = await importFresh<typeof import('../src/lib/report-center.js')>(
+  '../src/lib/report-center.js',
+);
 const syncStatusFile = path.join(storageRoot, 'config', 'openclaw-memory-sync-status.json');
 
 async function startHtmlServer(routes: Record<string, string>) {
@@ -72,8 +75,26 @@ async function startHtmlServer(routes: Record<string, string>) {
   };
 }
 
+async function removeDirWithRetry(targetPath: string, attempts = 8) {
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (
+        index === attempts - 1
+        || !(error && typeof error === 'object' && 'code' in error)
+        || !['ENOTEMPTY', 'EPERM', 'EBUSY'].includes(String((error as { code?: string }).code || ''))
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150 * (index + 1)));
+    }
+  }
+}
+
 test.after(async () => {
-  await fs.rm(storageRoot, { recursive: true, force: true });
+  await removeDirWithRetry(storageRoot);
 });
 
 test('platform control should run, pause, activate, and list datasource runs', async () => {
@@ -193,6 +214,14 @@ test('platform control should expose capability registry metadata', async () => 
   const reportsArea = areas.find((item) => item.id === 'reports');
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.templates'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-from-document'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.create-template'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.update-template'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.delete-template'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.group-templates'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.set-group-template'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-reference-file'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-reference-link'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.delete-output'));
 
   const integrations = (listResult.data?.integrations as Array<{ id?: string }>) || [];
   assert.ok(integrations.some((item) => item.id === 'web-capture'));
@@ -343,5 +372,158 @@ test('platform control should promote a document-center file into a reusable rep
   assert.ok(
     ((templatesResult.data?.items as Array<{ label?: string }>) || [])
       .some((item) => item.label === '投标输出模板'),
+  );
+});
+
+test('platform control should manage reusable templates and saved outputs', async () => {
+  await documentLibraries.createDocumentLibrary({
+    name: 'bids',
+    description: 'Bid knowledge base',
+    permissionLevel: 0,
+  }).catch(() => undefined);
+
+  const createTemplateResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'create-template',
+    '--label',
+    'CLI投标模板',
+    '--type',
+    'document',
+    '--description',
+    '通过 CLI 创建的投标模板',
+    '--default',
+    'true',
+  ]);
+  assert.equal(createTemplateResult.ok, true);
+  assert.equal(createTemplateResult.action, 'reports.create-template');
+  const createdTemplateKey = String((createTemplateResult.data?.template as { key?: string })?.key || '');
+  assert.ok(createdTemplateKey);
+
+  const addLinkResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'template-reference-link',
+    '--template',
+    createdTemplateKey,
+    '--url',
+    'https://example.com/tender-template',
+    '--label',
+    '招标模板参考链接',
+  ]);
+  assert.equal(addLinkResult.ok, true);
+  assert.equal(addLinkResult.action, 'reports.template-reference-link');
+  assert.equal((addLinkResult.data?.reference as { url?: string })?.url, 'https://example.com/tender-template');
+
+  const templateSourcePath = path.join(storageRoot, 'template-source.md');
+  await fs.writeFile(templateSourcePath, '# 模板参考', 'utf8');
+  const addFileResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'template-reference-file',
+    '--template',
+    createdTemplateKey,
+    '--path',
+    templateSourcePath,
+    '--name',
+    '模板参考文件.md',
+  ]);
+  assert.equal(addFileResult.ok, true);
+  assert.equal(addFileResult.action, 'reports.template-reference-file');
+  assert.equal((addFileResult.data?.reference as { originalName?: string })?.originalName, '模板参考文件.md');
+
+  const updateTemplateResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'update-template',
+    '--template',
+    createdTemplateKey,
+    '--label',
+    'CLI投标模板-更新',
+    '--description',
+    '更新后的模板说明',
+    '--default',
+    'false',
+  ]);
+  assert.equal(updateTemplateResult.ok, true);
+  assert.equal(updateTemplateResult.action, 'reports.update-template');
+  assert.equal((updateTemplateResult.data?.template as { label?: string })?.label, 'CLI投标模板-更新');
+
+  const groupTemplatesResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'group-templates',
+    '--library',
+    'bids',
+  ]);
+  assert.equal(groupTemplatesResult.ok, true);
+  assert.equal(groupTemplatesResult.action, 'reports.group-templates');
+  const groupTemplateKey = String(((groupTemplatesResult.data?.items as Array<{ key?: string }>) || [])[0]?.key || '');
+  assert.ok(groupTemplateKey);
+
+  const setGroupTemplateResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'set-group-template',
+    '--library',
+    'bids',
+    '--template',
+    groupTemplateKey,
+  ]);
+  assert.equal(setGroupTemplateResult.ok, true);
+  assert.equal(setGroupTemplateResult.action, 'reports.set-group-template');
+  assert.equal((setGroupTemplateResult.data?.group as { defaultTemplateKey?: string })?.defaultTemplateKey, groupTemplateKey);
+
+  const output = await reportCenter.createReportOutput({
+    groupKey: 'bids',
+    title: 'CLI测试输出',
+    triggerSource: 'chat',
+    kind: 'md',
+    format: 'markdown',
+    content: '# 测试输出',
+  });
+  const outputsBeforeDelete = await platformControl.executePlatformControlCommand([
+    'reports',
+    'outputs',
+    '--library',
+    'bids',
+  ]);
+  assert.ok(
+    ((outputsBeforeDelete.data?.items as Array<{ id?: string }>) || [])
+      .some((item) => item.id === output.id),
+  );
+
+  const deleteOutputResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'delete-output',
+    '--output',
+    output.id,
+  ]);
+  assert.equal(deleteOutputResult.ok, true);
+  assert.equal(deleteOutputResult.action, 'reports.delete-output');
+
+  const outputsAfterDelete = await platformControl.executePlatformControlCommand([
+    'reports',
+    'outputs',
+    '--library',
+    'bids',
+  ]);
+  assert.ok(
+    !((outputsAfterDelete.data?.items as Array<{ id?: string }>) || [])
+      .some((item) => item.id === output.id),
+  );
+
+  const deleteTemplateResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'delete-template',
+    '--template',
+    createdTemplateKey,
+  ]);
+  assert.equal(deleteTemplateResult.ok, true);
+  assert.equal(deleteTemplateResult.action, 'reports.delete-template');
+
+  const templatesAfterDelete = await platformControl.executePlatformControlCommand([
+    'reports',
+    'templates',
+    '--type',
+    'document',
+  ]);
+  assert.ok(
+    !((templatesAfterDelete.data?.items as Array<{ key?: string }>) || [])
+      .some((item) => item.key === createdTemplateKey),
   );
 });
