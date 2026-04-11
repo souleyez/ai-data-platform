@@ -11,6 +11,7 @@ export type ReportPlanSection = {
   purpose: string;
   evidenceFocus: string;
   completionMode: ReportPlanCompletionMode;
+  datavizSlotKeys?: string[];
 };
 
 export type ReportPlanCard = {
@@ -23,6 +24,40 @@ export type ReportPlanChart = {
   purpose: string;
 };
 
+export type ReportPlanDatavizSlot = {
+  key: string;
+  title: string;
+  purpose: string;
+  preferredChartType: 'bar' | 'horizontal-bar' | 'line';
+  placement: 'hero' | 'section';
+  sectionTitle?: string;
+  evidenceFocus: string;
+  minItems: number;
+  maxItems: number;
+};
+
+export type ReportPlanPageSpecSection = {
+  title: string;
+  purpose: string;
+  completionMode: ReportPlanCompletionMode;
+  datavizSlotKeys: string[];
+};
+
+export type ReportPlanLayoutVariant =
+  | 'insight-brief'
+  | 'risk-brief'
+  | 'operations-cockpit'
+  | 'talent-showcase'
+  | 'research-brief'
+  | 'solution-overview';
+
+export type ReportPlanPageSpec = {
+  layoutVariant: ReportPlanLayoutVariant;
+  heroCardLabels: string[];
+  heroDatavizSlotKeys: string[];
+  sections: ReportPlanPageSpecSection[];
+};
+
 export type ReportPlan = {
   audience: ReportPlanAudience;
   templateMode: ReportPlanTemplateMode;
@@ -33,7 +68,9 @@ export type ReportPlan = {
   completionRules: string[];
   cards: ReportPlanCard[];
   charts: ReportPlanChart[];
+  datavizSlots: ReportPlanDatavizSlot[];
   sections: ReportPlanSection[];
+  pageSpec: ReportPlanPageSpec;
   knowledgeScope: {
     libraryLabels: string[];
     documentCount: number;
@@ -102,6 +139,15 @@ function normalizeKeywordText(...values: Array<string | undefined | null>) {
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeDatavizSlotKey(title: string) {
+  return String(title || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'chart';
 }
 
 function hasKeyword(text: string, keywords: string[]) {
@@ -415,6 +461,109 @@ function buildChartPlan(templateTaskHint: KnowledgeTemplateTaskHint | null | und
   }
 }
 
+function inferDatavizSlotChartType(
+  templateTaskHint: KnowledgeTemplateTaskHint | null | undefined,
+  title: string,
+  index: number,
+) {
+  const normalizedTitle = normalizeKeywordText(title);
+  if (/trend|monthly|month|timeline|联动|趋势|月度|同比|环比/.test(normalizedTitle)) return 'line' as const;
+  if (/queue|priority|梯队|ranking|排名|top|risk|风险|补货/.test(normalizedTitle)) return 'horizontal-bar' as const;
+
+  switch (templateTaskHint) {
+    case 'resume-comparison':
+      return 'horizontal-bar';
+    case 'bids-static-page':
+      return index === 0 ? 'horizontal-bar' : 'bar';
+    case 'order-static-page':
+      if (index === 2) return 'line';
+      if (index === 1 || index === 3) return 'horizontal-bar';
+      return 'bar';
+    case 'footfall-static-page':
+      return index === 0 ? 'bar' : 'horizontal-bar';
+    default:
+      return 'bar';
+  }
+}
+
+function buildDatavizSlotPlan(
+  templateTaskHint: KnowledgeTemplateTaskHint | null | undefined,
+  charts: ReportPlanChart[],
+  sections: ReportPlanSection[],
+) {
+  const sectionAnchors = sections
+    .map((item) => item.title)
+    .filter((title) => title && !/AI综合分析/i.test(title));
+
+  return charts.map((chart, index) => {
+    const anchoredSection = index > 0
+      ? sectionAnchors[Math.min(index, Math.max(sectionAnchors.length - 1, 0))]
+      : undefined;
+    const preferredChartType = inferDatavizSlotChartType(templateTaskHint, chart.title, index);
+    return {
+      key: normalizeDatavizSlotKey(chart.title),
+      title: chart.title,
+      purpose: chart.purpose,
+      preferredChartType,
+      placement: index === 0 ? 'hero' : 'section',
+      sectionTitle: index === 0 ? undefined : anchoredSection,
+      evidenceFocus: anchoredSection
+        ? sections.find((item) => item.title === anchoredSection)?.evidenceFocus || chart.purpose
+        : chart.purpose,
+      minItems: preferredChartType === 'line' ? 3 : 2,
+      maxItems: preferredChartType === 'horizontal-bar' ? 8 : 6,
+    } satisfies ReportPlanDatavizSlot;
+  });
+}
+
+function attachDatavizSlotsToSections(
+  sections: ReportPlanSection[],
+  datavizSlots: ReportPlanDatavizSlot[],
+) {
+  return sections.map((section) => ({
+    ...section,
+    datavizSlotKeys: datavizSlots
+      .filter((slot) => slot.sectionTitle === section.title)
+      .map((slot) => slot.key),
+  }));
+}
+
+function buildPageSpec(
+  templateTaskHint: KnowledgeTemplateTaskHint | null | undefined,
+  preferredLayoutVariant: ReportPlanLayoutVariant | undefined,
+  cards: ReportPlanCard[],
+  sections: ReportPlanSection[],
+  datavizSlots: ReportPlanDatavizSlot[],
+): ReportPlanPageSpec {
+  const layoutVariant: ReportPlanLayoutVariant = preferredLayoutVariant
+    || (
+    templateTaskHint === 'resume-comparison'
+      ? 'talent-showcase'
+      : templateTaskHint === 'bids-static-page'
+        ? 'risk-brief'
+        : templateTaskHint === 'order-static-page' || templateTaskHint === 'footfall-static-page'
+          ? 'operations-cockpit'
+          : templateTaskHint === 'paper-static-page'
+            ? 'research-brief'
+            : templateTaskHint === 'iot-static-page'
+              ? 'solution-overview'
+              : 'insight-brief'
+    );
+  return {
+    layoutVariant,
+    heroCardLabels: cards.map((item) => item.label),
+    heroDatavizSlotKeys: datavizSlots
+      .filter((slot) => slot.placement === 'hero')
+      .map((slot) => slot.key),
+    sections: sections.map((section) => ({
+      title: section.title,
+      purpose: section.purpose,
+      completionMode: section.completionMode,
+      datavizSlotKeys: section.datavizSlotKeys || [],
+    })),
+  };
+}
+
 function buildSectionPurpose(title: string) {
   if (/AI综合分析|综合分析/i.test(title)) {
     return {
@@ -473,6 +622,20 @@ function buildKnowledgeScope(retrieval: RetrievalResult, libraries: Array<{ key?
 export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
   const knowledgeScope = buildKnowledgeScope(input.retrieval, input.libraries);
   const envelope = resolveBaseEnvelope(input, knowledgeScope.libraryLabels);
+  const sections = envelope.pageSections?.map((title) => {
+    const sectionPlan = buildSectionPurpose(title);
+    return {
+      title,
+      purpose: sectionPlan.purpose,
+      evidenceFocus: sectionPlan.evidenceFocus,
+      completionMode: sectionPlan.completionMode,
+    };
+  }) || [];
+  const charts = buildChartPlan(input.templateTaskHint);
+  const cards = buildCardPlan(input.templateTaskHint);
+  const datavizSlots = buildDatavizSlotPlan(input.templateTaskHint, charts, sections);
+  const sectionModules = attachDatavizSlotsToSections(sections, datavizSlots);
+  const preferredLayoutVariant = input.selectedTemplates?.[0]?.template.preferredLayoutVariant;
 
   return {
     audience: 'client',
@@ -490,23 +653,19 @@ export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
       'Prefer stronger and more recent evidence over broad but weak summarization.',
       'If evidence is missing, show the gap instead of fabricating metrics or facts.',
       'Keep the page readable for direct client or business review.',
+      'Treat dataviz slots as planned modules, not decorative add-ons.',
     ],
     completionRules: [
       'The model may improve titles, summaries, and action wording, but it must stay bounded by matched evidence.',
       'Hard numbers, dates, and claims must come from the knowledge evidence or be labeled as uncertain.',
       'Recommendation sections can synthesize, but they must not invent unsupported business conclusions.',
+      'When charts are produced, align them to the planned dataviz slots and keep chart semantics stable.',
     ],
-    cards: buildCardPlan(input.templateTaskHint),
-    charts: buildChartPlan(input.templateTaskHint),
-    sections: envelope.pageSections?.map((title) => {
-      const sectionPlan = buildSectionPurpose(title);
-      return {
-        title,
-        purpose: sectionPlan.purpose,
-        evidenceFocus: sectionPlan.evidenceFocus,
-        completionMode: sectionPlan.completionMode,
-      };
-    }) || [],
+    cards,
+    charts,
+    datavizSlots,
+    sections: sectionModules,
+    pageSpec: buildPageSpec(input.templateTaskHint, preferredLayoutVariant, cards, sectionModules, datavizSlots),
     knowledgeScope,
   };
 }
@@ -535,9 +694,20 @@ export function buildReportPlanContextBlock(plan: ReportPlan) {
     ...plan.cards.map((item, index) => `${index + 1}. ${item.label} :: ${item.purpose}`),
     'Planned charts:',
     ...plan.charts.map((item, index) => `${index + 1}. ${item.title} :: ${item.purpose}`),
+    'Planned dataviz slots:',
+    ...plan.datavizSlots.map((item, index) => (
+      `${index + 1}. ${item.title} :: type=${item.preferredChartType} :: placement=${item.placement}${item.sectionTitle ? ` :: section=${item.sectionTitle}` : ''} :: evidence=${item.evidenceFocus} :: items=${item.minItems}-${item.maxItems}`
+    )),
+    `Page spec layout: ${plan.pageSpec.layoutVariant}`,
+    `Page spec hero cards: ${plan.pageSpec.heroCardLabels.join(' | ')}`,
+    `Page spec hero dataviz: ${plan.pageSpec.heroDatavizSlotKeys.join(' | ') || '-'}`,
+    'Page spec sections:',
+    ...plan.pageSpec.sections.map((item, index) => (
+      `${index + 1}. ${item.title} :: completion=${item.completionMode} :: dataviz=${item.datavizSlotKeys.join(' | ') || '-'}`
+    )),
     'Planned sections:',
     ...plan.sections.map((item, index) => (
-      `${index + 1}. ${item.title} :: purpose=${item.purpose} :: evidence=${item.evidenceFocus} :: completion=${item.completionMode}`
+      `${index + 1}. ${item.title} :: purpose=${item.purpose} :: evidence=${item.evidenceFocus} :: completion=${item.completionMode} :: dataviz=${item.datavizSlotKeys?.join(' | ') || '-'}`
     )),
   ]
     .filter(Boolean)

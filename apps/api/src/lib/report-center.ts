@@ -9,7 +9,7 @@ import type { ParsedDocument } from './document-parser.js';
 import { ingestExistingLocalFiles } from './document-upload-ingest.js';
 import { DEFAULT_SCAN_DIR, loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
-import { buildReportPlan, inferReportPlanTaskHint } from './report-planner.js';
+import { buildReportPlan, inferReportPlanTaskHint, type ReportPlanDatavizSlot, type ReportPlanLayoutVariant, type ReportPlanPageSpec } from './report-planner.js';
 import { attachDatavizRendersToPage } from './report-dataviz.js';
 import {
   buildDefaultSystemTemplates,
@@ -68,6 +68,7 @@ export type SharedReportTemplate = {
   label: string;
   type: ReportTemplateType;
   description: string;
+  preferredLayoutVariant?: ReportPlanLayoutVariant;
   supported: boolean;
   isDefault?: boolean;
   origin?: 'system' | 'user';
@@ -105,6 +106,8 @@ export type ReportDynamicSource = {
   planSectionTitles?: string[];
   planCardLabels?: string[];
   planChartTitles?: string[];
+  planDatavizSlots?: ReportPlanDatavizSlot[];
+  planPageSpec?: ReportPlanPageSpec;
   planUpdatedAt?: string;
 };
 
@@ -134,6 +137,8 @@ export type ReportOutputRecord = {
     summary?: string;
     cards?: Array<{ label?: string; value?: string; note?: string }>;
     sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+    datavizSlots?: ReportPlanDatavizSlot[];
+    pageSpec?: ReportPlanPageSpec;
     charts?: Array<{
       title?: string;
       items?: Array<{ label?: string; value?: number }>;
@@ -667,7 +672,13 @@ async function attachReportAnalysis(record: ReportOutputRecord) {
 
 async function attachReportDataviz(record: ReportOutputRecord) {
   if (!isNarrativeReportKind(record.kind) || !record.page) return record;
-  const page = await attachDatavizRendersToPage(record.page);
+  const page = await attachDatavizRendersToPage(record.page, {
+    slots: Array.isArray(record.page?.datavizSlots) && record.page.datavizSlots.length
+      ? record.page.datavizSlots
+      : Array.isArray(record.dynamicSource?.planDatavizSlots)
+        ? record.dynamicSource?.planDatavizSlots
+        : [],
+  });
   return page ? { ...record, page } : record;
 }
 
@@ -709,6 +720,56 @@ function attachLocalReportAnalysis(record: ReportOutputRecord) {
       columns,
       rows,
     },
+  };
+}
+
+function normalizeStoredDatavizSlots(value: unknown): ReportPlanDatavizSlot[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const preferredChartType: ReportPlanDatavizSlot['preferredChartType'] =
+        item?.preferredChartType === 'horizontal-bar' || item?.preferredChartType === 'line'
+          ? item.preferredChartType
+          : 'bar';
+      const placement: ReportPlanDatavizSlot['placement'] =
+        item?.placement === 'section' ? 'section' : 'hero';
+      return {
+        key: String(item?.key || '').trim(),
+        title: String(item?.title || '').trim(),
+        purpose: String(item?.purpose || '').trim(),
+        preferredChartType,
+        placement,
+        sectionTitle: String(item?.sectionTitle || '').trim(),
+        evidenceFocus: String(item?.evidenceFocus || '').trim(),
+        minItems: Number.isFinite(Number(item?.minItems)) ? Number(item?.minItems) : 2,
+        maxItems: Number.isFinite(Number(item?.maxItems)) ? Number(item?.maxItems) : 6,
+      } satisfies ReportPlanDatavizSlot;
+    })
+    .filter((item) => item.title);
+}
+
+function normalizeStoredPageSpec(value: unknown): ReportPlanPageSpec | undefined {
+  if (!isRecord(value) || !Array.isArray(value.sections)) return undefined;
+  return {
+    layoutVariant: String(value.layoutVariant || '').trim() as ReportPlanPageSpec['layoutVariant'] || 'insight-brief',
+    heroCardLabels: Array.isArray(value.heroCardLabels)
+      ? value.heroCardLabels.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    heroDatavizSlotKeys: Array.isArray(value.heroDatavizSlotKeys)
+      ? value.heroDatavizSlotKeys.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    sections: value.sections.map((item: any) => {
+      const completionMode: ReportPlanPageSpec['sections'][number]['completionMode'] =
+        item?.completionMode === 'knowledge-first' ? 'knowledge-first' : 'knowledge-plus-model';
+      return {
+        title: String(item?.title || '').trim(),
+        purpose: String(item?.purpose || '').trim(),
+        completionMode,
+        datavizSlotKeys: Array.isArray(item?.datavizSlotKeys)
+          ? item.datavizSlotKeys.map((entry: any) => String(entry || '').trim()).filter(Boolean)
+          : [],
+      };
+    }).filter((item) => item.title),
   };
 }
 
@@ -766,6 +827,8 @@ function normalizeDynamicSource(
     planChartTitles: Array.isArray(dynamicSource?.planChartTitles)
       ? dynamicSource.planChartTitles.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
+    planDatavizSlots: normalizeStoredDatavizSlots(dynamicSource?.planDatavizSlots),
+    planPageSpec: normalizeStoredPageSpec(dynamicSource?.planPageSpec),
     planUpdatedAt: String(dynamicSource?.planUpdatedAt || '').trim(),
   };
 }
@@ -967,6 +1030,28 @@ function buildDynamicPlanMetadata(plan: ReturnType<typeof buildReportPlan>) {
     planSectionTitles: plan.sections.map((item) => item.title),
     planCardLabels: plan.cards.map((item) => item.label),
     planChartTitles: plan.charts.map((item) => item.title),
+    planDatavizSlots: plan.datavizSlots.map((item) => ({
+      key: item.key,
+      title: item.title,
+      purpose: item.purpose,
+      preferredChartType: item.preferredChartType,
+      placement: item.placement,
+      sectionTitle: item.sectionTitle,
+      evidenceFocus: item.evidenceFocus,
+      minItems: item.minItems,
+      maxItems: item.maxItems,
+    })),
+    planPageSpec: {
+      layoutVariant: plan.pageSpec.layoutVariant,
+      heroCardLabels: plan.pageSpec.heroCardLabels,
+      heroDatavizSlotKeys: plan.pageSpec.heroDatavizSlotKeys,
+      sections: plan.pageSpec.sections.map((item) => ({
+        title: item.title,
+        purpose: item.purpose,
+        completionMode: item.completionMode,
+        datavizSlotKeys: item.datavizSlotKeys,
+      })),
+    },
   };
 }
 
@@ -1081,6 +1166,8 @@ async function buildDynamicPageRecord(
       planSectionTitles: source.planSectionTitles || [],
       planCardLabels: source.planCardLabels || [],
       planChartTitles: source.planChartTitles || [],
+      planDatavizSlots: source.planDatavizSlots || [],
+      planPageSpec: source.planPageSpec || null,
     }) === JSON.stringify(planMetadata)
   ) {
     return record;
@@ -1142,6 +1229,8 @@ async function buildDynamicPageRecord(
       summary,
       cards,
       sections,
+      datavizSlots: reportPlan.datavizSlots,
+      pageSpec: reportPlan.pageSpec,
       charts,
     },
     dynamicSource: {
@@ -1244,6 +1333,20 @@ function normalizeStoredTemplateType(value: unknown): ReportTemplateType {
     : 'document';
 }
 
+function normalizeReportLayoutVariant(value: unknown): ReportPlanLayoutVariant | undefined {
+  const normalized = normalizeTextField(value);
+  return [
+    'insight-brief',
+    'risk-brief',
+    'operations-cockpit',
+    'talent-showcase',
+    'research-brief',
+    'solution-overview',
+  ].includes(normalized)
+    ? (normalized as ReportPlanLayoutVariant)
+    : undefined;
+}
+
 function normalizeStoredReferenceSourceType(value: unknown): ReportReferenceSourceType | undefined {
   const normalized = normalizeTextField(value);
   return ['word', 'ppt', 'spreadsheet', 'image', 'web-link', 'other'].includes(normalized)
@@ -1293,11 +1396,13 @@ function normalizeStoredSharedTemplate(value: unknown): SharedReportTemplate | n
   const key = normalizeTextField(value.key);
   if (!key) return null;
 
+  const type = normalizeStoredTemplateType(value.type);
   return {
     key,
     label: normalizeTextField(value.label) || key,
-    type: normalizeStoredTemplateType(value.type),
+    type,
     description: normalizeTextField(value.description),
+    preferredLayoutVariant: type === 'static-page' ? normalizeReportLayoutVariant(value.preferredLayoutVariant) : undefined,
     supported: value.supported !== false,
     isDefault: Boolean(value.isDefault),
     origin: normalizeTextField(value.origin) === 'system' ? 'system' : 'user',
@@ -1385,12 +1490,14 @@ function normalizeStoredPage(value: unknown): ReportOutputRecord['page'] | null 
   const sections: Array<{ title?: string; body?: string; bullets?: string[] }> = Array.isArray(value.sections)
     ? value.sections.map((item) => normalizeStoredPageSection(item)).filter(Boolean) as Array<{ title?: string; body?: string; bullets?: string[] }>
     : [];
+  const datavizSlots = normalizeStoredDatavizSlots(value.datavizSlots);
+  const pageSpec = normalizeStoredPageSpec(value.pageSpec);
   const charts: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }> = Array.isArray(value.charts)
     ? value.charts.map((item) => normalizeStoredPageChart(item)).filter(Boolean) as Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>
     : [];
 
-  return summary || cards.length || sections.length || charts.length
-    ? { summary, cards, sections, charts }
+  return summary || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec
+    ? { summary, cards, sections, datavizSlots, pageSpec, charts }
     : null;
 }
 
@@ -1554,6 +1661,7 @@ function buildTemplatesForLibrary(label: string, key: string) {
 function buildDefaultSharedTemplates(): SharedReportTemplate[] {
   return buildDefaultSystemTemplates().map((template) => ({
     ...template,
+    preferredLayoutVariant: inferTemplatePreferredLayoutVariant(template),
     origin: 'system',
     referenceImages: [],
   }));
@@ -1573,6 +1681,13 @@ function mergeSharedTemplates(storedTemplates: SharedReportTemplate[] | undefine
     merged.set(template.key, {
       ...(fallback || {}),
       ...template,
+      preferredLayoutVariant:
+        template.preferredLayoutVariant
+        || fallback?.preferredLayoutVariant
+        || inferTemplatePreferredLayoutVariant({
+          ...(fallback || {}),
+          ...template,
+        }),
       origin:
         template.origin
         || fallback?.origin
@@ -1595,34 +1710,44 @@ function mergeSharedTemplates(storedTemplates: SharedReportTemplate[] | undefine
   return values;
 }
 
-function looksLikeResumeTemplate(template: SharedReportTemplate) {
+function looksLikeResumeTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('简历') || text.includes('resume') || text.includes('cv') || text.includes('候选人');
 }
 
-function looksLikeBidTemplate(template: SharedReportTemplate) {
+function looksLikeBidTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('标书') || text.includes('招标') || text.includes('投标') || text.includes('bid') || text.includes('tender');
 }
 
-function looksLikeOrderTemplate(template: SharedReportTemplate) {
+function looksLikeOrderTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('订单') || text.includes('销售') || text.includes('库存') || text.includes('电商') || text.includes('order');
 }
 
-function looksLikeFormulaTemplate(template: SharedReportTemplate) {
+function looksLikeFormulaTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('配方') || text.includes('奶粉') || text.includes('formula');
 }
 
-function looksLikePaperTemplate(template: SharedReportTemplate) {
+function looksLikePaperTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('paper') || text.includes('论文') || text.includes('学术') || text.includes('研究');
 }
 
-function looksLikeIotTemplate(template: SharedReportTemplate) {
+function looksLikeIotTemplate(template: Pick<SharedReportTemplate, 'label' | 'description'>) {
   const text = `${template.label} ${template.description || ''}`.toLowerCase();
   return text.includes('iot') || text.includes('物联网') || text.includes('设备') || text.includes('网关') || text.includes('解决方案');
+}
+
+function inferTemplatePreferredLayoutVariant(template: Pick<SharedReportTemplate, 'type' | 'label' | 'description'>): ReportPlanLayoutVariant | undefined {
+  if (template.type !== 'static-page') return undefined;
+  if (looksLikeResumeTemplate(template)) return 'talent-showcase';
+  if (looksLikeBidTemplate(template)) return 'risk-brief';
+  if (looksLikeOrderTemplate(template)) return 'operations-cockpit';
+  if (looksLikePaperTemplate(template)) return 'research-brief';
+  if (looksLikeIotTemplate(template)) return 'solution-overview';
+  return 'insight-brief';
 }
 
 export function buildSharedTemplateEnvelope(template: SharedReportTemplate): ReportTemplateEnvelope {
@@ -2225,6 +2350,7 @@ export async function createSharedReportTemplate(input: {
   type?: ReportTemplateType;
   sourceType?: ReportReferenceSourceType;
   description?: string;
+  preferredLayoutVariant?: ReportPlanLayoutVariant;
   isDefault?: boolean;
 }) {
   const state = await loadReportCenterState();
@@ -2240,6 +2366,16 @@ export async function createSharedReportTemplate(input: {
     label,
     type,
     description: String(input.description || '').trim() || `${label} 模板`,
+    preferredLayoutVariant: type === 'static-page'
+      ? (
+        input.preferredLayoutVariant
+        || inferTemplatePreferredLayoutVariant({
+          label,
+          type,
+          description: String(input.description || '').trim() || `${label} 模板`,
+        })
+      )
+      : undefined,
     supported: true,
     isDefault: Boolean(input.isDefault),
     origin: 'user',
@@ -2258,6 +2394,7 @@ export async function createSharedReportTemplate(input: {
 export async function updateSharedReportTemplate(templateKey: string, patch: {
   label?: string;
   description?: string;
+  preferredLayoutVariant?: ReportPlanLayoutVariant;
   isDefault?: boolean;
 }) {
   const state = await loadReportCenterState();
@@ -2270,6 +2407,10 @@ export async function updateSharedReportTemplate(templateKey: string, patch: {
         ...item,
         label: patch.label ? String(patch.label).trim() || item.label : item.label,
         description: patch.description !== undefined ? String(patch.description).trim() || item.description : item.description,
+        preferredLayoutVariant:
+          item.type === 'static-page' && patch.preferredLayoutVariant !== undefined
+            ? patch.preferredLayoutVariant
+            : item.preferredLayoutVariant,
         isDefault: patch.isDefault !== undefined ? Boolean(patch.isDefault) : item.isDefault,
       };
     }
@@ -2547,6 +2688,12 @@ export async function reviseReportOutput(outputId: string, instruction: string) 
       normalizedInstruction,
       cloud.content,
       envelope,
+      [],
+      [],
+      {
+        datavizSlots: record.dynamicSource?.planDatavizSlots || [],
+        pageSpec: record.page?.pageSpec || record.dynamicSource?.planPageSpec,
+      },
     );
 
     const nextTable = 'table' in normalized ? normalized.table || null : null;

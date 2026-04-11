@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
+import type { ReportPlanDatavizSlot, ReportPlanLayoutVariant, ReportPlanPageSpec } from '../lib/report-planner.js';
 import {
   addSharedTemplateReferenceLink,
   createSharedReportTemplate,
@@ -84,6 +85,8 @@ export async function registerReportRoutes(app: FastifyInstance) {
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+        datavizSlots?: ReportPlanDatavizSlot[];
+        pageSpec?: ReportPlanPageSpec;
         charts?: Array<{
           title?: string;
           items?: Array<{ label?: string; value?: number }>;
@@ -197,6 +200,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       type?: 'table' | 'static-page' | 'ppt' | 'document';
       sourceType?: 'word' | 'ppt' | 'spreadsheet' | 'image' | 'web-link' | 'other';
       description?: string;
+      preferredLayoutVariant?: ReportPlanLayoutVariant;
       isDefault?: boolean;
     };
 
@@ -205,6 +209,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       type: body.type,
       sourceType: body.sourceType,
       description: body.description,
+      preferredLayoutVariant: body.preferredLayoutVariant,
       isDefault: Boolean(body.isDefault),
     });
     return {
@@ -220,6 +225,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
     const body = (request.body || {}) as {
       label?: string;
       description?: string;
+      preferredLayoutVariant?: ReportPlanLayoutVariant;
       isDefault?: boolean;
     };
     const item = await updateSharedReportTemplate(key, body);

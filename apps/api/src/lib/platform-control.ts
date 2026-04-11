@@ -88,6 +88,7 @@ import {
   updateSharedReportTemplate,
   type ReportTemplateType,
 } from './report-center.js';
+import type { ReportPlanLayoutVariant } from './report-planner.js';
 import type { KnowledgeOutputKind } from './knowledge-template.js';
 import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks } from './web-capture.js';
 import {
@@ -410,6 +411,18 @@ function resolveReportTemplateType(value: string | undefined): ReportTemplateTyp
   throw new Error('Unsupported template type. Supported: table, static-page, ppt, document');
 }
 
+function resolveReportLayoutVariant(value: string | undefined) {
+  const normalized = normalizeText(value || '');
+  if (!normalized) return undefined;
+  if (normalized === 'insight brief') return 'insight-brief';
+  if (normalized === 'risk brief') return 'risk-brief';
+  if (normalized === 'operations cockpit') return 'operations-cockpit';
+  if (normalized === 'talent showcase') return 'talent-showcase';
+  if (normalized === 'research brief') return 'research-brief';
+  if (normalized === 'solution overview') return 'solution-overview';
+  throw new Error('Unsupported layout variant. Supported: insight-brief, risk-brief, operations-cockpit, talent-showcase, research-brief, solution-overview');
+}
+
 function formatOutputKindLabel(kind: KnowledgeOutputKind) {
   if (kind === 'table') return 'table';
   if (kind === 'page') return 'static page';
@@ -441,6 +454,7 @@ function summarizeReportTemplateItem(item: {
   label: string;
   type: string;
   description?: string;
+  preferredLayoutVariant?: string;
   isDefault?: boolean;
   origin?: string;
   referenceImages?: unknown[];
@@ -450,6 +464,7 @@ function summarizeReportTemplateItem(item: {
     label: item.label,
     type: item.type,
     description: item.description || '',
+    preferredLayoutVariant: item.preferredLayoutVariant || '',
     isDefault: item.isDefault === true,
     origin: item.origin || 'system',
     referenceCount: Array.isArray(item.referenceImages) ? item.referenceImages.length : 0,
@@ -1305,6 +1320,7 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
         type: templateType,
         description: String(flags.description || '').trim()
           || `由数据集文件“${document.title || document.name}”创建的输出模板。`,
+        preferredLayoutVariant: resolveReportLayoutVariant(flags.layout),
         isDefault: resolveBooleanFlag(flags.default),
       });
       const reference = await addSharedTemplateReferenceFileFromPath(createdTemplate.key, {
@@ -1322,6 +1338,7 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
             label: createdTemplate.label,
             type: createdTemplate.type,
             description: createdTemplate.description,
+            preferredLayoutVariant: createdTemplate.preferredLayoutVariant || '',
             isDefault: createdTemplate.isDefault === true,
           },
           reference,
@@ -1343,6 +1360,7 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
       label: templateLabel,
       type: resolveReportTemplateType(flags.type),
       description: String(flags.description || '').trim() || undefined,
+      preferredLayoutVariant: resolveReportLayoutVariant(flags.layout),
       isDefault: resolveBooleanFlag(flags.default),
     });
     return {
@@ -1358,12 +1376,13 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
   if (subcommand === 'update-template') {
     const templateKey = String(flags.template || flags.key || '').trim();
     if (!templateKey) throw new Error('Missing --template for reports update-template.');
-    const patch: { label?: string; description?: string; isDefault?: boolean } = {};
+    const patch: { label?: string; description?: string; preferredLayoutVariant?: ReportPlanLayoutVariant; isDefault?: boolean } = {};
     if (flags.label !== undefined) patch.label = String(flags.label || '').trim();
     if (flags.description !== undefined) patch.description = String(flags.description || '').trim();
+    if (flags.layout !== undefined) patch.preferredLayoutVariant = resolveReportLayoutVariant(flags.layout);
     if (flags.default !== undefined) patch.isDefault = resolveBooleanFlag(flags.default);
     if (!Object.keys(patch).length) {
-      throw new Error('Missing template update fields. Provide --label, --description, or --default.');
+      throw new Error('Missing template update fields. Provide --label, --description, --layout, or --default.');
     }
     const template = await updateSharedReportTemplate(templateKey, patch);
     return {

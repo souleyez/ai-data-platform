@@ -265,17 +265,17 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
       },
       {
         key: 'reports.template-from-document',
-        command: 'pnpm system:control -- reports template-from-document --document "<document-id>" [--label "<template-name>"] [--type table|static-page|ppt|document] [--default true]',
+        command: 'pnpm system:control -- reports template-from-document --document "<document-id>" [--label "<template-name>"] [--type table|static-page|ppt|document] [--layout insight-brief|risk-brief|operations-cockpit|talent-showcase|research-brief|solution-overview] [--default true]',
         description: 'Promote one dataset file into a reusable report template reference.',
       },
       {
         key: 'reports.create-template',
-        command: 'pnpm system:control -- reports create-template --label "<template-name>" [--type table|static-page|ppt|document] [--description "<description>"] [--default true]',
+        command: 'pnpm system:control -- reports create-template --label "<template-name>" [--type table|static-page|ppt|document] [--description "<description>"] [--layout insight-brief|risk-brief|operations-cockpit|talent-showcase|research-brief|solution-overview] [--default true]',
         description: 'Create one reusable report template shell.',
       },
       {
         key: 'reports.update-template',
-        command: 'pnpm system:control -- reports update-template --template "<template-key>" [--label "<template-name>"] [--description "<description>"] [--default true|false]',
+        command: 'pnpm system:control -- reports update-template --template "<template-key>" [--label "<template-name>"] [--description "<description>"] [--layout insight-brief|risk-brief|operations-cockpit|talent-showcase|research-brief|solution-overview] [--default true|false]',
         description: 'Update one reusable report template.',
       },
       {

@@ -125,6 +125,7 @@ export type ResumePageDebugTrace = {
     sections: string[];
     cards: string[];
     charts: string[];
+    datavizSlots?: string[];
   } | null;
   displayProfiles: Array<{
     sourcePath: string;
@@ -611,6 +612,7 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           sections: (reportPlan.sections || []).map((item) => item.title),
           cards: (reportPlan.cards || []).map((item) => item.label),
           charts: (reportPlan.charts || []).map((item) => item.title),
+          datavizSlots: (reportPlan.datavizSlots || []).map((item) => item.title),
         }
         : null,
       displayProfiles: (resumeDisplayProfileResolution?.profiles || []).map((profile) => ({
@@ -691,7 +693,11 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           activeEnvelope,
           effectiveRetrieval.documents,
           resumeDisplayProfileResolution?.profiles || [],
-          { allowResumeFallback: false },
+          {
+            allowResumeFallback: false,
+            datavizSlots: reportPlan?.datavizSlots || [],
+            pageSpec: reportPlan?.pageSpec,
+          },
         );
         const composerNeedsFallback = shouldUseResumePageFallbackOutput(
           requestText,
@@ -745,7 +751,11 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
           activeEnvelope,
           effectiveRetrieval.documents,
           resumeDisplayProfileResolution?.profiles || [],
-          { allowResumeFallback: false },
+          {
+            allowResumeFallback: false,
+            datavizSlots: reportPlan?.datavizSlots || [],
+            pageSpec: reportPlan?.pageSpec,
+          },
         );
       }
     }
@@ -791,7 +801,11 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
         activeEnvelope,
         effectiveRetrieval.documents,
         resumeDisplayProfileResolution?.profiles || [],
-        { allowResumeFallback: false },
+        {
+          allowResumeFallback: false,
+          datavizSlots: reportPlan?.datavizSlots || [],
+          pageSpec: reportPlan?.pageSpec,
+        },
       );
 
       const needsResumeRetry = requestedKind === 'page'
@@ -838,7 +852,9 @@ export async function executeKnowledgeOutput(input: KnowledgeExecutionInput): Pr
     activeEnvelope,
     resumeDisplayProfileResolution?.profiles || [],
   );
-  const finalOutput = await attachDatavizRendersToOutput(rawFinalOutput);
+  const finalOutput = await attachDatavizRendersToOutput(rawFinalOutput, {
+    slots: reportPlan?.datavizSlots || [],
+  });
 
   return {
     libraries: resolvedLibraries,

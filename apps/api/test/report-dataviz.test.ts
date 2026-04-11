@@ -100,3 +100,93 @@ test('attachDatavizRendersToPage should fall back to builtin svg when python ren
   assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
   assert.match(rendered?.charts?.[0]?.render?.svg || '', /商场分区客流贡献/);
 });
+
+test('attachDatavizRendersToPage should honor planned dataviz slot chart types and titles', async () => {
+  process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ = '1';
+  const { attachDatavizRendersToPage: attachWithPlan } =
+    await importFresh<typeof import('../src/lib/report-dataviz.js')>(
+      '../src/lib/report-dataviz.js',
+    );
+
+  const rendered = await attachWithPlan({
+    summary: 'planned chart',
+    charts: [
+      {
+        items: [
+          { label: '1月', value: 20 },
+          { label: '2月', value: 32 },
+          { label: '3月', value: 48 },
+        ],
+      },
+    ],
+  }, {
+    slots: [
+      {
+        key: 'monthly-gmv',
+        title: '月度GMV与库存指数联动',
+        purpose: 'Show monthly linkage.',
+        preferredChartType: 'line',
+        placement: 'hero',
+        evidenceFocus: 'Monthly signals',
+        minItems: 3,
+        maxItems: 6,
+      },
+    ],
+  });
+
+  delete process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ;
+  assert.equal(rendered?.charts?.[0]?.title, '月度GMV与库存指数联动');
+  assert.equal(rendered?.charts?.[0]?.render?.chartType, 'line');
+  assert.match(rendered?.charts?.[0]?.render?.svg || '', /<svg/i);
+});
+
+test('attachDatavizRendersToPage should add planned chart shells when the page output is missing them', async () => {
+  process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ = '1';
+  const { attachDatavizRendersToPage: attachWithPlan } =
+    await importFresh<typeof import('../src/lib/report-dataviz.js')>(
+      '../src/lib/report-dataviz.js',
+    );
+
+  const rendered = await attachWithPlan({
+    summary: 'planned shells',
+    charts: [
+      {
+        title: '渠道贡献结构',
+        items: [
+          { label: 'Tmall', value: 42 },
+          { label: 'JD', value: 27 },
+        ],
+      },
+    ],
+  }, {
+    slots: [
+      {
+        key: 'channel-mix',
+        title: '渠道贡献结构',
+        purpose: 'Channel mix',
+        preferredChartType: 'bar',
+        placement: 'hero',
+        evidenceFocus: 'Channel evidence',
+        minItems: 2,
+        maxItems: 6,
+      },
+      {
+        key: 'restock-queue',
+        title: '补货优先级队列',
+        purpose: 'Restock queue',
+        preferredChartType: 'horizontal-bar',
+        placement: 'section',
+        sectionTitle: '行动建议',
+        evidenceFocus: 'Restock evidence',
+        minItems: 2,
+        maxItems: 8,
+      },
+    ],
+  });
+
+  delete process.env.AI_DATA_PLATFORM_DISABLE_PYTHON_DATAVIZ;
+  assert.equal(rendered?.charts?.length, 2);
+  assert.equal(rendered?.charts?.[0]?.title, '渠道贡献结构');
+  assert.equal(rendered?.charts?.[1]?.title, '补货优先级队列');
+  assert.deepEqual(rendered?.charts?.[1]?.items || [], []);
+});

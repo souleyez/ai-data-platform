@@ -28,8 +28,9 @@ test('normalizePersistedReportState should migrate legacy state into the current
       {
         key: 'template-user-file',
         label: 'User Template',
-        type: 'document',
+        type: 'static-page',
         description: 'legacy uploaded template',
+        preferredLayoutVariant: 'research-brief',
         referenceImages: [
           {
             id: 'tmplref-file',
@@ -57,6 +58,7 @@ test('normalizePersistedReportState should migrate legacy state into the current
   assert.equal(normalized.groups.length, 1);
   assert.deepEqual(normalized.groups[0]?.triggerKeywords, ['resume']);
   assert.equal(normalized.templates[0]?.origin, 'user');
+  assert.equal(normalized.templates[0]?.preferredLayoutVariant, 'research-brief');
   assert.equal(normalized.outputs[0]?.groupKey, 'resume');
   assert.equal(normalized.outputs[0]?.status, 'ready');
 });
@@ -76,6 +78,7 @@ test('normalizePersistedReportState should drop invalid records and keep support
         label: 'System Page Template',
         type: 'static-page',
         origin: 'system',
+        preferredLayoutVariant: 'risk-brief',
         referenceImages: [
           {
             id: 'tmplref-link',
@@ -99,6 +102,7 @@ test('normalizePersistedReportState should drop invalid records and keep support
   assert.deepEqual(normalized.groups[0]?.triggerKeywords, ['bid']);
   assert.equal(normalized.templates.length, 1);
   assert.equal(normalized.templates[0]?.origin, 'system');
+  assert.equal(normalized.templates[0]?.preferredLayoutVariant, 'risk-brief');
   assert.equal(normalized.outputs.length, 1);
   assert.equal(normalized.outputs[0]?.groupKey, 'bids');
 });
@@ -115,6 +119,34 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
         outputType: 'page',
         kind: 'page',
         summary: 'ok',
+        page: {
+          summary: 'ok',
+          datavizSlots: [
+            {
+              key: 'risk-clusters',
+              title: '风险主题分布',
+              purpose: '风险主题聚类',
+              preferredChartType: 'horizontal-bar',
+              placement: 'hero',
+              evidenceFocus: '风险主题聚类',
+              minItems: 2,
+              maxItems: 8,
+            },
+          ],
+          pageSpec: {
+            layoutVariant: 'risk-brief',
+            heroCardLabels: ['资料覆盖', '高风险主题'],
+            heroDatavizSlotKeys: ['risk-clusters'],
+            sections: [
+              {
+                title: '风险概览',
+                purpose: 'Open with a clear conclusion.',
+                completionMode: 'knowledge-plus-model',
+                datavizSlotKeys: ['risk-clusters'],
+              },
+            ],
+          },
+        },
         dynamicSource: {
           enabled: true,
           request: '按风险维度生成静态页',
@@ -128,6 +160,37 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
           planSectionTitles: ['风险概览', '资格风险', 'AI综合分析'],
           planCardLabels: ['资料覆盖', '高风险主题'],
           planChartTitles: ['风险主题分布'],
+          planDatavizSlots: [
+            {
+              key: 'risk-clusters',
+              title: '风险主题分布',
+              purpose: '风险主题聚类',
+              preferredChartType: 'horizontal-bar',
+              placement: 'hero',
+              evidenceFocus: '风险主题聚类',
+              minItems: 2,
+              maxItems: 8,
+            },
+          ],
+          planPageSpec: {
+            layoutVariant: 'risk-brief',
+            heroCardLabels: ['资料覆盖', '高风险主题'],
+            heroDatavizSlotKeys: ['risk-clusters'],
+            sections: [
+              {
+                title: '风险概览',
+                purpose: 'Open with a clear conclusion.',
+                completionMode: 'knowledge-plus-model',
+                datavizSlotKeys: ['risk-clusters'],
+              },
+              {
+                title: '资格风险',
+                purpose: 'Highlight blocking risks.',
+                completionMode: 'knowledge-first',
+                datavizSlotKeys: [],
+              },
+            ],
+          },
           planUpdatedAt: '2026-03-29T10:00:00.000Z',
         },
       },
@@ -139,4 +202,62 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planSectionTitles, ['风险概览', '资格风险', 'AI综合分析']);
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planCardLabels, ['资料覆盖', '高风险主题']);
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planChartTitles, ['风险主题分布']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planDatavizSlots, [
+    {
+      key: 'risk-clusters',
+      title: '风险主题分布',
+      purpose: '风险主题聚类',
+      preferredChartType: 'horizontal-bar',
+      placement: 'hero',
+      sectionTitle: '',
+      evidenceFocus: '风险主题聚类',
+      minItems: 2,
+      maxItems: 8,
+    },
+  ]);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planPageSpec, {
+    layoutVariant: 'risk-brief',
+    heroCardLabels: ['资料覆盖', '高风险主题'],
+    heroDatavizSlotKeys: ['risk-clusters'],
+    sections: [
+      {
+        title: '风险概览',
+        purpose: 'Open with a clear conclusion.',
+        completionMode: 'knowledge-plus-model',
+        datavizSlotKeys: ['risk-clusters'],
+      },
+      {
+        title: '资格风险',
+        purpose: 'Highlight blocking risks.',
+        completionMode: 'knowledge-first',
+        datavizSlotKeys: [],
+      },
+    ],
+  });
+  assert.deepEqual(normalized.outputs[0]?.page?.datavizSlots, [
+    {
+      key: 'risk-clusters',
+      title: '风险主题分布',
+      purpose: '风险主题聚类',
+      preferredChartType: 'horizontal-bar',
+      placement: 'hero',
+      sectionTitle: '',
+      evidenceFocus: '风险主题聚类',
+      minItems: 2,
+      maxItems: 8,
+    },
+  ]);
+  assert.deepEqual(normalized.outputs[0]?.page?.pageSpec, {
+    layoutVariant: 'risk-brief',
+    heroCardLabels: ['资料覆盖', '高风险主题'],
+    heroDatavizSlotKeys: ['risk-clusters'],
+    sections: [
+      {
+        title: '风险概览',
+        purpose: 'Open with a clear conclusion.',
+        completionMode: 'knowledge-plus-model',
+        datavizSlotKeys: ['risk-clusters'],
+      },
+    ],
+  });
 });

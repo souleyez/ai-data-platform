@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ChatOutput } from './knowledge-output.js';
 import { REPO_ROOT } from './paths.js';
+import type { ReportPlanDatavizSlot } from './report-planner.js';
 import {
   markTaskFailed,
   markTaskSkipped,
@@ -32,6 +33,10 @@ type PageShape = {
   charts?: PageChart[];
 };
 
+type DatavizPlanningInput = {
+  slots?: ReportPlanDatavizSlot[] | null;
+};
+
 type RendererPayload = {
   title: string;
   chart_type: 'bar' | 'horizontal-bar' | 'line';
@@ -53,6 +58,13 @@ function normalizeLabel(value: string) {
     .trim();
 }
 
+function normalizeSlotKey(value: string) {
+  return normalizeLabel(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function looksLikeTrendChart(title: string, items: Array<{ label: string; value: number }>) {
   if (items.length < 3) return false;
   const normalizedTitle = normalizeLabel(title).toLowerCase();
@@ -64,6 +76,50 @@ function inferRendererChartType(title: string, items: Array<{ label: string; val
   if (looksLikeTrendChart(title, items)) return 'line' as const;
   if (items.length > 4 || items.some((item) => item.label.length > 8)) return 'horizontal-bar' as const;
   return 'bar' as const;
+}
+
+function resolveSlotForChart(
+  chart: PageChart,
+  index: number,
+  slots: ReportPlanDatavizSlot[],
+) {
+  const normalizedTitle = normalizeSlotKey(String(chart.title || ''));
+  return slots.find((slot) => normalizeSlotKey(slot.title) === normalizedTitle)
+    || slots[index]
+    || null;
+}
+
+function applyDatavizPlanToCharts(
+  charts: Array<PageChart | null | undefined>,
+  plan?: DatavizPlanningInput | null,
+) {
+  const normalizedCharts = (charts || []).filter(Boolean) as PageChart[];
+  const slots = Array.isArray(plan?.slots) ? plan.slots.filter(Boolean) : [];
+  if (!slots.length) return normalizedCharts;
+
+  const usedChartIndexes = new Set<number>();
+  const plannedCharts = slots.map((slot, slotIndex) => {
+    const explicitMatchIndex = normalizedCharts.findIndex((chart, chartIndex) => {
+      if (usedChartIndexes.has(chartIndex)) return false;
+      return normalizeSlotKey(String(chart.title || '')) === normalizeSlotKey(slot.title);
+    });
+    const fallbackMatchIndex = explicitMatchIndex >= 0
+      ? explicitMatchIndex
+      : normalizedCharts.findIndex((_, chartIndex) => !usedChartIndexes.has(chartIndex) && chartIndex === slotIndex);
+    const resolvedIndex = fallbackMatchIndex >= 0
+      ? fallbackMatchIndex
+      : normalizedCharts.findIndex((_, chartIndex) => !usedChartIndexes.has(chartIndex));
+    const sourceChart = resolvedIndex >= 0 ? normalizedCharts[resolvedIndex] : null;
+    if (resolvedIndex >= 0) usedChartIndexes.add(resolvedIndex);
+    return {
+      ...(sourceChart || {}),
+      title: normalizeLabel(String(sourceChart?.title || slot.title)) || slot.title,
+      items: Array.isArray(sourceChart?.items) ? sourceChart?.items : [],
+    } satisfies PageChart;
+  });
+
+  const remainingCharts = normalizedCharts.filter((_, chartIndex) => !usedChartIndexes.has(chartIndex));
+  return [...plannedCharts, ...remainingCharts];
 }
 
 function sanitizeChartItems(items: Array<ChartItem | null | undefined>) {
@@ -356,17 +412,23 @@ async function runRenderer(payload: RendererPayload): Promise<ReportChartRender 
   });
 }
 
-export async function attachDatavizRendersToPage(page: PageShape | null | undefined) {
+export async function attachDatavizRendersToPage(
+  page: PageShape | null | undefined,
+  plan?: DatavizPlanningInput | null,
+) {
   if (!page?.charts?.length) return page || null;
+  const plannedCharts = applyDatavizPlanToCharts(page.charts || [], plan);
+  const slots = Array.isArray(plan?.slots) ? plan.slots.filter(Boolean) : [];
 
   const renderedCharts = await Promise.all(
-    page.charts.slice(0, MAX_RENDER_CHARTS).map(async (chart) => {
+    plannedCharts.slice(0, MAX_RENDER_CHARTS).map(async (chart, index) => {
       const title = normalizeLabel(chart.title || '');
       const items = sanitizeChartItems(chart.items || []);
       if (!title || items.length < 2) return chart;
+      const slot = slots.length ? resolveSlotForChart(chart, index, slots) : null;
       const render = await runRenderer({
         title,
-        chart_type: inferRendererChartType(title, items),
+        chart_type: slot?.preferredChartType || inferRendererChartType(title, items),
         items,
       });
       return render ? { ...chart, render } : chart;
@@ -377,13 +439,16 @@ export async function attachDatavizRendersToPage(page: PageShape | null | undefi
     ...page,
     charts: [
       ...renderedCharts,
-      ...(page.charts.slice(MAX_RENDER_CHARTS) || []),
+      ...(plannedCharts.slice(MAX_RENDER_CHARTS) || []),
     ],
   };
 }
 
-export async function attachDatavizRendersToOutput(output: ChatOutput) {
+export async function attachDatavizRendersToOutput(
+  output: ChatOutput,
+  plan?: DatavizPlanningInput | null,
+) {
   if (output.type !== 'page' || !output.page) return output;
-  const page = await attachDatavizRendersToPage(output.page);
+  const page = await attachDatavizRendersToPage(output.page, plan);
   return page ? { ...output, page } : output;
 }

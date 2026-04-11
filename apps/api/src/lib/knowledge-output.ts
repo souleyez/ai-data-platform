@@ -1,5 +1,6 @@
 import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isLikelyResumePersonName } from './document-schema.js';
+import type { ReportPlanDatavizSlot, ReportPlanPageSpec } from './report-planner.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
 import { sanitizeResumeDisplayCompany } from './resume-display-company.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
@@ -23,6 +24,8 @@ export type ChatOutput =
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+        datavizSlots?: ReportPlanDatavizSlot[];
+        pageSpec?: ReportPlanPageSpec;
         charts?: Array<{
           title?: string;
           items?: Array<{ label?: string; value?: number }>;
@@ -39,6 +42,8 @@ export type ChatOutput =
 
 export type NormalizeReportOutputOptions = {
   allowResumeFallback?: boolean;
+  datavizSlots?: ReportPlanDatavizSlot[];
+  pageSpec?: ReportPlanPageSpec;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -446,6 +451,114 @@ function normalizeCharts(value: unknown) {
       render: normalizeChartRender(item.render),
     }))
     .filter((item) => item.title || item.items.length || item.render);
+}
+
+function normalizeDatavizSlotKey(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function normalizeReportPlanDatavizSlots(slots: ReportPlanDatavizSlot[] | undefined) {
+  if (!Array.isArray(slots) || !slots.length) return [];
+  return slots
+    .map((slot) => {
+      const key = normalizeDatavizSlotKey(slot?.key || slot?.title || '');
+      const title = pickString(slot?.title, key);
+      if (!title) return null;
+      return {
+        key: key || normalizeDatavizSlotKey(title),
+        title,
+        purpose: pickString(slot?.purpose),
+        preferredChartType:
+          slot?.preferredChartType === 'line' || slot?.preferredChartType === 'horizontal-bar'
+            ? slot.preferredChartType
+            : 'bar',
+        placement: slot?.placement === 'section' ? 'section' : 'hero',
+        sectionTitle: pickString(slot?.sectionTitle),
+        evidenceFocus: pickString(slot?.evidenceFocus),
+        minItems: Number.isFinite(Number(slot?.minItems)) ? Number(slot?.minItems) : 2,
+        maxItems: Number.isFinite(Number(slot?.maxItems)) ? Number(slot?.maxItems) : 8,
+      };
+    })
+    .filter(Boolean) as ReportPlanDatavizSlot[];
+}
+
+function normalizeReportPlanPageSpec(pageSpec: ReportPlanPageSpec | undefined) {
+  if (!pageSpec || !Array.isArray(pageSpec.sections)) return null;
+  const layoutVariant: ReportPlanPageSpec['layoutVariant'] =
+    pageSpec.layoutVariant === 'risk-brief'
+    || pageSpec.layoutVariant === 'operations-cockpit'
+    || pageSpec.layoutVariant === 'talent-showcase'
+    || pageSpec.layoutVariant === 'research-brief'
+    || pageSpec.layoutVariant === 'solution-overview'
+      ? pageSpec.layoutVariant
+      : 'insight-brief';
+  const heroCardLabels = Array.isArray(pageSpec.heroCardLabels)
+    ? pageSpec.heroCardLabels.map((item) => pickString(item)).filter(Boolean)
+    : [];
+  const heroDatavizSlotKeys = Array.isArray(pageSpec.heroDatavizSlotKeys)
+    ? pageSpec.heroDatavizSlotKeys.map((item) => normalizeDatavizSlotKey(item)).filter(Boolean)
+    : [];
+  const sections = pageSpec.sections
+    .map((item) => {
+      const title = pickString(item?.title);
+      if (!title) return null;
+      return {
+        title,
+        purpose: pickString(item?.purpose),
+        completionMode: item?.completionMode === 'knowledge-plus-model' ? 'knowledge-plus-model' : 'knowledge-first',
+        datavizSlotKeys: Array.isArray(item?.datavizSlotKeys)
+          ? item.datavizSlotKeys.map((slotKey) => normalizeDatavizSlotKey(slotKey)).filter(Boolean)
+          : [],
+      };
+    })
+    .filter(Boolean) as ReportPlanPageSpec['sections'];
+
+  return heroCardLabels.length || heroDatavizSlotKeys.length || sections.length
+    ? {
+        layoutVariant,
+        heroCardLabels,
+        heroDatavizSlotKeys,
+        sections,
+      }
+    : null;
+}
+
+function applyPlannedDatavizSlots(
+  charts: NonNullable<KnowledgePageOutput['page']['charts']>,
+  slots: ReportPlanDatavizSlot[] = [],
+) {
+  const normalizedSlots = Array.isArray(slots) ? slots.filter((item) => item?.title) : [];
+  if (!normalizedSlots.length) return charts;
+
+  const normalizedCharts = Array.isArray(charts) ? charts.filter(Boolean) : [];
+  const usedChartIndexes = new Set<number>();
+  const plannedCharts = normalizedSlots.map((slot, slotIndex) => {
+    const explicitMatchIndex = normalizedCharts.findIndex((chart, chartIndex) => {
+      if (usedChartIndexes.has(chartIndex)) return false;
+      return normalizeDatavizSlotKey(String(chart.title || '')) === normalizeDatavizSlotKey(slot.title);
+    });
+    const fallbackMatchIndex = explicitMatchIndex >= 0
+      ? explicitMatchIndex
+      : normalizedCharts.findIndex((_, chartIndex) => !usedChartIndexes.has(chartIndex) && chartIndex === slotIndex);
+    const resolvedIndex = fallbackMatchIndex >= 0
+      ? fallbackMatchIndex
+      : normalizedCharts.findIndex((_, chartIndex) => !usedChartIndexes.has(chartIndex));
+    const sourceChart = resolvedIndex >= 0 ? normalizedCharts[resolvedIndex] : null;
+    if (resolvedIndex >= 0) usedChartIndexes.add(resolvedIndex);
+    return {
+      ...(sourceChart || {}),
+      title: sanitizeText(sourceChart?.title) || slot.title,
+      items: Array.isArray(sourceChart?.items) ? sourceChart.items : [],
+      render: sourceChart?.render || null,
+    };
+  });
+
+  const remainingCharts = normalizedCharts.filter((_, chartIndex) => !usedChartIndexes.has(chartIndex));
+  return [...plannedCharts, ...remainingCharts];
 }
 
 function normalizeObjectArray(value: unknown) {
@@ -3752,7 +3865,10 @@ export function normalizeReportOutput(
     const alignedSections = envelope?.pageSections?.length
       ? alignSectionsToEnvelope(rawSections, envelope.pageSections, summary)
       : rawSections;
-    const charts = normalizeCharts(pageSource.charts || effectivePayload.charts || payload.charts || root.charts);
+    const charts = applyPlannedDatavizSlots(
+      normalizeCharts(pageSource.charts || effectivePayload.charts || payload.charts || root.charts),
+      options.datavizSlots || [],
+    );
     const effectiveSections = alignedSections.length ? alignedSections : rawSections;
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
     const footfallDocuments = documents.filter(isFootfallReportDocument);
@@ -3785,7 +3901,7 @@ export function normalizeReportOutput(
       fallbackTitle: fallbackNarrativeTitle,
     });
 
-    const normalizedOutput: ChatOutput = {
+    const normalizedOutput: Exclude<ChatOutput, { type: 'answer' }> = {
       type: kind === 'page' ? 'page' : kind,
       title: normalizedTitle,
       content: content || summary,
@@ -3800,6 +3916,8 @@ export function normalizeReportOutput(
               body: index === 0 ? summary : '',
               bullets: [],
             })),
+        datavizSlots: normalizeReportPlanDatavizSlots(options.datavizSlots),
+        pageSpec: normalizeReportPlanPageSpec(options.pageSpec) || undefined,
         charts,
       },
     };

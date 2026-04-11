@@ -367,6 +367,10 @@ test('platform control should promote a document-center file into a reusable rep
     documentId,
     '--label',
     '投标输出模板',
+    '--type',
+    'static-page',
+    '--layout',
+    'risk-brief',
     '--default',
     'true',
   ]);
@@ -374,13 +378,14 @@ test('platform control should promote a document-center file into a reusable rep
   assert.equal(result.ok, true);
   assert.equal(result.action, 'reports.template-from-document');
   assert.equal((result.data?.template as { label?: string })?.label, '投标输出模板');
+  assert.equal((result.data?.template as { preferredLayoutVariant?: string })?.preferredLayoutVariant, 'risk-brief');
   assert.equal((result.data?.document as { id?: string })?.id, documentId);
 
   const templatesResult = await platformControl.executePlatformControlCommand([
     'reports',
     'templates',
     '--type',
-    'document',
+    'static-page',
   ]);
   assert.equal(templatesResult.ok, true);
   assert.equal(templatesResult.action, 'reports.templates');
@@ -634,9 +639,11 @@ test('platform control should manage reusable templates and saved outputs', asyn
     '--label',
     'CLI投标模板',
     '--type',
-    'document',
+    'static-page',
     '--description',
     '通过 CLI 创建的投标模板',
+    '--layout',
+    'risk-brief',
     '--default',
     'true',
   ]);
@@ -644,6 +651,7 @@ test('platform control should manage reusable templates and saved outputs', asyn
   assert.equal(createTemplateResult.action, 'reports.create-template');
   const createdTemplateKey = String((createTemplateResult.data?.template as { key?: string })?.key || '');
   assert.ok(createdTemplateKey);
+  assert.equal((createTemplateResult.data?.template as { preferredLayoutVariant?: string })?.preferredLayoutVariant, 'risk-brief');
 
   const addLinkResult = await platformControl.executePlatformControlCommand([
     'reports',
@@ -684,12 +692,15 @@ test('platform control should manage reusable templates and saved outputs', asyn
     'CLI投标模板-更新',
     '--description',
     '更新后的模板说明',
+    '--layout',
+    'operations-cockpit',
     '--default',
     'false',
   ]);
   assert.equal(updateTemplateResult.ok, true);
   assert.equal(updateTemplateResult.action, 'reports.update-template');
   assert.equal((updateTemplateResult.data?.template as { label?: string })?.label, 'CLI投标模板-更新');
+  assert.equal((updateTemplateResult.data?.template as { preferredLayoutVariant?: string })?.preferredLayoutVariant, 'operations-cockpit');
 
   const groupTemplatesResult = await platformControl.executePlatformControlCommand([
     'reports',

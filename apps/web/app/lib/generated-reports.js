@@ -73,6 +73,53 @@ function normalizeChartRender(render) {
     : null;
 }
 
+function normalizePageDatavizSlots(slots) {
+  return Array.isArray(slots)
+    ? slots
+        .map((slot) => ({
+          key: String(slot?.key || '').trim(),
+          title: String(slot?.title || '').trim(),
+          purpose: String(slot?.purpose || '').trim(),
+          preferredChartType: String(slot?.preferredChartType || '').trim(),
+          placement: String(slot?.placement || '').trim(),
+          sectionTitle: String(slot?.sectionTitle || '').trim(),
+          evidenceFocus: String(slot?.evidenceFocus || '').trim(),
+          minItems: normalizeNumber(slot?.minItems),
+          maxItems: normalizeNumber(slot?.maxItems),
+        }))
+        .filter((slot) => slot.key || slot.title)
+    : [];
+}
+
+function normalizePageSpec(pageSpec) {
+  if (!pageSpec || !Array.isArray(pageSpec?.sections)) return null;
+  const layoutVariant = String(pageSpec?.layoutVariant || '').trim() || 'insight-brief';
+  const heroCardLabels = Array.isArray(pageSpec?.heroCardLabels)
+    ? pageSpec.heroCardLabels.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const heroDatavizSlotKeys = Array.isArray(pageSpec?.heroDatavizSlotKeys)
+    ? pageSpec.heroDatavizSlotKeys.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const sections = pageSpec.sections
+    .map((section) => ({
+      title: String(section?.title || '').trim(),
+      purpose: String(section?.purpose || '').trim(),
+      completionMode: String(section?.completionMode || '').trim(),
+      datavizSlotKeys: Array.isArray(section?.datavizSlotKeys)
+        ? section.datavizSlotKeys.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((section) => section.title);
+  return heroCardLabels.length || heroDatavizSlotKeys.length || sections.length
+    ? {
+        layoutVariant,
+        heroCardLabels,
+        heroDatavizSlotKeys,
+        sections,
+      }
+    : null;
+}
+
 function normalizePage(page) {
   if (!page) return null;
   return {
@@ -95,6 +142,8 @@ function normalizePage(page) {
           }))
           .filter((section) => section.title || section.body || section.bullets.length)
       : [],
+    datavizSlots: normalizePageDatavizSlots(page?.datavizSlots),
+    pageSpec: normalizePageSpec(page?.pageSpec),
     charts: Array.isArray(page?.charts)
       ? page.charts
           .map((chart) => ({
@@ -128,6 +177,8 @@ function normalizeDynamicSource(dynamicSource) {
     sourceFingerprint: String(dynamicSource.sourceFingerprint || '').trim(),
     sourceDocumentCount: normalizeNumber(dynamicSource.sourceDocumentCount),
     sourceUpdatedAt: String(dynamicSource.sourceUpdatedAt || '').trim(),
+    planDatavizSlots: normalizePageDatavizSlots(dynamicSource.planDatavizSlots),
+    planPageSpec: normalizePageSpec(dynamicSource.planPageSpec),
   };
 }
 

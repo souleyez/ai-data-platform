@@ -53,7 +53,7 @@ function makeRetrieval(overrides?: Partial<RetrievalResult>): RetrievalResult {
   };
 }
 
-function makeSelectedTemplate(): SelectedKnowledgeTemplate {
+function makeSelectedTemplate(preferredLayoutVariant?: 'insight-brief' | 'risk-brief' | 'operations-cockpit' | 'talent-showcase' | 'research-brief' | 'solution-overview'): SelectedKnowledgeTemplate {
   return {
     group: {
       key: 'bids',
@@ -69,6 +69,7 @@ function makeSelectedTemplate(): SelectedKnowledgeTemplate {
       label: '标书摘要静态页',
       type: 'static-page',
       description: '标书摘要静态页模板',
+      preferredLayoutVariant,
       supported: true,
       referenceImages: [],
     },
@@ -97,9 +98,28 @@ test('buildReportPlan should produce a client-facing page plan with reusable env
   assert.equal(plan.envelope.title, '标书风险维度静态页');
   assert.deepEqual(plan.envelope.pageSections, ['风险概览', '资格风险', '材料缺口', '应答建议', 'AI综合分析']);
   assert.ok(plan.cards.length >= 3);
+  assert.ok(plan.datavizSlots.length >= 2);
+  assert.equal(plan.datavizSlots[0]?.placement, 'hero');
+  assert.equal(plan.datavizSlots[0]?.preferredChartType, 'horizontal-bar');
+  assert.equal(plan.pageSpec.layoutVariant, 'risk-brief');
+  assert.equal(plan.pageSpec.heroDatavizSlotKeys[0], plan.datavizSlots[0]?.key);
+  assert.ok(plan.sections.some((item) => (item.datavizSlotKeys || []).length > 0));
   assert.ok(plan.sections.some((item) => item.title === 'AI综合分析' && item.completionMode === 'knowledge-plus-model'));
   assert.match(plan.objective, /bid analysis page/i);
   assert.deepEqual(plan.knowledgeScope.dominantTopics, ['资格风险', '材料缺口', '时间风险', '交付要求']);
+});
+
+test('buildReportPlan should prefer selected template layoutVariant over task inference', () => {
+  const plan = buildReportPlan({
+    requestText: '请基于 bids 知识库按风险维度生成可视化静态页报表。',
+    templateTaskHint: 'bids-static-page',
+    conceptPageMode: true,
+    selectedTemplates: [makeSelectedTemplate('solution-overview')],
+    retrieval: makeRetrieval(),
+    libraries: [{ key: 'bids', label: 'bids' }],
+  });
+
+  assert.equal(plan.pageSpec.layoutVariant, 'solution-overview');
 });
 
 test('buildReportPlanContextBlock should expose planning constraints for the generator', () => {
@@ -142,6 +162,10 @@ test('buildReportPlanContextBlock should expose planning constraints for the gen
   assert.match(block, /Template mode: shared-template/);
   assert.match(block, /Planned sections:/);
   assert.match(block, /Planned cards:/);
+  assert.match(block, /Planned dataviz slots:/);
+  assert.match(block, /Page spec layout: solution-overview/);
+  assert.match(block, /Page spec sections:/);
+  assert.match(block, /type=bar/);
   assert.match(block, /Knowledge libraries: IOT解决方案/);
 });
 
@@ -224,6 +248,10 @@ test('buildReportPlan should use client-facing resume sections and planned visua
   assert.deepEqual(plan.envelope.pageSections, ['客户概览', '代表候选人', '代表项目', '技能覆盖', '匹配建议', 'AI综合分析']);
   assert.deepEqual(plan.cards.map((item) => item.label), ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
   assert.deepEqual(plan.charts.map((item) => item.title), ['公司覆盖分布', '技能热点分布']);
+  assert.deepEqual(plan.datavizSlots.map((item) => item.title), ['公司覆盖分布', '技能热点分布']);
+  assert.ok(plan.datavizSlots.every((item) => item.preferredChartType === 'horizontal-bar'));
+  assert.deepEqual(plan.pageSpec.heroCardLabels, ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
+  assert.equal(plan.pageSpec.layoutVariant, 'talent-showcase');
 });
 
 test('buildReportPlan should keep footfall reports at mall-zone aggregation level', () => {
@@ -276,6 +304,9 @@ test('buildReportPlan should keep footfall reports at mall-zone aggregation leve
   assert.ok(plan.objective.includes('mall-zone level'));
   assert.deepEqual(plan.cards.map((item) => item.label), ['总客流', '商场分区数', '头部分区', '展示口径']);
   assert.deepEqual(plan.charts.map((item) => item.title), ['商场分区客流贡献', '重点分区客流梯队']);
+  assert.equal(plan.datavizSlots[0]?.preferredChartType, 'bar');
+  assert.equal(plan.datavizSlots[1]?.preferredChartType, 'horizontal-bar');
+  assert.ok(plan.pageSpec.sections.some((item) => item.datavizSlotKeys.length > 0));
 });
 
 test('buildReportPlan should prefer business-specific footfall titles when the request names a mall', () => {

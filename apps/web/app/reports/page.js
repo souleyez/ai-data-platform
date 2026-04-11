@@ -52,10 +52,34 @@ function formatFileSize(size) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteReference, buildDownloadUrl }) {
+const REPORT_LAYOUT_VARIANTS = [
+  { value: '', label: '默认推断' },
+  { value: 'insight-brief', label: 'Insight Brief' },
+  { value: 'risk-brief', label: 'Risk Brief' },
+  { value: 'operations-cockpit', label: 'Operations Cockpit' },
+  { value: 'talent-showcase', label: 'Talent Showcase' },
+  { value: 'research-brief', label: 'Research Brief' },
+  { value: 'solution-overview', label: 'Solution Overview' },
+];
+
+function UploadedTemplateItem({
+  item,
+  submittingKey,
+  editingTemplateId,
+  editingTemplateDraft,
+  onEditTemplate,
+  onChangeTemplateDraft,
+  onCancelTemplateEdit,
+  onSaveTemplateEdit,
+  buildDownloadUrl,
+  onDeleteTemplate,
+  onDeleteReference,
+}) {
   const isPlaceholder = String(item.id || '').startsWith('placeholder:');
   const deletingTemplate = submittingKey === `delete-template:${item.templateKey}`;
   const deletingReference = submittingKey === `delete-reference:${item.id}`;
+  const savingTemplate = submittingKey === `update-template:${item.templateKey}`;
+  const isEditing = editingTemplateId === item.id;
 
   return (
     <article className="capture-result-item report-upload-item">
@@ -71,6 +95,54 @@ function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteR
 
       {item.description ? <div className="capture-task-note">{item.description}</div> : null}
 
+      {isEditing ? (
+        <div className="report-template-inline-editor">
+          <div className="filter-row report-template-create-row">
+            <input
+              className="filter-input"
+              placeholder="模板名称"
+              value={editingTemplateDraft.label}
+              onChange={(event) => onChangeTemplateDraft('label', event.target.value)}
+            />
+            <input
+              className="filter-input"
+              placeholder="模板说明（可选）"
+              value={editingTemplateDraft.description}
+              onChange={(event) => onChangeTemplateDraft('description', event.target.value)}
+            />
+            <select
+              className="filter-input"
+              value={editingTemplateDraft.preferredLayoutVariant}
+              onChange={(event) => onChangeTemplateDraft('preferredLayoutVariant', event.target.value)}
+            >
+              {REPORT_LAYOUT_VARIANTS.map((option) => (
+                <option key={option.value || 'default'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="report-template-actions">
+            <button
+              className="primary-btn"
+              type="button"
+              disabled={savingTemplate}
+              onClick={() => onSaveTemplateEdit(item)}
+            >
+              {savingTemplate ? '保存中...' : '保存模板'}
+            </button>
+            <button
+              className="ghost-btn"
+              type="button"
+              disabled={savingTemplate}
+              onClick={onCancelTemplateEdit}
+            >
+              取消编辑
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="report-upload-grid">
         <div className="report-upload-cell">
           <span>上传内容</span>
@@ -85,6 +157,10 @@ function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteR
         <div className="report-upload-cell">
           <span>模板名称</span>
           <strong>{item.templateLabel}</strong>
+        </div>
+        <div className="report-upload-cell">
+          <span>页面布局</span>
+          <strong>{item.preferredLayoutVariant || '默认推断'}</strong>
         </div>
         <div className="report-upload-cell">
           <span>来源类型</span>
@@ -121,7 +197,16 @@ function UploadedTemplateItem({ item, submittingKey, onDeleteTemplate, onDeleteR
         <button
           className="ghost-btn"
           type="button"
-          disabled={deletingTemplate || deletingReference}
+          disabled={deletingTemplate || deletingReference || savingTemplate}
+          onClick={() => onEditTemplate(item)}
+        >
+          {isEditing ? '编辑中...' : '编辑模板'}
+        </button>
+
+        <button
+          className="ghost-btn"
+          type="button"
+          disabled={deletingTemplate || deletingReference || savingTemplate}
           onClick={() => onDeleteTemplate(item)}
         >
           {deletingTemplate ? '删除中...' : '删除整个模板'}
@@ -161,10 +246,17 @@ function ReportsPageContent() {
   const [message, setMessage] = useState('');
   const [submittingKey, setSubmittingKey] = useState('');
   const [generatedReport, setGeneratedReport] = useState(null);
+  const [editingTemplateId, setEditingTemplateId] = useState('');
+  const [editingTemplateDraft, setEditingTemplateDraft] = useState({
+    label: '',
+    description: '',
+    preferredLayoutVariant: '',
+  });
   const [templateDraft, setTemplateDraft] = useState({
     label: '',
     description: '',
     link: '',
+    preferredLayoutVariant: '',
   });
   const [templateFile, setTemplateFile] = useState(null);
   const [botItems, setBotItems] = useState([]);
@@ -257,6 +349,65 @@ function ReportsPageContent() {
     await loadBotContext();
   }
 
+  function startEditingTemplate(item) {
+    setEditingTemplateId(item.id);
+    setEditingTemplateDraft({
+      label: String(item.templateLabel || '').trim(),
+      description: String(item.description || '').trim(),
+      preferredLayoutVariant: String(item.preferredLayoutVariant || '').trim(),
+    });
+  }
+
+  function cancelEditingTemplate() {
+    setEditingTemplateId('');
+    setEditingTemplateDraft({
+      label: '',
+      description: '',
+      preferredLayoutVariant: '',
+    });
+  }
+
+  function updateEditingTemplateDraft(field, value) {
+    setEditingTemplateDraft((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }
+
+  async function saveTemplateEdit(item) {
+    const label = String(editingTemplateDraft.label || '').trim();
+    const description = String(editingTemplateDraft.description || '').trim();
+    const preferredLayoutVariant = String(editingTemplateDraft.preferredLayoutVariant || '').trim();
+
+    if (!label) {
+      setMessage('模板名称不能为空。');
+      return;
+    }
+
+    try {
+      setSubmittingKey(`update-template:${item.templateKey}`);
+      setMessage('');
+      const response = await fetch(buildApiUrl(`/api/reports/template/${encodeURIComponent(item.templateKey)}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label,
+          description,
+          preferredLayoutVariant: preferredLayoutVariant || undefined,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json?.error || 'update template failed');
+      await loadReports();
+      cancelEditingTemplate();
+      setMessage(json?.message || '模板已更新。');
+    } catch (updateError) {
+      setMessage(updateError instanceof Error ? updateError.message : '更新模板失败。');
+    } finally {
+      setSubmittingKey('');
+    }
+  }
+
   async function deleteTemplate(item) {
     if (!window.confirm(`确认删除模板“${item.templateLabel}”吗？这会移除它的所有上传记录。`)) {
       return;
@@ -306,6 +457,7 @@ function ReportsPageContent() {
     const label = String(templateDraft.label || '').trim();
     const description = String(templateDraft.description || '').trim();
     const link = String(templateDraft.link || '').trim();
+    const preferredLayoutVariant = String(templateDraft.preferredLayoutVariant || '').trim();
     const hasFile = Boolean(templateFile);
     const hasLink = Boolean(link);
     let createdTemplate = null;
@@ -345,6 +497,7 @@ function ReportsPageContent() {
           label,
           description,
           sourceType,
+          preferredLayoutVariant: preferredLayoutVariant || undefined,
         }),
       });
       const json = await response.json();
@@ -381,6 +534,7 @@ function ReportsPageContent() {
         label: buildDefaultTemplateLabel((data?.templates || []).concat(createdTemplate ? [createdTemplate] : [])),
         description: '',
         link: '',
+        preferredLayoutVariant: '',
       });
       setTemplateFile(null);
       if (fileInputRef.current) {
@@ -491,6 +645,17 @@ function ReportsPageContent() {
                       value={templateDraft.description}
                       onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
                     />
+                    <select
+                      className="filter-input"
+                      value={templateDraft.preferredLayoutVariant}
+                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, preferredLayoutVariant: event.target.value }))}
+                    >
+                      {REPORT_LAYOUT_VARIANTS.map((item) => (
+                        <option key={item.value || 'default'} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="filter-row report-template-create-row">
@@ -538,6 +703,12 @@ function ReportsPageContent() {
                         key={item.id}
                         item={item}
                         submittingKey={submittingKey}
+                        editingTemplateId={editingTemplateId}
+                        editingTemplateDraft={editingTemplateDraft}
+                        onEditTemplate={startEditingTemplate}
+                        onChangeTemplateDraft={updateEditingTemplateDraft}
+                        onCancelTemplateEdit={cancelEditingTemplate}
+                        onSaveTemplateEdit={saveTemplateEdit}
                         onDeleteTemplate={deleteTemplate}
                         onDeleteReference={deleteTemplateReference}
                         buildDownloadUrl={buildTemplateReferenceDownloadUrl}

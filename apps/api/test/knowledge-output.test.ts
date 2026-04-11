@@ -114,6 +114,90 @@ test('normalizeReportOutput should keep envelope title when generated title is t
   assert.equal(output.title, '简历人才维度静态页');
 });
 
+test('normalizeReportOutput should align page charts to planned dataviz slots', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '输出一份经营静态页',
+    JSON.stringify({
+      title: '经营分析页',
+      summary: '摘要',
+      charts: [
+        {
+          title: '渠道贡献结构',
+          items: [
+            { label: 'Tmall', value: 42 },
+            { label: 'JD', value: 27 },
+          ],
+        },
+      ],
+    }),
+    {
+      title: '经营分析页',
+      fixedStructure: [],
+      variableZones: [],
+      outputHint: '经营分析输出',
+      pageSections: ['经营摘要', '行动建议', 'AI综合分析'],
+    },
+    [],
+    [],
+    {
+      datavizSlots: [
+        {
+          key: 'channel-mix',
+          title: '渠道贡献结构',
+          purpose: '渠道结构',
+          preferredChartType: 'bar',
+          placement: 'hero',
+          evidenceFocus: '渠道证据',
+          minItems: 2,
+          maxItems: 6,
+        },
+        {
+          key: 'restock-queue',
+          title: '补货优先级队列',
+          purpose: '补货优先级',
+          preferredChartType: 'horizontal-bar',
+          placement: 'section',
+          sectionTitle: '行动建议',
+          evidenceFocus: '补货证据',
+          minItems: 2,
+          maxItems: 8,
+        },
+      ],
+      pageSpec: {
+        heroCardLabels: ['资料覆盖'],
+        heroDatavizSlotKeys: ['channel-mix'],
+        sections: [
+          {
+            title: '行动建议',
+            purpose: '聚焦补货动作',
+            completionMode: 'knowledge-plus-model',
+            datavizSlotKeys: ['restock-queue'],
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.deepEqual(output.page?.charts?.map((item) => item.title), ['渠道贡献结构', '补货优先级队列']);
+  assert.deepEqual(output.page?.charts?.[1]?.items || [], []);
+  assert.deepEqual(output.page?.datavizSlots?.map((item) => item.key), ['channel-mix', 'restock-queue']);
+  assert.deepEqual(output.page?.pageSpec, {
+    layoutVariant: 'insight-brief',
+    heroCardLabels: ['资料覆盖'],
+    heroDatavizSlotKeys: ['channel-mix'],
+    sections: [
+      {
+        title: '行动建议',
+        purpose: '聚焦补货动作',
+        completionMode: 'knowledge-plus-model',
+        datavizSlotKeys: ['restock-queue'],
+      },
+    ],
+  });
+});
+
 test('buildKnowledgeFallbackOutput should produce resume company table when cloud output is unavailable', () => {
   const documents: ParsedDocument[] = [
     {
