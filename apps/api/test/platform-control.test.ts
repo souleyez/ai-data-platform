@@ -211,6 +211,21 @@ test('platform control should expose capability registry metadata', async () => 
   const areas = (listResult.data?.areas as Array<{ id?: string; commands?: Array<{ key?: string }> }>) || [];
   const datasourceArea = areas.find((item) => item.id === 'datasources');
   assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.capture-url'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.create'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.update'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.delete'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.login-capture'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.web-tasks'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.run-due'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.web-run-due'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.credentials'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.save-credential'));
+  assert.ok(datasourceArea?.commands?.some((item) => item.key === 'datasources.delete-credential'));
+  const documentsArea = areas.find((item) => item.id === 'documents');
+  assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.create-library'));
+  assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.update-library'));
+  assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.delete-library'));
+  assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.import-local'));
   const reportsArea = areas.find((item) => item.id === 'reports');
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.templates'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-from-document'));
@@ -373,6 +388,237 @@ test('platform control should promote a document-center file into a reusable rep
     ((templatesResult.data?.items as Array<{ label?: string }>) || [])
       .some((item) => item.label === '投标输出模板'),
   );
+});
+
+test('platform control should manage dataset libraries and import local files', async () => {
+  const createLibraryResult = await platformControl.executePlatformControlCommand([
+    'documents',
+    'create-library',
+    '--name',
+    '采集测试库',
+    '--description',
+    '用于 CLI 采集导入测试',
+    '--permission',
+    '1',
+  ]);
+  assert.equal(createLibraryResult.ok, true);
+  assert.equal(createLibraryResult.action, 'documents.create-library');
+  const libraryKey = String((createLibraryResult.data?.item as { key?: string })?.key || '');
+  assert.ok(libraryKey);
+
+  const updateLibraryResult = await platformControl.executePlatformControlCommand([
+    'documents',
+    'update-library',
+    '--library',
+    libraryKey,
+    '--label',
+    '采集测试库-更新',
+    '--permission',
+    '2',
+  ]);
+  assert.equal(updateLibraryResult.ok, true);
+  assert.equal(updateLibraryResult.action, 'documents.update-library');
+  assert.equal((updateLibraryResult.data?.item as { label?: string })?.label, '采集测试库-更新');
+
+  const localFilePath = path.join(storageRoot, 'local-ingest-source.md');
+  await fs.writeFile(localFilePath, '# 本地采集测试\n\n这是一份通过 system:control 导入的数据集文件。', 'utf8');
+  const importResult = await platformControl.executePlatformControlCommand([
+    'documents',
+    'import-local',
+    '--path',
+    localFilePath,
+    '--library',
+    libraryKey,
+  ]);
+  assert.equal(importResult.ok, true);
+  assert.equal(importResult.action, 'documents.import-local');
+  assert.equal((importResult.data?.summary as { successCount?: number })?.successCount, 1);
+  assert.ok(((importResult.data?.confirmedLibraryKeys as string[]) || []).includes(libraryKey));
+
+  const cache = await documentCacheRepository.readDocumentCache();
+  assert.ok(
+    cache?.items.some((item) =>
+      String(item.name || '').includes('local-ingest-source.md')
+      && (item.confirmedGroups || []).includes(libraryKey)),
+  );
+
+  const deleteLibraryResult = await platformControl.executePlatformControlCommand([
+    'documents',
+    'delete-library',
+    '--library',
+    libraryKey,
+  ]);
+  assert.equal(deleteLibraryResult.ok, true);
+  assert.equal(deleteLibraryResult.action, 'documents.delete-library');
+  assert.equal((deleteLibraryResult.data?.item as { key?: string })?.key, libraryKey);
+});
+
+test('platform control should manage datasource definitions and credentials', async () => {
+  await documentLibraries.createDocumentLibrary({
+    name: 'source-ops',
+    description: 'Datasource control library',
+    permissionLevel: 0,
+  }).catch(() => undefined);
+
+  const saveCredentialResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'save-credential',
+    '--label',
+    'CLI API Token',
+    '--kind',
+    'api_token',
+    '--token',
+    'secret-token',
+  ]);
+  assert.equal(saveCredentialResult.ok, true);
+  assert.equal(saveCredentialResult.action, 'datasources.save-credential');
+  const credentialId = String((saveCredentialResult.data?.item as { id?: string })?.id || '');
+  assert.ok(credentialId);
+
+  const credentialsResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'credentials',
+  ]);
+  assert.equal(credentialsResult.ok, true);
+  assert.equal(credentialsResult.action, 'datasources.credentials');
+  assert.ok(
+    ((credentialsResult.data?.items as Array<{ id?: string }>) || [])
+      .some((item) => item.id === credentialId),
+  );
+
+  const scanDir = path.join(storageRoot, 'local-datasource');
+  await fs.mkdir(scanDir, { recursive: true });
+  const createDatasourceResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'create',
+    '--name',
+    'CLI Local Datasource',
+    '--kind',
+    'local_directory',
+    '--library',
+    'source-ops',
+    '--path',
+    scanDir,
+    '--schedule',
+    'daily',
+  ]);
+  assert.equal(createDatasourceResult.ok, true);
+  assert.equal(createDatasourceResult.action, 'datasources.create');
+  const datasourceId = String((createDatasourceResult.data?.item as { id?: string })?.id || '');
+  assert.ok(datasourceId);
+
+  const updateDatasourceResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'update',
+    '--datasource',
+    datasourceId,
+    '--name',
+    'CLI Local Datasource Updated',
+    '--status',
+    'paused',
+  ]);
+  assert.equal(updateDatasourceResult.ok, true);
+  assert.equal(updateDatasourceResult.action, 'datasources.update');
+  assert.equal((updateDatasourceResult.data?.item as { status?: string })?.status, 'paused');
+
+  const listDatasourceResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'list',
+  ]);
+  assert.ok(
+    ((listDatasourceResult.data?.items as Array<{ id?: string }>) || [])
+      .some((item) => item.id === datasourceId),
+  );
+
+  const runDueResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'run-due',
+  ]);
+  assert.equal(runDueResult.ok, true);
+  assert.equal(runDueResult.action, 'datasources.run-due');
+
+  const deleteDatasourceResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'delete',
+    '--datasource',
+    datasourceId,
+  ]);
+  assert.equal(deleteDatasourceResult.ok, true);
+  assert.equal(deleteDatasourceResult.action, 'datasources.delete');
+
+  const deleteCredentialResult = await platformControl.executePlatformControlCommand([
+    'datasources',
+    'delete-credential',
+    '--credential',
+    credentialId,
+  ]);
+  assert.equal(deleteCredentialResult.ok, true);
+  assert.equal(deleteCredentialResult.action, 'datasources.delete-credential');
+});
+
+test('platform control should run authenticated capture and expose web tasks', async () => {
+  await documentLibraries.createDocumentLibrary({
+    name: '登录采集库',
+    description: 'Authenticated capture library',
+    permissionLevel: 0,
+  }).catch(() => undefined);
+
+  const server = await startHtmlServer({
+    '/secure-capture': `
+      <html>
+        <head><title>登录后采购公告</title></head>
+        <body>
+          <article>
+            <h1>登录后采购公告</h1>
+            <p>这是需要登录态抓取的测试正文。</p>
+          </article>
+        </body>
+      </html>
+    `,
+  });
+
+  try {
+    const loginCaptureResult = await platformControl.executePlatformControlCommand([
+      'datasources',
+      'login-capture',
+      '--url',
+      `${server.baseUrl}/secure-capture`,
+      '--username',
+      'tester',
+      '--password',
+      'secret',
+      '--remember',
+      'true',
+      '--library',
+      '登录采集库',
+      '--name',
+      'Secure bids capture',
+    ]);
+    assert.equal(loginCaptureResult.ok, true);
+    assert.equal(loginCaptureResult.action, 'datasources.login-capture');
+    assert.equal((loginCaptureResult.data?.captureStatus as string), 'error');
+    assert.match(String(loginCaptureResult.data?.captureSummary || ''), /login form not detected/i);
+
+    const webTasksResult = await platformControl.executePlatformControlCommand([
+      'datasources',
+      'web-tasks',
+    ]);
+    assert.equal(webTasksResult.ok, true);
+    assert.equal(webTasksResult.action, 'datasources.web-tasks');
+    assert.ok(
+      ((webTasksResult.data?.items as Array<{ url?: string }>) || [])
+        .some((item) => item.url === `${server.baseUrl}/secure-capture`),
+    );
+
+    const webRunDueResult = await platformControl.executePlatformControlCommand([
+      'datasources',
+      'web-run-due',
+    ]);
+    assert.equal(webRunDueResult.ok, true);
+    assert.equal(webRunDueResult.action, 'datasources.web-run-due');
+  } finally {
+    await server.close();
+  }
 });
 
 test('platform control should manage reusable templates and saved outputs', async () => {

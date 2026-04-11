@@ -1,22 +1,37 @@
+import path from 'node:path';
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
+import { loadDocumentCategoryConfig } from './document-config.js';
 import {
   documentMatchesLibrary,
   loadDocumentLibraries,
   type DocumentLibrary,
 } from './document-libraries.js';
 import {
+  DATASOURCE_AUTH_MODES,
+  DATASOURCE_KINDS,
+  DATASOURCE_SCHEDULE_KINDS,
+  deleteDatasourceDefinition,
   deleteDatasourceRun,
   getDatasourceDefinition,
   listDatasourceDefinitions,
   listDatasourceRuns,
+  upsertDatasourceDefinition,
   type DatasourceDefinition,
   type DatasourceTargetLibrary,
 } from './datasource-definitions.js';
 import { logDatasourceRunDeletion } from './datasource-audit.js';
 import {
+  deleteDatasourceCredential,
+  listDatasourceCredentials,
+  upsertDatasourceCredential,
+  type DatasourceCredentialKind,
+} from './datasource-credentials.js';
+import {
   activateDatasourceDefinition,
+  deleteDatasourceExecutionArtifacts,
   pauseDatasourceDefinition,
   runDatasourceDefinition,
+  runDueDatasourceDefinitions,
 } from './datasource-execution.js';
 import {
   buildDatasourceLibraryLabelMap,
@@ -28,13 +43,19 @@ import {
   loadDocumentDetailPayload,
 } from './document-route-detail-loaders.js';
 import {
+  createManagedDocumentLibrary,
+  deleteManagedDocumentLibrary,
+  updateManagedDocumentLibrary,
+} from './document-route-services.js';
+import {
   runDocumentDeepParseAction,
   runDocumentOrganizeAction,
   runDocumentReparseAction,
   runDocumentVectorRebuildAction,
   runReclusterUngroupedAction,
 } from './document-route-operations.js';
-import { buildDocumentId, loadParsedDocuments } from './document-store.js';
+import { ingestLocalFilesIntoLibrary } from './document-upload-ingest.js';
+import { buildDocumentId, DEFAULT_SCAN_DIR, loadParsedDocuments } from './document-store.js';
 import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { prepareKnowledgeSupply } from './knowledge-supply.js';
@@ -68,7 +89,12 @@ import {
   type ReportTemplateType,
 } from './report-center.js';
 import type { KnowledgeOutputKind } from './knowledge-template.js';
-import { createAndRunWebCaptureTask } from './web-capture.js';
+import { createAndRunWebCaptureTask, listWebCaptureTasks, runDueWebCaptureTasks } from './web-capture.js';
+import {
+  buildWebCaptureCredentialSummary,
+  loadWebCaptureCredential,
+  saveWebCaptureCredential,
+} from './web-capture-credentials.js';
 
 type CommandFlags = Record<string, string>;
 type ModelProviderId = 'openai' | 'github-copilot' | 'minimax' | 'moonshot' | 'zai';
@@ -138,6 +164,95 @@ function splitFlagList(value: string | undefined) {
 function resolveBooleanFlag(value: string | undefined) {
   const normalized = normalizeText(value || '');
   return normalized === 'true' || normalized === '1' || normalized === 'yes';
+}
+
+function resolveDatasourceKindFlag(value: string | undefined): DatasourceDefinition['kind'] {
+  const normalized = normalizeText(value || '').replace(/\s+/g, '_');
+  if (!normalized) return 'web_public';
+  const direct = DATASOURCE_KINDS.find((item) => item === normalized);
+  if (direct) return direct;
+  if (normalized === 'web' || normalized === 'public_web') return 'web_public';
+  if (normalized === 'web_login' || normalized === 'login_web') return 'web_login';
+  if (normalized === 'web_discovery' || normalized === 'discovery_web') return 'web_discovery';
+  if (normalized === 'upload' || normalized === 'public_upload') return 'upload_public';
+  if (normalized === 'local' || normalized === 'directory' || normalized === 'folder') return 'local_directory';
+  throw new Error(`Unsupported datasource kind "${value}".`);
+}
+
+function resolveDatasourceStatusFlag(value: string | undefined): DatasourceDefinition['status'] {
+  const normalized = normalizeText(value || '');
+  if (!normalized) return 'active';
+  if (normalized === 'draft') return 'draft';
+  if (normalized === 'paused' || normalized === 'pause') return 'paused';
+  if (normalized === 'error') return 'error';
+  if (normalized === 'active' || normalized === 'enabled') return 'active';
+  throw new Error(`Unsupported datasource status "${value}".`);
+}
+
+function resolveDatasourceScheduleFlag(value: string | undefined): DatasourceDefinition['schedule']['kind'] {
+  const normalized = normalizeText(value || '');
+  if (!normalized) return 'manual';
+  const direct = DATASOURCE_SCHEDULE_KINDS.find((item) => item === normalized);
+  if (direct) return direct;
+  throw new Error(`Unsupported datasource schedule "${value}".`);
+}
+
+function resolveDatasourceAuthModeFlag(value: string | undefined, kind: DatasourceDefinition['kind']): DatasourceDefinition['authMode'] {
+  if (kind === 'local_directory') return 'none';
+  const normalized = normalizeText(value || '');
+  if (!normalized) return 'none';
+  const direct = DATASOURCE_AUTH_MODES.find((item) => item === normalized);
+  if (direct) return direct;
+  throw new Error(`Unsupported datasource auth mode "${value}".`);
+}
+
+function resolveDatasourceCredentialKindFlag(value: string | undefined): DatasourceCredentialKind {
+  const normalized = normalizeText(value || '');
+  if (!normalized) return 'credential';
+  if (normalized === 'credential' || normalized === 'login') return 'credential';
+  if (normalized === 'manual_session' || normalized === 'session') return 'manual_session';
+  if (normalized === 'database_password' || normalized === 'database') return 'database_password';
+  if (normalized === 'api token' || normalized === 'api_token' || normalized === 'token') return 'api_token';
+  throw new Error(`Unsupported datasource credential kind "${value}".`);
+}
+
+function parseHeadersFlag(value: string | undefined) {
+  const entries = splitFlagList(value);
+  if (!entries.length) return undefined;
+  const headers = Object.fromEntries(
+    entries
+      .map((entry) => {
+        const [key, ...rest] = String(entry || '').split(':');
+        return [String(key || '').trim(), rest.join(':').trim()] as const;
+      })
+      .filter(([key, headerValue]) => key && headerValue),
+  );
+  return Object.keys(headers).length ? headers : undefined;
+}
+
+function buildDatasourceConfigPatch(
+  flags: CommandFlags,
+  kind: DatasourceDefinition['kind'],
+  existingConfig: Record<string, unknown> = {},
+) {
+  const nextConfig: Record<string, unknown> = { ...existingConfig };
+  if (flags.url !== undefined) nextConfig.url = String(flags.url || '').trim();
+  if (flags.path !== undefined) nextConfig.path = path.resolve(String(flags.path || '').trim());
+  if (flags.focus !== undefined) nextConfig.focus = String(flags.focus || '').trim();
+  if (flags.note !== undefined) nextConfig.note = String(flags.note || '').trim();
+  if (flags.keywords !== undefined) nextConfig.keywords = splitFlagList(flags.keywords);
+  if (flags['site-hints'] !== undefined) nextConfig.siteHints = splitFlagList(flags['site-hints']);
+  if (flags['seed-urls'] !== undefined) nextConfig.seedUrls = splitFlagList(flags['seed-urls']);
+  if (flags['crawl-mode'] !== undefined) {
+    const crawlMode = normalizeText(flags['crawl-mode']);
+    nextConfig.crawlMode = crawlMode === 'listing detail' ? 'listing-detail' : 'single-page';
+  }
+  if (flags['max-items'] !== undefined) nextConfig.maxItems = clampLimit(flags['max-items'], 5, 200);
+  if (flags['keep-original'] !== undefined) nextConfig.keepOriginalFiles = resolveBooleanFlag(flags['keep-original']);
+  if (kind === 'upload_public' && flags['upload-token'] !== undefined) {
+    nextConfig.uploadToken = String(flags['upload-token'] || '').trim();
+  }
+  return nextConfig;
 }
 
 function buildDatasourceMatchTerms(definition: DatasourceDefinition) {
@@ -459,6 +574,64 @@ async function runDocumentCommand(subcommand: string, flags: CommandFlags): Prom
     };
   }
 
+  if (subcommand === 'create-library') {
+    const name = String(flags.name || flags.label || '').trim();
+    if (!name) throw new Error('Missing --name for documents create-library.');
+    const { library, libraries } = await createManagedDocumentLibrary({
+      name,
+      description: String(flags.description || '').trim() || undefined,
+      permissionLevel: flags.permission !== undefined ? Number(flags.permission) : undefined,
+    });
+    return {
+      ok: true,
+      action: 'documents.create-library',
+      summary: `Created library "${library.label}".`,
+      data: {
+        item: library,
+        items: libraries,
+      },
+    };
+  }
+
+  if (subcommand === 'update-library') {
+    const key = String(flags.library || flags.key || '').trim();
+    if (!key) throw new Error('Missing --library for documents update-library.');
+    const patch: Parameters<typeof updateManagedDocumentLibrary>[1] = {};
+    if (flags.label !== undefined) patch.label = String(flags.label || '').trim();
+    if (flags.description !== undefined) patch.description = String(flags.description || '').trim();
+    if (flags.permission !== undefined) patch.permissionLevel = Number(flags.permission);
+    if (flags['knowledge-pages'] !== undefined) patch.knowledgePagesEnabled = resolveBooleanFlag(flags['knowledge-pages']);
+    if (flags['knowledge-pages-mode'] !== undefined) patch.knowledgePagesMode = String(flags['knowledge-pages-mode'] || '').trim() as 'none' | 'overview' | 'topics';
+    if (!Object.keys(patch).length) {
+      throw new Error('Missing library update fields. Provide --label, --description, --permission, or knowledge page flags.');
+    }
+    const { library, libraries } = await updateManagedDocumentLibrary(key, patch);
+    return {
+      ok: true,
+      action: 'documents.update-library',
+      summary: `Updated library "${library.label}".`,
+      data: {
+        item: library,
+        items: libraries,
+      },
+    };
+  }
+
+  if (subcommand === 'delete-library') {
+    const key = String(flags.library || flags.key || '').trim();
+    if (!key) throw new Error('Missing --library for documents delete-library.');
+    const { deleted, libraries } = await deleteManagedDocumentLibrary(key);
+    return {
+      ok: true,
+      action: 'documents.delete-library',
+      summary: `Deleted library "${deleted.label}".`,
+      data: {
+        item: deleted,
+        items: libraries,
+      },
+    };
+  }
+
   if (subcommand === 'list') {
     const libraries = await loadDocumentLibraries();
     const scopeLibrary = flags.library ? await resolveLibraryReference(flags.library) : null;
@@ -481,6 +654,38 @@ async function runDocumentCommand(subcommand: string, flags: CommandFlags): Prom
         totalCached: snapshot.items.length,
         availableLibraries: libraries.map((item) => ({ key: item.key, label: item.label })),
         items,
+      },
+    };
+  }
+
+  if (subcommand === 'import-local') {
+    const filePaths = [
+      ...splitFlagList(flags.paths),
+      ...splitFlagList(flags.path),
+    ];
+    if (!filePaths.length) {
+      throw new Error('Missing --path or --paths for documents import-local.');
+    }
+    const targetLibraries = await resolveTargetLibrariesFromFlags(flags);
+    const config = await loadDocumentCategoryConfig(DEFAULT_SCAN_DIR);
+    const libraries = await loadDocumentLibraries();
+    const ingestResult = await ingestLocalFilesIntoLibrary({
+      filePaths,
+      documentConfig: config,
+      libraries,
+      preferredLibraryKeys: targetLibraries.map((item) => item.key),
+      forcedLibraryKeys: targetLibraries.map((item) => item.key),
+    });
+    return {
+      ok: true,
+      action: 'documents.import-local',
+      summary: `Imported ${ingestResult.summary.successCount}/${ingestResult.summary.total} local files into the dataset base.`,
+      data: {
+        uploadedFiles: ingestResult.uploadedFiles,
+        summary: ingestResult.summary,
+        metrics: ingestResult.metrics,
+        confirmedLibraryKeys: ingestResult.confirmedLibraryKeys,
+        ingestItems: ingestResult.ingestItems,
       },
     };
   }
@@ -613,6 +818,168 @@ async function runSupplyCommand(subcommand: string, flags: CommandFlags): Promis
 }
 
 async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Promise<PlatformControlResult> {
+  if (subcommand === 'credentials') {
+    const items = await listDatasourceCredentials();
+    return {
+      ok: true,
+      action: 'datasources.credentials',
+      summary: `Loaded ${items.length} datasource credentials.`,
+      data: {
+        items,
+      },
+    };
+  }
+
+  if (subcommand === 'save-credential') {
+    const label = String(flags.label || flags.name || '').trim();
+    if (!label) throw new Error('Missing --label for datasources save-credential.');
+    const secret = {
+      username: String(flags.username || '').trim() || undefined,
+      password: String(flags.password || '').trim() || undefined,
+      token: String(flags.token || flags['api-key'] || '').trim() || undefined,
+      connectionString: String(flags['connection-string'] || '').trim() || undefined,
+      cookies: String(flags.cookies || '').trim() || undefined,
+      headers: parseHeadersFlag(flags.headers),
+    };
+    const item = await upsertDatasourceCredential({
+      id: String(flags.id || '').trim() || `cred-${Date.now()}`,
+      kind: resolveDatasourceCredentialKindFlag(flags.kind),
+      label,
+      origin: String(flags.origin || '').trim(),
+      notes: String(flags.note || flags.notes || '').trim(),
+      secret,
+    });
+    return {
+      ok: true,
+      action: 'datasources.save-credential',
+      summary: `Saved datasource credential "${item.label}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'delete-credential') {
+    const id = String(flags.credential || flags.id || '').trim();
+    if (!id) throw new Error('Missing --credential for datasources delete-credential.');
+    const item = await deleteDatasourceCredential(id);
+    if (!item) throw new Error(`Datasource credential "${id}" not found.`);
+    return {
+      ok: true,
+      action: 'datasources.delete-credential',
+      summary: `Deleted datasource credential "${item.label}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'create') {
+    const name = String(flags.name || '').trim();
+    if (!name) throw new Error('Missing --name for datasources create.');
+    const kind = resolveDatasourceKindFlag(flags.kind);
+    const targetLibraries = await resolveTargetLibrariesFromFlags(flags);
+    const authMode = resolveDatasourceAuthModeFlag(flags.auth, kind);
+    const credentialId = String(flags.credential || flags['credential-id'] || '').trim();
+    const credentialLabel = String(flags['credential-label'] || '').trim();
+    const item = await upsertDatasourceDefinition({
+      id: String(flags.id || '').trim() || `ds-${Date.now()}`,
+      name,
+      kind,
+      status: resolveDatasourceStatusFlag(flags.status),
+      targetLibraries,
+      schedule: {
+        kind: resolveDatasourceScheduleFlag(flags.schedule),
+        timezone: String(flags.timezone || process.env.TZ || 'Asia/Shanghai').trim(),
+        maxItemsPerRun: flags['max-items'] !== undefined ? clampLimit(flags['max-items'], 5, 200) : undefined,
+      },
+      authMode,
+      credentialRef: credentialId
+        ? {
+            id: credentialId,
+            kind: authMode,
+            label: credentialLabel,
+            origin: String(flags.origin || flags.url || '').trim(),
+            updatedAt: new Date().toISOString(),
+          }
+        : null,
+      config: buildDatasourceConfigPatch(flags, kind),
+      notes: String(flags.note || '').trim(),
+    });
+    return {
+      ok: true,
+      action: 'datasources.create',
+      summary: `Created datasource "${item.name}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'update') {
+    const definition = await resolveDatasourceReference(flags.datasource || flags.id || '');
+    const kind = flags.kind !== undefined ? resolveDatasourceKindFlag(flags.kind) : definition.kind;
+    const targetLibraries = (flags.library !== undefined || flags.libraries !== undefined)
+      ? await resolveTargetLibrariesFromFlags(flags)
+      : definition.targetLibraries;
+    const authMode = flags.auth !== undefined ? resolveDatasourceAuthModeFlag(flags.auth, kind) : definition.authMode;
+    const credentialId = flags.credential !== undefined || flags['credential-id'] !== undefined
+      ? String(flags.credential || flags['credential-id'] || '').trim()
+      : (definition.credentialRef?.id || '');
+    const credentialLabel = flags['credential-label'] !== undefined
+      ? String(flags['credential-label'] || '').trim()
+      : (definition.credentialRef?.label || '');
+    const item = await upsertDatasourceDefinition({
+      ...definition,
+      name: flags.name !== undefined ? String(flags.name || '').trim() || definition.name : definition.name,
+      kind,
+      status: flags.status !== undefined ? resolveDatasourceStatusFlag(flags.status) : definition.status,
+      targetLibraries,
+      schedule: {
+        kind: flags.schedule !== undefined ? resolveDatasourceScheduleFlag(flags.schedule) : definition.schedule.kind,
+        timezone: flags.timezone !== undefined ? String(flags.timezone || '').trim() : definition.schedule.timezone,
+        maxItemsPerRun: flags['max-items'] !== undefined
+          ? clampLimit(flags['max-items'], 5, 200)
+          : definition.schedule.maxItemsPerRun,
+      },
+      authMode,
+      credentialRef: credentialId
+        ? {
+            id: credentialId,
+            kind: authMode,
+            label: credentialLabel,
+            origin: String(flags.origin || flags.url || definition.credentialRef?.origin || '').trim(),
+            updatedAt: new Date().toISOString(),
+          }
+        : null,
+      config: buildDatasourceConfigPatch(flags, kind, definition.config),
+      notes: flags.note !== undefined ? String(flags.note || '').trim() : definition.notes,
+    });
+    return {
+      ok: true,
+      action: 'datasources.update',
+      summary: `Updated datasource "${item.name}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'delete') {
+    const definition = await resolveDatasourceReference(flags.datasource || flags.id || '');
+    await deleteDatasourceExecutionArtifacts(definition);
+    const item = await deleteDatasourceDefinition(definition.id);
+    if (!item) throw new Error(`Datasource "${definition.name}" could not be deleted.`);
+    return {
+      ok: true,
+      action: 'datasources.delete',
+      summary: `Deleted datasource "${definition.name}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
   if (!subcommand || subcommand === 'list') {
     const definitions = await listDatasourceDefinitions();
     return {
@@ -653,6 +1020,42 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
         datasource: datasource ? { id: datasource.id, name: datasource.name } : null,
         items,
       },
+    };
+  }
+
+  if (subcommand === 'run-due') {
+    const result = await runDueDatasourceDefinitions();
+    return {
+      ok: true,
+      action: 'datasources.run-due',
+      summary: result.executedCount
+        ? `Ran ${result.executedCount} due datasource definitions.`
+        : 'No datasource definitions were due.',
+      data: result as unknown as Record<string, unknown>,
+    };
+  }
+
+  if (subcommand === 'web-tasks') {
+    const items = await listWebCaptureTasks();
+    return {
+      ok: true,
+      action: 'datasources.web-tasks',
+      summary: `Loaded ${items.length} web capture tasks.`,
+      data: {
+        items,
+      },
+    };
+  }
+
+  if (subcommand === 'web-run-due') {
+    const result = await runDueWebCaptureTasks();
+    return {
+      ok: true,
+      action: 'datasources.web-run-due',
+      summary: result.executedCount
+        ? `Ran ${result.executedCount} due web capture tasks.`
+        : 'No web capture tasks were due.',
+      data: result as unknown as Record<string, unknown>,
     };
   }
 
@@ -718,6 +1121,95 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
           kind: definition.kind,
           targetLibraries: definition.targetLibraries,
         },
+        task,
+        ingest: webIngest
+          ? {
+              ingestPath: webIngest.ingestPath,
+              summary: webIngest.ingestResult.summary,
+              libraryKeys: webIngest.ingestResult.confirmedLibraryKeys,
+            }
+          : null,
+        captureStatus: task.lastStatus || 'idle',
+        captureSummary: task.lastSummary || '',
+        successCount,
+        failedCount,
+      },
+    };
+  }
+
+  if (subcommand === 'login-capture') {
+    const url = String(flags.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Missing valid --url for datasources login-capture.');
+    }
+    const username = String(flags.username || '').trim();
+    const password = String(flags.password || '').trim();
+    const remember = resolveBooleanFlag(flags.remember);
+    let stored = await loadWebCaptureCredential(url);
+    if (!username || !password) {
+      if (!stored) {
+        throw new Error('Missing login credential. Provide --username and --password, or store one first.');
+      }
+    } else if (remember) {
+      const savedCredential = await saveWebCaptureCredential({ url, username, password });
+      stored = {
+        id: savedCredential.id,
+        origin: savedCredential.origin,
+        username,
+        password,
+        maskedUsername: savedCredential.maskedUsername,
+        updatedAt: savedCredential.updatedAt,
+      };
+    } else {
+      stored = {
+        id: '',
+        origin: new URL(url).origin.toLowerCase(),
+        username,
+        password,
+        maskedUsername: buildWebCaptureCredentialSummary(url, { maskedUsername: username, origin: new URL(url).origin.toLowerCase() }).maskedUsername || `${username.slice(0, 2)}***`,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const targetLibraries = await resolveTargetLibrariesFromFlags(flags);
+    const task = await createAndRunWebCaptureTask({
+      url,
+      focus: String(flags.focus || '').trim(),
+      note: String(flags.note || '').trim(),
+      frequency: 'manual',
+      maxItems: clampLimit(flags['max-items'], 5, 50),
+      auth: stored?.username && stored?.password ? { username: stored.username, password: stored.password } : undefined,
+      credentialRef: remember ? (stored?.id || '') : '',
+      credentialLabel: stored?.maskedUsername || '',
+      keepOriginalFiles: resolveBooleanFlag(flags['keep-original']),
+    });
+    const definition = await syncWebCaptureTaskToDatasource(task, {
+      name: String(flags.name || '').trim() || undefined,
+      targetLibraries: targetLibraries.length ? targetLibraries : undefined,
+      notes: String(flags.note || '').trim() || undefined,
+    });
+    const webIngest = task.lastStatus === 'success'
+      ? await ingestWebCaptureTaskDocument({
+          task,
+          targetLibraries: definition.targetLibraries,
+        })
+      : null;
+    const successCount = webIngest?.ingestResult.summary.successCount || 0;
+    const failedCount = webIngest?.ingestResult.summary.failedCount || (successCount > 0 ? 0 : (task.lastStatus === 'error' ? 1 : 0));
+    return {
+      ok: true,
+      action: 'datasources.login-capture',
+      summary: task.lastStatus === 'success' && successCount > 0
+        ? `Captured authenticated URL "${url}" and ingested it into ${definition.targetLibraries.map((item) => item.label).join(', ') || 'the target library'}.`
+        : `Authenticated capture executed for "${url}", but ingestion did not complete successfully.`,
+      data: {
+        datasource: {
+          id: definition.id,
+          name: definition.name,
+          kind: definition.kind,
+          targetLibraries: definition.targetLibraries,
+        },
+        credentialSummary: buildWebCaptureCredentialSummary(url, stored),
         task,
         ingest: webIngest
           ? {
