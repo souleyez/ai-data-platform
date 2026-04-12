@@ -49,7 +49,13 @@ function resolveCanonicalSource(item) {
       ? 'existing-markdown'
       : 'markitdown';
   }
-  if (String(item?.fullText || '').trim()) return 'full-text';
+  const parseMethod = String(item?.parseMethod || '').trim().toLowerCase();
+  if (String(item?.fullText || '').trim()) {
+    if (parseMethod.includes('presentation-vlm')) return 'vlm-presentation';
+    if (parseMethod.includes('pdf-vlm')) return 'vlm-pdf';
+    if (parseMethod.includes('image-vlm') || parseMethod.includes('image-ocr+vlm')) return 'vlm-image';
+    return 'legacy-full-text';
+  }
   return 'none';
 }
 
@@ -59,10 +65,31 @@ function formatCanonicalSource(value) {
       return '现成 Markdown';
     case 'markitdown':
       return 'MarkItDown';
-    case 'full-text':
+    case 'legacy-full-text':
       return '旧正文';
+    case 'vlm-image':
+      return '图片 VLM';
+    case 'vlm-pdf':
+      return 'PDF VLM';
+    case 'vlm-presentation':
+      return '演示页 VLM';
     case 'none':
       return '未生成';
+    default:
+      return '-';
+  }
+}
+
+function formatCanonicalStatus(value) {
+  switch (String(value || '').trim()) {
+    case 'ready':
+      return '已就绪';
+    case 'fallback_full_text':
+      return '正文可用（旧正文）';
+    case 'failed':
+      return 'Canonical 失败';
+    case 'unsupported':
+      return '不支持';
     default:
       return '-';
   }
@@ -317,6 +344,7 @@ export default function DocumentAnalysisPanel({
   const detailMeta = useMemo(() => ([
     { label: '解析链路', value: item?.parseMethod || '-' },
     { label: 'Canonical 来源', value: formatCanonicalSource(resolveCanonicalSource(item)) },
+    { label: 'Canonical 状态', value: formatCanonicalStatus(item?.canonicalParseStatus) },
     { label: 'Markdown 方法', value: item?.markdownMethod || '-' },
     { label: 'Markdown 时间', value: formatDateTime(item?.markdownGeneratedAt) },
     { label: '深度解析状态', value: item?.detailParseStatus || '-' },
@@ -510,19 +538,30 @@ export default function DocumentAnalysisPanel({
           <section>
             <h4 style={{ marginBottom: 8 }}>Canonical 文本状态</h4>
             <div style={{ display: 'grid', gap: 8 }}>
-              <div className="message-refs">
-                <span className="source-chip">来源：{formatCanonicalSource(resolveCanonicalSource(item))}</span>
-                <span className="source-chip">方法：{item?.markdownMethod || '-'}</span>
-                <span className="source-chip">生成时间：{formatDateTime(item?.markdownGeneratedAt)}</span>
-              </div>
-              {item?.markdownError ? (
-                <div className="preview-meta-line" style={{ color: '#b91c1c' }}>
-                  Markdown 解析失败：{item.markdownError}
+                <div className="message-refs">
+                  <span className="source-chip">来源：{formatCanonicalSource(resolveCanonicalSource(item))}</span>
+                  <span className="source-chip">状态：{formatCanonicalStatus(item?.canonicalParseStatus)}</span>
+                  <span className="source-chip">方法：{item?.markdownMethod || '-'}</span>
+                  <span className="source-chip">生成时间：{formatDateTime(item?.markdownGeneratedAt)}</span>
                 </div>
-              ) : (
-                <div className="preview-meta-line">
-                  {resolveCanonicalSource(item) === 'full-text'
-                    ? '当前仍在使用旧正文作为 canonical text，建议加入 canonical backfill。'
+                {item?.markdownError ? (
+                  item?.canonicalParseStatus === 'failed' ? (
+                    <div className="preview-meta-line" style={{ color: '#b91c1c' }}>
+                      Markdown 解析失败：{item.markdownError}
+                    </div>
+                  ) : (
+                    <div className="preview-meta-line" style={{ color: '#64748b' }}>
+                      Markdown 未生成，当前已回退到可用正文。调试信息：{item.markdownError}
+                    </div>
+                  )
+                ) : (
+                  <div className="preview-meta-line">
+                    {item?.canonicalParseStatus === 'fallback_full_text'
+                      ? '当前没有 canonical markdown，但旧正文可用，问答和结构化仍可继续。'
+                      : resolveCanonicalSource(item) === 'legacy-full-text'
+                        ? '当前仍在使用旧正文作为 canonical text。'
+                      : String(resolveCanonicalSource(item)).startsWith('vlm-')
+                        ? '当前 canonical text 来自 VLM 兜底解析，已作为可用终态保留。'
                     : resolveCanonicalSource(item) === 'none'
                       ? '当前还没有可用的 canonical text。'
                       : '当前 canonical text 已就绪。'}

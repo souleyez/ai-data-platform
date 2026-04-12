@@ -42,6 +42,7 @@ export type ParsedDocument = {
   markdownMethod?: string;
   markdownGeneratedAt?: string;
   markdownError?: string;
+  canonicalParseStatus?: 'ready' | 'fallback_full_text' | 'failed' | 'unsupported';
   extractedChars: number;
   evidenceChunks?: EvidenceChunk[];
   entities?: StructuredEntity[];
@@ -3639,6 +3640,19 @@ function shouldAttemptDetailedMarkdownResolution(ext: string, parseStage: 'quick
   return parseStage === 'detailed' && (ext === '.md' || supportsMarkItDownExtension(ext));
 }
 
+function shouldPreserveLegacyAuxiliaryExtraction(ext: string) {
+  return ext === '.csv' || ext === '.xlsx' || ext === '.xls';
+}
+
+function shouldTreatLegacyExtractionAsCanonical(ext: string) {
+  return ext === '.txt'
+    || ext === '.json'
+    || ext === '.html'
+    || ext === '.htm'
+    || ext === '.xml'
+    || ext === '.csv';
+}
+
 export async function parseDocument(
   filePath: string,
   config?: DocumentCategoryConfig,
@@ -3657,16 +3671,31 @@ export async function parseDocument(
   const structuredExtractionProfile = extractionProfile ?? undefined;
 
   try {
-    const { status, text, parseMethod: hintedMethod, tableSummary } = await extractText(filePath, ext);
-    let parseStatus = status;
-    let activeText = text;
-    let parseMethod = inferParseMethod(ext, text, hintedMethod);
+    let status: 'parsed' | 'unsupported' | 'error' = 'unsupported';
+    let text = '';
+    let hintedMethod: string | undefined;
+    let tableSummary: TableSummary | undefined;
+    let parseStatus: 'parsed' | 'unsupported' | 'error' = 'unsupported';
+    let activeText = '';
+    let parseMethod = inferParseMethod(ext, '', undefined);
     let markdownText = '';
     let markdownMethod: ParsedDocument['markdownMethod'];
     let markdownGeneratedAt: string | undefined;
     let markdownError: string | undefined;
+    let canonicalParseStatus: ParsedDocument['canonicalParseStatus'] = status === 'unsupported'
+      ? 'unsupported'
+      : status === 'error'
+        ? 'failed'
+        : 'fallback_full_text';
 
     if (shouldAttemptDetailedMarkdownResolution(ext, parseStage)) {
+      if (ext === '.md') {
+        const extracted = await extractText(filePath, ext);
+        status = extracted.status;
+        text = extracted.text;
+        hintedMethod = extracted.parseMethod;
+        tableSummary = extracted.tableSummary;
+      }
       const markdownResult = await (options?.resolveMarkdown || resolveDocumentMarkdownForFile)({
         filePath,
         ext,
@@ -3682,11 +3711,39 @@ export async function parseDocument(
         markdownGeneratedAt = now;
         activeText = markdownText;
         parseStatus = 'parsed';
+        canonicalParseStatus = 'ready';
         if (markdownMethod === 'markitdown') {
           parseMethod = 'markitdown';
+        } else if (markdownMethod === 'existing-markdown') {
+          parseMethod = 'existing-markdown';
         }
       } else if (markdownResult.status === 'failed') {
         markdownError = markdownResult.error;
+      }
+    }
+
+    const needsLegacyExtraction = !markdownText || shouldPreserveLegacyAuxiliaryExtraction(ext);
+    if (needsLegacyExtraction) {
+      try {
+        const extracted = await extractText(filePath, ext);
+        status = extracted.status;
+        text = extracted.text;
+        hintedMethod = extracted.parseMethod;
+        tableSummary = extracted.tableSummary;
+        if (!markdownText) {
+          parseStatus = status;
+          activeText = text;
+          parseMethod = inferParseMethod(ext, text, hintedMethod);
+          canonicalParseStatus = status === 'unsupported'
+            ? 'unsupported'
+            : status === 'error'
+              ? 'failed'
+              : shouldTreatLegacyExtractionAsCanonical(ext)
+                ? 'ready'
+                : 'fallback_full_text';
+        }
+      } catch (error) {
+        if (!markdownText) throw error;
       }
     }
 
@@ -3697,6 +3754,7 @@ export async function parseDocument(
       && !markdownText
     ) {
       parseStatus = 'error';
+      canonicalParseStatus = 'failed';
     }
 
     const normalizedText = normalizeText(activeText);
@@ -3729,6 +3787,7 @@ export async function parseDocument(
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
+        canonicalParseStatus: 'unsupported',
         extractedChars: 0,
         evidenceChunks: [],
         entities: [],
@@ -3764,7 +3823,7 @@ export async function parseDocument(
         extractionProfile,
       );
       const fallbackSummary = AUDIO_EXTENSIONS.has(ext)
-        ? '音频详细解析失败，当前未转写出可用正文；如果 VLM 不支持该音频类型，将保持失败状态。'
+        ? '音频详细解析失败，当前未转写出可用正文；当前版本尚未接入音频 VLM 兜底。'
         : IMAGE_EXTENSIONS.has(ext)
         ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
         : PRESENTATION_EXTENSIONS.has(ext)
@@ -3789,6 +3848,7 @@ export async function parseDocument(
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
+        canonicalParseStatus: 'failed',
         extractedChars: 0,
         evidenceChunks: [],
         entities: [],
@@ -3900,6 +3960,7 @@ export async function parseDocument(
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
+        canonicalParseStatus,
         extractedChars: normalizedText.length,
         evidenceChunks: [],
         entities: [],
@@ -4005,6 +4066,7 @@ export async function parseDocument(
       markdownMethod,
       markdownGeneratedAt,
       markdownError,
+      canonicalParseStatus,
       extractedChars: normalizedText.length,
       evidenceChunks,
       entities: structured.entities,
@@ -4066,6 +4128,7 @@ export async function parseDocument(
       summary: fallbackSummary,
       excerpt: fallbackSummary,
       fullText: '',
+      canonicalParseStatus: 'failed',
       extractedChars: 0,
       evidenceChunks: [],
       entities: [],

@@ -49,6 +49,7 @@ const definitionsFile = path.join(storageRoot, 'config', 'datasources', 'definit
 const webCaptureTasksFile = path.join(storageRoot, 'web-captures', 'tasks.json');
 const reportStateFile = path.join(storageRoot, 'config', 'report-center.json');
 const memorySyncStatusFile = path.join(storageRoot, 'config', 'openclaw-memory-sync-status.json');
+const librariesFile = path.join(storageRoot, 'config', 'document-libraries.json');
 const documentCacheFile = path.join(storageRoot, 'cache', 'documents-cache.json');
 const deepParseQueueFile = path.join(storageRoot, 'cache', 'document-deep-parse-queue.json');
 const retainedDocumentsFile = path.join(storageRoot, 'config', 'retained-documents.json');
@@ -128,6 +129,17 @@ test('web capture, report center, and memory sync repositories should recover fr
   await fs.mkdir(path.dirname(reportStateFile), { recursive: true });
   await fs.mkdir(path.dirname(memorySyncStatusFile), { recursive: true });
   await fs.mkdir(path.dirname(documentCacheFile), { recursive: true });
+  await fs.writeFile(librariesFile, JSON.stringify({
+    items: [
+      {
+        key: 'order',
+        label: '订单分析',
+        description: '订单与库存运营资料',
+        permissionLevel: 0,
+        createdAt: '2026-04-07T00:00:00.000Z',
+      },
+    ],
+  }, null, 2), 'utf8');
 
   await fs.writeFile(webBackupFile, JSON.stringify({
     items: [
@@ -312,4 +324,29 @@ test('deep parse queue, retained documents, answer usage, and memory catalog sho
   assert.equal(recoveredAnswerUsage.items.length, 1);
   assert.equal(recoveredAnswerUsage.items[0]?.documentId, 'doc-one');
   assert.equal(recoveredMemoryCatalog?.documents?.['memory-doc-1']?.title, 'Memory Doc One');
+});
+
+test('runtime state file writes should serialize concurrent updates to the same file', async () => {
+  const concurrentFile = path.join(storageRoot, 'config', 'concurrent-state.json');
+  const originalNow = Date.now;
+  Date.now = () => 1776000000000;
+
+  try {
+    await Promise.all(
+      Array.from({ length: 16 }, (_, index) => runtimeStateFile.writeRuntimeStateJson({
+        filePath: concurrentFile,
+        payload: {
+          value: index,
+          label: `state-${index}`,
+        },
+      })),
+    );
+  } finally {
+    Date.now = originalNow;
+  }
+
+  const raw = await fs.readFile(concurrentFile, 'utf8');
+  const parsed = JSON.parse(raw) as { value: number; label: string };
+  assert.equal(typeof parsed.value, 'number');
+  assert.match(parsed.label, /^state-\d+$/);
 });

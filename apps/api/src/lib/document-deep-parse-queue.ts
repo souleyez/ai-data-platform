@@ -209,6 +209,23 @@ export async function readDetailedParseQueueState() {
   return readQueue();
 }
 
+export async function clearDetailedParseQueueEntries(filePaths: string[]) {
+  const normalized = new Set((filePaths || []).map(normalizeQueuePath).filter(Boolean));
+  if (!normalized.size) return { clearedCount: 0 };
+
+  const queue = await readQueue();
+  const nextItems = queue.items.filter((item) => !normalized.has(normalizeQueuePath(item.path)));
+  const clearedCount = queue.items.length - nextItems.length;
+  if (!clearedCount) return { clearedCount: 0 };
+
+  await writeQueue({
+    updatedAt: new Date().toISOString(),
+    items: nextItems,
+  });
+
+  return { clearedCount };
+}
+
 export async function runDetailedParseBatch(limit = 12, scanRoots?: string[]) {
   const lockOwner = await acquireLock();
   if (!lockOwner) {

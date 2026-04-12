@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { loadDocumentCategoryConfig } from './document-config.js';
-import { getParsedDocumentCanonicalSource } from './document-canonical-text.js';
+import {
+  getParsedDocumentCanonicalParseStatus,
+  getParsedDocumentCanonicalSource,
+} from './document-canonical-text.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { loadIndexedDocumentById, loadIndexedDocumentMap } from './document-route-loaders.js';
 import {
@@ -51,11 +54,12 @@ function shouldBackfillCanonicalParse(
 
   const detailStatus = String(item.detailParseStatus || '').trim();
   if (activeQueueStatus === 'failed' || detailStatus === 'failed') return true;
-
-  const canonicalSource = getParsedDocumentCanonicalSource(item);
-  if (canonicalSource === 'existing-markdown' || canonicalSource === 'markitdown') return false;
   if (item.parseStage !== 'detailed') return true;
-  return canonicalSource === 'full-text' || canonicalSource === 'none';
+
+  const canonicalParseStatus = getParsedDocumentCanonicalParseStatus(item);
+  if (canonicalParseStatus === 'ready' || canonicalParseStatus === 'unsupported') return false;
+  if (canonicalParseStatus === 'failed') return true;
+  return true;
 }
 
 export async function runDocumentOrganizeAction() {
@@ -115,6 +119,7 @@ export async function runDocumentCanonicalBackfillAction(limit: unknown, runImme
       ext: item.ext,
       parseStage: item.parseStage,
       detailParseStatus: item.detailParseStatus,
+      canonicalParseStatus: getParsedDocumentCanonicalParseStatus(item),
       canonicalSource: getParsedDocumentCanonicalSource(item),
       markdownMethod: item.markdownMethod,
       markdownError: item.markdownError,
@@ -146,6 +151,7 @@ export async function runDocumentCanonicalBackfillByIdAction(id: string, runImme
         ext: found.ext,
         parseStage: found.parseStage,
         detailParseStatus: found.detailParseStatus,
+        canonicalParseStatus: getParsedDocumentCanonicalParseStatus(found),
         canonicalSource: getParsedDocumentCanonicalSource(found),
         markdownMethod: found.markdownMethod,
         markdownError: found.markdownError,
@@ -171,6 +177,7 @@ export async function runDocumentCanonicalBackfillByIdAction(id: string, runImme
       ext: found.ext,
       parseStage: found.parseStage,
       detailParseStatus: found.detailParseStatus,
+      canonicalParseStatus: getParsedDocumentCanonicalParseStatus(found),
       canonicalSource: getParsedDocumentCanonicalSource(found),
       markdownMethod: found.markdownMethod,
       markdownError: found.markdownError,
@@ -212,7 +219,7 @@ export async function runDocumentReparseAction(idsInput: unknown) {
     matchedItems.map((item) => item.path),
     200,
     documentConfig.scanRoots,
-    { parseStage: 'detailed', cloudEnhancement: true },
+    { parseStage: 'detailed', cloudEnhancement: true, clearQueueEntries: true },
   );
 
   const reparsedByPath = new Map(parsed.items.map((item) => [item.path, item]));

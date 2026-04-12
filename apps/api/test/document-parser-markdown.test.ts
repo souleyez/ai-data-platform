@@ -23,6 +23,7 @@ test('detailed parse should prefer MarkItDown markdown when available', async ()
     assert.equal(doc.parseStatus, 'parsed');
     assert.equal(doc.parseMethod, 'markitdown');
     assert.equal(doc.markdownMethod, 'markitdown');
+    assert.equal(doc.canonicalParseStatus, 'ready');
     assert.match(String(doc.fullText || ''), /Canonical title/);
     assert.match(String(doc.markdownText || ''), /Canonical body/);
     assert.equal(doc.detailParseStatus, 'succeeded');
@@ -31,7 +32,7 @@ test('detailed parse should prefer MarkItDown markdown when available', async ()
   }
 });
 
-test('detailed parse should fall back to legacy extracted text when MarkItDown is unavailable for supported text formats', async () => {
+test('detailed parse should treat legacy extracted text as canonical for supported plain-text formats when MarkItDown is unavailable', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-markdown-fallback-'));
   const filePath = path.join(tempDir, 'sample.html');
 
@@ -49,6 +50,27 @@ test('detailed parse should fall back to legacy extracted text when MarkItDown i
     assert.notEqual(doc.parseMethod, 'markitdown');
     assert.match(String(doc.fullText || ''), /Legacy title/);
     assert.equal(doc.markdownError, 'markitdown-unavailable');
+    assert.equal(doc.canonicalParseStatus, 'ready');
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('detailed parse should treat txt legacy extraction as canonical-ready when MarkItDown is unavailable', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-txt-canonical-'));
+  const filePath = path.join(tempDir, 'notes.txt');
+
+  try {
+    await fs.writeFile(filePath, 'plain text note body', 'utf8');
+    const doc = await parseDocument(filePath, undefined, {
+      stage: 'detailed',
+    });
+
+    assert.equal(doc.parseStatus, 'parsed');
+    assert.equal(doc.parseMethod, 'text-utf8');
+    assert.equal(doc.markdownError, undefined);
+    assert.equal(doc.canonicalParseStatus, 'ready');
+    assert.match(String(doc.fullText || ''), /plain text note body/);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -88,6 +110,7 @@ test('detailed parse should convert audio files through MarkItDown when availabl
     assert.equal(doc.parseStatus, 'parsed');
     assert.equal(doc.parseMethod, 'markitdown');
     assert.equal(doc.markdownMethod, 'markitdown');
+    assert.equal(doc.canonicalParseStatus, 'ready');
     assert.match(String(doc.fullText || ''), /Hello from audio/);
     assert.equal(doc.detailParseStatus, 'succeeded');
   } finally {
@@ -112,7 +135,32 @@ test('detailed parse should fail audio files explicitly when markdown conversion
     assert.equal(doc.parseStatus, 'error');
     assert.equal(doc.detailParseStatus, 'failed');
     assert.equal(doc.markdownError, 'markitdown-unavailable');
-    assert.match(String(doc.summary || ''), /音频详细解析失败/);
+    assert.equal(doc.canonicalParseStatus, 'failed');
+    assert.match(String(doc.summary || ''), /尚未接入音频 VLM 兜底/);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('detailed parse should skip legacy extraction when MarkItDown already succeeds for supported formats', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-markdown-first-'));
+  const filePath = path.join(tempDir, 'broken.json');
+
+  try {
+    await fs.writeFile(filePath, '{not-valid-json', 'utf8');
+    const doc = await parseDocument(filePath, undefined, {
+      stage: 'detailed',
+      resolveMarkdown: async () => ({
+        status: 'succeeded',
+        markdownText: '# Canonical JSON\n\n- Recovered through markdown pipeline',
+        method: 'markitdown',
+      }),
+    });
+
+    assert.equal(doc.parseStatus, 'parsed');
+    assert.equal(doc.parseMethod, 'markitdown');
+    assert.equal(doc.canonicalParseStatus, 'ready');
+    assert.match(String(doc.fullText || ''), /Recovered through markdown pipeline/);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

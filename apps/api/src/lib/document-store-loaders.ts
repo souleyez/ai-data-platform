@@ -1,5 +1,10 @@
+import path from 'node:path';
 import { refreshDerivedSchemaProfile, type ParsedDocument } from './document-parser.js';
-import { applyDetailedParseQueueMetadata, enqueueDetailedParse } from './document-deep-parse-queue.js';
+import {
+  applyDetailedParseQueueMetadata,
+  clearDetailedParseQueueEntries,
+  enqueueDetailedParse,
+} from './document-deep-parse-queue.js';
 import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
 import { syncLibraryKnowledgePagesForDocuments } from './library-knowledge-pages.js';
@@ -27,6 +32,10 @@ function shouldQueueForDetailedParse(item: ParsedDocument) {
       || item.parseStatus === 'error'
       || supportsMarkItDownExtension(item.ext)
     );
+}
+
+function normalizeDocumentPathKey(filePath: string) {
+  return path.resolve(String(filePath || '')).toLowerCase();
 }
 
 export type LoadParsedDocumentsResult = {
@@ -126,7 +135,7 @@ export async function mergeParsedDocumentsForPaths(
   filePaths: string[],
   limit = 200,
   scanRoot?: string | string[],
-  options?: { parseStage?: 'quick' | 'detailed'; cloudEnhancement?: boolean },
+  options?: { parseStage?: 'quick' | 'detailed'; cloudEnhancement?: boolean; clearQueueEntries?: boolean },
 ): Promise<LoadParsedDocumentsResult> {
   const { exists, files, scanRoot: activeScanRoot, scanRoots: activeScanRoots } = await getCurrentFiles(scanRoot);
 
@@ -134,7 +143,7 @@ export async function mergeParsedDocumentsForPaths(
     return { exists, files, totalFiles: 0, items: [], cacheHit: false };
   }
 
-  const normalizedPaths = [...new Set(filePaths)];
+  const requestedPaths = [...new Set(filePaths)];
   const cache = await readDocumentCache();
 
   if (!cache || !sameScanRoots(cache.scanRoots || [cache.scanRoot], activeScanRoots)) {
@@ -142,10 +151,18 @@ export async function mergeParsedDocumentsForPaths(
   }
 
   const effectiveParseStage = options?.parseStage || 'detailed';
+  const filePathByKey = new Map(files.map((filePath) => [normalizeDocumentPathKey(filePath), filePath]));
+  const cacheItemByKey = new Map(cache.items.map((item) => [normalizeDocumentPathKey(item.path), item]));
+  const existingFilePaths = requestedPaths
+    .map((filePath) => filePathByKey.get(normalizeDocumentPathKey(filePath)))
+    .filter((filePath): filePath is string => Boolean(filePath));
+  if (effectiveParseStage === 'detailed' && options?.clearQueueEntries) {
+    await clearDetailedParseQueueEntries(existingFilePaths);
+  }
   const libraries = await loadDocumentLibraries();
   const libraryContextByPath = new Map<string, DocumentLibraryContext>();
-  for (const filePath of normalizedPaths) {
-    const cachedItem = cache.items.find((item) => item.path === filePath);
+  for (const filePath of requestedPaths) {
+    const cachedItem = cacheItemByKey.get(normalizeDocumentPathKey(filePath));
     if (!cachedItem) continue;
     const libraryContext = buildDocumentLibraryContext(
       libraries,
@@ -156,7 +173,7 @@ export async function mergeParsedDocumentsForPaths(
     }
   }
   const reparsedItems = await parseDocumentFiles(
-    normalizedPaths.filter((filePath) => files.includes(filePath)),
+    existingFilePaths,
     activeScanRoots,
     {
       cloudEnhancement: options?.cloudEnhancement ?? false,
@@ -165,14 +182,16 @@ export async function mergeParsedDocumentsForPaths(
     },
   );
 
-  const mergedByPath = new Map(cache.items.map((item) => [item.path, refreshDerivedSchemaProfile(item)]));
+  const mergedByPath = new Map(
+    cache.items.map((item) => [normalizeDocumentPathKey(item.path), refreshDerivedSchemaProfile(item)]),
+  );
   for (const item of reparsedItems) {
-    mergedByPath.set(item.path, item);
+    mergedByPath.set(normalizeDocumentPathKey(item.path), item);
   }
 
   const items = dedupeDocuments(
     sortDocumentsByRecency(
-      [...mergedByPath.values()].filter((item) => files.includes(item.path)),
+      [...mergedByPath.values()].filter((item) => filePathByKey.has(normalizeDocumentPathKey(item.path))),
     ),
   );
 

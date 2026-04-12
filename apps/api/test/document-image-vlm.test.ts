@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
+import { getParsedDocumentCanonicalParseStatus, getParsedDocumentCanonicalSource } from '../src/lib/document-canonical-text.js';
 import { enhanceParsedDocumentsWithCloud } from '../src/lib/document-cloud-enrichment.js';
 
 function buildImageItem(overrides: Partial<ParsedDocument> = {}): ParsedDocument {
@@ -299,6 +300,8 @@ test('enhanceParsedDocumentsWithCloud should use image VLM fallback for pdf docu
   assert.equal(item.parseStatus, 'parsed');
   assert.equal(item.detailParseStatus, 'succeeded');
   assert.match(String(item.parseMethod || ''), /pdf-vlm/);
+  assert.equal(getParsedDocumentCanonicalSource(item), 'vlm-pdf');
+  assert.equal(getParsedDocumentCanonicalParseStatus(item), 'ready');
   assert.equal(item.cloudStructuredModel, 'minimax/MiniMax-VL-01');
   assert.match(String(item.fullText || ''), /\[PDF VLM understanding\]/);
   assert.match(String(item.fullText || ''), /437\.69 万元/);

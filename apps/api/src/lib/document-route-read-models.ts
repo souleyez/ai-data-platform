@@ -1,6 +1,9 @@
 import { buildDocumentId } from './document-store.js';
 import { documentMatchesLibrary, type DocumentLibrary } from './document-libraries.js';
-import { getParsedDocumentCanonicalSource } from './document-canonical-text.js';
+import {
+  getParsedDocumentCanonicalParseStatus,
+  getParsedDocumentCanonicalSource,
+} from './document-canonical-text.js';
 import type { ParsedDocument } from './document-parser.js';
 import type { OpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 
@@ -47,6 +50,7 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     markdownMethod?: string;
     markdownGeneratedAt?: string;
     markdownError?: string;
+    canonicalParseStatus?: string;
   };
 
   return {
@@ -81,11 +85,8 @@ export function toListItem<T extends Record<string, unknown>>(item: T) {
     markdownMethod: source.markdownMethod,
     markdownGeneratedAt: source.markdownGeneratedAt,
     markdownError: source.markdownError,
-    canonicalSource: getParsedDocumentCanonicalSource({
-      markdownText: source.markdownText,
-      markdownMethod: source.markdownMethod,
-      fullText: source.fullText,
-    }),
+    canonicalSource: getParsedDocumentCanonicalSource(source),
+    canonicalParseStatus: getParsedDocumentCanonicalParseStatus(source),
   };
 }
 

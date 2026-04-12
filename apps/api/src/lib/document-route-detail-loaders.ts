@@ -2,9 +2,9 @@ import path from 'node:path';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { buildDocumentLibraryContext } from './document-extraction-governance.js';
 import { getDocumentParseFeedbackSnapshot } from './document-parse-feedback.js';
-import { parseDocument } from './document-parser.js';
 import { loadLibraryKnowledgeCompilationsForKeys } from './library-knowledge-pages.js';
 import {
+  getParsedDocumentCanonicalParseStatus,
   getParsedDocumentCanonicalSource,
   getParsedDocumentCanonicalText,
 } from './document-canonical-text.js';
@@ -15,6 +15,7 @@ import {
 } from './document-route-files.js';
 import { buildMatchedFolders } from './document-route-read-models.js';
 import { loadIndexedDocumentById } from './document-route-loaders.js';
+import { parseDetailedDocument } from './document-store-parse-runtime.js';
 
 export async function loadDocumentDetailPayload(id: string, options?: { includeSourceAvailability?: boolean }) {
   const { documentConfig, found } = await loadIndexedDocumentById(id);
@@ -27,7 +28,10 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
 
   const detailItem = found.fullText && found.parseStage === 'detailed'
     ? found
-    : await parseDocument(found.path, documentConfig, { stage: 'detailed', libraryContext });
+    : await parseDetailedDocument(found.path, documentConfig.scanRoots || documentConfig.scanRoot, {
+      libraryContext,
+      cloudEnhancement: true,
+    }) || found;
   const feedbackSnapshot = getDocumentParseFeedbackSnapshot({
     libraryKeys: found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [],
     schemaType: detailItem.schemaType,
@@ -43,6 +47,7 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
       ...detailItem,
       id,
       canonicalSource: getParsedDocumentCanonicalSource(detailItem),
+      canonicalParseStatus: getParsedDocumentCanonicalParseStatus(detailItem),
       ...(options?.includeSourceAvailability
         ? { sourceAvailable: await hasReadableDocumentSource(found.path) }
         : {}),

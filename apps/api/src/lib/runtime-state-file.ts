@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 export type RuntimeStateReadSource = 'main' | 'backup' | 'fallback';
@@ -15,6 +16,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function buildRuntimeStateBackupPath(filePath: string) {
   return `${filePath}.bak`;
 }
+
+const runtimeStateWriteChains = new Map<string, Promise<void>>();
 
 async function tryReadJsonFile(filePath: string) {
   const raw = await fs.readFile(filePath, 'utf8');
@@ -59,23 +62,37 @@ export async function writeRuntimeStateJson<T>(input: {
   serialize?: (payload: T) => unknown;
 }) {
   const { filePath } = input;
-  const payload = input.serialize ? input.serialize(input.payload) : input.payload;
-  const backupPath = buildRuntimeStateBackupPath(filePath);
-  const tempFilePath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const previous = runtimeStateWriteChains.get(filePath) || Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const payload = input.serialize ? input.serialize(input.payload) : input.payload;
+      const backupPath = buildRuntimeStateBackupPath(filePath);
+      const tempFilePath = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`;
 
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
 
+      try {
+        await fs.copyFile(filePath, backupPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
+      await fs.writeFile(tempFilePath, JSON.stringify(payload, null, 2), 'utf8');
+      await fs.copyFile(tempFilePath, filePath);
+      await fs.rm(tempFilePath, { force: true });
+    });
+
+  runtimeStateWriteChains.set(filePath, next);
   try {
-    await fs.copyFile(filePath, backupPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-      throw error;
+    await next;
+  } finally {
+    if (runtimeStateWriteChains.get(filePath) === next) {
+      runtimeStateWriteChains.delete(filePath);
     }
   }
-
-  await fs.writeFile(tempFilePath, JSON.stringify(payload, null, 2), 'utf8');
-  await fs.copyFile(tempFilePath, filePath);
-  await fs.rm(tempFilePath, { force: true });
 }
 
 export function normalizeArrayPayload<T>(parsed: unknown, itemGuard?: (item: unknown) => item is T) {

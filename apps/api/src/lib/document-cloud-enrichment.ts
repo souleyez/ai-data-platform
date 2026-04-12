@@ -14,7 +14,10 @@ import {
   renderPdfDocumentToImages,
   renderPresentationDocumentToImages,
 } from './document-parser.js';
-import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
+import {
+  getParsedDocumentCanonicalSource,
+  getParsedDocumentCanonicalText,
+} from './document-canonical-text.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
 import {
   normalizeDocumentImageFieldCandidateKey,
@@ -74,6 +77,13 @@ const PRESENTATION_VLM_MAX_SLIDES = Math.max(1, Number(process.env.DOCUMENT_PRES
 const PDF_VLM_MAX_PAGES = Math.max(1, Number(process.env.DOCUMENT_PDF_VLM_MAX_PAGES || 8));
 const PDF_VLM_MIN_CANONICAL_CHARS = Math.max(0, Number(process.env.DOCUMENT_PDF_VLM_MIN_CANONICAL_CHARS || 600));
 
+export type DocumentCloudEnhancementOptions = {
+  runTextParse?: typeof runDocumentAdvancedParse;
+  runImageParse?: typeof runDocumentImageVlm;
+  renderPresentation?: typeof renderPresentationDocumentToImages;
+  renderPdf?: typeof renderPdfDocumentToImages;
+};
+
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
 }
@@ -132,6 +142,28 @@ function shouldUsePdfVisualFallback(item: ParsedDocument) {
     return true;
   }
   return getParsedDocumentCanonicalText(item).length < PDF_VLM_MIN_CANONICAL_CHARS;
+}
+
+function shouldAttemptVisualFallback(item: ParsedDocument) {
+  if (isImageDocument(item) || isPresentationDocument(item)) {
+    return Boolean(item.path);
+  }
+  return shouldUsePdfVisualFallback(item);
+}
+
+function shouldAttemptTextStructuring(item: ParsedDocument, providerMode = getDocumentAdvancedParseProviderMode()) {
+  if (providerMode === 'disabled') return false;
+  if (item.parseStatus !== 'parsed') return false;
+  if (!getParsedDocumentCanonicalText(item)) return false;
+  const canonicalSource = getParsedDocumentCanonicalSource(item);
+  if (
+    canonicalSource === 'vlm-image'
+    || canonicalSource === 'vlm-pdf'
+    || canonicalSource === 'vlm-presentation'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function buildDocumentContext(item: ParsedDocument) {
@@ -525,6 +557,7 @@ function applyRenderedPageCollection(
   const withCandidateFields = assignCandidateFields({
     ...item,
     parseStatus: 'parsed',
+    canonicalParseStatus: 'ready',
     parseMethod: item.parseMethod?.includes(options.parseMethodSuffix)
       ? item.parseMethod
       : `${item.parseMethod || options.pageLabel.toLowerCase()}+${options.parseMethodSuffix}`,
@@ -650,6 +683,7 @@ async function enrichImageOne(
   const withCandidateFields = assignCandidateFields({
     ...item,
     parseStatus: 'parsed',
+    canonicalParseStatus: 'ready',
     parseMethod: item.parseMethod?.includes('image-ocr')
       ? 'image-ocr+vlm'
       : 'image-vlm',
@@ -780,14 +814,16 @@ async function enrichPdfOne(
 
 export async function enhanceParsedDocumentsWithCloud(
   items: ParsedDocument[],
-  options?: {
-    runTextParse?: typeof runDocumentAdvancedParse;
-    runImageParse?: typeof runDocumentImageVlm;
-    renderPresentation?: typeof renderPresentationDocumentToImages;
-    renderPdf?: typeof renderPdfDocumentToImages;
-  },
+  options?: DocumentCloudEnhancementOptions,
 ) {
-  const providerMode = getDocumentAdvancedParseProviderMode();
+  const withVisualFallbacks = await applyParsedDocumentVisualFallbacks(items, options);
+  return applyParsedDocumentTextStructuring(withVisualFallbacks, options);
+}
+
+export async function applyParsedDocumentVisualFallbacks(
+  items: ParsedDocument[],
+  options?: DocumentCloudEnhancementOptions,
+) {
   if (
     !CLOUD_ENRICH_ENABLED
     || CLOUD_ENRICH_MAX_PER_BATCH <= 0
@@ -797,15 +833,7 @@ export async function enhanceParsedDocumentsWithCloud(
 
   const candidateIndexes = items
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => {
-      if (isImageDocument(item) || isPresentationDocument(item)) {
-        return Boolean(item.path);
-      }
-      if (shouldUsePdfVisualFallback(item)) {
-        return true;
-      }
-      return providerMode !== 'disabled' && item.parseStatus === 'parsed' && Boolean(getParsedDocumentCanonicalText(item));
-    })
+    .filter(({ item }) => shouldAttemptVisualFallback(item))
     .slice(0, CLOUD_ENRICH_MAX_PER_BATCH);
 
   if (!candidateIndexes.length) {
@@ -837,6 +865,50 @@ export async function enhanceParsedDocumentsWithCloud(
                 options?.renderPdf || renderPdfDocumentToImages,
               )
             : await enrichTextOne(current.item, options?.runTextParse || runDocumentAdvancedParse);
+      } catch {
+        output[current.index] = current.item;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CLOUD_ENRICH_CONCURRENCY, candidateIndexes.length) }, () => worker()),
+  );
+
+  return output;
+}
+
+export async function applyParsedDocumentTextStructuring(
+  items: ParsedDocument[],
+  options?: DocumentCloudEnhancementOptions,
+) {
+  const providerMode = getDocumentAdvancedParseProviderMode();
+  if (
+    !CLOUD_ENRICH_ENABLED
+    || CLOUD_ENRICH_MAX_PER_BATCH <= 0
+    || providerMode === 'disabled'
+  ) {
+    return items;
+  }
+
+  const candidateIndexes = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => shouldAttemptTextStructuring(item, providerMode))
+    .slice(0, CLOUD_ENRICH_MAX_PER_BATCH);
+
+  if (!candidateIndexes.length) {
+    return items;
+  }
+
+  const output = [...items];
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < candidateIndexes.length) {
+      const current = candidateIndexes[cursor];
+      cursor += 1;
+      try {
+        output[current.index] = await enrichTextOne(current.item, options?.runTextParse || runDocumentAdvancedParse);
       } catch {
         output[current.index] = current.item;
       }

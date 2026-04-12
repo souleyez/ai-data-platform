@@ -2,14 +2,23 @@
 
 function renderCanonicalSource(item) {
   const source = String(item?.canonicalSource || '').trim();
+  const status = String(item?.canonicalParseStatus || '').trim();
   const label = (() => {
+    if (status === 'fallback_full_text') return '正文可用（旧正文）';
+    if (status === 'failed') return 'Canonical 失败';
     switch (source) {
       case 'existing-markdown':
         return '现成 MD';
       case 'markitdown':
         return 'MarkItDown';
-      case 'full-text':
+      case 'legacy-full-text':
         return '旧正文';
+      case 'vlm-image':
+        return '图片 VLM';
+      case 'vlm-pdf':
+        return 'PDF VLM';
+      case 'vlm-presentation':
+        return '演示页 VLM';
       case 'none':
         return '未生成';
       default:
@@ -18,10 +27,14 @@ function renderCanonicalSource(item) {
   })();
   if (!label) return null;
 
-  const color = source === 'none' || item?.markdownError
+  const color = status === 'fallback_full_text'
+    ? '#475569'
+    : status === 'failed' || source === 'none' || (item?.markdownError && status !== 'ready')
     ? '#b91c1c'
-    : source === 'full-text'
+    : source === 'legacy-full-text'
       ? '#92400e'
+      : source.startsWith('vlm-')
+        ? '#1d4ed8'
       : '#166534';
 
   return (
@@ -35,6 +48,7 @@ function renderParseStage(item, parseMethodLabels) {
   const methodLabel = parseMethodLabels[item.parseMethod] || item.parseMethod || '-';
   const stageLabel = item.parseStage === 'detailed' ? '进阶解析' : '快速解析';
   const isFailed = item.parseStatus === 'error' || item.detailParseStatus === 'failed';
+  const canonicalStatus = String(item?.canonicalParseStatus || '').trim();
   const detailErrorLabel = item.detailParseError === 'ocr-text-not-extracted'
     ? 'OCR 未提取到文本'
     : item.detailParseError === 'parse-error'
@@ -64,6 +78,11 @@ function renderParseStage(item, parseMethodLabels) {
       {detailStatusLabel ? (
         <span style={{ fontSize: 12, color: item.detailParseStatus === 'failed' ? '#b91c1c' : '#475569' }}>
           {detailStatusLabel}
+        </span>
+      ) : null}
+      {canonicalStatus === 'fallback_full_text' ? (
+        <span style={{ fontSize: 12, color: '#475569' }}>
+          当前使用旧正文，文档仍可问答
         </span>
       ) : null}
       {detailErrorLabel ? (

@@ -2,7 +2,10 @@ import { buildAuditSnapshot } from './audit-center.js';
 import { listDatasourceDefinitions, listDatasourceRuns } from './datasource-definitions.js';
 import { buildDatasourceMeta, buildDatasourceRunReadModels } from './datasource-service.js';
 import { readDetailedParseQueueState } from './document-deep-parse-queue.js';
-import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
+import {
+  getParsedDocumentCanonicalParseStatus,
+  getParsedDocumentCanonicalSource,
+} from './document-canonical-text.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { loadDocumentsIndexRoutePayload } from './document-route-read-operations.js';
 import { DOCUMENT_AUDIO_EXTENSIONS } from './document-parser.js';
@@ -180,10 +183,20 @@ export async function loadOperationsOverviewPayload() {
   const deepParseQueued = deepParseQueueState.items.filter((item) => item.status === 'queued').length;
   const deepParseProcessing = deepParseQueueState.items.filter((item) => item.status === 'processing').length;
   const deepParseBacklog = deepParseQueued + deepParseProcessing;
-  const canonicalCoverageCount = rawDocuments.items.filter((item) => Boolean(getParsedDocumentCanonicalText(item))).length;
-  const markdownCoverageCount = rawDocuments.items.filter((item) => Boolean(String(item.markdownText || '').trim())).length;
-  const markdownFailedCount = rawDocuments.items.filter((item) => Boolean(String(item.markdownError || '').trim())).length;
-  const vlmFallbackCount = rawDocuments.items.filter((item) => /vlm/i.test(String(item.parseMethod || ''))).length;
+  const canonicalCoverageCount = rawDocuments.items.filter(
+    (item) => getParsedDocumentCanonicalParseStatus(item) === 'ready',
+  ).length;
+  const markdownCoverageCount = rawDocuments.items.filter((item) => {
+    const source = getParsedDocumentCanonicalSource(item);
+    return source === 'existing-markdown' || source === 'markitdown';
+  }).length;
+  const markdownFailedCount = rawDocuments.items.filter(
+    (item) => getParsedDocumentCanonicalParseStatus(item) === 'failed' || Boolean(String(item.markdownError || '').trim()),
+  ).length;
+  const vlmFallbackCount = rawDocuments.items.filter((item) => {
+    const source = getParsedDocumentCanonicalSource(item);
+    return source === 'vlm-image' || source === 'vlm-pdf' || source === 'vlm-presentation';
+  }).length;
   const audioParseFailedCount = rawDocuments.items.filter((item) => {
     const ext = String(item.ext || '').toLowerCase();
     return AUDIO_EXTENSIONS.has(ext) && item.detailParseStatus === 'failed';
