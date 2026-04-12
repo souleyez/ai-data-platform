@@ -141,3 +141,19 @@ test('buildLatestParsedDocumentFullTextContextBlock should return empty string w
     fullText: '',
   }), '');
 });
+
+test('buildLatestParsedDocumentFullTextContextBlock should use markdown text when full text is empty', () => {
+  const block = buildLatestParsedDocumentFullTextContextBlock({
+    title: 'web-capture-md',
+    name: 'capture.md',
+    path: 'C:/docs/capture.md',
+    schemaType: 'generic',
+    parseStage: 'detailed',
+    detailParseStatus: 'succeeded',
+    fullText: '',
+    markdownText: '# 页面正文\n\n这是 Markdown 供料',
+  });
+
+  assert.match(block, /页面正文/);
+  assert.match(block, /Markdown 供料/);
+});

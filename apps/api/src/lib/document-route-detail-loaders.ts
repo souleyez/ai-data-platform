@@ -5,6 +5,10 @@ import { getDocumentParseFeedbackSnapshot } from './document-parse-feedback.js';
 import { parseDocument } from './document-parser.js';
 import { loadLibraryKnowledgeCompilationsForKeys } from './library-knowledge-pages.js';
 import {
+  getParsedDocumentCanonicalSource,
+  getParsedDocumentCanonicalText,
+} from './document-canonical-text.js';
+import {
   hasReadableDocumentSource,
   resolveReadableDocumentSource,
   sanitizeFileName,
@@ -27,7 +31,7 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
   const feedbackSnapshot = getDocumentParseFeedbackSnapshot({
     libraryKeys: found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [],
     schemaType: detailItem.schemaType,
-    text: detailItem.fullText || `${detailItem.title || ''}\n${detailItem.summary || ''}`,
+    text: getParsedDocumentCanonicalText(detailItem) || `${detailItem.title || ''}\n${detailItem.summary || ''}`,
   });
   const libraryKnowledge = await loadLibraryKnowledgeCompilationsForKeys(
     found.confirmedGroups?.length ? found.confirmedGroups : found.groups || [],
@@ -38,6 +42,7 @@ export async function loadDocumentDetailPayload(id: string, options?: { includeS
     item: {
       ...detailItem,
       id,
+      canonicalSource: getParsedDocumentCanonicalSource(detailItem),
       ...(options?.includeSourceAvailability
         ? { sourceAvailable: await hasReadableDocumentSource(found.path) }
         : {}),

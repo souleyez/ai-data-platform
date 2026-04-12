@@ -76,12 +76,24 @@ If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the 
 
 1. Clone or update the repository to the target server, for example `/srv/ai-data-platform`.
 2. Prepare `/etc/ai-data-platform/ai-data-platform.env` from `deploy/server/ai-data-platform.env.example`.
-3. Run `corepack pnpm install --frozen-lockfile`.
-4. Run `corepack pnpm build`.
-5. Install only the application unit files listed above.
-6. Run `systemctl daemon-reload`.
-7. Restart the application services.
-8. Verify the health endpoints.
+3. Install the document detailed-parse runtime:
+   - Python 3
+   - `markitdown`
+   - if audio parsing is required, install `markitdown[audio-transcription]`
+4. If `markitdown` is not on the default `PATH`, set `MARKITDOWN_BIN` in `/etc/ai-data-platform/ai-data-platform.env`.
+5. Run `corepack pnpm install --frozen-lockfile`.
+6. Run `corepack pnpm build`.
+7. Install only the application unit files listed above.
+8. Run `systemctl daemon-reload`.
+9. Restart the application services.
+10. Verify the health endpoints and one detailed parse path.
+
+Recommended runtime install example:
+
+```bash
+python3 -m pip install --upgrade markitdown
+python3 -m pip install --upgrade "markitdown[audio-transcription]"
+```
 
 ## Network boundary
 
@@ -127,6 +139,8 @@ Reference config:
 
 - `curl http://127.0.0.1:3100/api/health`
 - open the app frontend and verify the main user flows
+- verify `markitdown --help` or `python3 -m markitdown --help`
+- upload one `docx/pptx/xlsx/pdf` file and confirm the detailed parse shows canonical markdown
 
 ## Deployment profiles
 

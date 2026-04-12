@@ -67,6 +67,37 @@ function buildPresentationItem(overrides: Partial<ParsedDocument> = {}): ParsedD
   };
 }
 
+function buildPdfItem(overrides: Partial<ParsedDocument> = {}): ParsedDocument {
+  return {
+    path: '/tmp/bid-spec.pdf',
+    name: 'bid-spec.pdf',
+    ext: '.pdf',
+    title: '招标文件',
+    category: 'contract',
+    bizCategory: 'general',
+    parseStatus: 'error',
+    parseMethod: 'pdf-ocr-empty',
+    summary: '招标文件详细解析失败',
+    excerpt: '招标文件详细解析失败',
+    fullText: 'PDF OCR did not extract usable text.',
+    extractedChars: 0,
+    evidenceChunks: [],
+    entities: [],
+    claims: [],
+    intentSlots: {},
+    topicTags: ['招标'],
+    groups: ['bids'],
+    parseStage: 'detailed',
+    detailParseStatus: 'failed',
+    detailParseAttempts: 1,
+    detailParseError: 'markitdown-unavailable',
+    markdownError: 'markitdown-unavailable',
+    schemaType: 'contract',
+    structuredProfile: {},
+    ...overrides,
+  };
+}
+
 test('enhanceParsedDocumentsWithCloud should enrich parsed image documents with VLM output', async () => {
   const [item] = await enhanceParsedDocumentsWithCloud(
     [buildImageItem()],
@@ -215,6 +246,64 @@ test('enhanceParsedDocumentsWithCloud should use image VLM for presentation docu
   assert.match(String(item.fullText || ''), /4499 个车位/);
   assert.equal(
     Number(((item.structuredProfile as Record<string, unknown>)?.presentationUnderstanding as Record<string, unknown>)?.slideCount || 0),
+    2,
+  );
+});
+
+test('enhanceParsedDocumentsWithCloud should use image VLM fallback for pdf documents', async () => {
+  const [item] = await enhanceParsedDocumentsWithCloud(
+    [buildPdfItem()],
+    {
+      runTextParse: async () => {
+        throw new Error('text parse should not be used when pdf rendering succeeds');
+      },
+      renderPdf: async () => ({
+        images: [
+          { pageNumber: 1, imagePath: '/tmp/pdf-page-1.png' },
+          { pageNumber: 2, imagePath: '/tmp/pdf-page-2.png' },
+        ],
+        cleanup: async () => undefined,
+      }),
+      runImageParse: async ({ imagePath }) => ({
+        content: '{"summary":"招标文件重点","layoutType":"document-page","topicTags":["招标","评分"],"visualSummary":"页面展示评分办法与资格要求。","evidenceBlocks":[{"title":"控制价","text":"招标控制价 437.69 万元"}],"transcribedText":"招标控制价 437.69 万元 评分权重 技术 40 商务 40 报价 20"}',
+        model: 'minimax/MiniMax-VL-01',
+        provider: 'openclaw-skill',
+        capability: {
+          enabled: true,
+          available: true,
+          providerMode: 'openclaw-skill',
+          toolName: 'image',
+          reason: 'ready',
+        },
+        parsed: String(imagePath || '').includes('page-1')
+          ? {
+            summary: '招标文件重点',
+            layoutType: 'document-page',
+            topicTags: ['招标', '控制价'],
+            visualSummary: '页面展示项目控制价与规模。',
+            evidenceBlocks: [{ title: '控制价', text: '招标控制价 437.69 万元' }],
+            transcribedText: '招标控制价 437.69 万元',
+          }
+          : {
+            summary: '招标文件重点',
+            layoutType: 'document-page',
+            topicTags: ['招标', '评分'],
+            visualSummary: '页面展示评分权重与资格要求。',
+            evidenceBlocks: [{ title: '评分', text: '评分权重 技术 40 商务 40 报价 20' }],
+            transcribedText: '评分权重 技术 40 商务 40 报价 20',
+          },
+      }),
+    },
+  );
+
+  assert.equal(item.parseStatus, 'parsed');
+  assert.equal(item.detailParseStatus, 'succeeded');
+  assert.match(String(item.parseMethod || ''), /pdf-vlm/);
+  assert.equal(item.cloudStructuredModel, 'minimax/MiniMax-VL-01');
+  assert.match(String(item.fullText || ''), /\[PDF VLM understanding\]/);
+  assert.match(String(item.fullText || ''), /437\.69 万元/);
+  assert.equal(
+    Number(((item.structuredProfile as Record<string, unknown>)?.pdfUnderstanding as Record<string, unknown>)?.pageCount || 0),
     2,
   );
 });

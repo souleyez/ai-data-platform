@@ -1,6 +1,6 @@
 import { DATASOURCE_AUTH_MODES, DATASOURCE_KINDS, DATASOURCE_SCHEDULE_KINDS } from './datasource-definitions.js';
 import { LOCAL_DIRECTORY_ALLOWED_EXTENSIONS } from './datasource-local-directory.js';
-import { DOCUMENT_IMAGE_EXTENSIONS, DOCUMENT_PARSE_SUPPORTED_EXTENSIONS } from './document-parser.js';
+import { DOCUMENT_AUDIO_EXTENSIONS, DOCUMENT_IMAGE_EXTENSIONS, DOCUMENT_PARSE_SUPPORTED_EXTENSIONS } from './document-parser.js';
 import { IMAGE_CONTENT_TYPES, PREVIEW_CONTENT_TYPES } from './document-route-files.js';
 import { REPORT_OUTPUT_KINDS, REPORT_REFERENCE_SOURCE_TYPES, REPORT_TEMPLATE_TYPES } from './report-standards.js';
 
@@ -9,7 +9,7 @@ export type SupportCapability = 'upload' | 'preview' | 'parse' | 'index';
 
 export type FormatSupportItem = {
   id: string;
-  category: 'document' | 'spreadsheet' | 'structured-data' | 'image' | 'web-markup';
+  category: 'document' | 'spreadsheet' | 'structured-data' | 'image' | 'web-markup' | 'audio';
   extensions: string[];
   label: string;
   status: SupportStatus;
@@ -112,6 +112,15 @@ const baseFormatItems: FormatSupportItem[] = [
     status: 'partial',
     capabilities: { upload: true, preview: true, parse: true, index: true },
     notes: ['Image OCR is implemented.', 'Reliable extraction depends on runtime OCR availability and image quality.'],
+  },
+  {
+    id: 'audio',
+    category: 'audio',
+    extensions: [...DOCUMENT_AUDIO_EXTENSIONS],
+    label: 'Audio files',
+    status: 'partial',
+    capabilities: { upload: true, parse: true, index: true },
+    notes: ['Detailed parse prefers MarkItDown audio transcription when available.', 'If MarkItDown and VLM fallback are unavailable, parsing fails explicitly.'],
   },
   {
     id: 'template-image-svg',

@@ -2,8 +2,10 @@ import { buildAuditSnapshot } from './audit-center.js';
 import { listDatasourceDefinitions, listDatasourceRuns } from './datasource-definitions.js';
 import { buildDatasourceMeta, buildDatasourceRunReadModels } from './datasource-service.js';
 import { readDetailedParseQueueState } from './document-deep-parse-queue.js';
+import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { loadDocumentsIndexRoutePayload } from './document-route-read-operations.js';
+import { DOCUMENT_AUDIO_EXTENSIONS } from './document-parser.js';
 import { loadParsedDocuments } from './document-store.js';
 import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { loadReportCenterReadState } from './report-center.js';
@@ -18,6 +20,7 @@ const CAPTURE_ERROR_TASKS_WARNING = 1;
 const MEMORY_SYNC_STALE_WARNING_MS = 6 * 60 * 60 * 1000;
 const MEMORY_SYNC_STALE_CRITICAL_MS = 24 * 60 * 60 * 1000;
 const DYNAMIC_OUTPUT_STALE_WARNING_MS = 12 * 60 * 60 * 1000;
+const AUDIO_EXTENSIONS = new Set<string>(DOCUMENT_AUDIO_EXTENSIONS);
 
 type StabilityWarning = {
   key: string;
@@ -177,6 +180,14 @@ export async function loadOperationsOverviewPayload() {
   const deepParseQueued = deepParseQueueState.items.filter((item) => item.status === 'queued').length;
   const deepParseProcessing = deepParseQueueState.items.filter((item) => item.status === 'processing').length;
   const deepParseBacklog = deepParseQueued + deepParseProcessing;
+  const canonicalCoverageCount = rawDocuments.items.filter((item) => Boolean(getParsedDocumentCanonicalText(item))).length;
+  const markdownCoverageCount = rawDocuments.items.filter((item) => Boolean(String(item.markdownText || '').trim())).length;
+  const markdownFailedCount = rawDocuments.items.filter((item) => Boolean(String(item.markdownError || '').trim())).length;
+  const vlmFallbackCount = rawDocuments.items.filter((item) => /vlm/i.test(String(item.parseMethod || ''))).length;
+  const audioParseFailedCount = rawDocuments.items.filter((item) => {
+    const ext = String(item.ext || '').toLowerCase();
+    return AUDIO_EXTENSIONS.has(ext) && item.detailParseStatus === 'failed';
+  }).length;
   const deepParseTask = findTask(taskRuntimeMetrics.items, 'deep-parse');
   const memorySyncTask = findTask(taskRuntimeMetrics.items, 'memory-sync');
   const datavizTask = findTask(taskRuntimeMetrics.items, 'dataviz');
@@ -399,6 +410,13 @@ export async function loadOperationsOverviewPayload() {
         queued: deepParseQueued,
         processing: deepParseProcessing,
         failed: deepParseQueueState.items.filter((item) => item.status === 'failed').length,
+      },
+      markdownSummary: {
+        canonicalReady: canonicalCoverageCount,
+        markdownReady: markdownCoverageCount,
+        markdownFailed: markdownFailedCount,
+        vlmFallbackCount,
+        audioParseFailedCount,
       },
       memorySync: memorySyncStatus,
       recentDocuments,

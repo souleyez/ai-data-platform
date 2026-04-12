@@ -18,6 +18,7 @@ import {
   loadOpenClawMemorySelectionState,
   selectOpenClawMemoryDocumentCandidatesFromState,
 } from './openclaw-memory-selection.js';
+import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
 import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
@@ -134,7 +135,7 @@ function extractDocumentTimestamp(item: Pick<ParsedDocument, 'path' | 'detailPar
 
 function isDetailedFullTextDocument(item: ParsedDocument) {
   return item.parseStatus === 'parsed'
-    && Boolean(String(item.fullText || '').trim())
+    && Boolean(getParsedDocumentCanonicalText(item))
     && (
       item.parseStage === 'detailed'
       || item.detailParseStatus === 'succeeded'
@@ -167,9 +168,9 @@ export function selectLatestDetailedFullTextDocument(documents: ParsedDocument[]
 
 export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ParsedDocument,
-  'title' | 'name' | 'path' | 'schemaType' | 'parseStage' | 'detailParseStatus' | 'fullText'
+  'title' | 'name' | 'path' | 'schemaType' | 'parseStage' | 'detailParseStatus' | 'fullText' | 'markdownText'
 > | null) {
-  const fullText = String(document?.fullText || '').trim();
+  const fullText = getParsedDocumentCanonicalText(document);
   if (!fullText) return '';
 
   return [

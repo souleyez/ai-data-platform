@@ -37,6 +37,17 @@ Then apply the 10-specific identity overrides from:
 
 - [node-overrides.env.example](/C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/profiles/10/node-overrides.env.example)
 
+## Detailed parse runtime
+
+10 should install the same canonical markdown runtime as other nodes:
+
+```bash
+python3 -m pip install --upgrade markitdown
+python3 -m pip install --upgrade "markitdown[audio-transcription]"
+```
+
+If the node uses a custom install location, set `MARKITDOWN_BIN` in `/etc/ai-data-platform/ai-data-platform.env`.
+
 ## Model bridge drop-in
 
 Recommended server path:

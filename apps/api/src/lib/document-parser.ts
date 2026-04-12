@@ -13,6 +13,7 @@ import {
 import { applyDocumentParseFeedback } from './document-parse-feedback.js';
 import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
 import { canonicalizeResumeFields } from './resume-canonicalizer.js';
+import { resolveDocumentMarkdownForFile, supportsMarkItDownExtension } from './document-markdown-provider.js';
 import {
   buildAugmentedEnv,
   getOcrMyPdfCommandCandidates,
@@ -37,6 +38,10 @@ export type ParsedDocument = {
   summary: string;
   excerpt: string;
   fullText?: string;
+  markdownText?: string;
+  markdownMethod?: string;
+  markdownGeneratedAt?: string;
+  markdownError?: string;
   extractedChars: number;
   evidenceChunks?: EvidenceChunk[];
   entities?: StructuredEntity[];
@@ -317,6 +322,7 @@ export type ResumeFields = {
 export type ParseDocumentOptions = {
   stage?: 'quick' | 'detailed';
   libraryContext?: DocumentLibraryContext;
+  resolveMarkdown?: typeof resolveDocumentMarkdownForFile;
 };
 
 const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
@@ -332,6 +338,7 @@ type KeywordRule = string | RegExp;
 const execFileAsync = promisify(execFile);
 export const DOCUMENT_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'] as const;
 export const DOCUMENT_PRESENTATION_EXTENSIONS = ['.ppt', '.pptx', '.pptm'] as const;
+export const DOCUMENT_AUDIO_EXTENSIONS = ['.wav', '.mp3'] as const;
 export const DOCUMENT_PARSE_SUPPORTED_EXTENSIONS = [
   '.pdf',
   '.txt',
@@ -344,12 +351,15 @@ export const DOCUMENT_PARSE_SUPPORTED_EXTENSIONS = [
   '.xml',
   '.xlsx',
   '.xls',
+  '.epub',
+  ...DOCUMENT_AUDIO_EXTENSIONS,
   ...DOCUMENT_PRESENTATION_EXTENSIONS,
   ...DOCUMENT_IMAGE_EXTENSIONS,
 ] as const;
 const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
 const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS);
-const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、ppt、pptx、pptm、png、jpg、jpeg、webp、gif、bmp。';
+const AUDIO_EXTENSIONS = new Set<string>(DOCUMENT_AUDIO_EXTENSIONS);
+const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、epub、wav、mp3、ppt、pptx、pptm、png、jpg、jpeg、webp、gif、bmp。';
 
 type PdfExtractionResult = {
   text: string;
@@ -636,6 +646,18 @@ export async function renderPresentationDocumentToImages(filePath: string, optio
     cleanup: async () => {
       await fs.rm(rendered.workDir, { recursive: true, force: true }).catch(() => undefined);
       await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
+    },
+  };
+}
+
+export async function renderPdfDocumentToImages(filePath: string, options?: { maxPages?: number }) {
+  const rendered = await renderPdfPagesToImages(filePath, Math.max(1, Number(options?.maxPages || 12)));
+  if (!rendered) return null;
+
+  return {
+    images: rendered.images,
+    cleanup: async () => {
+      await fs.rm(rendered.workDir, { recursive: true, force: true }).catch(() => undefined);
     },
   };
 }
@@ -3604,12 +3626,17 @@ function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
   if (ext === '.ppt') return 'presentation-pdf-convert';
   if (ext === '.xlsx' || ext === '.xls') return 'xlsx-sheet-reader';
   if (IMAGE_EXTENSIONS.has(ext)) return text.includes('OCR text:') ? 'image-ocr' : 'image-metadata';
+  if (AUDIO_EXTENSIONS.has(ext)) return 'audio-pending';
   if (ext === '.pdf') {
     return text.includes('OCR fallback') || text.includes('[瑙ｆ瀽閾捐矾]')
       ? 'ocr-fallback'
       : 'pdf-auto';
   }
   return 'unsupported';
+}
+
+function shouldAttemptDetailedMarkdownResolution(ext: string, parseStage: 'quick' | 'detailed') {
+  return parseStage === 'detailed' && (ext === '.md' || supportsMarkItDownExtension(ext));
 }
 
 export async function parseDocument(
@@ -3631,13 +3658,53 @@ export async function parseDocument(
 
   try {
     const { status, text, parseMethod: hintedMethod, tableSummary } = await extractText(filePath, ext);
-    const parseMethod = inferParseMethod(ext, text, hintedMethod);
-    const normalizedText = normalizeText(text);
+    let parseStatus = status;
+    let activeText = text;
+    let parseMethod = inferParseMethod(ext, text, hintedMethod);
+    let markdownText = '';
+    let markdownMethod: ParsedDocument['markdownMethod'];
+    let markdownGeneratedAt: string | undefined;
+    let markdownError: string | undefined;
+
+    if (shouldAttemptDetailedMarkdownResolution(ext, parseStage)) {
+      const markdownResult = await (options?.resolveMarkdown || resolveDocumentMarkdownForFile)({
+        filePath,
+        ext,
+        existingText: text,
+      }).catch((error) => ({
+        status: 'failed' as const,
+        error: error instanceof Error ? error.message : 'markitdown-resolution-failed',
+      }));
+
+      if (markdownResult.status === 'succeeded') {
+        markdownText = markdownResult.markdownText;
+        markdownMethod = markdownResult.method;
+        markdownGeneratedAt = now;
+        activeText = markdownText;
+        parseStatus = 'parsed';
+        if (markdownMethod === 'markitdown') {
+          parseMethod = 'markitdown';
+        }
+      } else if (markdownResult.status === 'failed') {
+        markdownError = markdownResult.error;
+      }
+    }
+
+    if (
+      parseStage === 'detailed'
+      && parseStatus === 'unsupported'
+      && shouldAttemptDetailedMarkdownResolution(ext, parseStage)
+      && !markdownText
+    ) {
+      parseStatus = 'error';
+    }
+
+    const normalizedText = normalizeText(activeText);
     const category = detectCategory(filePath, normalizedText);
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
     const unsupportedSummary = UNSUPPORTED_PARSE_SUMMARY;
 
-    if (status === 'unsupported') {
+    if (parseStatus === 'unsupported') {
       const topicTags = mergeGovernedTopicTags(
         detectTopicTags(buildEvidence(filePath), category, bizCategory),
         extractionProfile,
@@ -3657,7 +3724,11 @@ export async function parseDocument(
         parseMethod,
         summary: unsupportedSummary,
         excerpt: unsupportedSummary,
-        fullText: '',
+        fullText: activeText || '',
+        markdownText: markdownText || undefined,
+        markdownMethod,
+        markdownGeneratedAt,
+        markdownError,
         extractedChars: 0,
         evidenceChunks: [],
         entities: [],
@@ -3683,7 +3754,7 @@ export async function parseDocument(
       };
     }
 
-    if (status === 'error') {
+    if (parseStatus === 'error') {
       const topicTags = mergeGovernedTopicTags(
         detectTopicTags(buildEvidence(filePath), category, bizCategory),
         extractionProfile,
@@ -3692,7 +3763,9 @@ export async function parseDocument(
         inferSchemaType(category, bizCategory, undefined, topicTags),
         extractionProfile,
       );
-      const fallbackSummary = IMAGE_EXTENSIONS.has(ext)
+      const fallbackSummary = AUDIO_EXTENSIONS.has(ext)
+        ? '音频详细解析失败，当前未转写出可用正文；如果 VLM 不支持该音频类型，将保持失败状态。'
+        : IMAGE_EXTENSIONS.has(ext)
         ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
         : PRESENTATION_EXTENSIONS.has(ext)
           ? 'PPT 解析失败，当前未提取到可用正文；可安装 LibreOffice 后重新解析，详细解析阶段会优先尝试 VLM。'
@@ -3711,7 +3784,11 @@ export async function parseDocument(
         parseMethod,
         summary: fallbackSummary,
         excerpt: fallbackSummary,
-        fullText: text,
+        fullText: activeText || text,
+        markdownText: markdownText || undefined,
+        markdownMethod,
+        markdownGeneratedAt,
+        markdownError,
         extractedChars: 0,
         evidenceChunks: [],
         entities: [],
@@ -3728,7 +3805,9 @@ export async function parseDocument(
           ? 'ocr-text-not-extracted'
           : PRESENTATION_EXTENSIONS.has(ext)
             ? 'presentation-text-not-extracted'
-            : 'parse-error',
+            : AUDIO_EXTENSIONS.has(ext)
+              ? (markdownError || 'audio-markdown-not-extracted')
+              : (markdownError || 'parse-error'),
         schemaType,
         structuredProfile: buildStructuredProfile({
           schemaType,
@@ -3751,10 +3830,10 @@ export async function parseDocument(
       : [];
     const summary = summarize(normalizedText, '文档内容为空或暂未提取到文本。');
     const excerptText = excerpt(normalizedText, '文档内容为空或暂未提取到文本。');
-    const inferredTitle = inferTitle(text, name);
+    const inferredTitle = inferTitle(activeText || text, name);
 
     if (parseStage === 'quick') {
-      const quickText = text.slice(0, 2400);
+      const quickText = activeText.slice(0, 2400);
       const contractFields = applyDocumentParseFeedback({
         libraryKeys: feedbackLibraryKeys,
         schemaType: 'contract',
@@ -3816,7 +3895,11 @@ export async function parseDocument(
         parseMethod,
         summary,
         excerpt: excerptText,
-        fullText: text,
+        fullText: activeText,
+        markdownText: markdownText || undefined,
+        markdownMethod,
+        markdownGeneratedAt,
+        markdownError,
         extractedChars: normalizedText.length,
         evidenceChunks: [],
         entities: [],
@@ -3853,20 +3936,20 @@ export async function parseDocument(
       };
     }
 
-    const evidenceChunks = splitEvidenceChunks(text);
+    const evidenceChunks = splitEvidenceChunks(activeText);
     const contractFields = applyDocumentParseFeedback({
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'contract',
-      text,
+      text: activeText,
       fields: extractContractFields(normalizedText, category, extractionProfile),
     });
     const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
     const resumeFields = applyDocumentParseFeedback({
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'resume',
-      text,
+      text: activeText,
       fields: extractResumeFields(
-        text,
+        activeText,
         inferredTitle,
         structured.entities,
         structured.claims,
@@ -3876,11 +3959,11 @@ export async function parseDocument(
     const enterpriseGuidanceFields = applyDocumentParseFeedback({
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'technical',
-      text,
+      text: activeText,
       fields: refineEnterpriseGuidanceFields(
-        extractEnterpriseGuidanceFields(text, inferredTitle, topicTags, category, extractionProfile),
+        extractEnterpriseGuidanceFields(activeText, inferredTitle, topicTags, category, extractionProfile),
         {
-          text,
+          text: activeText,
           title: inferredTitle,
           topicTags,
           profile: extractionProfile,
@@ -3890,11 +3973,11 @@ export async function parseDocument(
     const orderFields = applyDocumentParseFeedback({
       libraryKeys: feedbackLibraryKeys,
       schemaType: 'order',
-      text,
-      fields: extractOrderFields(text, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
+      text: activeText,
+      fields: extractOrderFields(activeText, inferredTitle, bizCategory, topicTags, extractionProfile, tableSummary),
     });
     const footfallFields = extractFootfallFields(
-      text,
+      activeText,
       inferredTitle,
       bizCategory,
       topicTags,
@@ -3917,7 +4000,11 @@ export async function parseDocument(
       parseMethod,
       summary: summarize(normalizedText, '文档内容为空或暂未提取到文本。'),
       excerpt: excerpt(normalizedText, '文档内容为空或暂未提取到文本。'),
-      fullText: text,
+      fullText: activeText,
+      markdownText: markdownText || undefined,
+      markdownMethod,
+      markdownGeneratedAt,
+      markdownError,
       extractedChars: normalizedText.length,
       evidenceChunks,
       entities: structured.entities,

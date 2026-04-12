@@ -4,6 +4,7 @@ import { readDocumentCache } from './document-cache-repository.js';
 import { replaceDocumentKnowledgeSnapshot } from './document-knowledge-lifecycle.js';
 import { syncLibraryKnowledgePagesForDocuments } from './library-knowledge-pages.js';
 import { loadDocumentLibraries } from './document-libraries.js';
+import { supportsMarkItDownExtension } from './document-markdown-provider.js';
 import { buildDocumentLibraryContext, type DocumentLibraryContext } from './document-extraction-governance.js';
 import { applyDocumentOverrides, loadDocumentOverrides } from './document-overrides.js';
 import {
@@ -18,6 +19,15 @@ import {
 import { mergeWithRetainedDocuments, sanitizeParsedDocument } from './document-store-normalization.js';
 import { parseDocumentFiles } from './document-store-parse-runtime.js';
 import { scheduleDocumentVectorIndexSync } from './document-store-vector-sync.js';
+
+function shouldQueueForDetailedParse(item: ParsedDocument) {
+  return item.parseStage !== 'detailed'
+    && (
+      item.parseStatus === 'parsed'
+      || item.parseStatus === 'error'
+      || supportsMarkItDownExtension(item.ext)
+    );
+}
 
 export type LoadParsedDocumentsResult = {
   exists: boolean;
@@ -43,7 +53,7 @@ export async function loadParsedDocuments(
     if (!skipBackgroundTasks) {
       await enqueueDetailedParse(
         cache.items
-          .filter((item) => (item.parseStatus === 'parsed' || item.parseStatus === 'error') && item.parseStage !== 'detailed')
+          .filter((item) => shouldQueueForDetailedParse(item))
           .map((item) => item.path),
       );
     }
@@ -94,7 +104,7 @@ export async function loadParsedDocuments(
       items,
     },
     queuePaths: items
-      .filter((item) => item.parseStatus === 'parsed' || item.parseStatus === 'error')
+      .filter((item) => shouldQueueForDetailedParse(item))
       .map((item) => item.path),
     vectorItems: mergedItems,
     memorySyncMode: 'scheduled',

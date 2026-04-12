@@ -39,6 +39,17 @@ Then apply the 120-specific overrides from:
 
 - [node-overrides.env.example](/C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/profiles/120/node-overrides.env.example)
 
+## Detailed parse runtime
+
+120 should install the canonical markdown runtime locally:
+
+```bash
+python3 -m pip install --upgrade markitdown
+python3 -m pip install --upgrade "markitdown[audio-transcription]"
+```
+
+If `markitdown` is not available on the service `PATH`, add `MARKITDOWN_BIN` to `/etc/ai-data-platform/ai-data-platform.env`.
+
 ## Current model bridge drop-in
 
 The 120 server uses a systemd drop-in for the model bridge.

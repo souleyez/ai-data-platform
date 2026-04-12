@@ -84,9 +84,13 @@ async function seedTelemetryState() {
     generatedAt,
     scanRoot,
     scanRoots: [scanRoot],
-    totalFiles: 1,
+    totalFiles: 3,
     scanSignature: 'sig-ops-telemetry',
-    indexedPaths: [path.join(scanRoot, 'ioa-procedure.docx')],
+    indexedPaths: [
+      path.join(scanRoot, 'ioa-procedure.docx'),
+      path.join(scanRoot, 'bid-spec.pdf'),
+      path.join(scanRoot, 'briefing.mp3'),
+    ],
     items: [
       {
         path: path.join(scanRoot, 'ioa-procedure.docx'),
@@ -101,9 +105,52 @@ async function seedTelemetryState() {
         extractedChars: 320,
         groups: ['ioa'],
         confirmedGroups: ['ioa'],
-        parseStage: 'quick',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        markdownText: '# IOA Procedure\n\n流程规范摘要',
+        markdownMethod: 'markitdown',
         schemaType: 'procedure',
         topicTags: ['流程', '制度'],
+      },
+      {
+        path: path.join(scanRoot, 'bid-spec.pdf'),
+        name: 'bid-spec.pdf',
+        ext: '.pdf',
+        title: '招标文件',
+        category: 'contract',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseMethod: 'pdf-ocr+pdf-vlm',
+        summary: '招标控制价与评分办法',
+        excerpt: '招标控制价与评分办法',
+        fullText: '[PDF VLM understanding]\n\n招标控制价 437.69 万元',
+        extractedChars: 120,
+        groups: ['order'],
+        confirmedGroups: ['order'],
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        schemaType: 'contract',
+        topicTags: ['招标', '评分'],
+      },
+      {
+        path: path.join(scanRoot, 'briefing.mp3'),
+        name: 'briefing.mp3',
+        ext: '.mp3',
+        title: 'Briefing Audio',
+        category: 'meeting',
+        bizCategory: 'general',
+        parseStatus: 'error',
+        parseMethod: 'audio-markdown',
+        summary: '音频详细解析失败',
+        excerpt: '音频详细解析失败',
+        extractedChars: 0,
+        groups: ['ioa'],
+        confirmedGroups: ['ioa'],
+        parseStage: 'detailed',
+        detailParseStatus: 'failed',
+        markdownError: 'markitdown-unavailable',
+        schemaType: 'generic',
+        topicTags: ['音频'],
       },
     ],
   }, null, 2), 'utf8');
@@ -337,6 +384,11 @@ test('operations overview should surface phase1 stability telemetry and warnings
   assert.equal(payload.stability.summary.deepParseBacklog, 24);
   assert.equal(payload.stability.summary.datasourceFailedRuns, 3);
   assert.equal(payload.stability.failures.datavizStatus, 'skipped');
+  assert.equal(payload.parse.markdownSummary.canonicalReady, 2);
+  assert.equal(payload.parse.markdownSummary.markdownReady, 1);
+  assert.equal(payload.parse.markdownSummary.markdownFailed, 1);
+  assert.equal(payload.parse.markdownSummary.vlmFallbackCount, 1);
+  assert.equal(payload.parse.markdownSummary.audioParseFailedCount, 1);
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'deep-parse-backlog-warning'));
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'datasource-failed-runs-warning'));
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'capture-error-tasks-warning'));

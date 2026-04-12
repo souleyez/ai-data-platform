@@ -11,8 +11,10 @@ import {
   DOCUMENT_PRESENTATION_EXTENSIONS,
   deriveSchemaProfile,
   refreshDerivedSchemaProfile,
+  renderPdfDocumentToImages,
   renderPresentationDocumentToImages,
 } from './document-parser.js';
+import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
 import { getDocumentAdvancedParseProviderMode, runDocumentAdvancedParse } from './document-advanced-parse-provider.js';
 import {
   normalizeDocumentImageFieldCandidateKey,
@@ -67,7 +69,10 @@ const CLOUD_ENRICH_CONCURRENCY = Math.max(1, Number(process.env.OPENCLAW_DOCUMEN
 const MAX_PROMPT_CHARS = Number(process.env.OPENCLAW_DOCUMENT_STRUCTURING_INPUT_LIMIT || 7000);
 const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
 const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS);
+const PDF_EXTENSIONS = new Set<string>(['.pdf']);
 const PRESENTATION_VLM_MAX_SLIDES = Math.max(1, Number(process.env.DOCUMENT_PRESENTATION_VLM_MAX_SLIDES || 12));
+const PDF_VLM_MAX_PAGES = Math.max(1, Number(process.env.DOCUMENT_PDF_VLM_MAX_PAGES || 8));
+const PDF_VLM_MIN_CANONICAL_CHARS = Math.max(0, Number(process.env.DOCUMENT_PDF_VLM_MIN_CANONICAL_CHARS || 600));
 
 function uniqStrings(values?: Array<string | undefined>) {
   return [...new Set((values || []).map((item) => String(item || '').trim()).filter(Boolean))];
@@ -115,12 +120,26 @@ function isPresentationDocument(item: ParsedDocument) {
   return PRESENTATION_EXTENSIONS.has(String(item.ext || '').toLowerCase());
 }
 
+function isPdfDocument(item: ParsedDocument) {
+  return PDF_EXTENSIONS.has(String(item.ext || '').toLowerCase());
+}
+
+function shouldUsePdfVisualFallback(item: ParsedDocument) {
+  if (!isPdfDocument(item) || !item.path) return false;
+  if (item.parseStatus !== 'parsed') return true;
+  if (String(item.markdownError || '').trim()) return true;
+  if (/ocr/i.test(String(item.parseMethod || '')) && String(item.markdownMethod || '').trim() !== 'markitdown') {
+    return true;
+  }
+  return getParsedDocumentCanonicalText(item).length < PDF_VLM_MIN_CANONICAL_CHARS;
+}
+
 function buildDocumentContext(item: ParsedDocument) {
   const evidence = (item.evidenceChunks || [])
     .slice(0, 6)
     .map((chunk, index) => `Evidence ${index + 1}: ${sanitizeText(chunk.text, 800)}`)
     .join('\n');
-  const fullText = sanitizeText(item.fullText || '', Math.max(1200, MAX_PROMPT_CHARS));
+  const fullText = sanitizeText(getParsedDocumentCanonicalText(item), Math.max(1200, MAX_PROMPT_CHARS));
 
   const existingResumeFields = item.resumeFields && Object.values(item.resumeFields).some((value) => Array.isArray(value) ? value.length : Boolean(value))
     ? `Existing resume fields: ${sanitizeText(JSON.stringify(item.resumeFields), 800)}`
@@ -441,24 +460,123 @@ function buildImageFullText(item: ParsedDocument, structured: DocumentImageVlmPa
   return blocks.join('\n\n');
 }
 
-function buildPresentationSlideBlock(input: {
+type RenderedPageResult = {
   pageNumber: number;
+  model: string;
+  payload: DocumentImageVlmPayload;
+};
+
+function buildRenderedPageBlock(input: {
+  pageNumber: number;
+  pageLabel: string;
   payload: DocumentImageVlmPayload;
 }) {
   const visualSummary = sanitizeText(input.payload.visualSummary || input.payload.summary, 1200);
   const transcribedText = sanitizeText(input.payload.transcribedText, 6000);
   return [
-    `# Slide ${input.pageNumber}`,
+    `# ${input.pageLabel} ${input.pageNumber}`,
     visualSummary ? `Visual summary:\n${visualSummary}` : '',
     transcribedText ? `Visual transcription:\n${transcribedText}` : '',
   ].filter(Boolean).join('\n\n');
+}
+
+function applyRenderedPageCollection(
+  item: ParsedDocument,
+  pageResults: RenderedPageResult[],
+  options: {
+    pageLabel: string;
+    markerLabel: string;
+    parseMethodSuffix: string;
+    understandingKey: 'presentationUnderstanding' | 'pdfUnderstanding';
+    countKey: 'slideCount' | 'pageCount';
+    itemsKey: 'slides' | 'pages';
+  },
+) {
+  const evidenceBlocks = pageResults.flatMap(({ pageNumber, payload }) => (payload.evidenceBlocks || []).map((block) => ({
+    title: sanitizeText(block.title, 120) ? `${options.pageLabel} ${pageNumber} · ${sanitizeText(block.title, 120)}` : `${options.pageLabel} ${pageNumber}`,
+    text: sanitizeText(block.text, 1000),
+  })));
+  const evidenceChunks = mergeEvidenceChunks(item.evidenceChunks, evidenceBlocks);
+  const incomingEntities = pageResults.flatMap(({ payload }) => (payload.entities as CloudEntity[] | undefined) || []);
+  const incomingClaims = pageResults.flatMap(({ payload }) => (payload.claims as CloudClaim[] | undefined) || []);
+  const entities = mergeEntities(item.entities, incomingEntities, evidenceChunks);
+  const claims = mergeClaims(item.claims, incomingClaims, evidenceChunks);
+  const topicTags = uniqStrings([
+    ...(item.topicTags || []),
+    ...pageResults.flatMap(({ payload }) => payload.topicTags || []),
+  ]).slice(0, 16);
+  const firstSummary = pageResults
+    .map(({ payload }) => sanitizeText(payload.summary || payload.visualSummary, 500))
+    .find(Boolean);
+  const summary = firstSummary || item.summary;
+  const fieldCandidates = normalizeImageFieldCandidates(
+    item,
+    pageResults.flatMap(({ payload }) => payload.fieldCandidates || []),
+  );
+  const visualFullText = [
+    item.fullText || '',
+    `[${options.markerLabel}]`,
+    ...pageResults.map(({ pageNumber, payload }) => buildRenderedPageBlock({
+      pageNumber,
+      pageLabel: options.pageLabel,
+      payload,
+    })),
+  ].filter(Boolean).join('\n\n');
+  const withCandidateFields = assignCandidateFields({
+    ...item,
+    parseStatus: 'parsed',
+    parseMethod: item.parseMethod?.includes(options.parseMethodSuffix)
+      ? item.parseMethod
+      : `${item.parseMethod || options.pageLabel.toLowerCase()}+${options.parseMethodSuffix}`,
+    parseStage: 'detailed',
+    detailParseStatus: 'succeeded',
+    detailParsedAt: new Date().toISOString(),
+    detailParseAttempts: Math.max(1, Number(item.detailParseAttempts || 0)),
+    detailParseError: undefined,
+    summary,
+    excerpt: summary || item.excerpt,
+    fullText: visualFullText,
+    extractedChars: sanitizeText(visualFullText, 20000).length,
+    topicTags,
+    evidenceChunks,
+    entities,
+    claims,
+    riskLevel: pageResults.map(({ payload }) => payload.riskLevel).find(Boolean) || item.riskLevel,
+    cloudStructuredAt: new Date().toISOString(),
+    cloudStructuredModel: uniqStrings(pageResults.map(({ model }) => model)).join(', '),
+  }, fieldCandidates);
+
+  const refreshed = refreshDerivedSchemaProfile(withCandidateFields);
+  const currentProfile = refreshed.structuredProfile && typeof refreshed.structuredProfile === 'object' && !Array.isArray(refreshed.structuredProfile)
+    ? refreshed.structuredProfile as Record<string, unknown>
+    : {};
+
+  return {
+    ...refreshed,
+    structuredProfile: {
+      ...currentProfile,
+      ...buildImageStructuredTopLevelFields(currentProfile, fieldCandidates),
+      fieldDetails: buildImageStructuredFieldDetails(refreshed, fieldCandidates, evidenceChunks),
+      [options.understandingKey]: {
+        [options.countKey]: pageResults.length,
+        [options.itemsKey]: pageResults.map(({ pageNumber, payload }) => ({
+          pageNumber,
+          documentKind: sanitizeText(payload.documentKind, 120),
+          layoutType: sanitizeText(payload.layoutType, 120),
+          visualSummary: sanitizeText(payload.visualSummary || payload.summary, 600),
+          transcribedText: sanitizeText(payload.transcribedText, 2000),
+        })),
+      },
+    },
+  };
 }
 
 async function enrichTextOne(
   item: ParsedDocument,
   runTextParse = runDocumentAdvancedParse,
 ): Promise<ParsedDocument> {
-  if (item.parseStatus !== 'parsed' || !item.fullText || item.extractedChars < 80) {
+  const canonicalText = getParsedDocumentCanonicalText(item);
+  if (item.parseStatus !== 'parsed' || !canonicalText || item.extractedChars < 80) {
     return item;
   }
 
@@ -482,7 +600,7 @@ async function enrichTextOne(
       sourceName: item.name,
       summary,
       excerpt: item.excerpt,
-      fullText: item.fullText,
+      fullText: canonicalText,
     },
   );
   const schemaDerived = deriveSchemaProfile({
@@ -581,11 +699,7 @@ async function enrichPresentationOne(
   }
 
   try {
-    const slideResults: Array<{
-      pageNumber: number;
-      model: string;
-      parsed: DocumentImageVlmPayload;
-    }> = [];
+    const slideResults: RenderedPageResult[] = [];
 
     for (const image of rendered.images) {
       const slideItem: ParsedDocument = {
@@ -597,7 +711,7 @@ async function enrichPresentationOne(
         slideResults.push({
           pageNumber: image.pageNumber,
           model: result.model,
-          parsed: result.parsed,
+          payload: result.parsed,
         });
       }
     }
@@ -605,88 +719,60 @@ async function enrichPresentationOne(
     if (!slideResults.length) {
       return enrichTextOne(item, runTextParse);
     }
+    return applyRenderedPageCollection(item, slideResults, {
+      pageLabel: 'Slide',
+      markerLabel: 'Presentation VLM understanding',
+      parseMethodSuffix: 'presentation-vlm',
+      understandingKey: 'presentationUnderstanding',
+      countKey: 'slideCount',
+      itemsKey: 'slides',
+    });
+  } finally {
+    await rendered.cleanup().catch(() => undefined);
+  }
+}
 
-    const evidenceBlocks = slideResults.flatMap(({ pageNumber, parsed }) => (parsed.evidenceBlocks || []).map((block) => ({
-      title: sanitizeText(block.title, 120) ? `Slide ${pageNumber} · ${sanitizeText(block.title, 120)}` : `Slide ${pageNumber}`,
-      text: sanitizeText(block.text, 1000),
-    })));
-    const evidenceChunks = mergeEvidenceChunks(item.evidenceChunks, evidenceBlocks);
-    const incomingEntities = slideResults.flatMap(({ parsed }) => (parsed.entities as CloudEntity[] | undefined) || []);
-    const incomingClaims = slideResults.flatMap(({ parsed }) => (parsed.claims as CloudClaim[] | undefined) || []);
-    const entities = mergeEntities(
-      item.entities,
-      incomingEntities,
-      evidenceChunks,
-    );
-    const claims = mergeClaims(
-      item.claims,
-      incomingClaims,
-      evidenceChunks,
-    );
-    const topicTags = uniqStrings([
-      ...(item.topicTags || []),
-      ...slideResults.flatMap(({ parsed }) => parsed.topicTags || []),
-    ]).slice(0, 16);
-    const firstSummary = slideResults
-      .map(({ parsed }) => sanitizeText(parsed.summary || parsed.visualSummary, 500))
-      .find(Boolean);
-    const summary = firstSummary || item.summary;
-    const fieldCandidates = normalizeImageFieldCandidates(
-      item,
-      slideResults.flatMap(({ parsed }) => parsed.fieldCandidates || []),
-    );
-    const presentationFullText = [
-      item.fullText || '',
-      '[Presentation VLM understanding]',
-      ...slideResults.map(({ pageNumber, parsed }) => buildPresentationSlideBlock({ pageNumber, payload: parsed })),
-    ].filter(Boolean).join('\n\n');
-    const withCandidateFields = assignCandidateFields({
-      ...item,
-      parseStatus: 'parsed',
-      parseMethod: item.parseMethod?.includes('presentation-vlm')
-        ? item.parseMethod
-        : `${item.parseMethod || 'presentation'}+presentation-vlm`,
-      parseStage: 'detailed',
-      detailParseStatus: 'succeeded',
-      detailParsedAt: new Date().toISOString(),
-      detailParseAttempts: Math.max(1, Number(item.detailParseAttempts || 0)),
-      detailParseError: undefined,
-      summary,
-      excerpt: summary || item.excerpt,
-      fullText: presentationFullText,
-      extractedChars: sanitizeText(presentationFullText, 20000).length,
-      topicTags,
-      evidenceChunks,
-      entities,
-      claims,
-      riskLevel: slideResults.map(({ parsed }) => parsed.riskLevel).find(Boolean) || item.riskLevel,
-      cloudStructuredAt: new Date().toISOString(),
-      cloudStructuredModel: uniqStrings(slideResults.map(({ model }) => model)).join(', '),
-    }, fieldCandidates);
+async function enrichPdfOne(
+  item: ParsedDocument,
+  runImageParse = runDocumentImageVlm,
+  runTextParse = runDocumentAdvancedParse,
+  renderPdf = renderPdfDocumentToImages,
+): Promise<ParsedDocument> {
+  const rendered = await renderPdf(item.path, { maxPages: PDF_VLM_MAX_PAGES });
+  if (!rendered?.images?.length) {
+    return enrichTextOne(item, runTextParse);
+  }
 
-    const refreshed = refreshDerivedSchemaProfile(withCandidateFields);
-    const currentProfile = refreshed.structuredProfile && typeof refreshed.structuredProfile === 'object' && !Array.isArray(refreshed.structuredProfile)
-      ? refreshed.structuredProfile as Record<string, unknown>
-      : {};
+  try {
+    const pageResults: RenderedPageResult[] = [];
 
-    return {
-      ...refreshed,
-      structuredProfile: {
-        ...currentProfile,
-        ...buildImageStructuredTopLevelFields(currentProfile, fieldCandidates),
-        fieldDetails: buildImageStructuredFieldDetails(refreshed, fieldCandidates, evidenceChunks),
-        presentationUnderstanding: {
-          slideCount: slideResults.length,
-          slides: slideResults.map(({ pageNumber, parsed }) => ({
-            pageNumber,
-            documentKind: sanitizeText(parsed.documentKind, 120),
-            layoutType: sanitizeText(parsed.layoutType, 120),
-            visualSummary: sanitizeText(parsed.visualSummary || parsed.summary, 600),
-            transcribedText: sanitizeText(parsed.transcribedText, 2000),
-          })),
-        },
-      },
-    };
+    for (const image of rendered.images) {
+      const pageItem: ParsedDocument = {
+        ...item,
+        title: `${item.title || item.name} - Page ${image.pageNumber}`,
+      };
+      const result = await runImageParse({ item: pageItem, imagePath: image.imagePath });
+      if (result?.parsed) {
+        pageResults.push({
+          pageNumber: image.pageNumber,
+          model: result.model,
+          payload: result.parsed,
+        });
+      }
+    }
+
+    if (!pageResults.length) {
+      return enrichTextOne(item, runTextParse);
+    }
+
+    return applyRenderedPageCollection(item, pageResults, {
+      pageLabel: 'Page',
+      markerLabel: 'PDF VLM understanding',
+      parseMethodSuffix: 'pdf-vlm',
+      understandingKey: 'pdfUnderstanding',
+      countKey: 'pageCount',
+      itemsKey: 'pages',
+    });
   } finally {
     await rendered.cleanup().catch(() => undefined);
   }
@@ -698,6 +784,7 @@ export async function enhanceParsedDocumentsWithCloud(
     runTextParse?: typeof runDocumentAdvancedParse;
     runImageParse?: typeof runDocumentImageVlm;
     renderPresentation?: typeof renderPresentationDocumentToImages;
+    renderPdf?: typeof renderPdfDocumentToImages;
   },
 ) {
   const providerMode = getDocumentAdvancedParseProviderMode();
@@ -714,7 +801,10 @@ export async function enhanceParsedDocumentsWithCloud(
       if (isImageDocument(item) || isPresentationDocument(item)) {
         return Boolean(item.path);
       }
-      return providerMode !== 'disabled' && item.parseStatus === 'parsed' && Boolean(item.fullText);
+      if (shouldUsePdfVisualFallback(item)) {
+        return true;
+      }
+      return providerMode !== 'disabled' && item.parseStatus === 'parsed' && Boolean(getParsedDocumentCanonicalText(item));
     })
     .slice(0, CLOUD_ENRICH_MAX_PER_BATCH);
 
@@ -739,6 +829,13 @@ export async function enhanceParsedDocumentsWithCloud(
               options?.runTextParse || runDocumentAdvancedParse,
               options?.renderPresentation || renderPresentationDocumentToImages,
             )
+            : shouldUsePdfVisualFallback(current.item)
+              ? await enrichPdfOne(
+                current.item,
+                options?.runImageParse || runDocumentImageVlm,
+                options?.runTextParse || runDocumentAdvancedParse,
+                options?.renderPdf || renderPdfDocumentToImages,
+              )
             : await enrichTextOne(current.item, options?.runTextParse || runDocumentAdvancedParse);
       } catch {
         output[current.index] = current.item;

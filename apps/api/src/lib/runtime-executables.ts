@@ -66,6 +66,19 @@ export function getPythonCommandCandidates() {
   return unique(commands);
 }
 
+export function getMarkItDownCommandCandidates() {
+  const commands = [process.env.MARKITDOWN_BIN || ''];
+
+  if (process.platform === 'win32') {
+    for (const home of buildWindowsPythonHomes()) {
+      commands.push(path.join(home, 'Scripts', 'markitdown.exe'));
+    }
+  }
+
+  commands.push('markitdown');
+  return unique(commands);
+}
+
 export function getUIEPythonCommandCandidates() {
   const commands = [
     process.env.PADDLE_UIE_PYTHON_BIN || '',
