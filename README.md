@@ -15,14 +15,7 @@ It is no longer the canonical shared platform repository.
 - `tools/windows-client`
   - Windows installer, bootstrap flow, runtime update chain, and client operations
 
-## Frozen platform references
-
-- `apps/control-plane-api`
-- `apps/control-plane-web`
-
-These directories are kept only as migration references. New shared backend or shared admin work must go to:
-
-- `home`
+The legacy `apps/control-plane-*` migration code has been removed from this repository. New shared backend or shared admin work must go to `home`.
 
 ## Boundary
 

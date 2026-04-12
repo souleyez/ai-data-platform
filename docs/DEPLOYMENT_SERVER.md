@@ -22,13 +22,6 @@ New environments should deploy only:
 3. `ai-data-platform-worker.service`
 4. `ai-data-platform-web.service`
 
-Do not install the legacy control-plane services for new environments:
-
-- `ai-data-platform-control-plane-api.service`
-- `ai-data-platform-control-plane-web.service`
-
-Those unit files remain in the repo only as migration references while the shared platform is consolidated into `home`.
-
 ## Required environment
 
 Main environment file:
@@ -101,8 +94,7 @@ Production servers should bind the application services to loopback and expose o
 
 - `API_HOST=127.0.0.1`
 - `WEB_HOST=127.0.0.1`
-- if the frozen legacy control-plane is still installed, keep `CONTROL_PLANE_API_HOST=127.0.0.1` and `CONTROL_PLANE_WEB_HOST=127.0.0.1`
-- public traffic should enter through `nginx` on `80/443`, not through direct access to `3001/3002/3100/3210`
+- public traffic should enter through `nginx` on `80/443`, not through direct access to `3002/3100`
 
 If you want explicit host-level rejection in addition to loopback binding, use:
 
@@ -111,10 +103,8 @@ If you want explicit host-level rejection in addition to loopback binding, use:
 
 That helper installs a dedicated `nftables` include snippet which rejects direct access to:
 
-- `3001`
 - `3002`
 - `3100`
-- `3210`
 
 ## Reverse proxy timeouts
 
@@ -177,8 +167,6 @@ Their defaults now target only the application packages and services:
 - `ai-data-platform-worker`
 - `ai-data-platform-web`
 
-If you intentionally need the frozen legacy control-plane during migration, pass explicit custom `BUILD_PACKAGES` and `SERVICES` values instead of relying on defaults.
-
 ## Runtime file boundary
 
 Do not keep mutable runtime files under the repository worktree on servers.
@@ -187,13 +175,13 @@ Do not keep mutable runtime files under the repository worktree on servers.
 - runtime state belongs under `storage/`
 - ad-hoc binaries or archives such as `scanner_linux` and `xmrig.tar.gz` must live outside `/srv/ai-data-platform`
 
-## Legacy references
+## Removed legacy surface
 
-The following content is no longer part of the standard deployment path:
+The old legacy control-plane code and unit templates were removed from this repository on 2026-04-13.
 
-- local or server deployment of `apps/control-plane-api`
-- local or server deployment of `apps/control-plane-web`
-- shared admin token rollout from this repository
-- control-plane file-to-Postgres migration from this repository
+Use `home` for:
 
-Use `home` for all of the above.
+- shared admin token rollout
+- shared public admin
+- shared control-plane deployment
+- cross-project release control and governance

@@ -15,15 +15,11 @@ $state = Get-ClientState
 $effectiveProjectKey = Set-ClientProjectKey -State $state -ProjectKey $ProjectKey
 $adminToken = if ($env:AI_DATA_PLATFORM_ADMIN_TOKEN) {
   $env:AI_DATA_PLATFORM_ADMIN_TOKEN.Trim()
-} elseif ($env:CONTROL_PLANE_ADMIN_TOKEN) {
-  $env:CONTROL_PLANE_ADMIN_TOKEN.Trim()
 } else {
   ''
 }
 $adminSessionToken = if ($env:AI_DATA_PLATFORM_ADMIN_SESSION_TOKEN) {
   $env:AI_DATA_PLATFORM_ADMIN_SESSION_TOKEN.Trim()
-} elseif ($env:CONTROL_PLANE_ADMIN_SESSION_TOKEN) {
-  $env:CONTROL_PLANE_ADMIN_SESSION_TOKEN.Trim()
 } else {
   ''
 }

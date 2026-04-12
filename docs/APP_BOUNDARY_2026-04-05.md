@@ -24,23 +24,11 @@ It is not allowed to continue growing as the shared platform repository.
 - shared control plane
 - shared public admin
 
-## Frozen reference directories
+## Legacy note
 
-The following directories are migration references only:
+The old `apps/control-plane-api` and `apps/control-plane-web` migration surfaces were removed from this repository on 2026-04-13.
 
-- `apps/control-plane-api`
-- `apps/control-plane-web`
-
-Allowed work there:
-
-- read-only comparison during migration
-- emergency fixes only when required to unblock existing local workflows
-
-Not allowed there:
-
-- new shared platform features
-- new shared admin screens
-- new multi-project backend logic
+If you need the shared control-plane or public admin now, use `home`.
 
 ## Current rule
 
