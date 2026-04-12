@@ -135,7 +135,7 @@ export default function DocumentsTable({
         <thead>
           <tr>
             <th>文件名</th>
-            <th>知识库分组</th>
+            <th>数据集分组</th>
             <th>解析</th>
             <th>业务结果</th>
             <th>摘要</th>
@@ -205,7 +205,7 @@ export default function DocumentsTable({
                             ) : null}
                           </span>
                         );
-                      }) : <span style={{ color: '#64748b' }}>未加入知识库分组</span>}
+                      }) : <span style={{ color: '#64748b' }}>未加入数据集分组</span>}
                     </div>
 
                     {!simpleMode && suggestedGroups.length ? (

@@ -599,18 +599,10 @@ function ReportsPageContent() {
         <header className="topbar">
           <div>
             <h2>报表中心</h2>
-            <p>
-              {mobileViewport
-                ? '移动端按单栏浏览模板、机器人和报表结果。'
-                : 'PC 端恢复完整报表工作台，左侧管理模板与机器人，右侧查看已出报表。'}
-            </p>
           </div>
         </header>
 
         {error ? <p>{error}</p> : null}
-        <div className="page-note">
-          本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；移动端更适合查看报表和做轻量配置。
-        </div>
         {message ? <div className="page-note">{message}</div> : null}
 
         {data ? (

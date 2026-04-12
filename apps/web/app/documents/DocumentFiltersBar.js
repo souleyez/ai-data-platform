@@ -32,7 +32,7 @@ export default function DocumentFiltersBar({
           style={{ minWidth: 200, flex: '1 1 200px', marginLeft: 'auto' }}
           value={keyword}
           onChange={(event) => onKeywordChange(event.target.value)}
-          placeholder="搜索文件名、摘要、知识库分组..."
+          placeholder="搜索文件名、摘要、数据集分组..."
         />
       </div>
     </section>

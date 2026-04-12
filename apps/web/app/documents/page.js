@@ -23,6 +23,7 @@ import {
 } from './api';
 import DocumentFiltersBar from './DocumentFiltersBar';
 import DocumentsTable from './DocumentsTable';
+import LibrarySettingsPanel from './LibrarySettingsPanel';
 import LibraryTabs from './LibraryTabs';
 import {
   buildExtensionSummary,
@@ -58,7 +59,7 @@ const PARSE_METHOD_LABELS = {
 const PAGE_SIZE = 50;
 const DEFAULT_SIDEBAR_SOURCES = [
   { name: '数据集', status: 'success' },
-  { name: '知识库分组', status: 'success' },
+  { name: '数据集分组', status: 'success' },
 ];
 
 function normalizePermissionLevel(value, fallback = 0) {
@@ -129,6 +130,7 @@ export default function DocumentsPage() {
   const [libraryCreateSubmitting, setLibraryCreateSubmitting] = useState(false);
   const [librarySettingsDrafts, setLibrarySettingsDrafts] = useState({});
   const [librarySettingsSubmittingId, setLibrarySettingsSubmittingId] = useState('');
+  const [librarySettingsExpanded, setLibrarySettingsExpanded] = useState(false);
 
   const loadDocuments = async () => {
     try {
@@ -242,7 +244,7 @@ export default function DocumentsPage() {
       await saveDocumentGroups([{ id: itemId, groups }]);
       await loadDocuments();
     } catch {
-      setScanMessage('更新知识库分组失败，请稍后重试');
+      setScanMessage('更新数据集分组失败，请稍后重试');
     } finally {
       setAssignmentSubmittingId('');
     }
@@ -260,9 +262,9 @@ export default function DocumentsPage() {
       setLibraryCreatePermissionLevel(0);
       await loadDocuments();
       setActiveLibrary(created?.item?.key || 'all');
-      setScanMessage(`已新建知识库“${name}”，权限等级 L${permissionLevel}`);
+      setScanMessage(`已新建数据集“${name}”，权限等级 L${permissionLevel}`);
     } catch {
-      setScanMessage('新建知识库失败，请稍后重试');
+      setScanMessage('新建数据集失败，请稍后重试');
     } finally {
       setLibraryCreateSubmitting(false);
     }
@@ -285,7 +287,7 @@ export default function DocumentsPage() {
     const draft = buildLibrarySettingsDraft(library, librarySettingsDrafts[libraryKey]);
     const label = String(draft.label || '').trim();
     if (!label) {
-      setScanMessage('知识库名称不能为空');
+      setScanMessage('数据集名称不能为空');
       return;
     }
 
@@ -308,9 +310,9 @@ export default function DocumentsPage() {
         knowledgePagesMode: draft.knowledgePagesMode,
       });
       await loadDocuments();
-      setScanMessage(`已更新知识库“${label}”设置`);
+      setScanMessage(`已更新数据集“${label}”设置`);
     } catch {
-      setScanMessage('更新知识库设置失败，请稍后重试');
+      setScanMessage('更新数据集设置失败，请稍后重试');
     } finally {
       setLibrarySettingsSubmittingId('');
     }
@@ -355,6 +357,10 @@ export default function DocumentsPage() {
       : null),
     [activeLibraryRecord, librarySettingsDrafts],
   );
+
+  useEffect(() => {
+    setLibrarySettingsExpanded(false);
+  }, [activeLibrary, mobileViewport]);
 
   const libraryLabelMap = useMemo(
     () => new Map(allLibraries.map((item) => [item.key, item.label])),
@@ -419,12 +425,7 @@ export default function DocumentsPage() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <h2>AI 知识库</h2>
-            <p>
-              {mobileViewport
-                ? '移动端只保留上传入口和文档列表，知识库治理工具栏会自动收起。'
-                : 'PC 端保留文档治理、分组和解析控制，移动端会自动切换成轻量布局。'}
-            </p>
+            <h2>AI 数据集</h2>
           </div>
           <div className="topbar-actions">
             <a className="ghost-btn" href="/#upload-document">添加文档</a>
@@ -449,9 +450,6 @@ export default function DocumentsPage() {
 
         {loading ? <p>加载中...</p> : null}
         {error ? <p>{error}</p> : null}
-        <div className="page-note">
-          本系统是基于 PC 的本地助手，推荐使用 PC 大屏幕打开；移动端建议用于查看和轻量处理。
-        </div>
         {scanMessage ? <div className="page-note">{scanMessage}</div> : null}
 
         {data ? (
@@ -463,15 +461,15 @@ export default function DocumentsPage() {
                     <span className="source-chip">总数 {totalFiles}</span>
                     <span className="source-chip">新增 {recentCount}</span>
                     <span className="source-chip">解析 {parseRate}</span>
-                    <span className="source-chip">知识库 {allLibraries.length}</span>
+                    <span className="source-chip">数据集 {allLibraries.length}</span>
                   </div>
                 </section>
 
                 <section className="card documents-card documents-create-library-card">
                   <div className="panel-header">
                     <div>
-                      <h3>新建知识库</h3>
-                      <p>这里保留一个轻量创建入口，方便先建库再上传文档。</p>
+                      <h3>新建数据集</h3>
+                      <p>这里保留一个轻量创建入口，方便先建数据集再上传文档。</p>
                     </div>
                   </div>
                   <div className="documents-create-library-row">
@@ -479,7 +477,7 @@ export default function DocumentsPage() {
                       className="filter-input"
                       value={libraryCreateDraft}
                       onChange={(event) => setLibraryCreateDraft(event.target.value)}
-                      placeholder="输入知识库名称"
+                      placeholder="输入数据集名称"
                     />
                     <button
                       className="primary-btn"
@@ -487,7 +485,7 @@ export default function DocumentsPage() {
                       onClick={() => void handleCreateLibrary()}
                       disabled={libraryCreateSubmitting || !String(libraryCreateDraft || '').trim()}
                     >
-                      {libraryCreateSubmitting ? '创建中...' : '新建知识库'}
+                      {libraryCreateSubmitting ? '创建中...' : '新建数据集'}
                     </button>
                   </div>
                 </section>
@@ -498,7 +496,6 @@ export default function DocumentsPage() {
                   libraries={libraries}
                   activeLibrary={activeLibrary}
                   activeLibraryRecord={activeLibraryRecord}
-                  activeLibrarySettingsDraft={activeLibrarySettingsDraft}
                   onSelectLibrary={setActiveLibrary}
                   getLibraryDocumentCount={getLibraryDocumentCount}
                   visibleItems={visibleItems}
@@ -509,10 +506,19 @@ export default function DocumentsPage() {
                   onCreatePermissionLevelChange={setLibraryCreatePermissionLevel}
                   onCreateLibrary={() => void handleCreateLibrary()}
                   createSubmitting={libraryCreateSubmitting}
-                  onSettingsChange={handleLibrarySettingChange}
-                  onSaveSettings={(libraryKey) => void handleSaveLibrarySettings(libraryKey)}
-                  settingsSubmittingId={librarySettingsSubmittingId}
+                  settingsExpanded={librarySettingsExpanded}
+                  onToggleSettings={() => setLibrarySettingsExpanded((current) => !current)}
                 />
+
+                {librarySettingsExpanded ? (
+                  <LibrarySettingsPanel
+                    activeLibraryRecord={activeLibraryRecord}
+                    activeLibrarySettingsDraft={activeLibrarySettingsDraft}
+                    onSettingsChange={handleLibrarySettingChange}
+                    onSaveSettings={(libraryKey) => void handleSaveLibrarySettings(libraryKey)}
+                    settingsSubmittingId={librarySettingsSubmittingId}
+                  />
+                ) : null}
 
                 <DocumentFiltersBar
                   totalFiles={totalFiles}
