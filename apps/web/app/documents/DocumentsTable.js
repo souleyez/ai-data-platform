@@ -1,5 +1,36 @@
 'use client';
 
+function renderCanonicalSource(item) {
+  const source = String(item?.canonicalSource || '').trim();
+  const label = (() => {
+    switch (source) {
+      case 'existing-markdown':
+        return '现成 MD';
+      case 'markitdown':
+        return 'MarkItDown';
+      case 'full-text':
+        return '旧正文';
+      case 'none':
+        return '未生成';
+      default:
+        return '';
+    }
+  })();
+  if (!label) return null;
+
+  const color = source === 'none' || item?.markdownError
+    ? '#b91c1c'
+    : source === 'full-text'
+      ? '#92400e'
+      : '#166534';
+
+  return (
+    <span style={{ fontSize: 12, color }}>
+      canonical: {label}
+    </span>
+  );
+}
+
 function renderParseStage(item, parseMethodLabels) {
   const methodLabel = parseMethodLabels[item.parseMethod] || item.parseMethod || '-';
   const stageLabel = item.parseStage === 'detailed' ? '进阶解析' : '快速解析';
@@ -29,6 +60,7 @@ function renderParseStage(item, parseMethodLabels) {
       <span style={isFailed ? { color: '#b91c1c', fontWeight: 600 } : undefined}>{item.parseStatus || '-'}</span>
       <span style={{ fontSize: 12, color: '#64748b' }}>{methodLabel}</span>
       <span style={{ fontSize: 12, color: '#64748b' }}>{stageLabel}</span>
+      {renderCanonicalSource(item)}
       {detailStatusLabel ? (
         <span style={{ fontSize: 12, color: item.detailParseStatus === 'failed' ? '#b91c1c' : '#475569' }}>
           {detailStatusLabel}

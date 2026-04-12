@@ -33,6 +33,9 @@ const documentConfig = await importFresh<typeof import('../src/lib/document-conf
 const documentStore = await importFresh<typeof import('../src/lib/document-store.js')>(
   '../src/lib/document-store.js',
 );
+const documentDeepParseQueue = await importFresh<typeof import('../src/lib/document-deep-parse-queue.js')>(
+  '../src/lib/document-deep-parse-queue.js',
+);
 const documentUploadIngest = await importFresh<typeof import('../src/lib/document-upload-ingest.js')>(
   '../src/lib/document-upload-ingest.js',
 );
@@ -226,6 +229,7 @@ test('platform control should expose capability registry metadata', async () => 
   assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.update-library'));
   assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.delete-library'));
   assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.import-local'));
+  assert.ok(documentsArea?.commands?.some((item) => item.key === 'documents.canonical-backfill'));
   const reportsArea = areas.find((item) => item.id === 'reports');
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.templates'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-from-document'));
@@ -283,6 +287,127 @@ test('platform control should expose document memory sync status', async () => {
   assert.equal(result.action, 'documents.sync-status');
   assert.equal((result.data as { status?: string })?.status, 'success');
   assert.equal((result.data as { lastResult?: { documentCount?: number } })?.lastResult?.documentCount, 12);
+});
+
+test('platform control should queue canonical markdown backfill candidates into the detailed parse queue', async () => {
+  const generatedAt = '2026-04-12T08:00:00.000Z';
+  const scanRoot = path.join(storageRoot, 'files');
+  const configFile = path.join(storageRoot, 'config', 'document-categories.json');
+  const librariesFile = path.join(storageRoot, 'config', 'document-libraries.json');
+  const cacheFile = path.join(storageRoot, 'cache', 'documents-cache.json');
+  const queueFile = path.join(storageRoot, 'cache', 'document-deep-parse-queue.json');
+
+  await fs.mkdir(path.dirname(configFile), { recursive: true });
+  await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+  await fs.writeFile(configFile, JSON.stringify({
+    scanRoot,
+    scanRoots: [scanRoot],
+    updatedAt: generatedAt,
+  }, null, 2), 'utf8');
+  await fs.writeFile(librariesFile, JSON.stringify({
+    items: [
+      {
+        key: 'ungrouped',
+        label: '未分组',
+        description: '系统保留未分组文档',
+        permissionLevel: 0,
+        createdAt: generatedAt,
+      },
+    ],
+  }, null, 2), 'utf8');
+  await fs.writeFile(cacheFile, JSON.stringify({
+    generatedAt,
+    scanRoot,
+    scanRoots: [scanRoot],
+    totalFiles: 4,
+    scanSignature: 'sig-canonical-backfill',
+    indexedPaths: [
+      path.join(scanRoot, 'legacy.html'),
+      path.join(scanRoot, 'note.md'),
+      path.join(scanRoot, 'ready.html'),
+      path.join(scanRoot, 'failed.mp3'),
+    ],
+    items: [
+      {
+        path: path.join(scanRoot, 'legacy.html'),
+        name: 'legacy.html',
+        ext: '.html',
+        title: 'Legacy html',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        fullText: 'Legacy body only',
+        summary: 'legacy',
+      },
+      {
+        path: path.join(scanRoot, 'note.md'),
+        name: 'note.md',
+        ext: '.md',
+        title: 'Existing markdown',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'quick',
+        detailParseStatus: 'queued',
+        fullText: '# Title',
+        summary: 'note',
+      },
+      {
+        path: path.join(scanRoot, 'ready.html'),
+        name: 'ready.html',
+        ext: '.html',
+        title: 'Ready html',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'parsed',
+        parseStage: 'detailed',
+        detailParseStatus: 'succeeded',
+        fullText: 'Canonical body',
+        markdownText: '# Canonical body',
+        markdownMethod: 'markitdown',
+        summary: 'ready',
+      },
+      {
+        path: path.join(scanRoot, 'failed.mp3'),
+        name: 'failed.mp3',
+        ext: '.mp3',
+        title: 'Failed audio',
+        category: 'general',
+        bizCategory: 'general',
+        parseStatus: 'error',
+        parseStage: 'detailed',
+        detailParseStatus: 'failed',
+        summary: 'failed',
+        markdownError: 'markitdown-unavailable',
+      },
+    ],
+  }, null, 2), 'utf8');
+  await fs.writeFile(queueFile, JSON.stringify({
+    updatedAt: generatedAt,
+    items: [],
+  }, null, 2), 'utf8');
+
+  const result = await platformControl.executePlatformControlCommand([
+    'documents',
+    'canonical-backfill',
+    '--limit',
+    '10',
+  ]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'documents.canonical-backfill');
+  assert.equal((result.data as { matchedCount?: number })?.matchedCount, 3);
+  assert.equal((result.data as { queuedCount?: number })?.queuedCount, 3);
+
+  const queueState = await documentDeepParseQueue.readDetailedParseQueueState();
+  const queuedPaths = queueState.items.map((item) => item.path).sort();
+  assert.deepEqual(queuedPaths, [
+    path.join(scanRoot, 'failed.mp3'),
+    path.join(scanRoot, 'legacy.html'),
+    path.join(scanRoot, 'note.md'),
+  ]);
 });
 
 test('platform control should capture one url into the requested knowledge library', async () => {

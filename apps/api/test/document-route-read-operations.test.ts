@@ -103,6 +103,8 @@ test('document read operations should stay read-only and expose read telemetry',
   assert.equal(typeof indexPayload.durationMs, 'number');
   assert.equal(indexPayload.items.length, 1);
   assert.equal(indexPayload.items[0]?.groupConfirmedAt, legacyConfirmedAt);
+  assert.equal(indexPayload.items[0]?.canonicalSource, 'none');
+  assert.equal(indexPayload.items[0]?.markdownMethod, undefined);
 
   assert.equal(overviewPayload.cacheHit, true);
   assert.equal(overviewPayload.loadedFrom, 'cache');

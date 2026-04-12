@@ -56,6 +56,14 @@ export async function reclusterUngroupedDocuments() {
   return requestJson('/api/documents/recluster-ungrouped', { method: 'POST' });
 }
 
+export async function backfillCanonicalDocuments(limit = 50, runImmediately = false) {
+  return requestJson('/api/documents/deep-parse/backfill', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ limit, runImmediately }),
+  });
+}
+
 export async function ignoreDocuments(items) {
   return requestJson('/api/documents/ignore', {
     method: 'POST',

@@ -11,6 +11,7 @@ import useMobileViewport from '../lib/use-mobile-viewport';
 import { formatDocumentBusinessResult } from '../lib/types';
 import {
   acceptDocumentGroupSuggestions,
+  backfillCanonicalDocuments,
   createDocumentLibrary,
   fetchDatasources,
   fetchDocuments,
@@ -35,14 +36,20 @@ import {
 const PARSE_METHOD_LABELS = {
   'text-utf8': 'UTF-8 文本',
   'markdown-utf8': 'Markdown',
+  'existing-markdown': '现成 Markdown',
   'csv-utf8': 'CSV',
   'json-parse': 'JSON',
   'html-strip': 'HTML 清洗',
   mammoth: 'DOCX 提取',
+  markitdown: 'MarkItDown',
   'xlsx-sheet-reader': '表格读取',
   'pdf-parse': 'PDF 文本',
   pypdf: 'PyPDF',
   'pdf-auto': 'PDF 自动解析',
+  'image-ocr+vlm': '图片 OCR + VLM',
+  'presentation-vlm': '演示稿 VLM',
+  'pdf-vlm': 'PDF VLM',
+  'audio-pending': '音频待进阶解析',
   'ocr-fallback': 'OCR fallback',
   unsupported: '暂不支持',
   error: '解析失败',
@@ -104,6 +111,7 @@ export default function DocumentsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanLoading, setScanLoading] = useState(false);
+  const [canonicalBackfillLoading, setCanonicalBackfillLoading] = useState(false);
   const [error, setError] = useState('');
   const [scanMessage, setScanMessage] = useState('');
   const [sidebarSources, setSidebarSources] = useState(DEFAULT_SIDEBAR_SOURCES);
@@ -163,6 +171,27 @@ export default function DocumentsPage() {
       setScanMessage('未分组文档重新分组失败，请稍后重试');
     } finally {
       setScanLoading(false);
+    }
+  };
+
+  const handleCanonicalBackfill = async () => {
+    if (canonicalBackfillLoading) return;
+    try {
+      setCanonicalBackfillLoading(true);
+      setScanMessage('');
+      const json = await backfillCanonicalDocuments(50, false);
+      await loadDocuments();
+      const matchedCount = Number(json?.matchedCount || json?.data?.matchedCount || 0);
+      const queuedCount = Number(json?.queuedCount || json?.data?.queuedCount || 0);
+      setScanMessage(
+        matchedCount > 0
+          ? `已加入 ${queuedCount}/${matchedCount} 份 Canonical 解析回填任务`
+          : '当前没有需要回填 Canonical 解析的文档',
+      );
+    } catch {
+      setScanMessage('Canonical 解析回填失败，请稍后重试');
+    } finally {
+      setCanonicalBackfillLoading(false);
     }
   };
 
@@ -400,6 +429,16 @@ export default function DocumentsPage() {
           <div className="topbar-actions">
             <a className="ghost-btn" href="/#upload-document">添加文档</a>
             <button className="ghost-btn" type="button" onClick={() => void loadDocuments()}>刷新</button>
+            {!mobileViewport ? (
+              <button
+                className="ghost-btn"
+                type="button"
+                onClick={() => void handleCanonicalBackfill()}
+                disabled={canonicalBackfillLoading}
+              >
+                {canonicalBackfillLoading ? '回填排队中...' : '回填 Canonical 解析'}
+              </button>
+            ) : null}
             {!mobileViewport ? (
               <button className="primary-btn" type="button" onClick={() => void handlePrimaryScan()} disabled={scanLoading}>
                 {scanLoading ? '处理中...' : '立即扫描未分组文档'}

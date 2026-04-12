@@ -113,6 +113,11 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         description: 'Run one batch of detailed parsing.',
       },
       {
+        key: 'documents.canonical-backfill',
+        command: 'pnpm system:control -- documents canonical-backfill [--limit 50] [--run true]',
+        description: 'Queue documents that still rely on legacy full text into the canonical markdown/VLM detailed-parse path.',
+      },
+      {
         key: 'documents.organize',
         command: 'pnpm system:control -- documents organize',
         description: 'Run auto-grouping against current libraries.',

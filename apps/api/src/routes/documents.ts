@@ -20,6 +20,8 @@ import {
   loadDocumentsIndexRoutePayload,
   loadDocumentsOverviewRoutePayload,
   loadDocumentLibrariesPayload,
+  runDocumentCanonicalBackfillAction,
+  runDocumentCanonicalBackfillByIdAction,
   runDocumentDeepParseAction,
   runDocumentOrganizeAction,
   runDocumentReparseAction,
@@ -353,6 +355,20 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     };
   });
 
+  app.post('/documents/deep-parse/backfill', async (request) => {
+    const body = (request.body || {}) as { limit?: number; runImmediately?: boolean };
+    const result = await runDocumentCanonicalBackfillAction(body.limit, body.runImmediately === true);
+
+    return {
+      status: 'completed',
+      mode: 'read-only',
+      ...result,
+      message: result.runImmediately
+        ? `已匹配 ${result.matchedCount} 条文档进入 canonical backfill，并立即执行了一轮详细解析。`
+        : `已匹配 ${result.matchedCount} 条文档进入 canonical backfill 队列。`,
+    };
+  });
+
   app.post('/documents/reparse', async (request, reply) => {
     const body = (request.body || {}) as { items?: Array<{ id?: string }> };
     const ids = Array.isArray(body.items) ? body.items.map((item) => String(item?.id || '').trim()).filter(Boolean) : [];
@@ -419,6 +435,31 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'document update failed';
+      const code = message === 'document not found' ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/documents/:id/canonical-backfill', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { runImmediately?: unknown };
+
+    try {
+      const result = await runDocumentCanonicalBackfillByIdAction(
+        id,
+        body.runImmediately === true || String(body.runImmediately || '').trim().toLowerCase() === 'true',
+      );
+      return {
+        status: 'completed',
+        ...result,
+        message: result.matchedCount
+          ? (result.runImmediately
+            ? '当前文档已加入 canonical backfill，并立即执行了一轮详细解析。'
+            : '当前文档已加入 canonical backfill 队列。')
+          : '当前文档不需要 canonical backfill。',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'document canonical backfill failed';
       const code = message === 'document not found' ? 404 : 400;
       return reply.code(code).send({ error: message });
     }

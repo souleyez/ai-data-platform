@@ -43,6 +43,31 @@ function formatFieldValue(value) {
   return text || '-';
 }
 
+function resolveCanonicalSource(item) {
+  if (String(item?.markdownText || '').trim()) {
+    return String(item?.markdownMethod || '').trim() === 'existing-markdown'
+      ? 'existing-markdown'
+      : 'markitdown';
+  }
+  if (String(item?.fullText || '').trim()) return 'full-text';
+  return 'none';
+}
+
+function formatCanonicalSource(value) {
+  switch (String(value || '').trim()) {
+    case 'existing-markdown':
+      return '现成 Markdown';
+    case 'markitdown':
+      return 'MarkItDown';
+    case 'full-text':
+      return '旧正文';
+    case 'none':
+      return '未生成';
+    default:
+      return '-';
+  }
+}
+
 function extractFieldDetails(profile) {
   const details = profile && typeof profile === 'object' && !Array.isArray(profile)
     ? profile.fieldDetails
@@ -259,6 +284,7 @@ export default function DocumentAnalysisPanel({
   const [libraryKnowledge, setLibraryKnowledge] = useState(extractLibraryKnowledgeSummaries(initialLibraryKnowledge));
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [backfillingCanonical, setBackfillingCanonical] = useState(false);
   const [clearingFeedback, setClearingFeedback] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -289,6 +315,9 @@ export default function DocumentAnalysisPanel({
   );
   const detailMeta = useMemo(() => ([
     { label: '解析链路', value: item?.parseMethod || '-' },
+    { label: 'Canonical 来源', value: formatCanonicalSource(resolveCanonicalSource(item)) },
+    { label: 'Markdown 方法', value: item?.markdownMethod || '-' },
+    { label: 'Markdown 时间', value: formatDateTime(item?.markdownGeneratedAt) },
     { label: '深度解析状态', value: item?.detailParseStatus || '-' },
     { label: '最近解析时间', value: formatDateTime(item?.detailParsedAt) },
     { label: '视觉模型', value: item?.cloudStructuredModel || '-' },
@@ -296,7 +325,7 @@ export default function DocumentAnalysisPanel({
     { label: '证据块数量', value: String(evidenceCount) },
     { label: '字段元数据数量', value: String(fieldDetails.length) },
     { label: '表格摘要', value: tableSummary ? '已提取' : '无' },
-  ]), [evidenceCount, fieldDetails.length, item?.analysisEditedAt, item?.cloudStructuredModel, item?.detailParseStatus, item?.detailParsedAt, item?.parseMethod, tableSummary]);
+  ]), [evidenceCount, fieldDetails.length, item, item?.analysisEditedAt, item?.cloudStructuredModel, item?.detailParseStatus, item?.detailParsedAt, item?.markdownGeneratedAt, item?.markdownMethod, item?.parseMethod, tableSummary]);
 
   function handleStartEdit() {
     setSummaryDraft(String(item?.summary || ''));
@@ -375,6 +404,30 @@ export default function DocumentAnalysisPanel({
     }
   }
 
+  async function handleCanonicalBackfill() {
+    if (!item?.id || backfillingCanonical) return;
+    setBackfillingCanonical(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(item.id)}/canonical-backfill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runImmediately: false }),
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        throw new Error(data?.error || '加入 canonical backfill 失败');
+      }
+      setNotice(data?.message || '已加入 canonical backfill 队列');
+    } catch (backfillError) {
+      setError(backfillError instanceof Error ? backfillError.message : '加入 canonical backfill 失败');
+    } finally {
+      setBackfillingCanonical(false);
+    }
+  }
+
   return (
     <section className="card documents-card">
       <div className="panel-header">
@@ -383,9 +436,14 @@ export default function DocumentAnalysisPanel({
           <p>查看摘要、结构化结果、字段置信度、证据块，以及当前知识库的解析反馈回流状态。</p>
         </div>
         {!editing ? (
-          <button type="button" className="ghost-btn" onClick={handleStartEdit}>
-            编辑解析结果
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="ghost-btn" onClick={handleCanonicalBackfill} disabled={backfillingCanonical}>
+              {backfillingCanonical ? '回填排队中...' : '立即回填当前文档'}
+            </button>
+            <button type="button" className="ghost-btn" onClick={handleStartEdit}>
+              编辑解析结果
+            </button>
+          </div>
         ) : (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="ghost-btn" onClick={handleCancel} disabled={saving}>
@@ -415,6 +473,30 @@ export default function DocumentAnalysisPanel({
             <h4 style={{ marginBottom: 8 }}>解析摘要</h4>
             <div className="preview-meta-line" style={{ whiteSpace: 'pre-wrap' }}>
               {item?.summary || '-'}
+            </div>
+          </section>
+
+          <section>
+            <h4 style={{ marginBottom: 8 }}>Canonical 文本状态</h4>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <div className="message-refs">
+                <span className="source-chip">来源：{formatCanonicalSource(resolveCanonicalSource(item))}</span>
+                <span className="source-chip">方法：{item?.markdownMethod || '-'}</span>
+                <span className="source-chip">生成时间：{formatDateTime(item?.markdownGeneratedAt)}</span>
+              </div>
+              {item?.markdownError ? (
+                <div className="preview-meta-line" style={{ color: '#b91c1c' }}>
+                  Markdown 解析失败：{item.markdownError}
+                </div>
+              ) : (
+                <div className="preview-meta-line">
+                  {resolveCanonicalSource(item) === 'full-text'
+                    ? '当前仍在使用旧正文作为 canonical text，建议加入 canonical backfill。'
+                    : resolveCanonicalSource(item) === 'none'
+                      ? '当前还没有可用的 canonical text。'
+                      : '当前 canonical text 已就绪。'}
+                </div>
+              )}
             </div>
           </section>
 

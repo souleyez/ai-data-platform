@@ -48,6 +48,7 @@ import {
   updateManagedDocumentLibrary,
 } from './document-route-services.js';
 import {
+  runDocumentCanonicalBackfillAction,
   runDocumentDeepParseAction,
   runDocumentOrganizeAction,
   runDocumentReparseAction,
@@ -769,6 +770,18 @@ async function runDocumentCommand(subcommand: string, flags: CommandFlags): Prom
       ok: true,
       action: 'documents.deep-parse',
       summary: `Detailed parse batch completed.`,
+      data: result as Record<string, unknown>,
+    };
+  }
+
+  if (subcommand === 'canonical-backfill') {
+    const result = await runDocumentCanonicalBackfillAction(flags.limit, resolveBooleanFlag(flags.run));
+    return {
+      ok: true,
+      action: 'documents.canonical-backfill',
+      summary: result.runImmediately
+        ? `Queued ${result.queuedCount}/${result.matchedCount} canonical backfill candidates and ran one detailed-parse batch.`
+        : `Queued ${result.queuedCount}/${result.matchedCount} canonical backfill candidates.`,
       data: result as Record<string, unknown>,
     };
   }

@@ -5,6 +5,8 @@ export {
 } from './document-route-read-operations.js';
 
 export {
+  runDocumentCanonicalBackfillAction,
+  runDocumentCanonicalBackfillByIdAction,
   runDocumentOrganizeAction,
   runReclusterUngroupedAction,
   runDocumentDeepParseAction,
