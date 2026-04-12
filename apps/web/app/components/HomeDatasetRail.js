@@ -76,7 +76,6 @@ export default function HomeDatasetRail({
             >
               <span className="home-dataset-rail-accent" aria-hidden="true" />
               <span className="home-dataset-rail-item-label">{library.label || library.name || library.key}</span>
-              {active ? <span className="home-dataset-rail-selected">已选</span> : null}
               <span className="library-permission-pill">L{normalizePermissionLevel(library.permissionLevel)}</span>
               <span className="library-tab-count">{Number(library.documentCount || 0)}</span>
             </button>

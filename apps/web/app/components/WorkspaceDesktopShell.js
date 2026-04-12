@@ -6,7 +6,20 @@ import HomeDatasetRail from './HomeDatasetRail';
 import HomeWorkspaceToolbar from './HomeWorkspaceToolbar';
 
 function sortLibrariesForRail(libraries = []) {
+  function getAuditScore(library) {
+    return Number(
+      library?.auditQualityScore
+      ?? library?.qualityScore
+      ?? library?.referenceCount
+      ?? library?.citationCount
+      ?? ((Number(library?.answerReferenceCount || 0) * 2) + Number(library?.reportReferenceCount || 0))
+      ?? 0,
+    ) || 0;
+  }
+
   return [...libraries].sort((a, b) => {
+    const auditDiff = getAuditScore(b) - getAuditScore(a);
+    if (auditDiff !== 0) return auditDiff;
     const countDiff = Number(b?.documentCount || 0) - Number(a?.documentCount || 0);
     if (countDiff !== 0) return countDiff;
     return String(a?.label || a?.name || a?.key || '').localeCompare(

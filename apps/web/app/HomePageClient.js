@@ -11,7 +11,20 @@ import HomeWorkspaceToolbar from './components/HomeWorkspaceToolbar';
 import { useHomePageController } from './use-home-page-controller';
 
 function sortLibrariesForRail(libraries = []) {
+  function getAuditScore(library) {
+    return Number(
+      library?.auditQualityScore
+      ?? library?.qualityScore
+      ?? library?.referenceCount
+      ?? library?.citationCount
+      ?? ((Number(library?.answerReferenceCount || 0) * 2) + Number(library?.reportReferenceCount || 0))
+      ?? 0,
+    ) || 0;
+  }
+
   return [...libraries].sort((a, b) => {
+    const auditDiff = getAuditScore(b) - getAuditScore(a);
+    if (auditDiff !== 0) return auditDiff;
     const countDiff = Number(b?.documentCount || 0) - Number(a?.documentCount || 0);
     if (countDiff !== 0) return countDiff;
     return String(a?.label || a?.name || a?.key || '').localeCompare(String(b?.label || b?.name || b?.key || ''), 'zh-CN');
@@ -75,7 +88,7 @@ export default function HomePageClient({ initialModelState }) {
     const selectedSet = new Set(preferredLibraries);
     return orderedLibraries.filter((item) => selectedSet.has(item.key));
   }, [orderedLibraries, preferredLibraries]);
-  const allSelected = Boolean(allLibraryKeys.length) && selectedLibraries.length === allLibraryKeys.length;
+  const allSelected = !selectedLibraries.length || (Boolean(allLibraryKeys.length) && selectedLibraries.length === allLibraryKeys.length);
   const preferredDocumentTotal = useMemo(
     () => selectedLibraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0),
     [selectedLibraries],
@@ -199,7 +212,7 @@ export default function HomePageClient({ initialModelState }) {
             totalDocuments={documentTotal}
             selectedKeys={preferredLibraries}
             onToggleLibrary={handleTogglePreferredLibrary}
-            onClearSelection={() => setPreferredLibraries(allLibraryKeys)}
+            onClearSelection={() => setPreferredLibraries([])}
             onCreateLibrary={handleCreateLibrary}
             creating={libraryCreateBusy}
             clearChipActive={allSelected}

@@ -12,12 +12,12 @@ function applyTheme(mode) {
 }
 
 export default function ThemeToggleButton({ compact = true }) {
-  const [mode, setMode] = useState('light');
+  const [mode, setMode] = useState('dark');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    const nextMode = stored === 'dark' ? 'dark' : 'light';
+    const nextMode = stored === 'light' ? 'light' : 'dark';
     setMode(nextMode);
     applyTheme(nextMode);
   }, []);

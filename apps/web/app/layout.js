@@ -18,7 +18,7 @@ export default function RootLayout({ children }) {
               (function () {
                 try {
                   var mode = localStorage.getItem('aidp_theme_mode_v1');
-                  var nextMode = mode === 'dark' ? 'dark' : 'light';
+                  var nextMode = mode === 'light' ? 'light' : 'dark';
                   document.documentElement.dataset.theme = nextMode;
                   document.documentElement.style.colorScheme = nextMode;
                 } catch (error) {}

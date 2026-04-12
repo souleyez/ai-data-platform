@@ -27,6 +27,7 @@ import { initialMessages, sourceItems } from './lib/mock-data';
 
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
 const CHAT_CONVERSATION_STATE_STORAGE_KEY = 'aidp_home_chat_conversation_state_v1';
+const HOME_PREFERRED_LIBRARIES_STORAGE_KEY = 'aidp_home_preferred_libraries_v1';
 
 function loadStoredSystemConstraints() {
   if (typeof window === 'undefined') return '';
@@ -49,6 +50,19 @@ function loadStoredConversationState() {
   }
 }
 
+function loadStoredPreferredLibraries() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(HOME_PREFERRED_LIBRARIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry) => typeof entry === 'string' && entry.trim());
+  } catch {
+    return [];
+  }
+}
+
 export function useHomePageController() {
   const [messages, setMessages] = useState(() => loadStoredChatMessages(initialMessages));
   const uploadInputRef = useRef(null);
@@ -64,7 +78,7 @@ export function useHomePageController() {
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
-  const [preferredLibraries, setPreferredLibraries] = useState([]);
+  const [preferredLibraries, setPreferredLibraries] = useState(() => loadStoredPreferredLibraries());
   const preferredLibrariesInitializedRef = useRef(false);
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
   const [conversationState, setConversationState] = useState(() => loadStoredConversationState());
@@ -89,7 +103,9 @@ export function useHomePageController() {
       if (!preferredLibrariesInitializedRef.current && libraries.length) {
         preferredLibrariesInitializedRef.current = true;
         setPreferredLibraries((current) => (
-          current.length ? current : libraries.map((item) => item.key).filter(Boolean)
+          current.length
+            ? current.filter((key) => libraries.some((item) => item.key === key))
+            : []
         ));
       }
     } catch {
@@ -151,6 +167,19 @@ export function useHomePageController() {
       // Ignore local persistence failures.
     }
   }, [conversationState]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (preferredLibraries.length) {
+        window.localStorage.setItem(HOME_PREFERRED_LIBRARIES_STORAGE_KEY, JSON.stringify(preferredLibraries));
+      } else {
+        window.localStorage.removeItem(HOME_PREFERRED_LIBRARIES_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore local persistence failures.
+    }
+  }, [preferredLibraries]);
 
   useEffect(() => {
     if (!reportItems.length) {
