@@ -76,7 +76,7 @@ export default function InsightPanel({
       ) : null}
       <ReportResultsPanel
         title="已出报表"
-        description="首页始终保留当前报表区，这里只保留查看、下载和删除。"
+        description=""
         items={reportItems}
         selectedReportId={selectedReportId}
         onSelectReport={onSelectReport}
@@ -89,6 +89,7 @@ export default function InsightPanel({
         }}
         mobileViewport={mobileViewport}
         className="report-results-home"
+        showStepper={false}
       />
     </aside>
   );

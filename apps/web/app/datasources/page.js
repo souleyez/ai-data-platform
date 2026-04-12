@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from '../components/Sidebar';
+import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
 import { buildApiUrl } from '../lib/config';
 import { appendSystemMemoryEntry } from '../lib/chat-memory';
+import useMobileViewport from '../lib/use-mobile-viewport';
+import { createDocumentLibrary } from '../documents/api';
 import DatasourceComposerCard from './datasource-composer-card';
 import DatasourceManagedCard from './datasource-managed-card';
 import DatasourceRunCard from './datasource-run-card';
@@ -14,7 +17,6 @@ import {
   buildSidebarSources,
   copyText,
   EMPTY_FORM,
-  StatCard,
 } from './datasource-page-support';
 
 function hasCredentialSecret(secret) {
@@ -44,6 +46,7 @@ function rememberDatasourceFeedback(title, content, meta = '') {
 }
 
 export default function DatasourcesPage() {
+  const mobileViewport = useMobileViewport();
   const [legacyData, setLegacyData] = useState(null);
   const [managed, setManaged] = useState([]);
   const [definitions, setDefinitions] = useState([]);
@@ -133,9 +136,24 @@ export default function DatasourcesPage() {
 
   const definitionMap = useMemo(() => new Map(definitions.map((item) => [item.id, item])), [definitions]);
   const sidebarSources = useMemo(() => buildSidebarSources(managed, legacyData?.items || []), [legacyData, managed]);
-  const recentRuns = useMemo(() => runs.slice(0, 10), [runs]);
-  const stability = legacyData?.stability || null;
   const isLocalDirectory = form.kind === 'local_directory';
+  const selectedLibraries = useMemo(
+    () => libraries.filter((item) => form.targetKeys.includes(item.key)),
+    [form.targetKeys, libraries],
+  );
+  const selectedLibraryKeySet = useMemo(() => new Set(form.targetKeys), [form.targetKeys]);
+  const filteredManaged = useMemo(() => {
+    if (!selectedLibraryKeySet.size) return managed;
+    return managed.filter((item) =>
+      (item.targetLibraries || []).some((entry) => selectedLibraryKeySet.has(entry.key)),
+    );
+  }, [managed, selectedLibraryKeySet]);
+  const recentRuns = useMemo(() => {
+    const scopedRuns = !selectedLibraryKeySet.size
+      ? runs
+      : runs.filter((run) => (run.libraryKeys || []).some((key) => selectedLibraryKeySet.has(key)));
+    return scopedRuns.slice(0, 10);
+  }, [runs, selectedLibraryKeySet]);
 
   function updateForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
@@ -173,6 +191,27 @@ export default function DatasourcesPage() {
     setForm(EMPTY_FORM);
     setError('');
     setMessage('');
+  }
+
+  async function handleCreateLibrary(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed || saving) return false;
+    try {
+      const created = await createDocumentLibrary(trimmed, '');
+      await load();
+      const createdKey = String(created?.item?.key || '').trim();
+      if (createdKey) {
+        setForm((current) => ({
+          ...current,
+          targetKeys: current.targetKeys.includes(createdKey) ? current.targetKeys : [...current.targetKeys, createdKey],
+        }));
+      }
+      setMessage(`已新建数据集：${trimmed}`);
+      return true;
+    } catch {
+      setError('新建数据集失败');
+      return false;
+    }
   }
 
   async function createOrReuseCredential(currentForm) {
@@ -255,7 +294,7 @@ export default function DatasourcesPage() {
       setMessage(nextMessage);
       rememberDatasourceFeedback(
         form.id ? '数据源已更新' : '数据源已创建',
-        `${json.item?.name || form.name} 已保存，目标知识库：${(json.item?.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}`,
+        `${json.item?.name || form.name} 已保存，目标数据集：${(json.item?.targetLibraries || []).map((entry) => entry.label).join('、') || '未绑定'}`,
         json.item?.kind || form.kind,
       );
       if (form.kind === 'local_directory' && form.runAfterSave && json?.item?.id) {
@@ -341,148 +380,139 @@ export default function DatasourcesPage() {
     }
   }
 
+  const content = (
+    <>
+      {message ? <div className="datasource-message datasource-success">{message}</div> : null}
+      {error ? <div className="datasource-message datasource-error">{error}</div> : null}
+
+      {loading ? (
+        <section className="card documents-card">
+          <div className="loading-bubble">
+            <span className="loading-dot"></span>
+            <span className="loading-dot"></span>
+            <span className="loading-dot"></span>
+          </div>
+        </section>
+      ) : (
+        <>
+          <section className="documents-grid two-columns datasource-workbench-grid">
+            <DatasourceComposerCard
+              form={form}
+              isLocalDirectory={isLocalDirectory}
+              libraries={libraries}
+              selectedLibraries={selectedLibraries}
+              credentials={credentials}
+              saving={saving}
+              onUpdateForm={updateForm}
+              onToggleTargetLibrary={toggleTargetLibrary}
+              onSave={handleSave}
+              onStartNew={() => setForm(EMPTY_FORM)}
+              showTargetLibrariesSection={mobileViewport}
+            />
+
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>已管理数据源</h3>
+                  <p>
+                    {selectedLibraries.length
+                      ? `当前只显示这些数据集关联的采集源：${selectedLibraries.map((item) => item.label).join('、')}`
+                      : '当前显示全部采集源；左侧选择数据集后会自动收口。'}
+                  </p>
+                </div>
+              </div>
+              {filteredManaged.length ? (
+                <div className="datasource-managed-list">
+                  {filteredManaged.map((item) => (
+                    <DatasourceManagedCard
+                      key={item.id}
+                      item={item}
+                      definition={definitionMap.get(item.id)}
+                      busyId={busyId}
+                      onEdit={setForm}
+                      onCopyPublicPath={handleCopyPublicPath}
+                      onManagedAction={handleManagedAction}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="report-empty-card">
+                  {selectedLibraries.length
+                    ? '当前所选数据集下还没有已管理采集源。'
+                    : '还没有已管理采集源。你可以先通过上面的工作栏整理一条采集需求。'}
+                </div>
+              )}
+            </section>
+
+            <section className="card documents-card">
+              <div className="panel-header">
+                <div>
+                  <h3>最近运行记录</h3>
+                  <p>
+                    {selectedLibraries.length
+                      ? `当前只显示这些数据集相关的最近运行：${selectedLibraries.map((item) => item.label).join('、')}`
+                      : '查看执行状态、采集数量和落库结果概览，不在这里展示实际采集正文。'}
+                  </p>
+                </div>
+              </div>
+              {recentRuns.length ? (
+                <div className="datasource-run-list">
+                  {recentRuns.map((run) => (
+                    <DatasourceRunCard
+                      key={run.id}
+                      run={run}
+                      deleting={busyId === `${run.id}:delete-run`}
+                      onDelete={handleDeleteRun}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="report-empty-card">
+                  {selectedLibraries.length
+                    ? '当前所选数据集还没有相关运行记录。'
+                    : '还没有运行记录。保存一条数据源后即可触发采集并在这里查看结果。'}
+                </div>
+              )}
+            </section>
+          </section>
+        </>
+      )}
+    </>
+  );
+
+  if (!mobileViewport) {
+    return (
+      <WorkspaceDesktopShell
+        currentPath="/datasources"
+        sourceItems={sidebarSources}
+        libraries={libraries}
+        totalDocuments={libraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
+        selectedKeys={form.targetKeys}
+        onToggleLibrary={toggleTargetLibrary}
+        onClearSelection={() => updateForm({ targetKeys: [] })}
+        onCreateLibrary={handleCreateLibrary}
+        creating={saving}
+        railShowClearChip={false}
+        railSelectionSummaryLabel={`已选 ${form.targetKeys.length}`}
+      >
+        {content}
+      </WorkspaceDesktopShell>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Sidebar sourceItems={sidebarSources} currentPath="/datasources" />
       <main className="main-panel">
-        <div className="topbar">
+        <header className="topbar">
           <div>
-            <div className="topbar-title-row">
-              <h2>数据源工作台</h2>
-              <span className="topbar-inline-note">
-                统一管理公开网页、登录网页、数据库和 ERP 采集任务，结果自动落到指定知识库并走后台深度解析。
-              </span>
-            </div>
-            <p>先用自然语言整理采集需求，再确认目标知识库、认证信息和执行频率。采集状态、运行记录和最近入库成果会持续沉淀在这里。</p>
+            <h2>采集源</h2>
           </div>
           <div className="topbar-actions">
             <button className="ghost-btn" type="button" onClick={resetComposer}>清空工作栏</button>
           </div>
-        </div>
-
-        {message ? <div className="datasource-message datasource-success">{message}</div> : null}
-        {error ? <div className="datasource-message datasource-error">{error}</div> : null}
-
-        {loading ? (
-          <section className="card documents-card">
-            <div className="loading-bubble">
-              <span className="loading-dot"></span>
-              <span className="loading-dot"></span>
-              <span className="loading-dot"></span>
-            </div>
-          </section>
-        ) : (
-          <section className="documents-layout">
-            <section className="card stats-grid">
-              <StatCard
-                label="阶段一告警"
-                value={stability ? String((stability.summary?.warningCount || 0) + (stability.summary?.criticalCount || 0)) : '-'}
-                subtle={stability ? `critical ${stability.summary?.criticalCount || 0} / warning ${stability.summary?.warningCount || 0}` : ''}
-              />
-              <StatCard
-                label="深解析积压"
-                value={stability ? String(stability.summary?.deepParseBacklog || 0) : '-'}
-                subtle="queued + processing"
-              />
-              <StatCard
-                label="采集失败任务"
-                value={stability ? String(stability.summary?.captureErrorTasks || 0) : '-'}
-                subtle="web capture error"
-              />
-              <StatCard
-                label="失败运行"
-                value={stability ? String(stability.summary?.datasourceFailedRuns || 0) : '-'}
-                subtle="recent datasource runs"
-              />
-            </section>
-
-            {stability?.warnings?.length ? (
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>阶段一稳定性</h3>
-                    <p>直接显示 backlog、失败和运行时告警，不需要再去翻本地 runtime JSON。</p>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {stability.warnings.slice(0, 8).map((warning) => (
-                    <span key={warning.key} className={`tag ${warning.level === 'critical' ? 'danger-tag' : 'warning-tag'}`}>
-                      {warning.title}
-                    </span>
-                  ))}
-                </div>
-                <div className="datasource-managed-meta" style={{ marginTop: 12 }}>
-                  <span>deep parse：{stability.backlog?.deepParseQueued || 0} queued / {stability.backlog?.deepParseProcessing || 0} processing</span>
-                  <span>dynamic outputs：{stability.backlog?.dynamicOutputs || 0}</span>
-                  <span>scheduled captures：{stability.backlog?.captureScheduled || 0}</span>
-                </div>
-              </section>
-            ) : null}
-
-            <section className="documents-grid two-columns datasource-workbench-grid">
-              <DatasourceComposerCard
-                form={form}
-                isLocalDirectory={isLocalDirectory}
-                libraries={libraries}
-                credentials={credentials}
-                saving={saving}
-                onUpdateForm={updateForm}
-                onToggleTargetLibrary={toggleTargetLibrary}
-                onSave={handleSave}
-                onStartNew={() => setForm(EMPTY_FORM)}
-              />
-
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>已管理数据源</h3>
-                    <p>在同一列表里查看状态、知识库归属、最近运行和直接操作。</p>
-                  </div>
-                </div>
-                {managed.length ? (
-                  <div className="datasource-managed-list">
-                    {managed.map((item) => (
-                      <DatasourceManagedCard
-                        key={item.id}
-                        item={item}
-                        definition={definitionMap.get(item.id)}
-                        busyId={busyId}
-                        onEdit={setForm}
-                        onCopyPublicPath={handleCopyPublicPath}
-                        onManagedAction={handleManagedAction}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="report-empty-card">还没有已管理数据源。你可以先通过上面的工作栏整理一条采集需求。</div>
-                )}
-              </section>
-
-              <section className="card documents-card">
-                <div className="panel-header">
-                  <div>
-                    <h3>最近运行记录</h3>
-                    <p>查看执行状态、采集数量和落库结果概览，不在这里展示实际采集正文。</p>
-                  </div>
-                </div>
-                {recentRuns.length ? (
-                  <div className="datasource-run-list">
-                    {recentRuns.map((run) => (
-                      <DatasourceRunCard
-                        key={run.id}
-                        run={run}
-                        deleting={busyId === `${run.id}:delete-run`}
-                        onDelete={handleDeleteRun}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="report-empty-card">还没有运行记录。保存一条数据源后即可触发采集并在这里查看结果。</div>
-                )}
-              </section>
-            </section>
-          </section>
-        )}
+        </header>
+        {content}
       </main>
     </div>
   );

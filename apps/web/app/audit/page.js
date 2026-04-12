@@ -2,9 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Sidebar from '../components/Sidebar';
+import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
 import { buildApiUrl } from '../lib/config';
 import { normalizeDatasourceResponse } from '../lib/types';
+import useMobileViewport from '../lib/use-mobile-viewport';
 import { sourceItems } from '../lib/mock-data';
+import { createDocumentLibrary } from '../documents/api';
 
 function StatCard({ label, value, subtle }) {
   return (
@@ -65,17 +68,21 @@ function renderStorageState(value) {
 }
 
 export default function AuditPage() {
+  const mobileViewport = useMobileViewport();
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [audit, setAudit] = useState(null);
+  const [libraries, setLibraries] = useState([]);
+  const [selectedLibraryKeys, setSelectedLibraryKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState('');
 
   async function loadAll() {
     setLoading(true);
     try {
-      const [datasourceResponse, auditResponse] = await Promise.all([
+      const [datasourceResponse, auditResponse, librariesResponse] = await Promise.all([
         fetch(buildApiUrl('/api/datasources')),
         fetch(buildApiUrl('/api/audit')),
+        fetch(buildApiUrl('/api/documents/libraries'), { cache: 'no-store' }),
       ]);
 
       if (datasourceResponse.ok) {
@@ -86,6 +93,10 @@ export default function AuditPage() {
 
       if (auditResponse.ok) {
         setAudit(await auditResponse.json());
+      }
+      if (librariesResponse.ok) {
+        const json = await librariesResponse.json();
+        setLibraries(Array.isArray(json?.items) ? json.items : []);
       }
     } finally {
       setLoading(false);
@@ -112,98 +123,66 @@ export default function AuditPage() {
     }
   }
 
+  async function handleCreateLibrary(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return false;
+    try {
+      await createDocumentLibrary(trimmed, '');
+      await loadAll();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const summary = useMemo(() => {
     if (!audit) return null;
+    const selectedSet = new Set(selectedLibraryKeys);
+    const filterBySelectedLibraries = (items) => {
+      if (!selectedSet.size) return items;
+      return items.filter((item) => Array.isArray(item?.libraries) && item.libraries.some((libraryKey) => selectedSet.has(libraryKey)));
+    };
+    const staleDocs = filterBySelectedLibraries((audit.documents || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended));
     return {
       storage: audit.storage,
       staleDays: audit.staleDays,
       hardDeleteDays: audit.hardDeleteDays,
-      stability: audit.stability || null,
-      staleDocs: (audit.documents || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
+      staleDocs,
       staleCaptures: (audit.captureTasks || []).filter((item) => item.cleanupRecommended || item.hardDeleteRecommended),
       logs: audit.logs || [],
     };
-  }, [audit]);
+  }, [audit, selectedLibraryKeys]);
+  const selectedLibraries = useMemo(
+    () => libraries.filter((item) => selectedLibraryKeys.includes(item.key)),
+    [libraries, selectedLibraryKeys],
+  );
 
-  return (
-    <div className="app-shell">
-      <Sidebar sourceItems={sidebarSources} currentPath="/audit" />
-      <main className="main-panel">
-        <header className="topbar">
-          <div>
-            <h2>AI审计</h2>
-            <p>把“清理原文件”和“彻底删除”拆开管理，长期低引用资料优先只删原件、保留结构化结果。</p>
-          </div>
-        </header>
-
-        <section className="documents-layout">
-          <section className="card stats-grid">
-            <StatCard
-              label="阶段一告警"
-              value={summary?.stability ? String((summary.stability.summary?.warningCount || 0) + (summary.stability.summary?.criticalCount || 0)) : '-'}
-              subtle={summary?.stability ? `critical ${summary.stability.summary?.criticalCount || 0} / warning ${summary.stability.summary?.warningCount || 0}` : ''}
-            />
-            <StatCard
-              label="深解析积压"
-              value={summary?.stability ? String(summary.stability.summary?.deepParseBacklog || 0) : '-'}
-              subtle="queued + processing"
-            />
-            <StatCard
-              label="采集异常任务"
-              value={summary?.stability ? String(summary.stability.summary?.captureErrorTasks || 0) : '-'}
-              subtle="capture error"
-            />
-            <StatCard
-              label="Dataviz平均耗时"
-              value={summary?.stability ? formatDurationMs(summary.stability.durations?.datavizAvgDurationMs) : '-'}
-              subtle="python dataviz"
-            />
-          </section>
-
-          {summary?.stability ? (
-            <section className="card table-card">
+  const auditContent = (
+    <>
+      <section className="documents-layout">
+          {selectedLibraries.length ? (
+            <section className="dataset-selection-panel">
               <div className="panel-header">
                 <div>
-                  <h3>阶段一稳定性</h3>
-                  <p>把 backlog、失败、渲染链异常和 memory sync 滞后统一收口到现有审计页里。</p>
+                  <h3>当前数据集上下文</h3>
+                  <p>左侧选择会收口文档类审计对象；采集源审计和审计日志仍保留全局视角。</p>
                 </div>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                {(summary.stability.warnings || []).map((warning) => (
-                  <span key={warning.key} className={`tag ${warning.level === 'critical' ? 'danger-tag' : 'warning-tag'}`}>
-                    {warning.title}
-                  </span>
+              <div className="dataset-selection-grid">
+                {selectedLibraries.map((library) => (
+                  <article key={library.key} className="dataset-selection-card">
+                    <div className="dataset-selection-head">
+                      <strong>{library.label}</strong>
+                      <span className="tag neutral-tag">L{Number(library.permissionLevel || 10)}</span>
+                    </div>
+                    <div className="dataset-selection-meta">
+                      <span>{Number(library.documentCount || 0)} 份文档</span>
+                      <span>{library.knowledgePagesEnabled ? '知识页已开启' : '知识页未开启'}</span>
+                    </div>
+                    {library.description ? <p className="dataset-selection-description">{library.description}</p> : null}
+                  </article>
                 ))}
-                {!(summary.stability.warnings || []).length ? (
-                  <span className="tag up-tag">当前没有阶段一稳定性告警</span>
-                ) : null}
               </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>任务族</th>
-                    <th>状态</th>
-                    <th>积压 / 处理中</th>
-                    <th>平均耗时</th>
-                    <th>最近异常</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['deepParse', '深解析', summary.stability.tasks?.deepParse, `${summary.stability.backlog?.deepParseQueued || 0} / ${summary.stability.backlog?.deepParseProcessing || 0}`, summary.stability.durations?.deepParseAvgDurationMs],
-                    ['memorySync', 'Memory Sync', summary.stability.tasks?.memorySync, '-', summary.stability.durations?.memorySyncAvgDurationMs],
-                    ['dataviz', 'Dataviz', summary.stability.tasks?.dataviz, '-', summary.stability.durations?.datavizAvgDurationMs],
-                  ].map(([key, label, task, backlog, avgDuration]) => (
-                    <tr key={key}>
-                      <td>{label}</td>
-                      <td>{task?.status || 'idle'}</td>
-                      <td>{String(backlog)}</td>
-                      <td>{formatDurationMs(avgDuration)}</td>
-                      <td className="summary-cell">{task?.lastErrorMessage || task?.lastMessage || '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </section>
           ) : null}
 
@@ -448,7 +427,38 @@ export default function AuditPage() {
               </tbody>
             </table>
           </section>
-        </section>
+      </section>
+    </>
+  );
+
+  if (!mobileViewport) {
+    return (
+      <WorkspaceDesktopShell
+        currentPath="/audit"
+        sourceItems={sidebarSources}
+        libraries={libraries}
+        totalDocuments={libraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
+        selectedKeys={selectedLibraryKeys}
+        onToggleLibrary={(libraryKey) => {
+          setSelectedLibraryKeys((current) => (
+            current.includes(libraryKey)
+              ? current.filter((item) => item !== libraryKey)
+              : [...current, libraryKey]
+          ));
+        }}
+        onClearSelection={() => setSelectedLibraryKeys([])}
+        onCreateLibrary={handleCreateLibrary}
+      >
+        {auditContent}
+      </WorkspaceDesktopShell>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <Sidebar sourceItems={sidebarSources} currentPath="/audit" />
+      <main className="main-panel">
+        {auditContent}
       </main>
     </div>
   );

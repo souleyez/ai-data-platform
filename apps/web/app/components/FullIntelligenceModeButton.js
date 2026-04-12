@@ -29,6 +29,7 @@ export default function FullIntelligenceModeButton({
   botConfigSlot = null,
   onAccessStateChange,
   showSystemConstraints = true,
+  compact = false,
 }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -183,13 +184,13 @@ export default function FullIntelligenceModeButton({
       <div className="mode-entry-wrap">
         <button
           type="button"
-          className={`ghost-btn mode-entry-btn ${mode === 'full' ? 'mode-entry-btn-active' : ''}`}
+          className={`ghost-btn mode-entry-btn ${mode === 'full' ? 'mode-entry-btn-active' : ''} ${compact ? 'mode-entry-btn-compact' : ''}`.trim()}
           onClick={handleClick}
           disabled={loading || submitting}
         >
           {submitting ? '处理中...' : buttonLabel}
         </button>
-        <span className="mode-entry-status">{statusLabel}</span>
+        {!compact ? <span className="mode-entry-status">{statusLabel}</span> : null}
       </div>
 
       {modalOpen ? (

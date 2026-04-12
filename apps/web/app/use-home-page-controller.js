@@ -64,6 +64,8 @@ export function useHomePageController() {
   const [documentLibraries, setDocumentLibraries] = useState([]);
   const [documentTotal, setDocumentTotal] = useState(0);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
+  const [preferredLibraries, setPreferredLibraries] = useState([]);
+  const preferredLibrariesInitializedRef = useRef(false);
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
   const [conversationState, setConversationState] = useState(() => loadStoredConversationState());
 
@@ -84,6 +86,12 @@ export function useHomePageController() {
       const total = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
       setDocumentLibraries(libraries);
       setDocumentTotal(total || Number(json?.totalFiles || 0));
+      if (!preferredLibrariesInitializedRef.current && libraries.length) {
+        preferredLibrariesInitializedRef.current = true;
+        setPreferredLibraries((current) => (
+          current.length ? current : libraries.map((item) => item.key).filter(Boolean)
+        ));
+      }
     } catch {
       setDocumentLibraries([]);
       setDocumentTotal(0);
@@ -195,6 +203,7 @@ export function useHomePageController() {
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,
+    preferredLibraries,
     setConversationState,
     systemConstraints,
     conversationState,
@@ -213,6 +222,7 @@ export function useHomePageController() {
     reportItems,
     selectedReportId,
     selectedManualLibraries,
+    preferredLibraries,
     conversationState,
     systemConstraints,
     sidebarSources,
@@ -221,11 +231,13 @@ export function useHomePageController() {
     setInput,
     setReportCollapsed,
     setSelectedManualLibraries,
+    setPreferredLibraries,
     setSelectedReportId,
     setConversationState,
     setSystemConstraints,
     deleteReport,
     resetConversation,
+    refreshHomeData,
     submitQuestion: (value) => submitQuestion(value, {
       ...baseActionContext,
       inputState: { isLoading, uploadLoading },

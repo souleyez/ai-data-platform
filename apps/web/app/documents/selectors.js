@@ -13,19 +13,24 @@ export function buildFilteredItems({
   keyword,
   activeExtension,
   activeLibrary,
+  selectedLibraries = [],
   libraries,
   libraryLabelMap,
 }) {
   const normalizedKeyword = keyword.trim().toLowerCase();
+  const selectedLibrarySet = new Set(Array.isArray(selectedLibraries) ? selectedLibraries : []);
+  const hasSelectedLibraries = selectedLibrarySet.size > 0;
 
   return visibleItems
     .filter((item) => {
       const effectiveGroups = getDocumentLibraryKeys(item, libraries);
       const extensionMatch = activeExtension === 'all' || item.ext === activeExtension;
-      const libraryMatch = activeLibrary === 'all'
-        || (activeLibrary === 'ungrouped'
-          ? isUngroupedDocument(item)
-          : effectiveGroups.includes(activeLibrary));
+      const libraryMatch = hasSelectedLibraries
+        ? effectiveGroups.some((group) => selectedLibrarySet.has(group))
+        : (activeLibrary === 'all'
+          || (activeLibrary === 'ungrouped'
+            ? isUngroupedDocument(item)
+            : effectiveGroups.includes(activeLibrary)));
       const haystack = [
         String(item?.name || ''),
         String(item?.summary || ''),

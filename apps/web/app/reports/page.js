@@ -3,10 +3,11 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
-import ConnectedBotsSummary from '../components/ConnectedBotsSummary';
 import GeneratedReportDetail from '../components/GeneratedReportDetail';
 import Sidebar from '../components/Sidebar';
+import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
 import {
+  createBot,
   fetchBots,
   fetchDatasources,
   updateBot,
@@ -31,6 +32,7 @@ import {
   normalizeReportsResponse,
 } from '../lib/types';
 import { sourceItems } from '../lib/mock-data';
+import { createDocumentLibrary } from '../documents/api';
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -50,6 +52,13 @@ function formatFileSize(size) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function buildTemplateLabelFromFileName(fileName, fallbackLabel) {
+  const trimmed = String(fileName || '').trim();
+  if (!trimmed) return fallbackLabel;
+  const normalized = trimmed.replace(/\.[^.]+$/, '').trim();
+  return normalized || fallbackLabel;
 }
 
 const REPORT_LAYOUT_VARIANTS = [
@@ -262,6 +271,7 @@ function ReportsPageContent() {
   const [botItems, setBotItems] = useState([]);
   const [botManageEnabled, setBotManageEnabled] = useState(false);
   const [documentLibraries, setDocumentLibraries] = useState([]);
+  const [selectedLibraryKeys, setSelectedLibraryKeys] = useState([]);
 
   async function loadReports() {
     try {
@@ -308,6 +318,26 @@ function ReportsPageContent() {
     }
   }
 
+  async function handleCreateLibrary(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return false;
+    try {
+      const created = await createDocumentLibrary(trimmed, '');
+      await loadBotContext();
+      const createdKey = String(created?.item?.key || '').trim();
+      if (createdKey) {
+        setSelectedLibraryKeys((current) => (
+          current.includes(createdKey) ? current : [...current, createdKey]
+        ));
+      }
+      setMessage(`已新建数据集：${trimmed}`);
+      return true;
+    } catch {
+      setMessage('新建数据集失败。');
+      return false;
+    }
+  }
+
   useEffect(() => {
     void loadReports();
     void loadSidebarSources();
@@ -319,10 +349,38 @@ function ReportsPageContent() {
     [data],
   );
 
-  const uploadedTemplateItems = useMemo(
-    () => buildUploadedTemplateItems(data?.templates || []),
-    [data],
+  const scopedLibraries = useMemo(
+    () => (selectedLibraryKeys.length
+      ? documentLibraries.filter((item) => selectedLibraryKeys.includes(item.key))
+      : documentLibraries),
+    [documentLibraries, selectedLibraryKeys],
   );
+
+  const selectedReportGroup = useMemo(
+    () => (selectedLibraryKeys.length === 1
+      ? (data?.groups || []).find((item) => item.key === selectedLibraryKeys[0]) || null
+      : null),
+    [data, selectedLibraryKeys],
+  );
+
+  const selectedGroupTemplateKeys = useMemo(() => {
+    if (!selectedLibraryKeys.length) return null;
+    const keys = new Set();
+    for (const group of data?.groups || []) {
+      if (!selectedLibraryKeys.includes(group.key)) continue;
+      for (const template of Array.isArray(group.templates) ? group.templates : []) {
+        if (template?.key) keys.add(template.key);
+      }
+      if (group.defaultTemplateKey) keys.add(group.defaultTemplateKey);
+    }
+    return keys;
+  }, [data, selectedLibraryKeys]);
+
+  const uploadedTemplateItems = useMemo(() => {
+    const items = buildUploadedTemplateItems(data?.templates || []);
+    if (!selectedGroupTemplateKeys) return items;
+    return items.filter((item) => selectedGroupTemplateKeys.has(item.templateKey));
+  }, [data, selectedGroupTemplateKeys]);
 
   useEffect(() => {
     if (!outputRecords.some((item) => item?.status === 'processing')) return undefined;
@@ -347,6 +405,12 @@ function ReportsPageContent() {
   async function saveConnectedBot(botId, payload) {
     await updateBot(botId, payload);
     await loadBotContext();
+  }
+
+  async function createConnectedBot(payload) {
+    const created = await createBot(payload);
+    await loadBotContext();
+    return created;
   }
 
   function startEditingTemplate(item) {
@@ -454,24 +518,22 @@ function ReportsPageContent() {
   }
 
   async function uploadTemplate() {
-    const label = String(templateDraft.label || '').trim();
-    const description = String(templateDraft.description || '').trim();
-    const link = String(templateDraft.link || '').trim();
-    const preferredLayoutVariant = String(templateDraft.preferredLayoutVariant || '').trim();
+    const label = buildTemplateLabelFromFileName(
+      templateFile?.name,
+      String(templateDraft.label || '').trim() || buildDefaultTemplateLabel(data?.templates || []),
+    );
+    const description = '';
+    const link = '';
+    const preferredLayoutVariant = '';
     const hasFile = Boolean(templateFile);
-    const hasLink = Boolean(link);
     let createdTemplate = null;
 
-    if (!label) {
-      setMessage('模板名称不能为空。');
+    if (!selectedReportGroup?.key) {
+      setMessage('请先在左侧只选中一个数据集分组。');
       return;
     }
-    if (hasFile && hasLink) {
-      setMessage('文件和网页链接二选一即可。');
-      return;
-    }
-    if (!hasFile && !hasLink) {
-      setMessage('请上传文件或填写网页链接。');
+    if (!hasFile) {
+      setMessage('请先选择模板文件。');
       return;
     }
 
@@ -484,7 +546,7 @@ function ReportsPageContent() {
         : 'web-link';
       const duplicate = findDuplicateTemplateUpload(data?.templates || [], {
         fileName: hasFile ? templateFile?.name : '',
-        url: hasLink ? link : '',
+        url: link || '',
       });
       if (duplicate) {
         throw new Error(`相同内容已存在于模板“${duplicate.templateLabel}”中，请不要重复上传。`);
@@ -506,28 +568,25 @@ function ReportsPageContent() {
       createdTemplate = json?.item || null;
       if (!createdTemplate?.key) throw new Error('template create failed');
 
-      if (hasFile) {
-        const formData = new FormData();
-        formData.append('file', templateFile);
-        const uploadResponse = await fetch(
-          `${buildApiUrl('/api/reports/template-reference')}?templateKey=${encodeURIComponent(createdTemplate.key)}`,
-          { method: 'POST', body: formData },
-        );
-        const uploadJson = await uploadResponse.json();
-        if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template reference failed');
-      } else {
-        const uploadResponse = await fetch(buildApiUrl('/api/reports/template-reference-link'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            templateKey: createdTemplate.key,
-            url: link,
-            label,
-          }),
-        });
-        const uploadJson = await uploadResponse.json();
-        if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template link failed');
-      }
+      const formData = new FormData();
+      formData.append('file', templateFile);
+      const uploadResponse = await fetch(
+        `${buildApiUrl('/api/reports/template-reference')}?templateKey=${encodeURIComponent(createdTemplate.key)}`,
+        { method: 'POST', body: formData },
+      );
+      const uploadJson = await uploadResponse.json();
+      if (!uploadResponse.ok) throw new Error(uploadJson?.error || 'upload template reference failed');
+
+      const groupResponse = await fetch(buildApiUrl('/api/reports/group-template'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupKey: selectedReportGroup.key,
+          templateKey: createdTemplate.key,
+        }),
+      });
+      const groupJson = await groupResponse.json();
+      if (!groupResponse.ok) throw new Error(groupJson?.error || 'set group template failed');
 
       await loadReports();
       setTemplateDraft({
@@ -540,7 +599,7 @@ function ReportsPageContent() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      setMessage('模板已上传并加入列表。');
+      setMessage(`模板已上传，并已设为“${selectedReportGroup.label}”默认模板。`);
     } catch (uploadError) {
       const shouldCleanup = typeof createdTemplate?.key === 'string' && createdTemplate.key;
       if (shouldCleanup) {
@@ -559,6 +618,46 @@ function ReportsPageContent() {
   }
 
   if (generatedId) {
+    if (!mobileViewport) {
+      return (
+        <WorkspaceDesktopShell
+          currentPath="/reports"
+          sourceItems={sidebarSources}
+          libraries={documentLibraries}
+          totalDocuments={documentLibraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
+          selectedKeys={generatedReport?.groupKey ? [generatedReport.groupKey] : selectedLibraryKeys}
+          onToggleLibrary={(libraryKey) => {
+            setSelectedLibraryKeys((current) => (
+              current.includes(libraryKey)
+                ? current.filter((item) => item !== libraryKey)
+                : [...current, libraryKey]
+            ));
+          }}
+          onClearSelection={() => setSelectedLibraryKeys([])}
+          onCreateLibrary={handleCreateLibrary}
+          railSelectionSummaryLabel={`已选 ${(generatedReport?.groupKey ? 1 : selectedLibraryKeys.length)}`}
+        >
+          {!generatedReport ? (
+            <section className="card report-empty-card">
+              <h4>报表不存在</h4>
+              <p>当前链接对应的报表记录不存在，可能已经被删除。</p>
+            </section>
+          ) : (
+            <section className="card documents-card report-single-view">
+              <div className="panel-header">
+                <div>
+                  <h3>{generatedReport.title}</h3>
+                  <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
+                </div>
+                <SingleReportActions item={generatedReport} />
+              </div>
+              <GeneratedReportDetail item={generatedReport} />
+            </section>
+          )}
+        </WorkspaceDesktopShell>
+      );
+    }
+
     return (
       <div className="app-shell">
         <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
@@ -592,101 +691,63 @@ function ReportsPageContent() {
     );
   }
 
-  return (
-    <div className={`app-shell ${mobileViewport ? 'app-shell-reports-simple' : ''}`.trim()}>
-      <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
-      <main className="main-panel">
-        <header className="topbar">
-          <div>
-            <h2>报表中心</h2>
-          </div>
-        </header>
+  const reportsContent = (
+    <>
+      {error ? <p>{error}</p> : null}
+      {message ? <div className="page-note">{message}</div> : null}
 
-        {error ? <p>{error}</p> : null}
-        {message ? <div className="page-note">{message}</div> : null}
-
-        {data ? (
+      {data ? (
+        <>
           <section className={`reports-workbench reports-workbench-single ${mobileViewport ? 'reports-workbench-simple' : ''}`.trim()}>
             <div className={`reports-management-grid ${mobileViewport ? 'reports-management-grid-simple' : ''}`.trim()}>
               <section className="card documents-card reports-templates-panel">
                 <div className="panel-header">
                   <div>
-                    <h3>报表模板上传</h3>
-                    <p>支持 Word、PPT、表格、图片和网页链接。上传后统一沉淀为模板参考。</p>
-                  </div>
-                </div>
-
-                <section className="capture-task-card">
-                  <div className="capture-task-heading">
-                    <div>
-                      <h4>上传模板</h4>
-                      <p>保留模板名称和说明即可，文件与网页链接二选一。</p>
+                      <h3>报表模板上传</h3>
+                      <p>{selectedReportGroup ? `当前数据集：${selectedReportGroup.label}` : '左侧只选中一个数据集分组后上传模板。'}</p>
                     </div>
                   </div>
 
-                  <div className="filter-row report-template-create-row">
-                    <input
-                      className="filter-input"
-                      placeholder="模板名称"
-                      value={templateDraft.label}
-                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, label: event.target.value }))}
-                    />
-                    <input
-                      className="filter-input"
-                      placeholder="模板说明（可选）"
-                      value={templateDraft.description}
-                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, description: event.target.value }))}
-                    />
-                    <select
-                      className="filter-input"
-                      value={templateDraft.preferredLayoutVariant}
-                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, preferredLayoutVariant: event.target.value }))}
-                    >
-                      {REPORT_LAYOUT_VARIANTS.map((item) => (
-                        <option key={item.value || 'default'} value={item.value}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <section className="capture-task-card">
+                    <div className="capture-task-heading">
+                      <div>
+                        <h4>上传模板</h4>
+                        <p>模板会直接挂到当前选中的数据集分组。</p>
+                      </div>
+                    </div>
 
-                  <div className="filter-row report-template-create-row">
-                    <input
-                      ref={fileInputRef}
-                      className="filter-input"
-                      type="file"
-                      accept="image/*,.doc,.docx,.rtf,.odt,.ppt,.pptx,.pptm,.xls,.xlsx,.csv,.tsv,.ods"
-                      onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
-                    />
-                    <input
-                      className="filter-input"
-                      placeholder="或填写网页链接，例如 https://example.com/template"
-                      value={templateDraft.link}
-                      onChange={(event) => setTemplateDraft((prev) => ({ ...prev, link: event.target.value }))}
-                    />
-                    <button
-                      className="primary-btn"
-                      type="button"
-                      onClick={() => void uploadTemplate()}
-                      disabled={submittingKey === 'upload-template'}
-                    >
-                      {submittingKey === 'upload-template' ? '上传中...' : '上传模板'}
-                    </button>
-                  </div>
+                    <div className="filter-row report-template-create-row">
+                      <div className="report-template-group-pill">
+                        {selectedReportGroup ? selectedReportGroup.label : '未锁定数据集分组'}
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        className="filter-input"
+                        type="file"
+                        accept="image/*,.doc,.docx,.rtf,.odt,.ppt,.pptx,.pptm,.xls,.xlsx,.csv,.tsv,.ods"
+                        onChange={(event) => setTemplateFile(event.target.files?.[0] || null)}
+                      />
+                      <button
+                        className="primary-btn"
+                        type="button"
+                        onClick={() => void uploadTemplate()}
+                        disabled={submittingKey === 'upload-template' || !selectedReportGroup}
+                      >
+                        {submittingKey === 'upload-template' ? '上传中...' : '上传模板'}
+                      </button>
+                    </div>
 
-                  <div className="capture-task-meta">
-                    {templateFile
-                      ? `已选择文件：${templateFile.name}`
-                      : templateDraft.link
-                        ? `已填写链接：${templateDraft.link}`
-                        : '支持上传 Word、PPT、表格、图片，或直接填写网页链接。'}
-                  </div>
-                </section>
+                    <div className="capture-task-meta">
+                      {templateFile
+                        ? `已选择文件：${templateFile.name}`
+                        : '支持 Word、PPT、表格、图片模板。'}
+                    </div>
+                  </section>
 
                 {!uploadedTemplateItems.length ? (
                   <section className="report-empty-card">
-                    <h4>还没有上传模板</h4>
-                    <p>上传完成后，这里会列出所有模板文件和网页链接的详细信息。</p>
+                    <h4>{selectedLibraryKeys.length ? '当前分组还没有模板' : '还没有上传模板'}</h4>
+                    <p>{selectedLibraryKeys.length ? '左侧切换分组后，这里的模板列表会跟着变化。' : '上传完成后，这里会列出模板文件。'}</p>
                   </section>
                 ) : (
                   <div className="capture-result-list reports-scroll-panel report-upload-list">
@@ -714,34 +775,53 @@ function ReportsPageContent() {
                 <div className="panel-header">
                   <div>
                     <h3>输出机器人</h3>
-                    <p>
-                      {mobileViewport
-                        ? '移动端保留机器人概览。'
-                        : 'PC 端恢复机器人可见库和权限编辑，移动端仍保持概览优先。'}
-                    </p>
+                    <p>{selectedLibraryKeys.length ? `当前按左侧已选 ${selectedLibraryKeys.length} 个数据集分组收口权限编辑。` : '左侧选择数据集分组后，这里的权限编辑会自动收口。'}</p>
                   </div>
                 </div>
 
-                <ConnectedBotsSummary
+                <ConnectedBotAccessEditor
                   items={botItems}
-                  libraries={documentLibraries}
-                  compact={mobileViewport}
-                  emptyTitle="当前还没有可用输出机器人"
-                  emptyText="机器人接通后会自动出现在这里。"
+                  libraries={scopedLibraries}
+                  manageEnabled={botManageEnabled}
+                  onSave={saveConnectedBot}
+                  onCreate={createConnectedBot}
                 />
-
-                {!mobileViewport && botManageEnabled ? (
-                  <ConnectedBotAccessEditor
-                    items={botItems}
-                    libraries={documentLibraries}
-                    manageEnabled={botManageEnabled}
-                    onSave={saveConnectedBot}
-                  />
-                ) : null}
               </section>
             </div>
           </section>
-        ) : null}
+        </>
+      ) : null}
+    </>
+  );
+
+  if (!mobileViewport) {
+    return (
+      <WorkspaceDesktopShell
+        currentPath="/reports"
+        sourceItems={sidebarSources}
+        libraries={documentLibraries}
+        totalDocuments={documentLibraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
+        selectedKeys={selectedLibraryKeys}
+        onToggleLibrary={(libraryKey) => {
+          setSelectedLibraryKeys((current) => (
+            current.includes(libraryKey)
+              ? current.filter((item) => item !== libraryKey)
+              : [...current, libraryKey]
+          ));
+        }}
+        onClearSelection={() => setSelectedLibraryKeys([])}
+        onCreateLibrary={handleCreateLibrary}
+      >
+        {reportsContent}
+      </WorkspaceDesktopShell>
+    );
+  }
+
+  return (
+    <div className="app-shell app-shell-reports-simple">
+      <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
+      <main className="main-panel">
+        {reportsContent}
       </main>
     </div>
   );

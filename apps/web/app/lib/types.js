@@ -1,4 +1,4 @@
-export const NAV_ITEMS = ['智能工作台', '数据集', '数据源管理', '报表中心', '审计日志'];
+export const NAV_ITEMS = ['智能会话', '数据集', '采集源', '报表', '审计'];
 
 export const QUICK_ACTIONS = [
   { label: '订单趋势分析', prompt: '请做订单趋势分析' },

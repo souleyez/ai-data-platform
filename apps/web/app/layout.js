@@ -10,8 +10,24 @@ export const revalidate = 0;
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang="zh-CN" suppressHydrationWarning>
+      <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function () {
+                try {
+                  var mode = localStorage.getItem('aidp_theme_mode_v1');
+                  var nextMode = mode === 'dark' ? 'dark' : 'light';
+                  document.documentElement.dataset.theme = nextMode;
+                  document.documentElement.style.colorScheme = nextMode;
+                } catch (error) {}
+              })();
+            `,
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

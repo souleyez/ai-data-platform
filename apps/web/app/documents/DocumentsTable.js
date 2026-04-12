@@ -154,12 +154,12 @@ export default function DocumentsTable({
                 <td className="document-name-cell">
                   <div style={{ display: 'grid', gap: 6 }}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <a href={`/documents/${item.id}`}>{item.name}</a>
+                      <span>{item.name}</span>
                       {recentNewIds.includes(item.id) ? (
                         <span className="source-chip" style={{ background: '#dcfce7', color: '#166534' }}>新增</span>
                       ) : null}
                     </div>
-                    {!simpleMode ? (
+                    {canReparseDocument(item) || !simpleMode ? (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         {canReparseDocument(item) ? (
                           <button
@@ -171,14 +171,16 @@ export default function DocumentsTable({
                             {reparseSubmittingId === item.id ? '重新解析中..' : '重新解析'}
                           </button>
                         ) : null}
-                        <button
-                          type="button"
-                          className="ghost-btn compact-inline-btn"
-                          onClick={() => ignoreDocument(item.id)}
-                          disabled={ignoreSubmittingId === item.id}
-                        >
-                          {ignoreSubmittingId === item.id ? '删除中..' : '删除'}
-                        </button>
+                        {!simpleMode ? (
+                          <button
+                            type="button"
+                            className="ghost-btn compact-inline-btn"
+                            onClick={() => ignoreDocument(item.id)}
+                            disabled={ignoreSubmittingId === item.id}
+                          >
+                            {ignoreSubmittingId === item.id ? '删除中..' : '删除'}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

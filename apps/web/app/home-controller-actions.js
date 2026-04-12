@@ -83,7 +83,9 @@ function buildChatOptions(context, overrides = {}) {
     mode: overrides.mode || 'general',
     confirmedRequest: overrides.confirmedRequest || '',
     confirmedAction: overrides.confirmedAction || '',
-    preferredLibraries: Array.isArray(overrides.preferredLibraries) ? overrides.preferredLibraries : [],
+    preferredLibraries: Array.isArray(overrides.preferredLibraries)
+      ? overrides.preferredLibraries
+      : (Array.isArray(context.preferredLibraries) ? context.preferredLibraries : []),
     conversationState: overrides.conversationState ?? context.conversationState ?? null,
     systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
     botId: overrides.botId ?? context.selectedBotId ?? '',

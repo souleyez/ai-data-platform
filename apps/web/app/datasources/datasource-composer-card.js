@@ -12,23 +12,25 @@ export default function DatasourceComposerCard({
   form,
   isLocalDirectory,
   libraries,
+  selectedLibraries = [],
   credentials,
   saving,
   onUpdateForm,
   onToggleTargetLibrary,
   onSave,
   onStartNew,
+  showTargetLibrariesSection = true,
 }) {
   return (
     <section className="card documents-card">
       <div className="panel-header">
         <div>
           <h3>{form.id ? '编辑数据源' : '新建数据源'}</h3>
-          <p>在一个工作栏里完成数据源配置、知识库绑定、认证和采集频率设置。</p>
+          <p>在一个工作栏里完成采集配置、认证和频率设置。</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {form.id ? <DatasourceTag tone="success-tag">编辑中</DatasourceTag> : null}
-          <button className="primary-btn" type="button" disabled={saving} onClick={onSave}>
+          <button className="primary-btn" type="button" disabled={saving || !form.targetKeys.length} onClick={onSave}>
             {saving ? '保存中...' : form.id ? '保存更新' : '创建数据源'}
           </button>
         </div>
@@ -144,28 +146,39 @@ export default function DatasourceComposerCard({
         </label>
       </div>
 
-      <div className="panel-header" style={{ marginTop: 20 }}>
-        <div>
-          <h3><RequiredLabel>目标知识库</RequiredLabel></h3>
-          <p>采集结果会直接进入选中的知识库，并自动进入日常后台深度解析链。</p>
+      {showTargetLibrariesSection ? (
+        <>
+          <div className="panel-header" style={{ marginTop: 20 }}>
+            <div>
+              <h3><RequiredLabel>目标知识库</RequiredLabel></h3>
+              <p>采集结果会直接进入选中的知识库，并自动进入日常后台深度解析链。</p>
+            </div>
+          </div>
+          <div className="datasource-library-grid">
+            {libraries.map((library) => {
+              const selected = form.targetKeys.includes(library.key);
+              return (
+                <button
+                  key={library.key}
+                  type="button"
+                  className={`datasource-library-chip ${selected ? 'active' : ''}`}
+                  onClick={() => onToggleTargetLibrary(library.key)}
+                >
+                  <span>{library.label}</span>
+                  <span>{library.documentCount || 0} 份</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <div className="capture-task-meta" style={{ marginTop: 20 }}>
+          当前入库目标由左侧数据集分组决定。
+          {selectedLibraries.length
+            ? ` 当前将写入：${selectedLibraries.map((item) => item.label).join('、')}。`
+            : ' 请先在左侧选择至少一个数据集。'}
         </div>
-      </div>
-      <div className="datasource-library-grid">
-        {libraries.map((library) => {
-          const selected = form.targetKeys.includes(library.key);
-          return (
-            <button
-              key={library.key}
-              type="button"
-              className={`datasource-library-chip ${selected ? 'active' : ''}`}
-              onClick={() => onToggleTargetLibrary(library.key)}
-            >
-              <span>{library.label}</span>
-              <span>{library.documentCount || 0} 份</span>
-            </button>
-          );
-        })}
-      </div>
+      )}
 
       {!isLocalDirectory ? (
         <>
@@ -252,7 +265,7 @@ export default function DatasourceComposerCard({
           </button>
         ) : null}
         <span className="datasource-inline-note">
-          当前会优先保留数据集能力，采集与深度解析继续走后台任务。
+          保存后会直接按左侧已选数据集入库，采集与深度解析继续走后台任务。
         </span>
       </div>
     </section>

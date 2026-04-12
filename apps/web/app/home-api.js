@@ -43,6 +43,20 @@ export async function fetchBots() {
   return parseApiResponse(response, 'load bots failed');
 }
 
+export async function fetchModelConfig() {
+  const response = await fetch(buildApiUrl('/api/model-config'), { cache: 'no-store' });
+  return parseApiResponse(response, 'load model config failed');
+}
+
+export async function updateModelConfig(payload) {
+  const response = await fetch(buildApiUrl('/api/model-config'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return parseApiResponse(response, 'update model config failed');
+}
+
 export async function createBot(payload) {
   const response = await fetch(buildApiUrl('/api/bots'), {
     method: 'POST',

@@ -216,6 +216,9 @@ function TemplateConfirmationCard({ confirmation, disabled, onConfirm }) {
 }
 
 export default function ChatPanel({
+  compact = false,
+  scopeLabel = '',
+  scopeMeta = '',
   messages,
   input,
   isLoading,
@@ -255,7 +258,14 @@ export default function ChatPanel({
   }, []);
 
   return (
-    <div className="chat-panel card">
+    <div className={`chat-panel card ${compact ? 'chat-panel-compact' : ''}`.trim()}>
+      {scopeLabel ? (
+        <div className={`chat-scope-strip ${compact ? 'chat-scope-strip-compact' : ''}`.trim()}>
+          <span className="chat-scope-kicker">默认资料范围</span>
+          <strong className="chat-scope-title">{scopeLabel}</strong>
+          {scopeMeta ? <span className="chat-scope-meta">{scopeMeta}</span> : null}
+        </div>
+      ) : null}
       <div className="chat-messages" ref={messagesRef}>
         {messages.map((message, index) => (
           <div className={`message ${message.role}`} key={message.id || `${message.role}-${index}`}>
@@ -337,28 +347,13 @@ export default function ChatPanel({
       </div>
 
       <div id="chat-composer" className="chat-composer-wrap" ref={composerRef}>
-        <div className="chat-composer-actions">
-          <input
-            ref={uploadInputRef}
-            type="file"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(event) => onUploadFilesSelected(Array.from(event.target.files || []))}
-          />
-          <button
-            type="button"
-            className="ghost-btn upload-inline-btn"
-            onClick={() => {
-              if (!uploadLoading && uploadInputRef.current) {
-                uploadInputRef.current.value = '';
-                uploadInputRef.current.click();
-              }
-            }}
-            disabled={uploadLoading}
-          >
-            {uploadLoading ? '上传解析中...' : '上传文件'}
-          </button>
-        </div>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(event) => onUploadFilesSelected(Array.from(event.target.files || []))}
+        />
 
         <div className="chat-input-row">
           <textarea
@@ -373,9 +368,24 @@ export default function ChatPanel({
             }}
             placeholder="直接提问。普通对话默认只做资料供给；只有命中库内资料模板输出时，系统才会先让你确认两种执行方式。"
           />
-          <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
-            {isLoading ? '思考中...' : '发送'}
-          </button>
+          <div className="chat-input-side-actions">
+            <button
+              type="button"
+              className="ghost-btn upload-inline-btn"
+              onClick={() => {
+                if (!uploadLoading && uploadInputRef.current) {
+                  uploadInputRef.current.value = '';
+                  uploadInputRef.current.click();
+                }
+              }}
+              disabled={uploadLoading}
+            >
+              {uploadLoading ? '上传解析中...' : '上传文件'}
+            </button>
+            <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
+              {isLoading ? '思考中...' : '发送'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

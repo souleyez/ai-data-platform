@@ -285,6 +285,7 @@ export default function DocumentAnalysisPanel({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [backfillingCanonical, setBackfillingCanonical] = useState(false);
+  const [reparsing, setReparsing] = useState(false);
   const [clearingFeedback, setClearingFeedback] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -326,6 +327,7 @@ export default function DocumentAnalysisPanel({
     { label: '字段元数据数量', value: String(fieldDetails.length) },
     { label: '表格摘要', value: tableSummary ? '已提取' : '无' },
   ]), [evidenceCount, fieldDetails.length, item, item?.analysisEditedAt, item?.cloudStructuredModel, item?.detailParseStatus, item?.detailParsedAt, item?.markdownGeneratedAt, item?.markdownMethod, item?.parseMethod, tableSummary]);
+  const canReparse = item?.parseStatus === 'error' || item?.detailParseStatus === 'failed';
 
   function handleStartEdit() {
     setSummaryDraft(String(item?.summary || ''));
@@ -428,6 +430,30 @@ export default function DocumentAnalysisPanel({
     }
   }
 
+  async function handleReparse() {
+    if (!item?.id || reparsing) return;
+    setReparsing(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const response = await fetch('/api/documents/reparse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ id: item.id }] }),
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        throw new Error(data?.error || '重新解析失败');
+      }
+      setNotice(data?.message || '已加入重新解析队列');
+    } catch (reparseError) {
+      setError(reparseError instanceof Error ? reparseError.message : '重新解析失败');
+    } finally {
+      setReparsing(false);
+    }
+  }
+
   return (
     <section className="card documents-card">
       <div className="panel-header">
@@ -437,6 +463,11 @@ export default function DocumentAnalysisPanel({
         </div>
         {!editing ? (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {canReparse ? (
+              <button type="button" className="ghost-btn" onClick={handleReparse} disabled={reparsing}>
+                {reparsing ? '重新解析中...' : '重新解析'}
+              </button>
+            ) : null}
             <button type="button" className="ghost-btn" onClick={handleCanonicalBackfill} disabled={backfillingCanonical}>
               {backfillingCanonical ? '回填排队中...' : '立即回填当前文档'}
             </button>

@@ -97,6 +97,7 @@ export default function ReportResultsPanel({
   onRequestExpand,
   mobileViewport = false,
   className = '',
+  showStepper = true,
 }) {
   const [internalSelectedId, setInternalSelectedId] = useState('');
   const controlled = typeof onSelectReport === 'function';
@@ -151,7 +152,7 @@ export default function ReportResultsPanel({
           {description ? <p>{description}</p> : null}
         </div>
         <div className="report-results-toolbar">
-          {canStep ? (
+          {showStepper && canStep ? (
             <div className="report-results-stepper">
               <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(-1)}>
                 上一份
