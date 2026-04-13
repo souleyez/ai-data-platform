@@ -114,6 +114,143 @@ test('normalizeReportOutput should keep envelope title when generated title is t
   assert.equal(output.title, '简历人才维度静态页');
 });
 
+test('normalizeReportOutput should fall back to layout variant titles for generic page outputs', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '生成一页方案介绍',
+    JSON.stringify({
+      title: '一个泛化标题',
+      summary: '当前方案已覆盖采集、治理和生成链路。',
+      sections: [{ title: '方案概览', body: '内容' }],
+    }),
+    null,
+    [],
+    [],
+    {
+      pageSpec: {
+        layoutVariant: 'solution-overview',
+        heroCardLabels: [],
+        heroDatavizSlotKeys: [],
+        sections: [
+          {
+            title: '方案概览',
+            purpose: '开场摘要',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'summary',
+            datavizSlotKeys: [],
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(output.title, '方案介绍页');
+});
+
+test('normalizeReportOutput should polish layout-variant summary and section openings for generic page outputs', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '生成一页方案介绍',
+    JSON.stringify({
+      title: '一个泛化标题',
+      summary: '当前方案已覆盖采集、治理和生成链路。',
+      sections: [
+        { title: '方案概览', body: '内容' },
+        { title: '能力模块', body: '按模块说明。' },
+        { title: '交付路径', body: '建议分阶段实施。' },
+        { title: '行动建议', body: '建议先验证核心页。' },
+      ],
+    }),
+    null,
+    [],
+    [],
+    {
+      pageSpec: {
+        layoutVariant: 'solution-overview',
+        heroCardLabels: [],
+        heroDatavizSlotKeys: [],
+        sections: [
+          {
+            title: '方案概览',
+            purpose: '开场摘要',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'summary',
+            datavizSlotKeys: [],
+          },
+          {
+            title: '能力模块',
+            purpose: '说明方案模块',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'comparison',
+            datavizSlotKeys: [],
+          },
+          {
+            title: '交付路径',
+            purpose: '说明实施路径',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'timeline',
+            datavizSlotKeys: [],
+          },
+          {
+            title: '行动建议',
+            purpose: '说明下一步动作',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'cta',
+            datavizSlotKeys: [],
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(output.type, 'page');
+  assert.match(output.page?.summary || '', /方案能力、交付路径和落地动作展开/);
+  assert.match(output.page?.sections?.find((item) => item.title === '方案概览')?.body || '', /方案主张和适用范围/);
+  assert.match(output.page?.sections?.find((item) => item.title === '能力模块')?.body || '', /各模块解决什么问题/);
+  assert.match(output.page?.sections?.find((item) => item.title === '交付路径')?.body || '', /分阶段落地/);
+  assert.match(output.page?.sections?.find((item) => item.title === '行动建议')?.body || '', /推进落地的优先顺序/);
+});
+
+test('normalizeReportOutput should rename weak chart titles for layout variant pages', () => {
+  const output = normalizeReportOutput(
+    'page',
+    '生成一页方案介绍',
+    JSON.stringify({
+      title: '一个泛化标题',
+      summary: '当前方案已覆盖采集、治理和生成链路。',
+      sections: [
+        { title: '方案概览', body: '内容' },
+      ],
+      charts: [
+        { title: '图表 1', items: [{ label: '采集', value: 4 }] },
+        { title: 'Chart 2', items: [{ label: '阶段一', value: 2 }] },
+      ],
+    }),
+    null,
+    [],
+    [],
+    {
+      pageSpec: {
+        layoutVariant: 'solution-overview',
+        heroCardLabels: [],
+        heroDatavizSlotKeys: [],
+        sections: [
+          {
+            title: '方案概览',
+            purpose: '开场摘要',
+            completionMode: 'knowledge-plus-model',
+            displayMode: 'summary',
+            datavizSlotKeys: [],
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(output.page?.charts?.[0]?.title, '能力覆盖一览');
+  assert.equal(output.page?.charts?.[1]?.title, '交付阶段一览');
+});
+
 test('normalizeReportOutput should align page charts to planned dataviz slots', () => {
   const output = normalizeReportOutput(
     'page',

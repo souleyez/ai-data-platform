@@ -8,12 +8,12 @@ import type {
 } from './report-center.js';
 
 const REPORT_SCENARIO_LABELS: Record<string, string> = {
-  'insight-brief': 'Insight Brief',
-  'risk-brief': 'Risk Brief',
-  'operations-cockpit': 'Operations Cockpit',
-  'talent-showcase': 'Talent Showcase',
-  'research-brief': 'Research Brief',
-  'solution-overview': 'Solution Overview',
+  'insight-brief': '洞察简报',
+  'risk-brief': '风险简报',
+  'operations-cockpit': '经营总览',
+  'talent-showcase': '人才展示页',
+  'research-brief': '研究综述页',
+  'solution-overview': '方案介绍页',
 };
 
 export type ReportDraftBenchmarkScenario = {

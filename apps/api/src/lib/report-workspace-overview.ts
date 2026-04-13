@@ -61,17 +61,31 @@ function buildOverviewBullets(input: {
   warnings: Array<{ title?: string; detail?: string }>;
 }) {
   const bullets = [
-    `当前文档总量 ${input.totalFiles}，canonical 正文就绪 ${input.canonicalReady}，覆盖率 ${formatPercent(input.canonicalReady, input.totalFiles)}。`,
-    `采集链最近失败运行 ${input.failedRuns} 次，error 任务 ${input.errorTasks} 个。`,
-    `当前报表输出 ${input.outputs} 份，其中动态输出 ${input.dynamicOutputs} 份。`,
-    `当前静态页草稿 ${input.draftOutputs} 份，其中可终稿 ${input.draftReadyOutputs} 份、需补齐 ${input.draftBlockedOutputs} 份、建议继续优化 ${input.draftNeedsAttentionOutputs} 份。`,
+    `当前已沉淀 ${input.totalFiles} 份文档，核心正文就绪 ${input.canonicalReady} 份，内容覆盖率 ${formatPercent(input.canonicalReady, input.totalFiles)}。`,
+    `采集与入库链已形成持续更新能力，当前动态报表 ${input.dynamicOutputs} 份，可直接支撑首页与经营页的内容供给。`,
+    `当前累计输出 ${input.outputs} 份报表，其中静态页草稿 ${input.draftOutputs} 份，可终稿 ${input.draftReadyOutputs} 份。`,
   ];
   if (input.warnings.length) {
-    bullets.push(...input.warnings.slice(0, 3).map((item) => `${item.title || '告警'}：${item.detail || '需要关注当前运行态。'}`));
+    bullets.push('当前仍有少量运行侧信号需要继续收口，建议在进入终稿前统一文案和页面重点。');
   } else {
-    bullets.push('当前没有 critical 告警，适合继续完善页面结构、图表和客户可见文案。');
+    bullets.push('当前运行态整体稳定，适合把页面重点放在数据价值、交付样板和客户可见表达上。');
   }
   return bullets;
+}
+
+function buildShowcaseScenarioBullets(scenarios: Array<{ label?: string; readyRatio?: number; total?: number }>) {
+  return scenarios.map((item) => {
+    const label = String(item.label || '通用静态页').trim();
+    const total = toNumber(item.total);
+    const readyRatio = toNumber(item.readyRatio);
+    if (readyRatio >= 0.75) {
+      return `${label}：当前已积累 ${total} 份草稿，可优先沉淀为稳定的客户展示样板。`;
+    }
+    if (readyRatio >= 0.45) {
+      return `${label}：当前已有 ${total} 份草稿，适合继续统一结构和重点文案。`;
+    }
+    return `${label}：当前已有 ${total} 份草稿，建议继续补强内容密度和模块表达后再推广。`;
+  });
 }
 
 function normalizeVisualStyle(value: unknown): ReportVisualStylePreset | undefined {
@@ -127,11 +141,11 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
   }, {});
 
   const cards = [
-    { label: '文档总量', value: String(totalFiles), note: `数据集 ${libraries.length}` },
-    { label: 'Canonical 就绪', value: formatPercent(canonicalReady, totalFiles), note: `${canonicalReady} / ${totalFiles}` },
-    { label: '采集任务', value: String(toNumber(operations.capture?.taskSummary?.totalTasks)), note: `已排程 ${toNumber(operations.capture?.taskSummary?.scheduledTasks)}` },
-    { label: '报表输出', value: String(totalOutputs), note: `动态 ${dynamicOutputs}` },
-    { label: '草稿可终稿', value: String(draftReadyOutputs), note: `需补齐 ${draftBlockedOutputs}` },
+    { label: '资料规模', value: String(totalFiles), note: `覆盖 ${libraries.length} 个数据集` },
+    { label: '正文就绪', value: formatPercent(canonicalReady, totalFiles), note: `${canonicalReady} / ${totalFiles} 份可直接供页` },
+    { label: '采集任务', value: String(toNumber(operations.capture?.taskSummary?.totalTasks)), note: `已排程 ${toNumber(operations.capture?.taskSummary?.scheduledTasks)} 个来源` },
+    { label: '页面产出', value: String(totalOutputs), note: `动态页面 ${dynamicOutputs} 份` },
+    { label: '可终稿草稿', value: String(draftReadyOutputs), note: `待润色 ${draftNeedsAttentionOutputs} 份` },
   ];
 
   const warningBullets = buildOverviewBullets({
@@ -156,7 +170,7 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
     layoutVariant: 'operations-cockpit',
     visualStyle: selectedVisualStyle,
     mustHaveModules: ['项目摘要', '关键指标', '数据集分布', '解析链完成度', '采集运行状态', '报表状态', '后续动作'],
-    optionalModules: ['静态页基准', '审计建议'],
+    optionalModules: ['交付样板'],
     evidencePriority: ['文档量', '解析完成度', '采集运行', '报表输出'],
     audienceTone: 'operator-facing',
     riskNotes: (operations.stability?.warnings || []).slice(0, 5).map((item) => `${item.title || '告警'}：${item.detail || ''}`),
@@ -168,7 +182,7 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
         moduleType: 'hero',
         title: 'AI Data Platform 工作台首页',
         purpose: 'Open with a concise summary of the current project state.',
-        contentDraft: `基于当前项目真实运行数据生成的工作台首页。当前共有 ${totalFiles} 份文档、${totalOutputs} 份报表输出、${toNumber(operations.capture?.taskSummary?.totalTasks)} 个采集任务，当前 canonical 正文就绪率为 ${formatPercent(canonicalReady, totalFiles)}。`,
+        contentDraft: `当前平台已形成从采集、解析到页面生成的完整交付链。基于现有 ${totalFiles} 份文档、${totalOutputs} 份报表输出和持续运行的数据源任务，可以直接生成项目总览、经营页和方案页等客户可见页面。`,
         evidenceRefs: ['operations.parse.scanSummary', 'operations.output.summary', 'operations.capture.taskSummary'],
         chartIntent: null,
         cards: [],
@@ -196,9 +210,9 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
       {
         moduleId: buildModuleId('signals', 2),
         moduleType: 'insight-list',
-        title: '当前信号',
+        title: '当前进展',
         purpose: 'Turn raw metrics and warnings into readable bullets.',
-        contentDraft: '以下信号基于当前项目运行态自动生成，可在进入终稿前逐条改写或删减。',
+        contentDraft: '以下要点基于当前项目真实运行数据整理，可直接作为首页摘要初稿继续精修。',
         evidenceRefs: ['operations.stability', 'operations.capture.runSummary', 'operations.output.summary'],
         chartIntent: null,
         cards: [],
@@ -325,22 +339,15 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
       {
         moduleId: buildModuleId('draft-benchmark', 8),
         moduleType: 'comparison',
-        title: '静态页基准',
-        purpose: 'Show which draft scenarios are currently easiest to finalize.',
+        title: '交付样板',
+        purpose: 'Name the page scenarios that are closest to being reusable customer-facing templates.',
         contentDraft: topDraftScenarios.length
-          ? '以下场景来自当前真实静态页草稿输出，适合用来判断哪类页面已经可以稳定对外呈现。'
-          : '当前还没有足够的静态页草稿积累来形成可靠基准。',
+          ? '以下页面类型已经形成可复用的初稿基础，适合作为后续客户展示与项目交付的样板继续沉淀。'
+          : '当前还没有足够的静态页草稿积累来形成稳定样板，可先从首页总览和经营页开始沉淀。',
         evidenceRefs: ['operations.output.benchmark'],
         chartIntent: null,
         cards: [],
-        bullets: topDraftScenarios.map((item) => {
-          const label = String(item.label || '通用静态页').trim();
-          const readyRatio = formatPercent(toNumber(item.readyRatio) * 100, 100);
-          const blocked = toNumber(item.blocked);
-          const total = toNumber(item.total);
-          const evidenceCoverage = formatPercent(toNumber(item.averageEvidenceCoverage) * 100, 100);
-          return `${label}：草稿 ${total} 份，通过率 ${readyRatio}，证据覆盖 ${evidenceCoverage}，阻塞 ${blocked} 份。`;
-        }),
+        bullets: buildShowcaseScenarioBullets(topDraftScenarios),
         enabled: true,
         status: 'generated',
         order: 8,
@@ -351,14 +358,20 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
         moduleType: 'cta',
         title: '下一步动作',
         purpose: 'Convert system signals into concrete operator actions.',
-        contentDraft: '这部分应在进入终稿前按当前客户或内部读者的关注点微调措辞。',
+        contentDraft: '建议先把当前首页总览、经营页和方案页打磨成稳定样板，再继续扩展到更多静态页场景。',
         evidenceRefs: ['operations.stability.warnings', 'audit.summary'],
         chartIntent: null,
         cards: [],
         bullets: [
-          criticalCount > 0 ? `优先处理 ${criticalCount} 条 critical 告警，避免把异常状态直接暴露到客户页面。` : '当前没有 critical 告警，可优先优化文案和视觉表达。',
-          warningCount > 0 ? `还有 ${warningCount} 条 warning 告警，建议在终稿前决定是否展示或转化为风险提醒。` : '告警较少，可将更多篇幅用于经营亮点和可执行建议。',
-          `审计建议：建议清理 ${toNumber(operations.audit?.summary?.cleanupRecommendedDocuments)} 份文档、${toNumber(operations.audit?.summary?.cleanupRecommendedCaptureTasks)} 个采集任务。`,
+          topLibraries[0]
+            ? `优先围绕「${String(topLibraries[0]?.label || topLibraries[0]?.key || '').trim()}」补强首页信号和图表，先形成一个足够稳定的样板页面。`
+            : '优先围绕当前重点数据集补强首页信号和图表，先形成一个足够稳定的样板页面。',
+          topDraftScenarios[0]
+            ? `建议先把「${String(topDraftScenarios[0]?.label || '当前场景').trim()}」沉淀成标准页面结构，再复制到相近场景。`
+            : '建议先把首页总览和经营页沉淀成标准页面结构，再复制到相近场景。',
+          criticalCount > 0 || warningCount > 0
+            ? '当前仍有少量运行信号需要继续收口，终稿前建议统一页面重点和风险表述。'
+            : '当前运行态整体稳定，可将更多篇幅用于数据价值表达和行动建议。',
         ],
         enabled: true,
         status: 'generated',

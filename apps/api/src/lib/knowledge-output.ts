@@ -209,6 +209,185 @@ function buildDefaultTitle(kind: 'table' | 'page' | 'pdf' | 'ppt' | 'doc' | 'md'
   return '知识库表格';
 }
 
+function buildLayoutVariantPageTitle(
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+  envelope?: ReportTemplateEnvelope | null,
+) {
+  const envelopeTitle = sanitizeText(envelope?.title);
+  if (envelopeTitle) return envelopeTitle;
+  if (layoutVariant === 'operations-cockpit') return '经营总览页';
+  if (layoutVariant === 'solution-overview') return '方案介绍页';
+  if (layoutVariant === 'research-brief') return '研究综述页';
+  if (layoutVariant === 'risk-brief') return '风险简报页';
+  if (layoutVariant === 'talent-showcase') return '人才展示页';
+  if (layoutVariant === 'insight-brief') return '知识综述页';
+  return buildDefaultTitle('page');
+}
+
+function ensureSentence(value: unknown) {
+  const text = sanitizeText(value);
+  if (!text) return '';
+  return /[。！？.!?]$/.test(text) ? text : `${text}。`;
+}
+
+function includesLayoutSignals(text: string, signals: string[]) {
+  const normalized = normalizeText(text);
+  return signals.filter((signal) => normalized.includes(normalizeText(signal))).length;
+}
+
+function buildLayoutVariantSummary(
+  summary: string,
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+) {
+  const normalizedSummary = sanitizeText(summary);
+  if (!normalizedSummary) return normalizedSummary;
+  if (layoutVariant === 'operations-cockpit') {
+    if (includesLayoutSignals(normalizedSummary, ['经营', '风险', '动作']) >= 2) return ensureSentence(normalizedSummary);
+    return `${ensureSentence(normalizedSummary)}本页重点围绕经营信号、风险提醒和下一步动作展开。`;
+  }
+  if (layoutVariant === 'solution-overview') {
+    if (includesLayoutSignals(normalizedSummary, ['方案', '交付', '落地']) >= 2) return ensureSentence(normalizedSummary);
+    return `${ensureSentence(normalizedSummary)}本页重点围绕方案能力、交付路径和落地动作展开。`;
+  }
+  if (layoutVariant === 'research-brief') {
+    if (includesLayoutSignals(normalizedSummary, ['发现', '边界', '建议']) >= 2) return ensureSentence(normalizedSummary);
+    return `${ensureSentence(normalizedSummary)}本页重点围绕核心发现、适用边界和后续建议展开。`;
+  }
+  if (layoutVariant === 'risk-brief') {
+    if (includesLayoutSignals(normalizedSummary, ['风险', '影响', '应答']) >= 2) return ensureSentence(normalizedSummary);
+    return `${ensureSentence(normalizedSummary)}本页重点围绕主要风险、影响范围和应答动作展开。`;
+  }
+  if (layoutVariant === 'talent-showcase') {
+    if (includesLayoutSignals(normalizedSummary, ['优势', '项目', '案例']) >= 2) return ensureSentence(normalizedSummary);
+    return `${ensureSentence(normalizedSummary)}本页重点围绕核心优势、项目经历和代表案例展开。`;
+  }
+  return ensureSentence(normalizedSummary);
+}
+
+function buildLayoutVariantSectionLead(
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+  title: string,
+) {
+  const normalizedTitle = normalizeText(title);
+  if (!normalizedTitle) return '';
+  if (layoutVariant === 'operations-cockpit') {
+    if (containsAny(normalizedTitle, ['经营', '概览', '摘要'])) return '这一段先把当前经营盘面和主要变化交代清楚。';
+    if (containsAny(normalizedTitle, ['风险', '提醒', '异常'])) return '这一段重点说明当前最需要优先处理的风险点。';
+    if (containsAny(normalizedTitle, ['行动', '建议', '下一步'])) return '这一段给出可直接执行的下一步动作。';
+  }
+  if (layoutVariant === 'solution-overview') {
+    if (containsAny(normalizedTitle, ['方案', '概览', '摘要'])) return '这一段先讲清方案主张和适用范围。';
+    if (containsAny(normalizedTitle, ['能力', '模块'])) return '这一段说明方案由哪些能力模块组成，以及各模块解决什么问题。';
+    if (containsAny(normalizedTitle, ['交付', '路径', '阶段'])) return '这一段说明方案如何分阶段落地，以及每个阶段的交付重点。';
+    if (containsAny(normalizedTitle, ['行动', '建议', '下一步'])) return '这一段说明推进落地的优先顺序和下一步沟通动作。';
+  }
+  if (layoutVariant === 'research-brief') {
+    if (containsAny(normalizedTitle, ['研究', '概览', '摘要'])) return '这一段先讲清研究对象、问题和当前结论范围。';
+    if (containsAny(normalizedTitle, ['核心', '发现'])) return '这一段保留最值得被客户记住的研究发现。';
+    if (containsAny(normalizedTitle, ['局限', '风险', '边界'])) return '这一段交代结论边界和需要谨慎解读的部分。';
+    if (containsAny(normalizedTitle, ['行动', '建议', '下一步'])) return '这一段把研究结论转成可执行建议。';
+  }
+  if (layoutVariant === 'risk-brief') {
+    if (containsAny(normalizedTitle, ['概览', '摘要'])) return '这一段先交代当前项目范围和需要关注的总风险。';
+    if (containsAny(normalizedTitle, ['风险', '资格', '异常'])) return '这一段说明当前最主要的风险点和影响范围。';
+    if (containsAny(normalizedTitle, ['应答', '行动', '建议'])) return '这一段把风险转成应答动作和材料优先级。';
+  }
+  if (layoutVariant === 'talent-showcase') {
+    if (containsAny(normalizedTitle, ['核心', '优势'])) return '这一段先讲清候选人的核心优势和适配点。';
+    if (containsAny(normalizedTitle, ['项目', '经历', '历程'])) return '这一段按经历顺序说明代表性项目和承担角色。';
+    if (containsAny(normalizedTitle, ['代表', '案例', '项目'])) return '这一段优先摆出最能支撑可信度的项目案例。';
+    if (containsAny(normalizedTitle, ['联系', '建议', '下一步'])) return '这一段给出下一步沟通建议。';
+  }
+  return '';
+}
+
+function looksLikeWeakSectionBody(value: string) {
+  const text = sanitizeText(value);
+  if (!text) return true;
+  if (looksLikeJsonEchoText(text)) return true;
+  return /^(内容|待补充|说明|暂无|略|详情|文字内容)$/u.test(text) || text.length <= 6;
+}
+
+function looksLikeWeakChartTitle(value: string) {
+  const title = normalizeText(value);
+  if (!title) return true;
+  return /^(图表|chart|趋势图|对比图|分布图|数据图|可视化)\s*[-_#]?\s*\d*$/iu.test(title);
+}
+
+function buildLayoutVariantChartTitle(
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+  title: string,
+  index: number,
+) {
+  const normalizedTitle = sanitizeText(title);
+  if (!looksLikeWeakChartTitle(normalizedTitle)) return normalizedTitle;
+  if (layoutVariant === 'operations-cockpit') {
+    if (index === 0) return '经营趋势概览';
+    if (index === 1) return '风险与动作优先级';
+    return '经营图表概览';
+  }
+  if (layoutVariant === 'solution-overview') {
+    if (index === 0) return '能力覆盖一览';
+    if (index === 1) return '交付阶段一览';
+    return '方案要点图示';
+  }
+  if (layoutVariant === 'research-brief') {
+    if (index === 0) return '关键结果对比';
+    return '研究结果图示';
+  }
+  if (layoutVariant === 'risk-brief') {
+    if (index === 0) return '风险主题分布';
+    return '风险图示';
+  }
+  if (layoutVariant === 'talent-showcase') {
+    if (index === 0) return '能力结构概览';
+    return '案例分布图示';
+  }
+  return normalizedTitle;
+}
+
+function polishLayoutVariantSectionBody(
+  body: string,
+  title: string,
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+) {
+  const normalizedBody = sanitizeText(body);
+  const lead = buildLayoutVariantSectionLead(layoutVariant, title);
+  if (!lead) return ensureSentence(normalizedBody);
+  if (looksLikeWeakSectionBody(normalizedBody)) return lead;
+  if (normalizedBody.includes(sanitizeText(lead))) return ensureSentence(normalizedBody);
+  if (normalizedBody.length <= 20) return `${ensureSentence(normalizedBody)}${lead}`;
+  return ensureSentence(normalizedBody);
+}
+
+function polishLayoutVariantPageCopy(
+  page: NonNullable<Exclude<ChatOutput, { type: 'answer' }>['page']>,
+  layoutVariant: ReportPlanPageSpec['layoutVariant'] | undefined,
+) {
+  if (
+    layoutVariant !== 'operations-cockpit'
+    && layoutVariant !== 'solution-overview'
+    && layoutVariant !== 'research-brief'
+    && layoutVariant !== 'risk-brief'
+    && layoutVariant !== 'talent-showcase'
+  ) {
+    return page;
+  }
+
+  return {
+    ...page,
+    summary: buildLayoutVariantSummary(String(page.summary || ''), layoutVariant),
+    sections: (page.sections || []).map((section) => ({
+      ...section,
+      body: polishLayoutVariantSectionBody(String(section.body || ''), String(section.title || ''), layoutVariant),
+    })),
+    charts: (page.charts || []).map((chart, index) => ({
+      ...chart,
+      title: buildLayoutVariantChartTitle(layoutVariant, String(chart.title || ''), index),
+    })),
+  };
+}
+
 const REPORT_TITLE_SIGNAL_PATTERN = /(报告|分析|静态页|驾驶舱|看板|概览|汇总|总览|表格|表|文档|方案|画像|清单|复盘|应答|总结)/u;
 const WEAK_GENERATED_TITLE_PATTERN = /^(一个|某个|默认|示例|样例|测试|泛化)/u;
 const TITLE_STOPWORDS = new Set([
@@ -3944,7 +4123,7 @@ export function normalizeReportOutput(
         ? buildFootfallPageTitle(envelope)
         : orderDocuments.length
           ? buildOrderPageTitle(orderView, envelope)
-          : pickString(envelope?.title, buildDefaultTitle(kind));
+          : buildLayoutVariantPageTitle(normalizedPageSpec?.layoutVariant, envelope);
     const normalizedTitle = resolvePreferredNarrativeTitle({
       generatedTitle,
       requestText,
@@ -3990,6 +4169,13 @@ export function normalizeReportOutput(
         orderDocuments,
         envelope,
         normalizedOutput.page,
+      );
+    }
+
+    if (!resumeDocuments.length && !footfallDocuments.length && !orderDocuments.length && normalizedOutput.page) {
+      normalizedOutput.page = polishLayoutVariantPageCopy(
+        normalizedOutput.page,
+        normalizedPageSpec?.layoutVariant,
       );
     }
 

@@ -262,16 +262,31 @@ test('operations cockpit page outputs should build specialized draft modules for
   assert.equal(record.draft?.layoutVariant, 'operations-cockpit');
   assert.equal(record.draft?.visualStyle, 'signal-board');
   assert.equal(record.draft?.audienceTone, 'operator-facing');
+  assert.equal(record.draft?.modules?.[0]?.title, '经营总览');
   assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'metric-grid'));
-  assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'cta'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '下一步动作' && item.moduleType === 'cta'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '风险提醒' && item.moduleType === 'insight-list'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '经营概览' && item.moduleType === 'comparison'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '渠道趋势' && item.moduleType === 'chart'));
   assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'chart'));
   assert.ok((record.draft?.riskNotes || []).length > 0);
-  assert.ok((record.draft?.evidencePriority || []).some((title) => title === '关键指标'));
+  assert.ok((record.draft?.evidencePriority || []).some((title) => title === '关键指标' || title === '经营指标'));
   assert.ok((record.draft?.evidencePriority || []).some((title) => title === '渠道趋势'));
   assert.equal(record.draft?.modules?.[0]?.moduleType, 'hero');
   assert.equal(record.draft?.modules?.[1]?.moduleType, 'metric-grid');
+  assert.equal(record.draft?.modules?.[1]?.title, '经营指标');
   assert.equal(record.draft?.modules?.at(-1)?.moduleType, 'cta');
+  assert.match(record.draft?.modules?.[1]?.cards?.[0]?.note || '', /环比 \+12%|首屏经营结果信号展示/);
   assert.match(record.draft?.modules?.[0]?.contentDraft || '', /订单.*库存指数|库存指数.*订单/);
+  assert.match(record.draft?.modules?.[0]?.contentDraft || '', /整体经营盘面交代清楚/);
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '下一步动作')?.contentDraft || '',
+    /可以立即执行的经营动作|建议先围绕优先补货、复盘投放结构组织当前经营动作/,
+  );
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '渠道趋势')?.contentDraft || '',
+    /图表建议优先展示以下经营维度：天猫、京东|优先支撑当前经营判断/,
+  );
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'insight-list').length) <= 1);
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length) <= 2);
 });
@@ -336,7 +351,7 @@ test('risk brief page outputs should build risk-oriented draft modules for revie
   assert.ok((record.draft?.modules || []).some((item) => item.title === '应答建议' && item.moduleType === 'cta'));
   assert.match(
     (record.draft?.modules || []).find((item) => item.title === '应答建议')?.contentDraft || '',
-    /建议优先围绕优先补证、重写交付边界说明推进|建议优先处理以下动作/,
+    /建议优先围绕优先补证、重写交付边界说明处理当前风险|建议优先处理以下动作/,
   );
   assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'chart'));
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length) <= 1);
@@ -402,7 +417,7 @@ test('research brief page outputs should build research-oriented draft modules f
   assert.equal(record.draft?.audienceTone, 'analytical');
   assert.ok((record.draft?.modules || []).some((item) => item.title === '核心发现' && item.moduleType === 'insight-list'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '局限与风险' && item.moduleType === 'insight-list'));
-  assert.ok((record.draft?.modules || []).some((item) => item.title === '行动建议' && item.moduleType === 'cta'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '研究建议' && item.moduleType === 'cta'));
   assert.ok((record.draft?.modules || []).filter((item) => item.moduleType === 'insight-list').length >= 2);
   assert.ok((record.draft?.modules || []).filter((item) => item.moduleType === 'insight-list').length <= 3);
 });
@@ -468,12 +483,32 @@ test('solution overview page outputs should build solution-oriented draft module
 
   assert.equal(record.status, 'draft_generated');
   assert.equal(record.draft?.layoutVariant, 'solution-overview');
-  assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'comparison'));
+  assert.equal(record.draft?.modules?.[0]?.title, '方案概览');
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '方案亮点' && item.moduleType === 'metric-grid'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '能力模块' && item.moduleType === 'comparison'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '交付路径' && item.moduleType === 'timeline'));
-  assert.ok((record.draft?.modules || []).some((item) => item.title === '行动建议' && item.moduleType === 'cta'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '推进建议' && item.moduleType === 'cta'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '方案能力覆盖' && item.moduleType === 'chart'));
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '方案亮点')?.cards?.[0]?.note || '',
+    /方案首页说明适用范围|方案首页亮点数字展示|采集、解析、报表、审计/,
+  );
+  assert.match(record.draft?.modules?.[0]?.contentDraft || '', /方案主张|能力模块和交付路径/);
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '能力模块')?.contentDraft || '',
+    /解决什么问题、怎么交付、客户能看到什么|重点可先按采集与解析、静态页生成、审计治理组织方案说明/,
+  );
   assert.match(
     (record.draft?.modules || []).find((item) => item.title === '交付路径')?.contentDraft || '',
-    /建议按以下阶段展开|建议按以下交付阶段推进/,
+    /建议按以下阶段展开|建议按以下交付阶段推进|客户容易理解的阶段节奏/,
+  );
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '推进建议')?.contentDraft || '',
+    /客户感知的交付样板|建议优先把经营页先落地、再推广到研究\/方案页落成第一批客户可见交付/,
+  );
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '方案能力覆盖')?.contentDraft || '',
+    /图表建议优先展示以下能力覆盖：采集、解析、报表|能力覆盖或交付范围/,
   );
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '能力模块'));
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '交付路径'));
