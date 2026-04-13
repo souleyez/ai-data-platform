@@ -28,6 +28,40 @@ function looksLikeCloudUnavailable(normalized) {
     || meta.includes('云端回复暂不可用');
 }
 
+function looksLikeScopeSwitchPrompt(prompt) {
+  const text = String(prompt || '').trim();
+  if (!text) return false;
+  return /(后续|接下来|后面|之后|从现在开始|默认|切到|切换到|改成|锁定|限定|只按|只看|只围绕|围绕|针对).*(数据集|知识库|文档库|资料|问答|回答)/i.test(text)
+    || /(按|围绕|针对).*(数据集|知识库|文档库).*(问答|回答)/i.test(text);
+}
+
+function resolvePreferredLibraryKeys(libraries, availableLibraries) {
+  if (!Array.isArray(libraries) || !libraries.length) return [];
+  const available = Array.isArray(availableLibraries) ? availableLibraries : [];
+  const matched = [];
+  for (const item of libraries) {
+    const key = String(item?.key || '').trim();
+    const label = String(item?.label || '').trim();
+    const resolved = available.find((entry) => (
+      (key && String(entry?.key || '').trim() === key)
+      || (label && String(entry?.label || entry?.name || '').trim() === label)
+    ));
+    const candidate = String(resolved?.key || key).trim();
+    if (candidate && !matched.includes(candidate)) matched.push(candidate);
+  }
+  return matched;
+}
+
+function applyScopedLibrariesIfNeeded(prompt, normalized, context) {
+  if (!looksLikeScopeSwitchPrompt(prompt)) return;
+  const nextKeys = resolvePreferredLibraryKeys(
+    normalized?.libraries,
+    context.availableLibraries,
+  );
+  if (!nextKeys.length) return;
+  context.setPreferredLibraries?.(nextKeys);
+}
+
 function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, message));
 }
@@ -173,6 +207,7 @@ export async function submitQuestion(value, context) {
     } else {
       setCloudModelHealthy('chat-success');
     }
+    applyScopedLibrariesIfNeeded(text, normalized, context);
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
@@ -224,6 +259,11 @@ export async function confirmTemplateOption(option, context) {
     } else {
       setCloudModelHealthy('template-chat-success');
     }
+    applyScopedLibrariesIfNeeded(
+      option.confirmedRequest || option.executePrompt || option.title || '',
+      normalized,
+      context,
+    );
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);

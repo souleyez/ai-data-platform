@@ -281,6 +281,7 @@ export function useHomePageController() {
   }
 
   const baseActionContext = {
+    availableLibraries: documentLibraries,
     refreshHomeData,
     selectedBotId: '',
     loadDocumentSnapshot,
@@ -289,6 +290,7 @@ export function useHomePageController() {
     setInput,
     setIsLoading,
     setMessages,
+    setPreferredLibraries,
     setReportItems,
     setSelectedReportId,
     setSelectedManualLibraries,

@@ -148,10 +148,10 @@ export default function HomeWorkspaceToolbar({
     }
     if (cloudStatus?.status === 'unavailable') {
       return {
-        level: 'critical',
-        badgeText: '不可用',
-        summary: '云端模型暂不可用',
-        detail: cloudStatus.message || '最近一次云端调用失败，请稍后重试或检查模型连接。',
+        level: 'warning',
+        badgeText: '待重试',
+        summary: '最近一次云端调用失败',
+        detail: cloudStatus.message || '最近一次云端请求未成功，但这通常不代表网关或代理已经中断。建议先重试一次。',
       };
     }
     if (!currentModel && !modelState.availableModels.length) {
