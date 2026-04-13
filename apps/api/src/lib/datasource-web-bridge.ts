@@ -215,6 +215,8 @@ export type WebCaptureDatasourceOverrides = {
   name?: string;
   targetLibraries?: DatasourceTargetLibrary[];
   notes?: string;
+  authMode?: DatasourceDefinition['authMode'];
+  credentialRef?: DatasourceDefinition['credentialRef'];
 };
 
 export async function syncWebCaptureTaskToDatasource(task: WebCaptureTask, overrides: WebCaptureDatasourceOverrides = {}) {
@@ -225,6 +227,8 @@ export async function syncWebCaptureTaskToDatasource(task: WebCaptureTask, overr
     name: overrides.name?.trim() || definition.name,
     notes: overrides.notes?.trim() || definition.notes,
     targetLibraries: overrides.targetLibraries?.length ? overrides.targetLibraries : definition.targetLibraries,
+    authMode: overrides.authMode || definition.authMode,
+    credentialRef: overrides.credentialRef !== undefined ? overrides.credentialRef : definition.credentialRef,
   };
   await upsertDatasourceDefinition(nextDefinition);
 

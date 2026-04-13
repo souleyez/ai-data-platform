@@ -20,6 +20,7 @@ export default function DatasourceManagedCard({
   const runtime = item.runtime || item;
   const telemetryItems = buildTelemetryItems(runtime);
   const stability = item.stability || null;
+  const accessState = item.accessState || null;
 
   return (
     <article className="datasource-managed-card">
@@ -50,6 +51,15 @@ export default function DatasourceManagedCard({
               {stability.latestDurationMs ? <span>最近耗时：{formatDurationMs(stability.latestDurationMs)}</span> : null}
             </div>
           ) : null}
+          {accessState?.supportsSessionReuse ? (
+            <div className="datasource-managed-meta">
+              <DatasourceTag tone={accessState.hasStoredSession ? 'success-tag' : 'neutral-tag'}>
+                {accessState.hasStoredSession ? '已缓存会话' : '未缓存会话'}
+              </DatasourceTag>
+              {accessState.maskedUsername ? <span>账号：{accessState.maskedUsername}</span> : null}
+              {accessState.sessionUpdatedAt ? <span>会话更新时间：{formatRelative(accessState.sessionUpdatedAt)}</span> : null}
+            </div>
+          ) : null}
           {stability?.note ? <p>{stability.note}</p> : null}
         </div>
         <div className="datasource-managed-actions">
@@ -64,6 +74,12 @@ export default function DatasourceManagedCard({
           ) : (
             <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:activate`} onClick={() => onManagedAction(item, 'activate')}>启用</button>
           )}
+          {accessState?.supportsSessionReuse ? (
+            <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:clearSession`} onClick={() => onManagedAction(item, 'clearSession')}>清除会话</button>
+          ) : null}
+          {accessState?.canForceRelogin ? (
+            <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:forceRelogin`} onClick={() => onManagedAction(item, 'forceRelogin')}>强制重登</button>
+          ) : null}
           <button className="ghost-btn" type="button" disabled={busyId === `${item.id}:delete`} onClick={() => onManagedAction(item, 'delete')}>删除</button>
         </div>
       </div>

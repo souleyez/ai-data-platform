@@ -5,13 +5,15 @@ import {
   type DatasourceDefinition,
   type DatasourceRun,
 } from './datasource-definitions.js';
+import { getDatasourceCredentialSecret } from './datasource-credentials.js';
 import { databaseDatasourceProvider } from './datasource-database-provider.js';
 import { erpDatasourceProvider } from './datasource-erp-provider.js';
-import type { DatasourceProviderSummary } from './datasource-provider.js';
+import type { DatasourceAccessState, DatasourceProviderSummary } from './datasource-provider.js';
 import { uploadDatasourceProvider } from './datasource-upload-provider.js';
 import { localDirectoryDatasourceProvider } from './datasource-local-provider.js';
 import { buildDatasourceSummaryFromWebCaptureTask } from './datasource-web-bridge.js';
 import { webDatasourceProvider } from './datasource-web-provider.js';
+import { buildWebCaptureCredentialSummary, loadWebCaptureCredential } from './web-capture-credentials.js';
 import { listWebCaptureTasks } from './web-capture.js';
 
 const PROVIDERS = [
@@ -53,6 +55,55 @@ function toDatasourceResultLabels(run: { documentIds?: string[]; resultSummaries
 
 function pickProvider(definition: DatasourceDefinition) {
   return PROVIDERS.find((provider) => provider.supports(definition)) || null;
+}
+
+function isWebDatasource(definition: DatasourceDefinition) {
+  return definition.kind === 'web_public' || definition.kind === 'web_login' || definition.kind === 'web_discovery';
+}
+
+function getDefinitionUrl(definition: DatasourceDefinition) {
+  return String(definition.config?.url || definition.config?.baseUrl || '').trim();
+}
+
+function hasCredentialSecret(secret: Awaited<ReturnType<typeof getDatasourceCredentialSecret>>) {
+  return Boolean(
+    secret?.username ||
+      secret?.password ||
+      secret?.token ||
+      secret?.connectionString ||
+      secret?.cookies ||
+      (secret?.headers && Object.keys(secret.headers).length),
+  );
+}
+
+async function buildDatasourceAccessState(definition: DatasourceDefinition): Promise<DatasourceAccessState | null> {
+  if (!isWebDatasource(definition)) return null;
+
+  const url = getDefinitionUrl(definition);
+  const [legacyCredential, datasourceCredentialSecret] = await Promise.all([
+    url ? loadWebCaptureCredential(url) : Promise.resolve(null),
+    definition.credentialRef?.id ? getDatasourceCredentialSecret(definition.credentialRef.id) : Promise.resolve(null),
+  ]);
+
+  const legacySummary = url ? buildWebCaptureCredentialSummary(url, legacyCredential) : null;
+  const credentialHasSession = Boolean(
+    datasourceCredentialSecret?.cookies ||
+      (datasourceCredentialSecret?.headers && Object.keys(datasourceCredentialSecret.headers).length),
+  );
+  const hasStoredSession = Boolean(legacySummary?.hasStoredSession || credentialHasSession);
+  const hasStoredCredential = Boolean(legacySummary?.hasStoredCredential || hasCredentialSecret(datasourceCredentialSecret));
+  const source: DatasourceAccessState['source'] =
+    legacySummary?.hasStoredSession ? 'web-capture' : credentialHasSession ? 'credential' : 'none';
+
+  return {
+    supportsSessionReuse: definition.authMode === 'credential' || definition.authMode === 'manual_session',
+    hasStoredCredential,
+    maskedUsername: legacySummary?.maskedUsername || definition.credentialRef?.label || '',
+    hasStoredSession,
+    sessionUpdatedAt: legacySummary?.sessionUpdatedAt || definition.credentialRef?.updatedAt || '',
+    source,
+    canForceRelogin: definition.authMode === 'credential' && Boolean(url) && hasStoredCredential,
+  };
 }
 
 export function toDatasourceDocumentLabels(documentIds: string[]) {
@@ -161,7 +212,14 @@ export async function listDatasourceProviderSummaries() {
     if (!provider) continue;
     const url = String(definition.config?.url || '').trim();
     if (url) definitionUrls.add(url);
-    summaries.push(await provider.summarize(definition, runsByDatasource.get(definition.id) || []));
+    const [summary, accessState] = await Promise.all([
+      provider.summarize(definition, runsByDatasource.get(definition.id) || []),
+      buildDatasourceAccessState(definition),
+    ]);
+    summaries.push({
+      ...summary,
+      accessState,
+    });
   }
 
   const existingIds = new Set(summaries.map((item) => item.id));

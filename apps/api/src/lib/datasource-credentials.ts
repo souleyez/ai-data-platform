@@ -169,3 +169,25 @@ export async function deleteDatasourceCredential(id: string) {
   await writeAll(items);
   return toPublicRecord(removed);
 }
+
+export async function clearDatasourceCredentialSession(id: string) {
+  const normalizedId = String(id || '').trim();
+  if (!normalizedId) return null;
+
+  const items = await readAll();
+  const index = items.findIndex((item) => item.id === normalizedId);
+  if (index < 0) return null;
+
+  const next = {
+    ...items[index],
+    updatedAt: new Date().toISOString(),
+    secret: {
+      ...items[index].secret,
+      cookies: '',
+      headers: {},
+    },
+  };
+  items[index] = next;
+  await writeAll(items);
+  return toPublicRecord(next);
+}

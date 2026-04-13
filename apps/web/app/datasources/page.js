@@ -314,6 +314,8 @@ export default function DatasourcesPage() {
       run: `/api/datasources/definitions/${encodeURIComponent(item.id)}/run`,
       activate: `/api/datasources/definitions/${encodeURIComponent(item.id)}/activate`,
       pause: `/api/datasources/definitions/${encodeURIComponent(item.id)}/pause`,
+      clearSession: `/api/datasources/definitions/${encodeURIComponent(item.id)}/clear-session`,
+      forceRelogin: `/api/datasources/definitions/${encodeURIComponent(item.id)}/force-relogin`,
       delete: `/api/datasources/definitions/${encodeURIComponent(item.id)}`,
     };
 
@@ -337,6 +339,10 @@ export default function DatasourcesPage() {
             ? `已启用数据源：${item.name}`
             : action === 'pause'
               ? `已暂停数据源：${item.name}`
+              : action === 'clearSession'
+                ? `已清除缓存会话：${item.name}`
+                : action === 'forceRelogin'
+                  ? `已强制重登并重新采集：${item.name}`
               : `已删除数据源：${item.name}`;
       setMessage(nextMessage);
       rememberDatasourceFeedback('数据源状态更新', nextMessage, item.name);

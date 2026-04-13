@@ -11,6 +11,7 @@ import {
   upsertDatasourceDefinition,
 } from '../lib/datasource-definitions.js';
 import {
+  clearDatasourceCredentialSession,
   deleteDatasourceCredential,
   getDatasourceCredential,
   getDatasourceCredentialSecret,
@@ -46,9 +47,33 @@ import { loadDocumentCategoryConfig } from '../lib/document-config.js';
 import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { ingestUploadedFiles, saveMultipartFiles } from '../lib/document-upload-ingest.js';
 import { loadOperationsOverviewPayload } from '../lib/operations-overview.js';
+import { clearWebCaptureSession } from '../lib/web-capture-credentials.js';
 
 const DATASOURCE_STALE_WARNING_MS = 12 * 60 * 60 * 1000;
 const DATASOURCE_STALE_CRITICAL_MS = 24 * 60 * 60 * 1000;
+
+function isWebDatasourceKind(kind: unknown) {
+  return kind === 'web_public' || kind === 'web_login' || kind === 'web_discovery';
+}
+
+function getDatasourceDefinitionUrl(definition: { config?: Record<string, unknown> }) {
+  return String(definition.config?.url || definition.config?.baseUrl || '').trim();
+}
+
+async function clearDatasourceDefinitionSessions(definition: {
+  credentialRef?: { id?: string } | null;
+  config?: Record<string, unknown>;
+}) {
+  const url = getDatasourceDefinitionUrl(definition);
+  const [webCaptureSession, credentialSession] = await Promise.all([
+    url ? clearWebCaptureSession(url) : Promise.resolve(null),
+    definition.credentialRef?.id ? clearDatasourceCredentialSession(definition.credentialRef.id) : Promise.resolve(null),
+  ]);
+  return {
+    clearedWebCaptureSession: Boolean(webCaptureSession),
+    clearedCredentialSession: Boolean(credentialSession),
+  };
+}
 
 function toDatasourceItem(item: any) {
   return {
@@ -550,6 +575,58 @@ export async function registerDatasourceRoutes(app: FastifyInstance) {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'failed to run datasource definition';
+      const code = /not found/i.test(message) ? 404 : 400;
+      return reply.code(code).send({ error: message });
+    }
+  });
+
+  app.post('/datasources/definitions/:id/clear-session', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    const definition = id ? await getDatasourceDefinition(id) : null;
+    if (!definition) {
+      return reply.code(404).send({ error: 'datasource definition not found' });
+    }
+    if (!isWebDatasourceKind(definition.kind)) {
+      return reply.code(400).send({ error: 'session clearing only supports web datasource definitions' });
+    }
+
+    const cleared = await clearDatasourceDefinitionSessions(definition);
+    return {
+      status: 'cleared',
+      datasourceId: definition.id,
+      cleared,
+      message: cleared.clearedWebCaptureSession || cleared.clearedCredentialSession
+        ? '已清除缓存会话，下次采集会重新建立登录态。'
+        : '当前没有可清除的缓存会话。',
+    };
+  });
+
+  app.post('/datasources/definitions/:id/force-relogin', async (request, reply) => {
+    const params = request.params as { id?: string };
+    const id = String(params.id || '').trim();
+    const definition = id ? await getDatasourceDefinition(id) : null;
+    if (!definition) {
+      return reply.code(404).send({ error: 'datasource definition not found' });
+    }
+    if (!isWebDatasourceKind(definition.kind)) {
+      return reply.code(400).send({ error: 'force relogin only supports web datasource definitions' });
+    }
+    if (definition.authMode !== 'credential') {
+      return reply.code(400).send({ error: 'force relogin requires credential-based web datasource definitions' });
+    }
+
+    await clearDatasourceDefinitionSessions(definition);
+
+    try {
+      const result = await runDatasourceDefinition(id);
+      return {
+        status: 'executed',
+        relogin: true,
+        ...result,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'failed to re-login and run datasource definition';
       const code = /not found/i.test(message) ? 404 : 400;
       return reply.code(code).send({ error: message });
     }

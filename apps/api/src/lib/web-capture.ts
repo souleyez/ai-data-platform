@@ -5,10 +5,16 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { DEFAULT_SCAN_DIR } from './document-store.js';
+import { getDatasourceCredentialSecret } from './datasource-credentials.js';
 import { STORAGE_ROOT } from './paths.js';
 import { buildAugmentedEnv, getPythonCommandCandidates } from './runtime-executables.js';
 import { readRuntimeStateJson, writeRuntimeStateJson } from './runtime-state-file.js';
-import { loadWebCaptureCredential } from './web-capture-credentials.js';
+import {
+  clearWebCaptureSession,
+  isWebCaptureSessionFresh,
+  loadWebCaptureCredential,
+  saveWebCaptureSession,
+} from './web-capture-credentials.js';
 
 const WEB_CAPTURE_DIR = path.join(STORAGE_ROOT, 'web-captures');
 const TASKS_FILE = path.join(WEB_CAPTURE_DIR, 'tasks.json');
@@ -96,6 +102,13 @@ type RuntimeAuth = {
 };
 
 type CookieJar = Map<string, Map<string, string>>;
+
+type RuntimeAccess = {
+  auth?: RuntimeAuth;
+  headerOverrides?: Record<string, string>;
+  storedCredential?: Awaited<ReturnType<typeof loadWebCaptureCredential>>;
+  sessionCookieHeader?: string;
+};
 
 type LoginForm = {
   actionUrl: string;
@@ -550,6 +563,57 @@ function getTaskFocusTerms(task: Pick<WebCaptureTask, 'focus' | 'keywords' | 'si
   return Array.from(dedup);
 }
 
+function parseCookieHeaderValue(value: string) {
+  return String(value || '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const separatorIndex = entry.indexOf('=');
+      if (separatorIndex <= 0) return ['', ''] as const;
+      return [entry.slice(0, separatorIndex).trim(), entry.slice(separatorIndex + 1).trim()] as const;
+    })
+    .filter(([name, cookieValue]) => Boolean(name && cookieValue));
+}
+
+function applyCookieHeaderToJar(jar: CookieJar, url: string, cookieHeader: string) {
+  const bucket = ensureCookieBucket(jar, url);
+  for (const [name, cookieValue] of parseCookieHeaderValue(cookieHeader)) {
+    bucket.set(name, cookieValue);
+  }
+}
+
+function applySerializedSessionCookies(
+  jar: CookieJar,
+  sessionCookies: Record<string, Record<string, string>>,
+) {
+  for (const [scope, bucket] of Object.entries(sessionCookies || {})) {
+    const jarBucket = ensureCookieBucket(jar, scope);
+    for (const [name, cookieValue] of Object.entries(bucket || {})) {
+      if (!name || !cookieValue) continue;
+      jarBucket.set(name, cookieValue);
+    }
+  }
+}
+
+function serializeCookieJar(jar: CookieJar) {
+  const next: Record<string, Record<string, string>> = {};
+  for (const [scope, bucket] of jar.entries()) {
+    if (!scope || !bucket?.size) continue;
+    next[scope] = Object.fromEntries(
+      Array.from(bucket.entries()).filter(([name, cookieValue]) => Boolean(name && cookieValue)),
+    );
+  }
+  return next;
+}
+
+function hasCookiesInJar(jar: CookieJar) {
+  for (const bucket of jar.values()) {
+    if (bucket.size) return true;
+  }
+  return false;
+}
+
 function summarizeText(text: string, focus: string) {
   const sentences = splitSentences(text).slice(0, 50);
   if (!sentences.length) return '已抓取页面，但正文较少，当前只保留来源和页面概览。';
@@ -919,10 +983,16 @@ function isDownloadResponse(url: string, response: Response) {
   return false;
 }
 
-async function fetchWebPage(url: string, auth?: RuntimeAuth, jar?: CookieJar): Promise<PageResult | DownloadResult> {
+async function fetchWebPage(
+  url: string,
+  auth?: RuntimeAuth,
+  jar?: CookieJar,
+  headerOverrides?: Record<string, string>,
+): Promise<PageResult | DownloadResult> {
   const headers: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (compatible; ai-data-platform/0.1; +https://example.local)',
     Accept: 'text/html,application/xhtml+xml,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream',
+    ...(headerOverrides || {}),
   };
 
   if (auth?.username && auth?.password) {
@@ -968,7 +1038,12 @@ async function fetchWebPage(url: string, auth?: RuntimeAuth, jar?: CookieJar): P
   return { kind: 'page', url: response.url || url, html, title, text, extractionMethod: main.method };
 }
 
-async function submitLoginForm(page: PageResult, auth: RuntimeAuth, jar: CookieJar) {
+async function submitLoginForm(
+  page: PageResult,
+  auth: RuntimeAuth,
+  jar: CookieJar,
+  headerOverrides?: Record<string, string>,
+) {
   const form = extractLoginForm(page);
   if (!form) {
     throw new Error('login form not detected');
@@ -979,6 +1054,7 @@ async function submitLoginForm(page: PageResult, auth: RuntimeAuth, jar: CookieJ
     'User-Agent': 'Mozilla/5.0 (compatible; ai-data-platform/0.1; +https://example.local)',
     Accept: 'text/html,application/xhtml+xml',
     Referer: page.url,
+    ...(headerOverrides || {}),
   };
 
   const cookieHeader = getCookieHeader(jar, form.actionUrl);
@@ -1379,15 +1455,37 @@ async function collectRankedEntries(task: WebCaptureTask, landing: PageResult, a
   return selected;
 }
 
-async function resolveRuntimeAuth(task: WebCaptureTask, auth?: RuntimeAuth) {
-  if (auth?.username && auth?.password) return auth;
-  if (task.credentialRef) {
-    const stored = await loadWebCaptureCredential(task.url);
-    if (stored?.username && stored?.password) {
-      return { username: stored.username, password: stored.password };
-    }
+async function resolveRuntimeAccess(task: WebCaptureTask, auth?: RuntimeAuth): Promise<RuntimeAccess> {
+  if (auth?.username && auth?.password) {
+    return {
+      auth,
+      headerOverrides: undefined,
+      storedCredential: task.credentialRef ? await loadWebCaptureCredential(task.url) : null,
+      sessionCookieHeader: '',
+    };
   }
-  return undefined;
+
+  let storedCredential = null;
+  let datasourceSecret = null;
+  if (task.credentialRef) {
+    storedCredential = await loadWebCaptureCredential(task.url);
+    datasourceSecret = await getDatasourceCredentialSecret(task.credentialRef);
+  }
+
+  const resolvedAuth = storedCredential?.username && storedCredential?.password
+    ? { username: storedCredential.username, password: storedCredential.password }
+    : datasourceSecret?.username && datasourceSecret?.password
+      ? { username: datasourceSecret.username, password: datasourceSecret.password }
+      : undefined;
+
+  return {
+    auth: resolvedAuth,
+    storedCredential,
+    sessionCookieHeader: String(datasourceSecret?.cookies || '').trim(),
+    headerOverrides: datasourceSecret?.headers && Object.keys(datasourceSecret.headers).length
+      ? datasourceSecret.headers
+      : undefined,
+  };
 }
 
 async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth) {
@@ -1400,11 +1498,25 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
       seedUrls: resolveSeedUrls(task.seedUrls, task.url),
       crawlMode: resolveTaskCrawlMode(task),
     };
-    const runtimeAuth = await resolveRuntimeAuth(normalizedTask, auth);
+    const runtime = await resolveRuntimeAccess(normalizedTask, auth);
+    const runtimeAuth = runtime.auth;
     const jar: CookieJar = new Map();
-    let landing = await fetchWebPage(normalizedTask.url, runtimeAuth, jar);
+    if (runtime.sessionCookieHeader) {
+      applyCookieHeaderToJar(jar, normalizedTask.url, runtime.sessionCookieHeader);
+    }
+    if (runtime.storedCredential?.sessionCookies && isWebCaptureSessionFresh(runtime.storedCredential.sessionUpdatedAt)) {
+      applySerializedSessionCookies(jar, runtime.storedCredential.sessionCookies);
+    }
+    let landing = await fetchWebPage(normalizedTask.url, runtimeAuth, jar, runtime.headerOverrides);
 
     if (landing.kind === 'download') {
+      if (normalizedTask.credentialRef && hasCookiesInJar(jar)) {
+        await saveWebCaptureSession({
+          url: normalizedTask.url,
+          sessionCookies: serializeCookieJar(jar),
+          updatedAt: now,
+        }).catch(() => undefined);
+      }
       const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
       const summary = shouldKeepOriginalDownload(normalizedTask, landing.extension)
         ? `本次采集识别为可下载文件，已保留原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
@@ -1432,7 +1544,17 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     }
 
     if (runtimeAuth && isLikelyLoginPage(landing)) {
-      const loginResult = await submitLoginForm(landing, runtimeAuth, jar);
+      if (runtime.storedCredential?.sessionCookies && isWebCaptureSessionFresh(runtime.storedCredential.sessionUpdatedAt)) {
+        await clearWebCaptureSession(normalizedTask.url).catch(() => undefined);
+      }
+      const loginResult = await submitLoginForm(landing, runtimeAuth, jar, runtime.headerOverrides);
+      if (normalizedTask.credentialRef && hasCookiesInJar(jar)) {
+        await saveWebCaptureSession({
+          url: normalizedTask.url,
+          sessionCookies: serializeCookieJar(jar),
+          updatedAt: now,
+        }).catch(() => undefined);
+      }
       if (loginResult.kind === 'download') {
         const storedDownload = await writeDownloadedCapture(normalizedTask, loginResult);
         const summary = shouldKeepOriginalDownload(normalizedTask, loginResult.extension)
@@ -1460,7 +1582,7 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
         };
       }
       landing = isLikelyLoginPage(loginResult)
-        ? await fetchWebPage(normalizedTask.url, runtimeAuth, jar)
+        ? await fetchWebPage(normalizedTask.url, runtimeAuth, jar, runtime.headerOverrides)
         : loginResult;
       if (landing.kind === 'download') {
         const storedDownload = await writeDownloadedCapture(normalizedTask, landing);
@@ -1491,7 +1613,18 @@ async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth)
     }
 
     if (isLikelyLoginPage(landing)) {
+      if (runtime.storedCredential?.sessionCookies && isWebCaptureSessionFresh(runtime.storedCredential.sessionUpdatedAt)) {
+        await clearWebCaptureSession(normalizedTask.url).catch(() => undefined);
+      }
       throw new Error('login required or login form not supported');
+    }
+
+    if (normalizedTask.credentialRef && hasCookiesInJar(jar)) {
+      await saveWebCaptureSession({
+        url: normalizedTask.url,
+        sessionCookies: serializeCookieJar(jar),
+        updatedAt: now,
+      }).catch(() => undefined);
     }
 
     const title = landing.title || normalizedTask.url;
@@ -1577,6 +1710,7 @@ export async function createAndRunWebCaptureTask(input: {
   auth?: RuntimeAuth;
   credentialRef?: string;
   credentialLabel?: string;
+  loginMode?: 'none' | 'credential';
   keepOriginalFiles?: boolean;
 }) {
   const now = new Date().toISOString();
@@ -1598,7 +1732,7 @@ export async function createAndRunWebCaptureTask(input: {
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     captureStatus: 'active',
-    loginMode: input.auth || input.credentialRef ? 'credential' : 'none',
+    loginMode: input.loginMode || (input.auth || input.credentialRef ? 'credential' : 'none'),
     credentialRef: input.credentialRef || '',
     credentialLabel: input.credentialLabel || '',
   };

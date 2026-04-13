@@ -114,7 +114,7 @@ async function ensureWebTaskFromDefinition(definition: DatasourceDefinition) {
     maxItems: Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 5),
     credentialRef: definition.credentialRef?.id || '',
     credentialLabel: definition.credentialRef?.label || '',
-    loginMode: definition.authMode === 'credential' || definition.authMode === 'manual_session' ? 'credential' : 'none',
+    loginMode: definition.authMode === 'credential' ? 'credential' : 'none',
     captureStatus: definition.status === 'paused' ? 'paused' : 'active',
     keepOriginalFiles: Boolean(definition.config?.keepOriginalFiles),
   });
@@ -280,6 +280,10 @@ export async function runDatasourceDefinition(id: string) {
     throw new Error('datasource run is not implemented for this provider yet');
   }
 
+  const credentialSecret = definition.credentialRef?.id
+    ? await getDatasourceCredentialSecret(definition.credentialRef.id)
+    : null;
+
   const task = await createAndRunWebCaptureTask({
     url: getDefinitionUrl(definition),
     focus: String(definition.config?.focus || '').trim(),
@@ -290,8 +294,15 @@ export async function runDatasourceDefinition(id: string) {
     frequency: definition.schedule.kind,
     note: definition.notes || '',
     maxItems: Number(definition.schedule.maxItemsPerRun || definition.config?.maxItems || 5),
+    auth: definition.authMode === 'credential' && credentialSecret?.username && credentialSecret?.password
+      ? {
+          username: credentialSecret.username,
+          password: credentialSecret.password,
+        }
+      : undefined,
     credentialRef: definition.credentialRef?.id || '',
     credentialLabel: definition.credentialRef?.label || '',
+    loginMode: definition.authMode === 'credential' ? 'credential' : 'none',
     keepOriginalFiles: Boolean(definition.config?.keepOriginalFiles),
   });
 
@@ -300,6 +311,8 @@ export async function runDatasourceDefinition(id: string) {
     name: definition.name,
     targetLibraries: definition.targetLibraries,
     notes: definition.notes,
+    authMode: definition.authMode,
+    credentialRef: definition.credentialRef,
   });
 
   const webIngest = task.lastStatus === 'success'

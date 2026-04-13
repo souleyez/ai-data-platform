@@ -151,6 +151,8 @@ export async function registerWebCaptureRoutes(app: FastifyInstance) {
         password,
         maskedUsername: savedCredential?.maskedUsername || `${username.slice(0, 2)}***`,
         updatedAt: savedCredential?.updatedAt || new Date().toISOString(),
+        sessionCookies: savedCredential?.sessionCookies || stored?.sessionCookies || {},
+        sessionUpdatedAt: savedCredential?.sessionUpdatedAt || stored?.sessionUpdatedAt || '',
       };
     }
 

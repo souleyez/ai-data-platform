@@ -1191,6 +1191,8 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
         password,
         maskedUsername: savedCredential.maskedUsername,
         updatedAt: savedCredential.updatedAt,
+        sessionCookies: savedCredential.sessionCookies,
+        sessionUpdatedAt: savedCredential.sessionUpdatedAt,
       };
     } else {
       stored = {
@@ -1200,6 +1202,8 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
         password,
         maskedUsername: buildWebCaptureCredentialSummary(url, { maskedUsername: username, origin: new URL(url).origin.toLowerCase() }).maskedUsername || `${username.slice(0, 2)}***`,
         updatedAt: new Date().toISOString(),
+        sessionCookies: {},
+        sessionUpdatedAt: '',
       };
     }
 
@@ -1226,6 +1230,7 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
           targetLibraries: definition.targetLibraries,
         })
       : null;
+    const latestStored = remember ? await loadWebCaptureCredential(url) : stored;
     const successCount = webIngest?.ingestResult.summary.successCount || 0;
     const failedCount = webIngest?.ingestResult.summary.failedCount || (successCount > 0 ? 0 : (task.lastStatus === 'error' ? 1 : 0));
     return {
@@ -1241,7 +1246,7 @@ async function runDatasourceCommand(subcommand: string, flags: CommandFlags): Pr
           kind: definition.kind,
           targetLibraries: definition.targetLibraries,
         },
-        credentialSummary: buildWebCaptureCredentialSummary(url, stored),
+        credentialSummary: buildWebCaptureCredentialSummary(url, latestStored),
         task,
         ingest: webIngest
           ? {

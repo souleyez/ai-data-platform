@@ -46,6 +46,16 @@ export type DatasourceProviderRuntime = {
   resultSummaries?: DatasourceRunSummaryItem[];
 };
 
+export type DatasourceAccessState = {
+  supportsSessionReuse: boolean;
+  hasStoredCredential: boolean;
+  maskedUsername?: string;
+  hasStoredSession: boolean;
+  sessionUpdatedAt?: string;
+  source: 'none' | 'web-capture' | 'credential';
+  canForceRelogin: boolean;
+};
+
 export type DatasourceProviderSummary = {
   id: string;
   name: string;
@@ -57,6 +67,7 @@ export type DatasourceProviderSummary = {
   notes?: string;
   executionHints?: string[];
   publicPath?: string;
+  accessState?: DatasourceAccessState | null;
   runtime?: DatasourceProviderRuntime | null;
 };
 
