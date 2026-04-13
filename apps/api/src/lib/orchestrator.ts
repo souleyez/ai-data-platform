@@ -3,6 +3,7 @@ import {
   isChatTimeoutBackgroundCandidate,
 } from './chat-background-jobs.js';
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
+import { tryExecutePlatformChatAction, type ChatActionResult } from './platform-chat-actions.js';
 import {
   buildBotConfigurationMemoryContextBlock,
   buildBotIdentityContextBlock,
@@ -105,7 +106,7 @@ function buildFallbackResponse(
   gatewayConfigured: boolean,
   requestMode: ChatRequestInput['mode'],
 ): {
-  mode: 'openclaw' | 'fallback';
+  mode: 'openclaw' | 'fallback' | 'host';
   intent: 'general' | 'report';
   content: string;
   output: ChatOutput;
@@ -184,6 +185,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   let evidenceMode: string | null = null;
   let savedReport: Record<string, unknown> | null = null;
   let backgroundHandoff = false;
+  let actionResult: ChatActionResult | null = null;
   let references: Array<{ id: string; name: string; path?: string }> = [];
   let guard = {
     requiresConfirmation: false,
@@ -191,7 +193,40 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   };
   let confirmation: Record<string, unknown> | null = null;
 
-  if (gatewayConfigured) {
+  if (requestMode === 'general' && !input.backgroundContinuation) {
+    try {
+      const hostAction = await tryExecutePlatformChatAction({
+        prompt,
+      });
+      if (hostAction) {
+        mode = 'host';
+        intent = 'general';
+        content = hostAction.content;
+        output = { type: 'answer', content };
+        libraries = hostAction.libraries;
+        conversationState = null;
+        routeKind = hostAction.actionResult.status === 'failed'
+          ? 'platform_action_failed'
+          : 'platform_action';
+        evidenceMode = null;
+        actionResult = hostAction.actionResult;
+        guard = {
+          requiresConfirmation: false,
+          reason: '',
+        };
+      }
+    } catch (error) {
+      fallbackReason = summarizeError(error);
+      content = error instanceof Error ? error.message : '系统操作执行失败，请稍后再试。';
+      output = { type: 'answer', content };
+      mode = 'host';
+      intent = 'general';
+      routeKind = 'platform_action_failed';
+      actionResult = null;
+    }
+  }
+
+  if (mode !== 'host' && gatewayConfigured) {
     try {
       if (requestMode === 'knowledge_output') {
         const result = await executeKnowledgeOutput({
@@ -340,6 +375,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     output,
     reportTemplate,
     savedReport,
+    actionResult,
     knowledgePlan,
     guard: {
       requiresConfirmation: guard.requiresConfirmation,
@@ -352,9 +388,14 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       output,
       meta: backgroundHandoff
         ? '已转报表中心后台生成'
-        : (mode === 'openclaw' ? '云端智能回复' : '云端回复暂不可用'),
+        : (mode === 'openclaw'
+          ? '云端智能回复'
+          : (mode === 'host'
+            ? (actionResult?.status === 'failed' ? '系统操作失败' : '系统操作已执行')
+            : '云端回复暂不可用')),
       references,
       confirmation,
+      actionResult,
     },
     sources: [],
     permissions: {

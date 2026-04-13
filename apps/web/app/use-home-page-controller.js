@@ -90,7 +90,7 @@ export function useHomePageController() {
     try {
       const json = await fetchDatasources();
       const normalized = normalizeDatasourceResponse(json);
-      if (normalized.items.length) setSidebarSources(normalized.items);
+      setSidebarSources(Array.isArray(normalized.items) ? normalized.items : []);
     } catch {
       setSidebarSources(sourceItems);
     }
@@ -103,14 +103,12 @@ export function useHomePageController() {
       const total = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
       setDocumentLibraries(libraries);
       setDocumentTotal(total || Number(json?.totalFiles || 0));
-      if (!preferredLibrariesInitializedRef.current && libraries.length) {
-        preferredLibrariesInitializedRef.current = true;
-        setPreferredLibraries((current) => (
-          current.length
-            ? current.filter((key) => libraries.some((item) => item.key === key))
-            : []
-        ));
-      }
+      if (libraries.length) preferredLibrariesInitializedRef.current = true;
+      setPreferredLibraries((current) => (
+        Array.isArray(current) && current.length
+          ? current.filter((key) => libraries.some((item) => item.key === key))
+          : []
+      ));
     } catch {
       setDocumentLibraries([]);
       setDocumentTotal(0);
@@ -283,6 +281,7 @@ export function useHomePageController() {
   const baseActionContext = {
     availableLibraries: documentLibraries,
     refreshHomeData,
+    loadDatasources,
     selectedBotId: '',
     loadDocumentSnapshot,
     loadReports,

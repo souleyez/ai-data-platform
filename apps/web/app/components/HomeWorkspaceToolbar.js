@@ -13,6 +13,8 @@ const DESKTOP_NAV_LINKS = [
   { label: '审计', href: '/audit' },
 ];
 
+const MODEL_CONFIG_INVALIDATED_EVENT = 'aidp-model-config-invalidated';
+
 const INITIAL_MODEL_STATE = {
   openclaw: {
     installed: false,
@@ -70,6 +72,16 @@ export default function HomeWorkspaceToolbar({
     }
 
     void loadModelState();
+    if (typeof window !== 'undefined') {
+      const refresh = () => {
+        void loadModelState();
+      };
+      window.addEventListener(MODEL_CONFIG_INVALIDATED_EVENT, refresh);
+      return () => {
+        alive = false;
+        window.removeEventListener(MODEL_CONFIG_INVALIDATED_EVENT, refresh);
+      };
+    }
     return () => {
       alive = false;
     };

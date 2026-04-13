@@ -66,6 +66,51 @@ function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, message));
 }
 
+async function applyActionResult(normalized, context) {
+  const actionResult = normalized?.actionResult;
+  if (!actionResult) return;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('aidp-platform-action', { detail: actionResult }));
+  }
+  if (actionResult.status !== 'completed') return;
+
+  const invalidate = Array.isArray(actionResult.invalidate) ? actionResult.invalidate : [];
+  const refreshTasks = [];
+  if (invalidate.includes('documents') && context.loadDocumentSnapshot) {
+    refreshTasks.push(context.loadDocumentSnapshot());
+  }
+  if (invalidate.includes('datasources') && context.loadDatasources) {
+    refreshTasks.push(context.loadDatasources());
+  }
+  if (invalidate.includes('reports') && context.loadReports) {
+    refreshTasks.push(context.loadReports());
+  }
+  if (invalidate.includes('models') && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('aidp-model-config-invalidated'));
+  }
+
+  if (refreshTasks.length) {
+    await Promise.allSettled(refreshTasks);
+  }
+
+  if (actionResult.domain === 'documents' && actionResult.action === 'documents.create-library') {
+    const key = String(actionResult?.entity?.key || '').trim();
+    if (key) {
+      context.setPreferredLibraries?.([key]);
+    }
+    return;
+  }
+
+  if (actionResult.domain === 'documents' && actionResult.action === 'documents.delete-library') {
+    const deletedKey = String(actionResult?.entity?.key || '').trim();
+    if (deletedKey) {
+      context.setPreferredLibraries?.((current) => Array.isArray(current)
+        ? current.filter((item) => item !== deletedKey)
+        : []);
+    }
+  }
+}
+
 function seedSelectedLibraries(setSelectedManualLibraries, ingestItems) {
   setSelectedManualLibraries((prev) => {
     const next = { ...prev };
@@ -202,12 +247,15 @@ export async function submitQuestion(value, context) {
   try {
     const data = await sendChatPrompt(text, buildRecentChatHistory([...messages, userMessage]), buildChatOptions(context));
     const normalized = normalizeChatResponse(data, null);
-    if (looksLikeCloudUnavailable(normalized)) {
+    if (normalized?.mode === 'host') {
+      // Keep cloud model health as-is; this turn was handled by a local platform action.
+    } else if (looksLikeCloudUnavailable(normalized)) {
       setCloudModelUnavailable(normalized.message?.content, 'chat-fallback');
     } else {
       setCloudModelHealthy('chat-success');
     }
     applyScopedLibrariesIfNeeded(text, normalized, context);
+    await applyActionResult(normalized, context);
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
@@ -254,7 +302,9 @@ export async function confirmTemplateOption(option, context) {
       }),
     );
     const normalized = normalizeChatResponse(data, null);
-    if (looksLikeCloudUnavailable(normalized)) {
+    if (normalized?.mode === 'host') {
+      // Keep cloud model health as-is; this turn was handled by a local platform action.
+    } else if (looksLikeCloudUnavailable(normalized)) {
       setCloudModelUnavailable(normalized.message?.content, 'template-chat-fallback');
     } else {
       setCloudModelHealthy('template-chat-success');
@@ -264,6 +314,7 @@ export async function confirmTemplateOption(option, context) {
       normalized,
       context,
     );
+    await applyActionResult(normalized, context);
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);

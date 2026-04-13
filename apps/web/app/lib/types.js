@@ -27,6 +27,7 @@ export function formatSourceLabel(source) {
 export function formatOrchestrationLabel(orchestration) {
   if (!orchestration) return '分析信息缺失';
   const matches = orchestration.docMatches ?? 0;
+  if (orchestration.mode === 'host') return '系统操作 · 已执行';
   const modeLabel = orchestration.mode === 'openclaw' ? '云端模型' : '云端未响应';
   return `${modeLabel} · 命中文档 ${matches} 项`;
 }
@@ -41,6 +42,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     references: Array.isArray(data?.message?.references) ? data.message.references : [],
     orchestration: data?.orchestration || data?.message?.orchestration || null,
     confirmation: data?.message?.confirmation || data?.guard?.confirmation || null,
+    actionResult: data?.message?.actionResult || data?.actionResult || null,
     output,
   };
 
@@ -57,6 +59,7 @@ export function normalizeChatResponse(data, fallbackPanel) {
     guard: data?.guard || null,
     conversationState: data?.conversationState || null,
     savedReport: data?.savedReport || null,
+    actionResult: data?.actionResult || data?.message?.actionResult || null,
   };
 }
 
