@@ -29,6 +29,7 @@ import { initialMessages, sourceItems } from './lib/mock-data';
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
 const CHAT_CONVERSATION_STATE_STORAGE_KEY = 'aidp_home_chat_conversation_state_v1';
 const HOME_PREFERRED_LIBRARIES_STORAGE_KEY = 'aidp_home_preferred_libraries_v1';
+const CHAT_DEBUG_DETAILS_STORAGE_KEY = 'aidp_home_chat_debug_details_v1';
 
 function loadStoredSystemConstraints() {
   if (typeof window === 'undefined') return '';
@@ -45,6 +46,16 @@ function loadStoredConversationState() {
     const raw = window.localStorage.getItem(CHAT_CONVERSATION_STATE_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && parsed.kind === 'general'
+      && typeof parsed.expiresAt === 'string'
+      && Date.parse(parsed.expiresAt) <= Date.now()
+    ) {
+      window.localStorage.removeItem(CHAT_CONVERSATION_STATE_STORAGE_KEY);
+      return null;
+    }
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
@@ -61,6 +72,26 @@ function loadStoredPreferredLibraries() {
     return parsed.filter((entry) => typeof entry === 'string' && entry.trim());
   } catch {
     return [];
+  }
+}
+
+function resolveChatDebugAvailability() {
+  if (typeof window === 'undefined') return process.env.NODE_ENV !== 'production';
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    return process.env.NODE_ENV !== 'production' || params.get('chatDebug') === '1';
+  } catch {
+    return process.env.NODE_ENV !== 'production';
+  }
+}
+
+function loadStoredChatDebugDetailsEnabled() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage.getItem(CHAT_DEBUG_DETAILS_STORAGE_KEY);
+    return raw === '1' || raw === 'true';
+  } catch {
+    return false;
   }
 }
 
@@ -85,6 +116,10 @@ export function useHomePageController() {
   const preferredLibrariesInitializedRef = useRef(false);
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
   const [conversationState, setConversationState] = useState(() => loadStoredConversationState());
+  const [chatDebugAvailable] = useState(() => resolveChatDebugAvailability());
+  const [chatDebugDetailsEnabled, setChatDebugDetailsEnabled] = useState(() => (
+    resolveChatDebugAvailability() && loadStoredChatDebugDetailsEnabled()
+  ));
 
   async function loadDatasources() {
     try {
@@ -228,6 +263,19 @@ export function useHomePageController() {
   }, [preferredLibraries]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !chatDebugAvailable) return;
+    try {
+      if (chatDebugDetailsEnabled) {
+        window.localStorage.setItem(CHAT_DEBUG_DETAILS_STORAGE_KEY, '1');
+      } else {
+        window.localStorage.removeItem(CHAT_DEBUG_DETAILS_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore local persistence failures.
+    }
+  }, [chatDebugAvailable, chatDebugDetailsEnabled]);
+
+  useEffect(() => {
     if (!reportItems.length) {
       hasAutoSelectedReportRef.current = false;
       setSelectedReportId('');
@@ -320,7 +368,10 @@ export function useHomePageController() {
     sidebarSources,
     uploadInputRef,
     uploadLoading,
+    chatDebugAvailable,
+    chatDebugDetailsEnabled,
     setInput,
+    setChatDebugDetailsEnabled,
     setReportCollapsed,
     setSelectedManualLibraries,
     setPreferredLibraries,

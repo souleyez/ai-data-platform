@@ -32,6 +32,137 @@ export function formatOrchestrationLabel(orchestration) {
   return `${modeLabel} · 命中文档 ${matches} 项`;
 }
 
+function basenameOfPath(value) {
+  return String(value || '')
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop() || '';
+}
+
+export function buildOrchestrationDebugChips(orchestration) {
+  if (!orchestration || typeof orchestration !== 'object') return [];
+
+  const chips = [];
+  const baseLabel = formatOrchestrationLabel(orchestration);
+  if (baseLabel) {
+    chips.push({ key: 'mode', label: baseLabel, tone: 'neutral' });
+  }
+
+  if (orchestration.recentUploadSummaryIncluded) {
+    const count = Number(orchestration.recentUploadSummaryItemCount || 0);
+    chips.push({
+      key: 'recent-upload-summary',
+      label: count > 0 ? `上传摘要 ${count} 份` : '上传摘要已附带',
+      tone: 'supply',
+    });
+  }
+
+  if (orchestration.latestDocumentFullTextIncluded) {
+    chips.push({
+      key: 'latest-document-full-text',
+      label: '上传全文已附带',
+      tone: 'supply',
+    });
+  }
+
+  const preferredDocumentLabel = basenameOfPath(orchestration.preferredDocumentPath);
+  if (preferredDocumentLabel) {
+    chips.push({
+      key: 'preferred-document',
+      label: `目标文档 ${preferredDocumentLabel}`,
+      tone: 'neutral',
+    });
+  }
+
+  if (orchestration.preferredDocumentStatus === 'not_ready') {
+    chips.push({
+      key: 'preferred-document-status',
+      label: '刚上传文档待解析',
+      tone: 'warning',
+    });
+  } else if (orchestration.preferredDocumentStatus === 'missing') {
+    chips.push({
+      key: 'preferred-document-status',
+      label: '目标文档未找到',
+      tone: 'warning',
+    });
+  }
+
+  return chips;
+}
+
+export function buildOrchestrationDebugDetails(orchestration) {
+  if (!orchestration || typeof orchestration !== 'object') return [];
+
+  const details = [];
+  const preferredDocumentLabel = basenameOfPath(orchestration.preferredDocumentPath);
+  if (preferredDocumentLabel) {
+    details.push({
+      key: 'preferred-document',
+      label: '目标文档',
+      value: preferredDocumentLabel,
+    });
+  }
+
+  if (orchestration.preferredDocumentStatus && orchestration.preferredDocumentStatus !== 'none') {
+    const statusMap = {
+      ready: '已就绪',
+      not_ready: '待详细解析',
+      missing: '未找到',
+      unknown: '状态未知',
+    };
+    details.push({
+      key: 'preferred-document-status',
+      label: '文档状态',
+      value: statusMap[orchestration.preferredDocumentStatus] || String(orchestration.preferredDocumentStatus),
+    });
+  }
+
+  if (orchestration.recentUploadSummaryIncluded) {
+    const count = Number(orchestration.recentUploadSummaryItemCount || 0);
+    details.push({
+      key: 'recent-upload-summary',
+      label: '上传摘要供料',
+      value: count > 0 ? `已附带 ${count} 份` : '已附带',
+    });
+  }
+
+  if (orchestration.latestDocumentFullTextIncluded) {
+    details.push({
+      key: 'latest-document-full-text',
+      label: '上传全文供料',
+      value: '已附带',
+    });
+  }
+
+  if (typeof orchestration.docMatches === 'number') {
+    details.push({
+      key: 'doc-matches',
+      label: '命中文档',
+      value: `${orchestration.docMatches} 项`,
+    });
+  }
+
+  if (orchestration.evidenceMode) {
+    details.push({
+      key: 'evidence-mode',
+      label: '证据模式',
+      value: String(orchestration.evidenceMode),
+    });
+  }
+
+  if (orchestration.routeKind) {
+    details.push({
+      key: 'route-kind',
+      label: '路由',
+      value: String(orchestration.routeKind),
+    });
+  }
+
+  return details;
+}
+
 export function normalizeChatResponse(data, fallbackPanel) {
   const output = data?.output || data?.message?.output || null;
   const message = {

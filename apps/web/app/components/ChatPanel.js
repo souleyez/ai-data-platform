@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import IngestFeedback from './IngestFeedback';
-import { formatSourceLabel } from '../lib/types';
+import {
+  buildOrchestrationDebugChips,
+  buildOrchestrationDebugDetails,
+  formatSourceLabel,
+} from '../lib/types';
 
 function sanitizeReadableText(content) {
   return String(content || '')
@@ -235,6 +239,9 @@ export default function ChatPanel({
   groupSaving,
   onSubmitCredential,
   onConfirmTemplateOption,
+  chatDebugAvailable = false,
+  chatDebugDetailsEnabled = false,
+  onToggleChatDebugDetails,
 }) {
   const messagesRef = useRef(null);
   const composerRef = useRef(null);
@@ -259,6 +266,17 @@ export default function ChatPanel({
 
   return (
     <div className={`chat-panel card ${compact ? 'chat-panel-compact' : ''}`.trim()}>
+      {chatDebugAvailable ? (
+        <div className="chat-debug-toolbar">
+          <button
+            type="button"
+            className={`ghost-btn chat-debug-toggle ${chatDebugDetailsEnabled ? 'is-active' : ''}`.trim()}
+            onClick={() => onToggleChatDebugDetails?.()}
+          >
+            {chatDebugDetailsEnabled ? '关闭供料调试' : '开启供料调试'}
+          </button>
+        </div>
+      ) : null}
       {scopeLabel ? (
         <div className={`chat-scope-strip ${compact ? 'chat-scope-strip-compact' : ''}`.trim()}>
           <span className="chat-scope-kicker">默认资料范围</span>
@@ -305,6 +323,43 @@ export default function ChatPanel({
               ) : null}
 
               {message.meta ? <div className="message-meta">{message.meta}</div> : null}
+
+              {message.role === 'assistant' && message.orchestration ? (
+                (() => {
+                  const chips = buildOrchestrationDebugChips(message.orchestration);
+                  const details = buildOrchestrationDebugDetails(message.orchestration);
+                  if (!chips.length && !details.length) return null;
+                  return (
+                    <>
+                      {chips.length ? (
+                        <div className="message-orchestration-block">
+                          {chips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className={`orchestration-chip ${chip.tone ? `orchestration-chip-${chip.tone}` : ''}`.trim()}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {chatDebugDetailsEnabled && details.length ? (
+                        <details className="message-debug-details">
+                          <summary>查看供料详情</summary>
+                          <div className="message-debug-details-list">
+                            {details.map((item) => (
+                              <div className="message-debug-details-item" key={item.key}>
+                                <strong>{item.label}</strong>
+                                <span>{item.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </>
+                  );
+                })()
+              ) : null}
 
               {message.references?.length ? (
                 <div className="message-ref-block">

@@ -16,70 +16,6 @@ function splitText(value) {
     .filter(Boolean);
 }
 
-function truncateText(value, maxLength = 140) {
-  const text = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!text) return '';
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1)}…`;
-}
-
-function pickLabel(item) {
-  const name = String(item?.preview?.title || item?.name || item?.title || '').trim();
-  if (name) return name;
-
-  const path = String(item?.path || '').trim();
-  if (!path) return '文档';
-  const chunks = path.split(/[\\/]/).filter(Boolean);
-  return chunks[chunks.length - 1] || '文档';
-}
-
-function summarizeIngestItem(item) {
-  const label = pickLabel(item);
-  const docType = String(item?.preview?.docType || '').trim();
-  const summary = truncateText(item?.preview?.summary || item?.summary || item?.excerpt || '');
-  const groups = [
-    ...(Array.isArray(item?.groups) ? item.groups : []),
-    ...(Array.isArray(item?.confirmedGroups) ? item.confirmedGroups : []),
-    ...(Array.isArray(item?.suggestedGroups) ? item.suggestedGroups : []),
-  ]
-    .map((entry) => String(entry || '').trim())
-    .filter(Boolean);
-
-  const uniqueGroups = Array.from(new Set(groups));
-  const parts = [label];
-  if (docType) parts.push(`类型：${docType}`);
-  if (summary) parts.push(`摘要：${summary}`);
-  parts.push(uniqueGroups.length ? `入库：${uniqueGroups.join('、')}` : '入库：未分组');
-  return parts.join('；');
-}
-
-function summarizeIngestFeedbackMessage(message) {
-  const feedback = message?.ingestFeedback;
-  if (!feedback) return '';
-
-  const parts = [];
-  const title = String(message?.title || '').trim();
-  const content = String(message?.content || feedback?.message || '').trim();
-  if (title) parts.push(title);
-  if (content) parts.push(content);
-
-  const summary = feedback?.summary || null;
-  if (summary && (summary.total || summary.successCount || summary.failedCount)) {
-    const summaryParts = [];
-    if (typeof summary.total === 'number') summaryParts.push(`共 ${summary.total} 项`);
-    if (typeof summary.successCount === 'number') summaryParts.push(`成功 ${summary.successCount} 项`);
-    if (typeof summary.failedCount === 'number') summaryParts.push(`失败 ${summary.failedCount} 项`);
-    if (summaryParts.length) parts.push(summaryParts.join('；'));
-  }
-
-  const ingestItems = Array.isArray(feedback?.ingestItems) ? feedback.ingestItems.slice(0, 5) : [];
-  if (ingestItems.length) {
-    parts.push(`涉及材料：${ingestItems.map(summarizeIngestItem).join('；')}`);
-  }
-
-  return parts.join('。').trim();
-}
-
 function summarizeCredentialRequestMessage(message) {
   const request = message?.credentialRequest;
   if (!request) return '';
@@ -100,7 +36,7 @@ export function getMessageMemoryContent(message) {
   if (explicitMemory) return explicitMemory;
 
   if (message?.ingestFeedback) {
-    return summarizeIngestFeedbackMessage(message);
+    return '';
   }
 
   if (message?.credentialRequest) {

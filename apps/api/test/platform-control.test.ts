@@ -752,6 +752,66 @@ test('platform control should manage datasource definitions and credentials', as
   assert.equal(deleteCredentialResult.action, 'datasources.delete-credential');
 });
 
+test('platform control supply preview should expose uploaded document supply context', async () => {
+  const library = await documentLibraries.createDocumentLibrary({
+    name: '订单分析数据集',
+    description: '订单数据分析资料',
+    permissionLevel: 1,
+  }).catch(async () => {
+    const libraries = await documentLibraries.loadDocumentLibraries();
+    return libraries.find((item) => item.label === '订单分析数据集')!;
+  });
+
+  const uploadDir = path.join(storageRoot, 'files', 'uploads');
+  await fs.mkdir(uploadDir, { recursive: true });
+  const filePath = path.join(uploadDir, '订单分析周报.md');
+  await fs.writeFile(filePath, '# 订单分析\n\n最近30天订单趋势平稳，退款率下降。', 'utf8');
+
+  const config = await documentConfig.loadDocumentCategoryConfig(documentStore.DEFAULT_SCAN_DIR);
+  const libraries = await documentLibraries.loadDocumentLibraries();
+  await documentUploadIngest.ingestExistingLocalFiles({
+    filePaths: [filePath],
+    documentConfig: config,
+    libraries,
+    forcedLibraryKeys: [library.key],
+    preferredLibraryKeys: [library.key],
+  });
+
+  const summaryJson = JSON.stringify({
+    uploadedAt: new Date().toISOString(),
+    items: [
+      {
+        path: filePath,
+        name: '订单分析周报',
+        docType: 'markdown',
+        summary: '最近30天订单趋势平稳，退款率下降。',
+        libraries: [{ key: library.key, label: library.label }],
+      },
+    ],
+  });
+
+  const result = await platformControl.executePlatformControlCommand([
+    'supply',
+    'preview',
+    '--prompt',
+    '请基于刚上传的文档总结重点',
+    '--preferred-document',
+    filePath,
+    '--recent-upload-summary-json',
+    summaryJson,
+    '--library',
+    library.key,
+  ]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, 'supply.preview');
+  assert.equal((result.data?.supplyContext as { preferredDocumentPath?: string })?.preferredDocumentPath, filePath);
+  assert.equal((result.data?.supplyContext as { preferredDocumentStatus?: string })?.preferredDocumentStatus, 'not_ready');
+  assert.equal((result.data?.supplyContext as { latestDocumentFullTextIncluded?: boolean })?.latestDocumentFullTextIncluded, true);
+  assert.equal((result.data?.supplyContext as { recentUploadSummaryIncluded?: boolean })?.recentUploadSummaryIncluded, true);
+  assert.equal((result.data?.supplyContext as { recentUploadSummaryItemCount?: number })?.recentUploadSummaryItemCount, 1);
+});
+
 test('platform control should run authenticated capture and expose web tasks', async () => {
   await documentLibraries.createDocumentLibrary({
     name: '登录采集库',

@@ -7,7 +7,11 @@ import {
 } from './lib/chat-background-jobs.js';
 import { ensureDefaultProjectSamples } from './lib/default-project-samples.js';
 import { loadParsedDocuments } from './lib/document-store.js';
-import { buildLatestParsedDocumentFullTextContextBlock } from './lib/knowledge-chat-dispatch.js';
+import {
+  buildLatestParsedDocumentFullTextContextBlock,
+  buildRecentUploadSummaryContextBlock,
+} from './lib/knowledge-chat-dispatch.js';
+import { parseGeneralKnowledgeConversationState } from './lib/knowledge-request-state.js';
 import { runOpenClawChat } from './lib/openclaw-adapter.js';
 import { runChatOrchestrationV2 } from './lib/orchestrator.js';
 import { startWecomLongConnectionManager } from './lib/wecom-long-connection.js';
@@ -31,6 +35,11 @@ async function buildPreferredDocumentFullTextContextBlock(preferredDocumentPath?
   const state = await loadParsedDocuments(240, false);
   const document = state.items.find((item) => String(item.path || '').trim() === normalizedPath) || null;
   return buildLatestParsedDocumentFullTextContextBlock(document);
+}
+
+function buildRecentUploadSummaryFallbackContextBlock(conversationState?: unknown) {
+  const generalState = parseGeneralKnowledgeConversationState(conversationState);
+  return buildRecentUploadSummaryContextBlock(generalState?.recentUploadSummary || null);
 }
 
 function buildBackgroundDirectReportSystemPrompt(systemConstraints: string) {
@@ -72,13 +81,14 @@ app.listen({ port, host }).then(() => {
 
       if (response.mode !== 'openclaw' || !content) {
         const preferredDocumentContextBlock = await buildPreferredDocumentFullTextContextBlock(job.latestDocumentPath);
-        if (preferredDocumentContextBlock) {
+        const recentUploadSummaryContextBlock = buildRecentUploadSummaryFallbackContextBlock(job.request.conversationState);
+        if (preferredDocumentContextBlock || recentUploadSummaryContextBlock) {
           const fallback = await runOpenClawChat({
             prompt: job.prompt,
             sessionUser: job.request.sessionUser,
             timeoutMs: getChatBackgroundGatewayTimeoutMs(job.attemptCount || 1),
             systemPrompt: buildBackgroundDirectReportSystemPrompt(systemConstraints),
-            contextBlocks: [preferredDocumentContextBlock],
+            contextBlocks: [recentUploadSummaryContextBlock, preferredDocumentContextBlock].filter(Boolean),
           });
           content = sanitizeBackgroundMarkdownContent(String(fallback.content || '').trim());
         }

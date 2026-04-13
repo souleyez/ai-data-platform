@@ -23,6 +23,7 @@ export type ChatBackgroundJobRequest = {
   sessionUser?: string;
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
   mode?: 'general' | 'knowledge_output';
+  conversationState?: unknown;
   systemConstraints?: string;
   botId?: string;
   effectiveVisibleLibraryKeys?: string[];
@@ -105,6 +106,9 @@ function normalizeJobRequest(value: unknown): ChatBackgroundJobRequest {
     sessionUser: normalizeText(record.sessionUser) || undefined,
     chatHistory: normalizeChatHistory(record.chatHistory),
     mode: record.mode === 'knowledge_output' ? 'knowledge_output' : 'general',
+    conversationState: (record.conversationState && typeof record.conversationState === 'object')
+      ? record.conversationState
+      : null,
     systemConstraints: normalizeText(record.systemConstraints) || undefined,
     botId: normalizeText(record.botId) || undefined,
     effectiveVisibleLibraryKeys: Array.isArray(record.effectiveVisibleLibraryKeys)
@@ -270,6 +274,7 @@ export async function handoffTimedOutChatToBackground(input: {
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
   preferredDocumentPath?: string;
+  conversationState?: unknown;
 }) {
   const latestContext = await loadLatestVisibleDetailedDocumentContext({
     botDefinition: input.botDefinition,
@@ -313,6 +318,7 @@ export async function handoffTimedOutChatToBackground(input: {
       sessionUser: input.sessionUser,
       chatHistory: normalizeChatHistory(input.chatHistory),
       mode: 'general',
+      conversationState: input.conversationState ?? null,
       systemConstraints: normalizeText(input.systemConstraints) || undefined,
       botId: normalizeText(input.botId) || undefined,
       effectiveVisibleLibraryKeys: Array.isArray(input.effectiveVisibleLibraryKeys)

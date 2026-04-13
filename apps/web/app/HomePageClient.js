@@ -59,6 +59,8 @@ export default function HomePageClient({ initialModelState }) {
     setSelectedReportId,
     setSystemConstraints,
     sidebarSources,
+    chatDebugAvailable,
+    chatDebugDetailsEnabled,
     submitCredentialForMessage,
     submitQuestion,
     systemConstraints,
@@ -66,6 +68,7 @@ export default function HomePageClient({ initialModelState }) {
     updateReportItem,
     uploadInputRef,
     uploadLoading,
+    setChatDebugDetailsEnabled,
   } = useHomePageController();
   const [libraryCreateBusy, setLibraryCreateBusy] = useState(false);
 
@@ -172,6 +175,9 @@ export default function HomePageClient({ initialModelState }) {
                 groupSaving={groupSaving}
                 onSubmitCredential={submitCredentialForMessage}
                 onConfirmTemplateOption={confirmTemplateOption}
+                chatDebugAvailable={chatDebugAvailable}
+                chatDebugDetailsEnabled={chatDebugDetailsEnabled}
+                onToggleChatDebugDetails={() => setChatDebugDetailsEnabled((prev) => !prev)}
               />
               <InsightPanel
                 mobileViewport={mobileViewport}
@@ -243,6 +249,9 @@ export default function HomePageClient({ initialModelState }) {
               groupSaving={groupSaving}
               onSubmitCredential={submitCredentialForMessage}
               onConfirmTemplateOption={confirmTemplateOption}
+              chatDebugAvailable={chatDebugAvailable}
+              chatDebugDetailsEnabled={chatDebugDetailsEnabled}
+              onToggleChatDebugDetails={() => setChatDebugDetailsEnabled((prev) => !prev)}
             />
           </section>
 

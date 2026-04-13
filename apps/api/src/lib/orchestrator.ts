@@ -17,6 +17,7 @@ import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
 import {
+  parseGeneralKnowledgeConversationState,
   parseKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
@@ -109,7 +110,7 @@ function buildFallbackResponse(
   output: ChatOutput;
   libraries: Array<{ key: string; label: string }>;
   knowledgePlan: KnowledgePlan | null;
-  conversationState: KnowledgeConversationState | null;
+  conversationState: unknown;
   fallbackReason: string;
 } {
   const content = buildCloudUnavailableAnswer();
@@ -146,6 +147,12 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const existingKnowledgeState = requestMode === 'knowledge_output'
     ? parseKnowledgeConversationState(input.conversationState)
     : null;
+  const existingGeneralState = requestMode === 'general'
+    ? parseGeneralKnowledgeConversationState(input.conversationState)
+    : null;
+  const effectivePreferredDocumentPath = String(
+    input.preferredDocumentPath || existingGeneralState?.preferredDocumentPath || '',
+  ).trim();
   const systemContextBlocks = [
     buildSystemCapabilityContextBlock({
       mode: effectiveIntelligenceMode,
@@ -255,7 +262,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
           accessContext: input.accessContext || null,
           cloudTimeoutMs: input.cloudTimeoutMs,
-          preferredDocumentPath: input.preferredDocumentPath,
+          preferredDocumentPath: effectivePreferredDocumentPath,
         });
         const result = await (
           requestMode === 'general' && !input.backgroundContinuation
@@ -295,7 +302,8 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
             botDefinition,
             effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
             accessContext: input.accessContext || null,
-            preferredDocumentPath: input.preferredDocumentPath,
+            preferredDocumentPath: effectivePreferredDocumentPath,
+            conversationState: input.conversationState ?? null,
           });
           backgroundHandoff = true;
           savedReport = handoff.savedReport as Record<string, unknown>;
@@ -408,13 +416,35 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       backgroundContinuation: backgroundHandoff,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
-      preferredDocumentPath: String(input.preferredDocumentPath || '').trim(),
+      preferredDocumentPath: effectivePreferredDocumentPath,
       latestDocumentFullTextIncluded: Boolean(
         debug
         && typeof debug === 'object'
         && 'latestDocumentFullTextIncluded' in debug
         && debug.latestDocumentFullTextIncluded === true,
       ),
+      preferredDocumentStatus: (
+        debug
+        && typeof debug === 'object'
+        && 'preferredDocumentStatus' in debug
+        && typeof debug.preferredDocumentStatus === 'string'
+      )
+        ? debug.preferredDocumentStatus
+        : (effectivePreferredDocumentPath ? 'unknown' : 'none'),
+      recentUploadSummaryIncluded: Boolean(
+        debug
+        && typeof debug === 'object'
+        && 'recentUploadSummaryIncluded' in debug
+        && debug.recentUploadSummaryIncluded === true,
+      ),
+      recentUploadSummaryItemCount: (
+        debug
+        && typeof debug === 'object'
+        && 'recentUploadSummaryItemCount' in debug
+        && Number.isFinite(Number(debug.recentUploadSummaryItemCount))
+      )
+        ? Number(debug.recentUploadSummaryItemCount)
+        : 0,
       botId: botDefinition?.id || '',
       botName: botDefinition?.name || '',
     },

@@ -22,10 +22,15 @@ import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-a
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
 import type { ChatOutput } from './knowledge-output.js';
 import type { ResolvedChannelAccess } from './channel-access-resolver.js';
+import {
+  parseGeneralKnowledgeConversationState,
+  type GeneralKnowledgeUploadSummary,
+} from './knowledge-request-state.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
 const UPLOADED_DOCUMENT_CHAT_CONTEXT_CHAR_LIMIT = 5000;
+const RECENT_UPLOAD_SUMMARY_CHAR_LIMIT = 240;
 const UPLOADED_DOCUMENT_FULL_TEXT_HINT_PATTERNS = [
   /这份(?:文档|文件|材料)?/,
   /这个(?:文档|文件|材料)?/,
@@ -49,7 +54,7 @@ export type GeneralKnowledgeDispatchResult = {
   intent: 'general';
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
-  conversationState: null;
+  conversationState: ReturnType<typeof parseGeneralKnowledgeConversationState>;
   routeKind?: 'general' | 'template_confirmation';
   evidenceMode?: 'supply_only' | null;
   guard?: {
@@ -64,6 +69,41 @@ function trimUploadedDocumentContextText(text: string, maxChars = UPLOADED_DOCUM
   if (!normalized) return '';
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+function trimRecentUploadSummaryText(text: string, maxChars = RECENT_UPLOAD_SUMMARY_CHAR_LIMIT) {
+  const normalized = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
+
+export function buildRecentUploadSummaryContextBlock(summary?: GeneralKnowledgeUploadSummary | null) {
+  const items = Array.isArray(summary?.items) ? summary.items : [];
+  if (!items.length) return '';
+
+  const lines = ['Recent uploaded documents summary:'];
+  const uploadedAt = String(summary?.uploadedAt || '').trim();
+  if (uploadedAt) lines.push(`Uploaded at: ${uploadedAt}`);
+
+  for (const [index, item] of items.slice(0, 5).entries()) {
+    const label = String(item?.name || path.basename(String(item?.path || '')) || `文档 ${index + 1}`).trim();
+    const docType = String(item?.docType || '').trim();
+    const summaryText = trimRecentUploadSummaryText(item?.summary || '');
+    const libraries = Array.isArray(item?.libraries)
+      ? item.libraries
+          .map((entry) => String(entry?.label || entry?.key || '').trim())
+          .filter(Boolean)
+      : [];
+    lines.push([
+      `${index + 1}. ${label}`,
+      docType ? `类型：${docType}` : '',
+      summaryText ? `摘要：${summaryText}` : '',
+      libraries.length ? `分组：${libraries.join('、')}` : '',
+    ].filter(Boolean).join('；'));
+  }
+
+  return lines.join('\n');
 }
 
 async function runCloudChatWithSearchFallback(input: {
@@ -305,6 +345,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
 }): Promise<GeneralKnowledgeDispatchResult> {
   const requestText = String(input.prompt || '').trim();
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
+  const generalState = parseGeneralKnowledgeConversationState(input.existingState);
+  const preferredDocumentPath = String(input.preferredDocumentPath || generalState?.preferredDocumentPath || '').trim();
+  const recentUploadSummary = generalState?.recentUploadSummary || null;
   const useExternalScopedMemory = input.accessContext?.source === 'external-directory';
   const memoryState = await loadOpenClawMemorySelectionState({
     botId: input.botDefinition?.id,
@@ -332,24 +375,26 @@ export async function runGeneralKnowledgeAwareChat(input: {
   });
   const shouldIncludeLatestDocumentFullText = shouldIncludeUploadedDocumentFullText(
     requestText,
-    input.preferredDocumentPath,
+    preferredDocumentPath,
   );
   const latestDetailedDocumentContext = shouldIncludeLatestDocumentFullText
     ? await loadLatestVisibleDetailedDocumentContext({
       botDefinition: input.botDefinition,
       effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
-      preferredDocumentPath: input.preferredDocumentPath,
+      preferredDocumentPath,
     })
     : { document: null, libraries: [], preferredDocument: null, preferredDocumentReady: false };
   const latestDetailedDocument = latestDetailedDocumentContext.document;
-  const conversationState = null;
+  const conversationState = generalState;
   const latestDocumentFullTextIncluded = Boolean(latestDetailedDocument && shouldIncludeLatestDocumentFullText);
-  const preferredDocumentPath = String(input.preferredDocumentPath || '').trim();
   const preferredDocumentStatus = !preferredDocumentPath
     ? 'none'
     : latestDetailedDocumentContext.preferredDocumentReady
       ? 'ready'
       : (latestDetailedDocumentContext.preferredDocument ? 'not_ready' : 'missing');
+  const recentUploadSummaryBlock = buildRecentUploadSummaryContextBlock(recentUploadSummary);
+  const recentUploadSummaryIncluded = Boolean(recentUploadSummaryBlock);
+  const recentUploadSummaryItemCount = Array.isArray(recentUploadSummary?.items) ? recentUploadSummary.items.length : 0;
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -379,7 +424,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const latestDocumentFullTextBlock = shouldIncludeLatestDocumentFullText
     ? buildLatestParsedDocumentFullTextContextBlock(latestDetailedDocument)
     : '';
-  const chatContextBlocks = [...systemContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
+  const chatContextBlocks = [
+    ...systemContextBlocks,
+    recentUploadSummaryBlock,
+    latestDocumentFullTextBlock,
+  ].filter(Boolean);
   const references = appendReference(buildAnswerReferences(supply.effectiveRetrieval.documents), latestDetailedDocument);
 
   if (shouldIncludeLatestDocumentFullText && !latestDetailedDocument) {
@@ -399,6 +448,8 @@ export async function runGeneralKnowledgeAwareChat(input: {
         preferredDocumentPath,
         latestDocumentFullTextIncluded: false,
         preferredDocumentStatus,
+        recentUploadSummaryIncluded,
+        recentUploadSummaryItemCount,
         botId: input.botDefinition?.id || '',
         botName: input.botDefinition?.name || '',
         visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -449,6 +500,8 @@ export async function runGeneralKnowledgeAwareChat(input: {
       preferredDocumentPath,
       latestDocumentFullTextIncluded,
       preferredDocumentStatus,
+      recentUploadSummaryIncluded,
+      recentUploadSummaryItemCount,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -492,6 +545,8 @@ export async function runGeneralKnowledgeAwareChat(input: {
       preferredDocumentPath,
       latestDocumentFullTextIncluded,
       preferredDocumentStatus,
+      recentUploadSummaryIncluded,
+      recentUploadSummaryItemCount,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
