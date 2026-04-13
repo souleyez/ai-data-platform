@@ -6,6 +6,7 @@ export type IngestPreviewItem = {
   id: string;
   sourceType: 'file' | 'url';
   sourceName: string;
+  path?: string;
   status: 'success' | 'failed';
   preview?: {
     title: string;
@@ -185,6 +186,7 @@ export function buildPreviewItemFromDocument(
     id: Buffer.from(doc.path).toString('base64url'),
     sourceType,
     sourceName: sourceName || doc.name,
+    path: doc.path,
     status: 'success',
     preview: {
       title: doc.title || path.parse(doc.name).name,

@@ -235,11 +235,35 @@ function normalizeDraft(draft) {
         ratio: Number(draft.evidenceCoverage.ratio || 0) || 0,
       }
     : null;
+  const history = Array.isArray(draft.history)
+    ? draft.history
+      .map((item) => ({
+        id: String(item?.id || '').trim(),
+        action: String(item?.action || '').trim(),
+        label: String(item?.label || '').trim(),
+        detail: String(item?.detail || '').trim(),
+        createdAt: String(item?.createdAt || '').trim(),
+        canRestore: Array.isArray(item?.snapshot?.modules) && item.snapshot.modules.length > 0,
+        snapshot: Array.isArray(item?.snapshot?.modules)
+          ? {
+              reviewStatus: normalizeDraftReviewStatus(item?.snapshot?.reviewStatus),
+              version: Math.max(1, normalizeNumber(item?.snapshot?.version) || 1),
+              modules: item.snapshot.modules
+                .map((module, index) => normalizeDraftModule(module, index))
+                .filter(Boolean)
+                .sort((left, right) => left.order - right.order),
+            }
+          : null,
+      }))
+      .filter((item) => item.id || item.label || item.createdAt)
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+    : [];
   return {
     reviewStatus: normalizeDraftReviewStatus(draft.reviewStatus),
     readiness: String(draft.readiness || '').trim() || 'needs_attention',
     version: Math.max(1, normalizeNumber(draft.version) || 1),
     modules,
+    history,
     lastEditedAt: String(draft.lastEditedAt || '').trim(),
     approvedAt: String(draft.approvedAt || '').trim(),
     audience: String(draft.audience || '').trim(),
@@ -258,6 +282,16 @@ function normalizeDraft(draft) {
     audienceTone: String(draft.audienceTone || '').trim(),
     riskNotes: Array.isArray(draft.riskNotes)
       ? draft.riskNotes.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    visualMixTargets: Array.isArray(draft.visualMixTargets)
+      ? draft.visualMixTargets
+          .map((item) => ({
+            moduleType: String(item?.moduleType || '').trim(),
+            minCount: normalizeNumber(item?.minCount),
+            targetCount: normalizeNumber(item?.targetCount),
+            maxCount: normalizeNumber(item?.maxCount),
+          }))
+          .filter((item) => item.moduleType)
       : [],
     qualityChecklist,
     missingMustHaveModules,
@@ -374,6 +408,19 @@ export function normalizeGeneratedReportRecord(item) {
   };
 }
 
+export function isDraftGeneratedReport(item) {
+  return Boolean(
+    item?.kind === 'page'
+      && item?.draft?.modules?.length
+      && ['draft_planned', 'draft_generated', 'draft_reviewing', 'final_generating'].includes(String(item?.status || '').trim()),
+  );
+}
+
+export function buildDraftEditorPath(itemOrId) {
+  const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
+  return `/reports/draft/${encodeURIComponent(String(id || '').trim())}`;
+}
+
 export function buildGeneratedReportPersistPayload(item) {
   if (!item) return null;
   return {
@@ -395,6 +442,7 @@ export function buildGeneratedReportPersistPayload(item) {
 export function buildGeneratedReportLink(itemOrId) {
   if (typeof window === 'undefined') {
     if (typeof itemOrId === 'string') return `/reports?generated=${encodeURIComponent(itemOrId)}`;
+    if (isDraftGeneratedReport(itemOrId)) return buildDraftEditorPath(itemOrId);
     if (itemOrId?.kind === 'page') {
       return `/shared/report?payload=${encodeURIComponent(createSharedReportPayload(itemOrId))}`;
     }
@@ -403,6 +451,9 @@ export function buildGeneratedReportLink(itemOrId) {
 
   if (typeof itemOrId === 'string') {
     return `${window.location.origin}/reports?generated=${encodeURIComponent(itemOrId)}`;
+  }
+  if (isDraftGeneratedReport(itemOrId)) {
+    return `${window.location.origin}${buildDraftEditorPath(itemOrId)}`;
   }
   if (itemOrId?.kind === 'page') {
     return `${window.location.origin}/shared/report?payload=${encodeURIComponent(createSharedReportPayload(itemOrId))}`;

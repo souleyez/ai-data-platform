@@ -11,6 +11,7 @@ import { loadDocumentsIndexRoutePayload } from './document-route-read-operations
 import { DOCUMENT_AUDIO_EXTENSIONS } from './document-parser.js';
 import { loadParsedDocuments } from './document-store.js';
 import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
+import { summarizeReportDraftBenchmarks } from './report-draft-quality.js';
 import { loadReportCenterReadState } from './report-center.js';
 import { readTaskRuntimeMetrics, type TaskRuntimeMetricsRecord } from './task-runtime-metrics.js';
 import { listWebCaptureTasks } from './web-capture.js';
@@ -178,10 +179,10 @@ export async function loadOperationsOverviewPayload() {
   const captureErrorTasks = webCaptureTasks.filter((task) => task.lastStatus === 'error');
   const captureScheduledCount = webCaptureTasks.filter((task) => task.captureStatus !== 'paused' && task.frequency !== 'manual').length;
   const dynamicOutputs = reportState.outputs.filter((item) => item.dynamicSource?.enabled);
-  const draftOutputs = reportState.outputs.filter((item) => item.kind === 'page' && item.draft?.modules?.length);
-  const draftBlockedCount = draftOutputs.filter((item) => item.draft?.readiness === 'blocked').length;
-  const draftNeedsAttentionCount = draftOutputs.filter((item) => item.draft?.readiness === 'needs_attention').length;
-  const draftReadyCount = draftOutputs.filter((item) => item.draft?.readiness === 'ready').length;
+  const draftBenchmark = summarizeReportDraftBenchmarks(reportState.outputs);
+  const draftBlockedCount = draftBenchmark.totals.blocked;
+  const draftNeedsAttentionCount = draftBenchmark.totals.needsAttention;
+  const draftReadyCount = draftBenchmark.totals.ready;
   const dynamicOutputStaleCount = dynamicOutputs.filter((item) => {
     const lastRenderedAt = toTimestamp(item.dynamicSource?.lastRenderedAt || item.dynamicSource?.updatedAt || item.createdAt);
     return Boolean(lastRenderedAt) && Date.now() - lastRenderedAt >= DYNAMIC_OUTPUT_STALE_WARNING_MS;
@@ -460,11 +461,12 @@ export async function loadOperationsOverviewPayload() {
         outputs: reportState.outputs.length,
         dynamicOutputs: dynamicOutputs.length,
         staleDynamicOutputs: dynamicOutputStaleCount,
-        draftOutputs: draftOutputs.length,
+        draftOutputs: draftBenchmark.totals.drafts,
         draftReadyOutputs: draftReadyCount,
         draftNeedsAttentionOutputs: draftNeedsAttentionCount,
         draftBlockedOutputs: draftBlockedCount,
       },
+      benchmark: draftBenchmark,
       recentOutputs,
     },
     runtime: {

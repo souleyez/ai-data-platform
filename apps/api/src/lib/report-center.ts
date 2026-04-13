@@ -9,9 +9,10 @@ import type { ParsedDocument } from './document-parser.js';
 import { ingestExistingLocalFiles } from './document-upload-ingest.js';
 import { DEFAULT_SCAN_DIR, loadParsedDocuments, matchDocumentsByPrompt } from './document-store.js';
 import { normalizeReportOutput } from './knowledge-output.js';
-import { buildReportPlan, inferReportPlanTaskHint, type ReportPlanDatavizSlot, type ReportPlanLayoutVariant, type ReportPlanPageSpec } from './report-planner.js';
+import { buildReportPlan, inferReportPlanTaskHint, type ReportPlanDatavizSlot, type ReportPlanLayoutVariant, type ReportPlanPageSpec, type ReportPlanVisualMixTarget } from './report-planner.js';
 import { attachDatavizRendersToPage } from './report-dataviz.js';
 import { buildSpecializedDraftForRecord } from './report-draft-composers.js';
+import { hydrateDraftQuality } from './report-draft-quality.js';
 import { inferSectionDisplayMode, inferSectionDisplayModeFromTitle } from './report-visual-intent.js';
 import {
   buildDefaultSystemTemplates,
@@ -108,6 +109,12 @@ export type ReportDynamicSource = {
   planSectionTitles?: string[];
   planCardLabels?: string[];
   planChartTitles?: string[];
+  planMustHaveModules?: string[];
+  planOptionalModules?: string[];
+  planEvidencePriority?: string[];
+  planAudienceTone?: string;
+  planRiskNotes?: string[];
+  planVisualMixTargets?: ReportPlanVisualMixTarget[];
   planDatavizSlots?: ReportPlanDatavizSlot[];
   planPageSpec?: ReportPlanPageSpec;
   planUpdatedAt?: string;
@@ -145,6 +152,7 @@ export type ReportDraftModuleStatus = 'generated' | 'edited' | 'disabled';
 export type ReportDraftReviewStatus = 'draft_generated' | 'draft_reviewing' | 'approved';
 export type ReportDraftReadiness = 'ready' | 'needs_attention' | 'blocked';
 export type ReportDraftChecklistStatus = 'pass' | 'warning' | 'fail';
+export type ReportDraftHistoryAction = 'saved' | 'module-revised' | 'structure-revised' | 'copy-revised' | 'finalized' | 'restored';
 
 export type ReportDraftChecklistItem = {
   key: string;
@@ -158,6 +166,33 @@ export type ReportDraftEvidenceCoverage = {
   coveredModules: number;
   totalModules: number;
   ratio: number;
+};
+
+export type ReportDraftHistorySnapshot = {
+  reviewStatus: ReportDraftReviewStatus;
+  version: number;
+  modules: ReportDraftModule[];
+  lastEditedAt?: string;
+  approvedAt?: string;
+  audience?: string;
+  objective?: string;
+  layoutVariant?: ReportPlanLayoutVariant;
+  visualStyle?: ReportVisualStylePreset;
+  mustHaveModules?: string[];
+  optionalModules?: string[];
+  evidencePriority?: string[];
+  audienceTone?: string;
+  riskNotes?: string[];
+  visualMixTargets?: ReportPlanVisualMixTarget[];
+};
+
+export type ReportDraftHistoryEntry = {
+  id: string;
+  action: ReportDraftHistoryAction;
+  label: string;
+  detail?: string;
+  createdAt: string;
+  snapshot?: ReportDraftHistorySnapshot | null;
 };
 
 export type ReportDraftModule = {
@@ -184,6 +219,7 @@ export type ReportOutputDraft = {
   reviewStatus: ReportDraftReviewStatus;
   version: number;
   modules: ReportDraftModule[];
+  history?: ReportDraftHistoryEntry[];
   lastEditedAt?: string;
   approvedAt?: string;
   audience?: string;
@@ -195,6 +231,7 @@ export type ReportOutputDraft = {
   evidencePriority?: string[];
   audienceTone?: string;
   riskNotes?: string[];
+  visualMixTargets?: ReportPlanVisualMixTarget[];
   readiness?: ReportDraftReadiness;
   qualityChecklist?: ReportDraftChecklistItem[];
   missingMustHaveModules?: string[];
@@ -946,17 +983,26 @@ function buildDraftForRecord(record: ReportOutputRecord): ReportOutputDraft | nu
     reviewStatus: 'draft_generated',
     version: 1,
     modules,
+    history: [],
     lastEditedAt: record.createdAt,
     approvedAt: '',
     audience: String(record.dynamicSource?.planAudience || 'client').trim(),
     objective: String(record.dynamicSource?.planObjective || '').trim(),
     layoutVariant,
     visualStyle: fallbackVisualStyle,
-    mustHaveModules: (record.dynamicSource?.planSectionTitles || []).slice(0, 8),
-    optionalModules: [],
-    evidencePriority: (record.dynamicSource?.planCardLabels || []).slice(0, 8),
-    audienceTone: 'client-facing',
-    riskNotes: [],
+    mustHaveModules: (record.dynamicSource?.planMustHaveModules || record.dynamicSource?.planSectionTitles || []).slice(0, 8),
+    optionalModules: (record.dynamicSource?.planOptionalModules || []).slice(0, 8),
+    evidencePriority: (record.dynamicSource?.planEvidencePriority || record.dynamicSource?.planCardLabels || []).slice(0, 8),
+    audienceTone: String(record.dynamicSource?.planAudienceTone || 'client-facing').trim() || 'client-facing',
+    riskNotes: (record.dynamicSource?.planRiskNotes || []).slice(0, 8),
+    visualMixTargets: Array.isArray(record.dynamicSource?.planVisualMixTargets)
+      ? record.dynamicSource.planVisualMixTargets.slice(0, 10).map((item) => ({
+          moduleType: item.moduleType,
+          minCount: Number(item.minCount || 0),
+          targetCount: Number(item.targetCount || 0),
+          maxCount: Number(item.maxCount || 0),
+        }))
+      : [],
   });
 }
 
@@ -1200,6 +1246,29 @@ function normalizeDynamicSource(
     planChartTitles: Array.isArray(dynamicSource?.planChartTitles)
       ? dynamicSource.planChartTitles.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
+    planMustHaveModules: Array.isArray(dynamicSource?.planMustHaveModules)
+      ? dynamicSource.planMustHaveModules.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planOptionalModules: Array.isArray(dynamicSource?.planOptionalModules)
+      ? dynamicSource.planOptionalModules.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planEvidencePriority: Array.isArray(dynamicSource?.planEvidencePriority)
+      ? dynamicSource.planEvidencePriority.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planAudienceTone: String(dynamicSource?.planAudienceTone || '').trim(),
+    planRiskNotes: Array.isArray(dynamicSource?.planRiskNotes)
+      ? dynamicSource.planRiskNotes.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    planVisualMixTargets: Array.isArray(dynamicSource?.planVisualMixTargets)
+      ? dynamicSource.planVisualMixTargets
+          .map((item) => ({
+            moduleType: String(item?.moduleType || '').trim() as ReportPlanVisualMixTarget['moduleType'],
+            minCount: Number(item?.minCount || 0),
+            targetCount: Number(item?.targetCount || 0),
+            maxCount: Number(item?.maxCount || 0),
+          }))
+          .filter((item) => item.moduleType && Number.isFinite(item.minCount) && Number.isFinite(item.targetCount) && Number.isFinite(item.maxCount))
+      : [],
     planDatavizSlots: normalizeStoredDatavizSlots(dynamicSource?.planDatavizSlots),
     planPageSpec: normalizeStoredPageSpec(dynamicSource?.planPageSpec),
     planUpdatedAt: String(dynamicSource?.planUpdatedAt || '').trim(),
@@ -1403,6 +1472,12 @@ function buildDynamicPlanMetadata(plan: ReturnType<typeof buildReportPlan>) {
     planSectionTitles: plan.sections.map((item) => item.title),
     planCardLabels: plan.cards.map((item) => item.label),
     planChartTitles: plan.charts.map((item) => item.title),
+    planMustHaveModules: plan.mustHaveModules,
+    planOptionalModules: plan.optionalModules,
+    planEvidencePriority: plan.evidencePriority,
+    planAudienceTone: plan.audienceTone,
+    planRiskNotes: plan.riskNotes,
+    planVisualMixTargets: plan.visualMixTargets,
     planDatavizSlots: plan.datavizSlots.map((item) => ({
       key: item.key,
       title: item.title,
@@ -1540,6 +1615,7 @@ async function buildDynamicPageRecord(
       planSectionTitles: source.planSectionTitles || [],
       planCardLabels: source.planCardLabels || [],
       planChartTitles: source.planChartTitles || [],
+      planVisualMixTargets: source.planVisualMixTargets || [],
       planDatavizSlots: source.planDatavizSlots || [],
       planPageSpec: source.planPageSpec || null,
     }) === JSON.stringify(planMetadata)
@@ -1965,6 +2041,11 @@ function normalizeStoredDraft(value: unknown): ReportOutputDraft | null {
     reviewStatus: normalizeStoredDraftReviewStatus(value.reviewStatus),
     version: Math.max(1, Number(value.version || 1) || 1),
     modules: modules.sort((left, right) => left.order - right.order),
+    history: Array.isArray(value.history)
+      ? value.history
+          .map((item) => normalizeStoredDraftHistoryEntry(item))
+          .filter(Boolean) as ReportDraftHistoryEntry[]
+      : [],
     lastEditedAt: normalizeTextField(value.lastEditedAt),
     approvedAt: normalizeTextField(value.approvedAt),
     audience: normalizeTextField(value.audience),
@@ -1976,6 +2057,22 @@ function normalizeStoredDraft(value: unknown): ReportOutputDraft | null {
     evidencePriority: normalizeStringList(value.evidencePriority),
     audienceTone: normalizeTextField(value.audienceTone),
     riskNotes: normalizeStringList(value.riskNotes),
+    visualMixTargets: Array.isArray(value.visualMixTargets)
+      ? value.visualMixTargets
+          .map((item) => ({
+            moduleType: normalizeTextField(isRecord(item) ? item.moduleType : ''),
+            minCount: Number(isRecord(item) ? item.minCount : 0),
+            targetCount: Number(isRecord(item) ? item.targetCount : 0),
+            maxCount: Number(isRecord(item) ? item.maxCount : 0),
+          }))
+          .filter((item) => item.moduleType && Number.isFinite(item.minCount) && Number.isFinite(item.targetCount) && Number.isFinite(item.maxCount))
+          .map((item) => ({
+            moduleType: item.moduleType as ReportPlanVisualMixTarget['moduleType'],
+            minCount: item.minCount,
+            targetCount: item.targetCount,
+            maxCount: item.maxCount,
+          }))
+      : [],
   });
 }
 
@@ -3199,187 +3296,122 @@ function buildDraftStructureSummary(draft: ReportOutputDraft) {
     }));
 }
 
-function normalizeDraftChecklistLabel(value: string) {
-  return String(value || '').trim().toLowerCase();
+function normalizeStoredDraftHistoryAction(value: unknown): ReportDraftHistoryAction {
+  const normalized = normalizeTextField(value);
+  if (
+    normalized === 'saved'
+    || normalized === 'module-revised'
+    || normalized === 'structure-revised'
+    || normalized === 'copy-revised'
+    || normalized === 'finalized'
+    || normalized === 'restored'
+  ) {
+    return normalized;
+  }
+  return 'saved';
 }
 
-function doesDraftModuleMatchRequirement(module: ReportDraftModule, requirement: string) {
-  const normalizedRequirement = normalizeDraftChecklistLabel(requirement);
-  if (!normalizedRequirement) return false;
-  const candidates = [
-    module.title,
-    module.purpose,
-    module.layoutType,
-    module.moduleType,
-  ]
-    .map((item) => normalizeDraftChecklistLabel(item || ''))
-    .filter(Boolean);
-  return candidates.some((candidate) => (
-    candidate === normalizedRequirement
-    || candidate.includes(normalizedRequirement)
-    || normalizedRequirement.includes(candidate)
-  ));
+function normalizeDraftVisualMixTargets(value: unknown): ReportPlanVisualMixTarget[] {
+  return Array.isArray(value)
+    ? value
+        .map((item) => ({
+          moduleType: normalizeTextField(isRecord(item) ? item.moduleType : ''),
+          minCount: Number(isRecord(item) ? item.minCount : 0),
+          targetCount: Number(isRecord(item) ? item.targetCount : 0),
+          maxCount: Number(isRecord(item) ? item.maxCount : 0),
+        }))
+        .filter((item) => item.moduleType && Number.isFinite(item.minCount) && Number.isFinite(item.targetCount) && Number.isFinite(item.maxCount))
+        .map((item) => ({
+          moduleType: item.moduleType as ReportPlanVisualMixTarget['moduleType'],
+          minCount: item.minCount,
+          targetCount: item.targetCount,
+          maxCount: item.maxCount,
+        }))
+    : [];
 }
 
-function getEnabledDraftModules(draft: ReportOutputDraft) {
-  return (draft.modules || [])
-    .filter((module) => module.enabled !== false && module.status !== 'disabled')
-    .sort((left, right) => left.order - right.order);
-}
-
-function hasMeaningfulDraftContent(module: ReportDraftModule) {
-  return Boolean(
-    String(module.contentDraft || '').trim()
-    || (Array.isArray(module.bullets) && module.bullets.some((item) => String(item || '').trim()))
-    || (Array.isArray(module.cards) && module.cards.some((item) => String(item?.label || '').trim() || String(item?.value || '').trim()))
-    || (Array.isArray(module.chartIntent?.items) && module.chartIntent.items.some((item) => String(item?.label || '').trim()))
-  );
-}
-
-function hasMeaningfulEvidenceRefs(module: ReportDraftModule) {
-  return Array.isArray(module.evidenceRefs)
-    && module.evidenceRefs.some((item) => {
-      const normalized = String(item || '').trim().toLowerCase();
-      return Boolean(normalized && normalized !== 'composer:placeholder');
-    });
-}
-
-function hasEvidenceSignals(module: ReportDraftModule) {
-  return Boolean(
-    hasMeaningfulEvidenceRefs(module)
-    || (Array.isArray(module.cards) && module.cards.some((item) => String(item?.label || '').trim() || String(item?.value || '').trim()))
-    || (Array.isArray(module.chartIntent?.items) && module.chartIntent.items.some((item) => String(item?.label || '').trim()))
-  );
-}
-
-function isPriorityEvidenceModule(module: ReportDraftModule, draft: ReportOutputDraft) {
-  const priorities = Array.isArray(draft.evidencePriority) ? draft.evidencePriority : [];
-  if (!priorities.length) return false;
-  return priorities.some((item) => doesDraftModuleMatchRequirement(module, item));
-}
-
-function buildDraftQualityChecklist(draft: ReportOutputDraft) {
-  const enabledModules = getEnabledDraftModules(draft);
-  const meaningfulModules = enabledModules.filter(hasMeaningfulDraftContent);
-  const missingMustHaveModules = (draft.mustHaveModules || [])
-    .filter((title) => String(title || '').trim())
-    .filter((title) => !enabledModules.some((module) => doesDraftModuleMatchRequirement(module, title)));
-
-  const evidenceCoverage = {
-    coveredModules: enabledModules.filter(hasEvidenceSignals).length,
-    totalModules: enabledModules.length,
-    ratio: enabledModules.length
-      ? Number((enabledModules.filter(hasEvidenceSignals).length / enabledModules.length).toFixed(3))
-      : 0,
-  } satisfies ReportDraftEvidenceCoverage;
-  const priorityEvidenceModules = enabledModules.filter((module) => isPriorityEvidenceModule(module, draft));
-  const priorityEvidenceCoverage = {
-    coveredModules: priorityEvidenceModules.filter(hasEvidenceSignals).length,
-    totalModules: priorityEvidenceModules.length,
-    ratio: priorityEvidenceModules.length
-      ? Number((priorityEvidenceModules.filter(hasEvidenceSignals).length / priorityEvidenceModules.length).toFixed(3))
-      : 0,
-  };
-
-  const hasVisualModule = enabledModules.some((module) => (
-    module.moduleType === 'metric-grid'
-    || module.moduleType === 'chart'
-    || module.moduleType === 'timeline'
-    || module.moduleType === 'comparison'
-  ));
-  const heroOrSummaryPresent = enabledModules.some((module) => module.moduleType === 'hero' || module.moduleType === 'summary');
-
-  const checklist: ReportDraftChecklistItem[] = [
-    {
-      key: 'enabled-modules',
-      label: '已启用模块',
-      status: enabledModules.length ? 'pass' : 'fail',
-      detail: enabledModules.length
-        ? `已启用 ${enabledModules.length} 个模块。`
-        : '当前草稿没有启用模块。',
-      blocking: true,
-    },
-    {
-      key: 'must-have-modules',
-      label: '关键模块完整度',
-      status: missingMustHaveModules.length ? 'fail' : 'pass',
-      detail: missingMustHaveModules.length
-        ? `缺少关键模块：${missingMustHaveModules.join('、')}`
-        : '关键模块已覆盖。',
-      blocking: true,
-    },
-    {
-      key: 'meaningful-content',
-      label: '模块内容完整度',
-      status: meaningfulModules.length ? 'pass' : 'fail',
-      detail: meaningfulModules.length
-        ? `有内容的模块 ${meaningfulModules.length}/${enabledModules.length || 0}。`
-        : '当前没有可读的模块正文或图表草稿。',
-      blocking: true,
-    },
-    {
-      key: 'hero-summary',
-      label: '开场摘要',
-      status: heroOrSummaryPresent ? 'pass' : 'warning',
-      detail: heroOrSummaryPresent ? '已包含开场摘要模块。' : '建议补一个 hero 或 summary 模块。',
-    },
-    {
-      key: 'visual-coverage',
-      label: '可视化覆盖',
-      status: hasVisualModule ? 'pass' : 'warning',
-      detail: hasVisualModule ? '已包含指标、对比、时间线或图表模块。' : '建议补至少一个指标、对比、时间线或图表模块。',
-    },
-    {
-      key: 'evidence-coverage',
-      label: '证据与数据覆盖',
-      status: evidenceCoverage.totalModules === 0
-        ? 'warning'
-        : evidenceCoverage.ratio >= 0.4
-          ? 'pass'
-          : 'warning',
-      detail: evidenceCoverage.totalModules
-        ? `有证据或数据支撑的模块 ${evidenceCoverage.coveredModules}/${evidenceCoverage.totalModules}。`
-        : '当前还没有可评估的模块。',
-    },
-    {
-      key: 'priority-evidence',
-      label: '关键模块证据覆盖',
-      status: priorityEvidenceCoverage.totalModules === 0
-        ? 'warning'
-        : priorityEvidenceCoverage.ratio >= 0.6
-          ? 'pass'
-          : 'warning',
-      detail: priorityEvidenceCoverage.totalModules
-        ? `重点模块证据覆盖 ${priorityEvidenceCoverage.coveredModules}/${priorityEvidenceCoverage.totalModules}。`
-        : '当前还没有声明需要重点覆盖证据的模块。',
-    },
-  ];
-
-  const blockingFailures = checklist.some((item) => item.blocking && item.status === 'fail');
-  const warnings = checklist.some((item) => item.status === 'warning');
-  const readiness: ReportDraftReadiness = blockingFailures
-    ? 'blocked'
-    : warnings
-      ? 'needs_attention'
-      : 'ready';
-
+function buildDraftHistorySnapshot(draft: ReportOutputDraft): ReportDraftHistorySnapshot {
   return {
-    readiness,
-    qualityChecklist: checklist,
-    missingMustHaveModules,
-    evidenceCoverage,
+    reviewStatus: draft.reviewStatus === 'approved' ? 'approved' : 'draft_reviewing',
+    version: Math.max(1, Number(draft.version || 0) || 1),
+    modules: Array.isArray(draft.modules)
+      ? draft.modules.map((module) => ({
+          ...module,
+          evidenceRefs: Array.isArray(module.evidenceRefs) ? [...module.evidenceRefs] : [],
+          cards: Array.isArray(module.cards) ? module.cards.map((card) => ({ ...card })) : [],
+          bullets: Array.isArray(module.bullets) ? [...module.bullets] : [],
+          chartIntent: module.chartIntent
+            ? {
+                ...module.chartIntent,
+                items: Array.isArray(module.chartIntent.items)
+                  ? module.chartIntent.items.map((item) => ({ ...item }))
+                  : [],
+              }
+            : null,
+        }))
+      : [],
+    lastEditedAt: normalizeTextField(draft.lastEditedAt),
+    approvedAt: normalizeTextField(draft.approvedAt),
+    audience: normalizeTextField(draft.audience),
+    objective: normalizeTextField(draft.objective),
+    layoutVariant: normalizeTextField(draft.layoutVariant) as ReportPlanLayoutVariant,
+    visualStyle: normalizeVisualStylePreset(draft.visualStyle),
+    mustHaveModules: normalizeStringList(draft.mustHaveModules),
+    optionalModules: normalizeStringList(draft.optionalModules),
+    evidencePriority: normalizeStringList(draft.evidencePriority),
+    audienceTone: normalizeTextField(draft.audienceTone),
+    riskNotes: normalizeStringList(draft.riskNotes),
+    visualMixTargets: normalizeDraftVisualMixTargets(draft.visualMixTargets),
   };
 }
 
-function hydrateDraftQuality(draft: ReportOutputDraft): ReportOutputDraft {
-  const quality = buildDraftQualityChecklist(draft);
+function normalizeStoredDraftHistorySnapshot(value: unknown): ReportDraftHistorySnapshot | null {
+  if (!isRecord(value)) return null;
+  const normalizedDraft = normalizeStoredDraft({
+    ...value,
+    history: [],
+  });
+  if (!normalizedDraft) return null;
+  return buildDraftHistorySnapshot(normalizedDraft);
+}
+
+function normalizeStoredDraftHistoryEntry(value: unknown): ReportDraftHistoryEntry | null {
+  if (!isRecord(value)) return null;
+  const label = normalizeTextField(value.label);
+  const createdAt = normalizeTextField(value.createdAt);
+  if (!label || !createdAt) return null;
   return {
-    ...draft,
-    ...quality,
+    id: normalizeTextField(value.id) || buildId('drafthist'),
+    action: normalizeStoredDraftHistoryAction(value.action),
+    label,
+    detail: normalizeTextField(value.detail),
+    createdAt,
+    snapshot: normalizeStoredDraftHistorySnapshot(value.snapshot),
   };
 }
 
-export async function updateReportOutputDraft(outputId: string, nextDraftInput: ReportOutputDraft) {
+function appendDraftHistory(
+  draft: ReportOutputDraft,
+  entry: { action: ReportDraftHistoryAction; label: string; detail?: string },
+  now = new Date().toISOString(),
+) {
+  const nextEntry: ReportDraftHistoryEntry = {
+    id: buildId('drafthist'),
+    action: entry.action,
+    label: String(entry.label || '').trim() || '更新草稿',
+    detail: normalizeTextField(entry.detail),
+    createdAt: now,
+    snapshot: buildDraftHistorySnapshot(draft),
+  };
+  const history = Array.isArray(draft.history) ? draft.history : [];
+  return [...history, nextEntry].slice(-20);
+}
+
+export async function updateReportOutputDraft(
+  outputId: string,
+  nextDraftInput: ReportOutputDraft,
+  options?: { historyEntry?: { action: ReportDraftHistoryAction; label: string; detail?: string } },
+) {
   const state = await loadReportCenterState();
   const record = findReportOutputOrThrow(state.outputs, outputId);
   if (record.kind !== 'page') throw new Error('draft editing only supports static pages');
@@ -3389,12 +3421,29 @@ export async function updateReportOutputDraft(outputId: string, nextDraftInput: 
   const reviewStatus: ReportDraftReviewStatus =
     nextDraftInput?.reviewStatus === 'approved' ? 'approved' : 'draft_reviewing';
 
-  const normalizedDraft = normalizeStoredDraft({
+  const historyEntry = options?.historyEntry || {
+    action: 'saved' as const,
+    label: '保存草稿',
+    detail: `当前共 ${Array.isArray(nextDraftInput?.modules) ? nextDraftInput.modules.length : currentDraft.modules.length} 个模块。`,
+  };
+
+  const baseDraft = normalizeStoredDraft({
     ...nextDraftInput,
     version: Math.max(currentDraft.version + 1, Number(nextDraftInput?.version || 0) || 0, 1),
     reviewStatus,
+    history: Array.isArray(nextDraftInput?.history) ? nextDraftInput.history : currentDraft.history || [],
     lastEditedAt: new Date().toISOString(),
     approvedAt: reviewStatus === 'approved' ? (nextDraftInput?.approvedAt || new Date().toISOString()) : '',
+  });
+  if (!baseDraft) throw new Error('draft payload is invalid');
+
+  const history = historyEntry
+    ? appendDraftHistory(baseDraft, historyEntry)
+    : (Array.isArray(nextDraftInput?.history) ? nextDraftInput.history : currentDraft.history || []);
+
+  const normalizedDraft = normalizeStoredDraft({
+    ...baseDraft,
+    history,
   });
   if (!normalizedDraft) throw new Error('draft payload is invalid');
 
@@ -3410,6 +3459,36 @@ export async function updateReportOutputDraft(outputId: string, nextDraftInput: 
   const nextOutputs = state.outputs.map((item) => (item.id === outputId ? nextRecord : item));
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
   return nextRecord;
+}
+
+export async function restoreReportOutputDraftHistory(outputId: string, historyId: string) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft restore only supports static pages');
+
+  const currentDraft = record.draft || buildDraftForRecord(record);
+  if (!currentDraft) throw new Error('draft is not available for this output');
+  const historyEntry = (currentDraft.history || []).find((entry) => entry.id === historyId);
+  if (!historyEntry) throw new Error('draft history entry not found');
+  if (!historyEntry.snapshot) throw new Error('draft history entry cannot be restored');
+
+  const nextDraft = normalizeStoredDraft({
+    ...historyEntry.snapshot,
+    reviewStatus: 'draft_reviewing',
+    version: Math.max(currentDraft.version + 1, Number(historyEntry.snapshot.version || 0) || 0, 1),
+    approvedAt: '',
+    lastEditedAt: new Date().toISOString(),
+    history: currentDraft.history || [],
+  });
+  if (!nextDraft) throw new Error('draft history snapshot is invalid');
+
+  return updateReportOutputDraft(outputId, nextDraft, {
+    historyEntry: {
+      action: 'restored',
+      label: '恢复草稿版本',
+      detail: `已恢复到 ${historyEntry.label || '历史版本'}（${historyEntry.createdAt}）。`,
+    },
+  });
 }
 
 export async function reviseReportOutputDraftModule(outputId: string, moduleId: string, instruction: string) {
@@ -3475,7 +3554,13 @@ export async function reviseReportOutputDraftModule(outputId: string, moduleId: 
     lastEditedAt: new Date().toISOString(),
     modules: draft.modules.map((item, index) => (index === moduleIndex ? revisedModule : item)),
   };
-  return updateReportOutputDraft(outputId, nextDraft);
+  return updateReportOutputDraft(outputId, nextDraft, {
+    historyEntry: {
+      action: 'module-revised',
+      label: '重写单个模块',
+      detail: `已更新「${revisedModule.title || currentModule.title || '未命名模块'}」`,
+    },
+  });
 }
 
 export async function reviseReportOutputDraftStructure(outputId: string, instruction: string) {
@@ -3551,7 +3636,13 @@ export async function reviseReportOutputDraftStructure(outputId: string, instruc
     lastEditedAt: new Date().toISOString(),
     modules: nextModules,
   };
-  return updateReportOutputDraft(outputId, nextDraft);
+  return updateReportOutputDraft(outputId, nextDraft, {
+    historyEntry: {
+      action: 'structure-revised',
+      label: '重写模块结构',
+      detail: `当前共 ${nextModules.length} 个模块。`,
+    },
+  });
 }
 
 export async function reviseReportOutputDraftCopy(outputId: string, instruction: string) {
@@ -3647,7 +3738,13 @@ export async function reviseReportOutputDraftCopy(outputId: string, instruction:
     lastEditedAt: new Date().toISOString(),
     modules: nextModules,
   };
-  return updateReportOutputDraft(outputId, nextDraft);
+  return updateReportOutputDraft(outputId, nextDraft, {
+    historyEntry: {
+      action: 'copy-revised',
+      label: '重写整页文案',
+      detail: `已更新 ${nextModules.length} 个模块的文案。`,
+    },
+  });
 }
 
 export async function finalizeDraftReportOutput(outputId: string) {
@@ -3673,6 +3770,11 @@ export async function finalizeDraftReportOutput(outputId: string) {
     ...validatedDraft,
     reviewStatus: 'approved',
     version: draft.version + 1,
+    history: appendDraftHistory(validatedDraft, {
+      action: 'finalized',
+      label: '确认终稿生成',
+      detail: `终稿基于 ${validatedDraft.modules.length} 个模块生成。`,
+    }),
     approvedAt: new Date().toISOString(),
     lastEditedAt: new Date().toISOString(),
   });

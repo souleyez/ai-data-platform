@@ -160,6 +160,15 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
           planSectionTitles: ['风险概览', '资格风险', 'AI综合分析'],
           planCardLabels: ['资料覆盖', '高风险主题'],
           planChartTitles: ['风险主题分布'],
+          planMustHaveModules: ['页面摘要', '核心风险', '应答建议'],
+          planOptionalModules: ['风险矩阵'],
+          planEvidencePriority: ['高风险主题', '核心风险'],
+          planAudienceTone: 'client-facing',
+          planRiskNotes: ['Do not finalize if risk sections lack evidence-backed details.'],
+          planVisualMixTargets: [
+            { moduleType: 'hero', minCount: 1, targetCount: 1, maxCount: 1 },
+            { moduleType: 'chart', minCount: 1, targetCount: 1, maxCount: 1 },
+          ],
           planDatavizSlots: [
             {
               key: 'risk-clusters',
@@ -202,6 +211,12 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planSectionTitles, ['风险概览', '资格风险', 'AI综合分析']);
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planCardLabels, ['资料覆盖', '高风险主题']);
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planChartTitles, ['风险主题分布']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planMustHaveModules, ['页面摘要', '核心风险', '应答建议']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planOptionalModules, ['风险矩阵']);
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planEvidencePriority, ['高风险主题', '核心风险']);
+  assert.equal(normalized.outputs[0]?.dynamicSource?.planAudienceTone, 'client-facing');
+  assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planRiskNotes, ['Do not finalize if risk sections lack evidence-backed details.']);
+  assert.equal(normalized.outputs[0]?.dynamicSource?.planVisualMixTargets?.[1]?.moduleType, 'chart');
   assert.deepEqual(normalized.outputs[0]?.dynamicSource?.planDatavizSlots, [
     {
       key: 'risk-clusters',
@@ -265,6 +280,56 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
   });
 });
 
+test('normalizePersistedReportState should preserve draft history entries', () => {
+  const normalized = normalizePersistedReportState({
+    version: REPORT_STATE_VERSION,
+    outputs: [
+      {
+        id: 'output-draft-history-1',
+        groupKey: 'resume',
+        groupLabel: 'resume',
+        title: '草稿历史页',
+        outputType: 'page',
+        kind: 'page',
+        summary: 'ok',
+        draft: {
+          reviewStatus: 'draft_reviewing',
+          version: 3,
+          modules: [
+            {
+              moduleId: 'm-1',
+              moduleType: 'summary',
+              title: '摘要',
+              purpose: '概览',
+              contentDraft: '当前草稿正文',
+              evidenceRefs: [],
+              cards: [],
+              bullets: [],
+              enabled: true,
+              status: 'edited',
+              order: 0,
+              layoutType: 'summary',
+            },
+          ],
+          history: [
+            {
+              id: 'hist-1',
+              action: 'saved',
+              label: '保存草稿',
+              detail: '当前共 1 个模块。',
+              createdAt: '2026-04-13T10:00:00.000Z',
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(normalized.outputs[0]?.draft?.history?.[0]?.action, 'saved');
+  assert.equal(normalized.outputs[0]?.draft?.history?.[0]?.label, '保存草稿');
+  assert.equal(normalized.outputs[0]?.draft?.history?.[0]?.detail, '当前共 1 个模块。');
+});
+
 test('normalizePersistedReportState should preserve draft workflow metadata for page outputs', () => {
   const normalized = normalizePersistedReportState({
     version: REPORT_STATE_VERSION,
@@ -290,6 +355,10 @@ test('normalizePersistedReportState should preserve draft workflow metadata for 
           version: 3,
           lastEditedAt: '2026-04-13T08:00:00.000Z',
           visualStyle: 'signal-board',
+          visualMixTargets: [
+            { moduleType: 'hero', minCount: 1, targetCount: 1, maxCount: 1 },
+            { moduleType: 'chart', minCount: 1, targetCount: 1, maxCount: 2 },
+          ],
           modules: [
             {
               moduleId: 'hero-1',
@@ -324,6 +393,7 @@ test('normalizePersistedReportState should preserve draft workflow metadata for 
   assert.equal(normalized.outputs[0]?.draft?.visualStyle, 'signal-board');
   assert.equal(normalized.outputs[0]?.draft?.readiness, 'needs_attention');
   assert.ok((normalized.outputs[0]?.draft?.qualityChecklist || []).length >= 3);
+  assert.equal(normalized.outputs[0]?.draft?.visualMixTargets?.[1]?.moduleType, 'chart');
   assert.equal(normalized.outputs[0]?.page?.visualStyle, 'signal-board');
   assert.equal(normalized.outputs[0]?.draft?.modules?.length, 2);
   assert.equal(normalized.outputs[0]?.draft?.modules?.[1]?.title, '经营概览');

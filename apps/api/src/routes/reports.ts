@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { ReportPlanDatavizSlot, ReportPlanLayoutVariant, ReportPlanPageSpec } from '../lib/report-planner.js';
+import { summarizeReportDraftBenchmarks } from '../lib/report-draft-quality.js';
 import {
   addSharedTemplateReferenceLink,
   createSharedReportTemplate,
@@ -11,6 +12,7 @@ import {
   finalizeDraftReportOutput,
   loadReportCenterReadState,
   readSharedTemplateReferenceFile,
+  restoreReportOutputDraftHistory,
   reviseReportOutputDraftCopy,
   reviseReportOutputDraftModule,
   reviseReportOutputDraftStructure,
@@ -23,10 +25,76 @@ import {
 } from '../lib/report-center.js';
 import { buildWorkspaceOverviewDraftPayload } from '../lib/report-workspace-overview.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeDraftModulesForHistory(draft: unknown) {
+  if (!isRecord(draft) || !Array.isArray(draft.modules)) return [];
+  return draft.modules
+    .filter((module): module is Record<string, unknown> => isRecord(module))
+    .map((module, index) => ({
+      moduleId: String(module.moduleId || `module-${index}`),
+      moduleType: String(module.moduleType || ''),
+      title: String(module.title || ''),
+      contentDraft: String(module.contentDraft || ''),
+      enabled: module.enabled !== false,
+      order: Number(module.order || index),
+      bullets: Array.isArray(module.bullets) ? module.bullets : [],
+      cards: Array.isArray(module.cards) ? module.cards : [],
+      chartIntent: module.chartIntent ?? null,
+    }))
+    .sort((left, right) => left.order - right.order);
+}
+
+function buildDraftSaveHistoryDetail(previousDraft: unknown, nextDraft: unknown) {
+  const previousModules = normalizeDraftModulesForHistory(previousDraft);
+  const nextModules = normalizeDraftModulesForHistory(nextDraft);
+  if (!nextModules.length) return '';
+  const previousById = new Map(previousModules.map((module, index) => [module.moduleId, { module, index }]));
+  const nextById = new Map(nextModules.map((module, index) => [module.moduleId, { module, index }]));
+
+  const addedCount = nextModules.filter((module) => !previousById.has(module.moduleId)).length;
+  const removedCount = previousModules.filter((module) => !nextById.has(module.moduleId)).length;
+  const movedCount = nextModules.filter((module, index) => {
+    const previous = previousById.get(module.moduleId);
+    return previous && previous.index !== index;
+  }).length;
+  const typeChangedCount = nextModules.filter((module) => {
+    const previous = previousById.get(module.moduleId);
+    return previous && previous.module.moduleType !== module.moduleType;
+  }).length;
+  const contentChangedCount = nextModules.filter((module) => {
+    const previous = previousById.get(module.moduleId);
+    if (!previous) return false;
+    return (
+      previous.module.title !== module.title
+      || previous.module.contentDraft !== module.contentDraft
+      || JSON.stringify(previous.module.bullets) !== JSON.stringify(module.bullets)
+      || JSON.stringify(previous.module.cards) !== JSON.stringify(module.cards)
+      || JSON.stringify(previous.module.chartIntent) !== JSON.stringify(module.chartIntent)
+    );
+  }).length;
+  const toggledCount = nextModules.filter((module) => {
+    const previous = previousById.get(module.moduleId);
+    return previous && previous.module.enabled !== module.enabled;
+  }).length;
+
+  const details = [`当前共 ${nextModules.length} 个模块`];
+  if (addedCount) details.push(`新增 ${addedCount} 个`);
+  if (removedCount) details.push(`删除 ${removedCount} 个`);
+  if (movedCount) details.push(`重排 ${movedCount} 个`);
+  if (typeChangedCount) details.push(`改类型 ${typeChangedCount} 个`);
+  if (contentChangedCount) details.push(`改文案 ${contentChangedCount} 个`);
+  if (toggledCount) details.push(`启停 ${toggledCount} 个`);
+  return `${details.join('，')}。`;
+}
+
 export async function registerReportRoutes(app: FastifyInstance) {
   app.get('/reports', async () => {
     const startedAt = Date.now();
     const state = await loadReportCenterReadState();
+    const benchmark = summarizeReportDraftBenchmarks(state.outputs);
 
     return {
       mode: 'read-only',
@@ -34,6 +102,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       groups: state.groups,
       templates: state.templates,
       outputRecords: state.outputs,
+      benchmark,
       meta: {
         groups: state.groups.length,
         templates: state.templates.length,
@@ -50,6 +119,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
 
   app.get('/reports/snapshot', async () => {
     const state = await loadReportCenterReadState();
+    const benchmark = summarizeReportDraftBenchmarks(state.outputs);
     return {
       mode: 'read-only',
       total: state.outputs.length,
@@ -80,6 +150,22 @@ export async function registerReportRoutes(app: FastifyInstance) {
             }
           : null,
       })),
+      benchmark,
+    };
+  });
+
+  app.get('/reports/benchmark', async (request) => {
+    const query = (request.query || {}) as { groupKey?: string | string[] };
+    const rawGroupKey = query.groupKey;
+    const groupKeys = Array.isArray(rawGroupKey)
+      ? rawGroupKey
+      : String(rawGroupKey || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const state = await loadReportCenterReadState();
+    return {
+      benchmark: summarizeReportDraftBenchmarks(state.outputs, { groupKeys }),
     };
   });
 
@@ -408,11 +494,39 @@ export async function registerReportRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'id is required' });
     if (!draft) return reply.code(400).send({ error: 'draft is required' });
 
-    const item = await updateReportOutputDraft(id, draft as never);
+    const currentState = await loadReportCenterReadState();
+    const current = currentState.outputs.find((entry) => entry.id === id);
+    if (!current) return reply.code(404).send({ error: 'report output not found' });
+
+    const normalizedDraft = draft as never as { modules?: Array<unknown> };
+    const moduleCount = Array.isArray(normalizedDraft?.modules) ? normalizedDraft.modules.length : 0;
+    const detail = buildDraftSaveHistoryDetail(current.draft, draft)
+      || (moduleCount ? `当前共 ${moduleCount} 个模块。` : '');
+    const item = await updateReportOutputDraft(id, draft as never, {
+      historyEntry: {
+        action: 'saved',
+        label: '保存草稿',
+        detail,
+      },
+    });
     return {
       status: 'saved',
       item,
       message: `已保存 ${item.title} 草稿`,
+    };
+  });
+
+  app.post('/reports/output/:id/restore-draft-history', async (request, reply) => {
+    const id = String((request.params as { id?: string })?.id || '').trim();
+    const historyId = String(((request.body || {}) as { historyId?: string }).historyId || '').trim();
+    if (!id) return reply.code(400).send({ error: 'id is required' });
+    if (!historyId) return reply.code(400).send({ error: 'historyId is required' });
+
+    const item = await restoreReportOutputDraftHistory(id, historyId);
+    return {
+      status: 'restored',
+      item,
+      message: `已恢复 ${item.title} 的草稿版本`,
     };
   });
 

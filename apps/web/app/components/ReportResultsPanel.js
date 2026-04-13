@@ -1,15 +1,16 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import {
+  buildDraftEditorPath,
   downloadGeneratedReportAs,
   formatGeneratedReportTime,
   getGeneratedReportShareActions,
 } from '../lib/generated-reports';
 
 const GeneratedReportDetail = dynamic(() => import('./GeneratedReportDetail'));
-const ReportDraftEditor = dynamic(() => import('./ReportDraftEditor'));
 
 function ReportShareActions({ item }) {
   if (item?.status === 'processing') return null;
@@ -36,14 +37,6 @@ function formatReportStatus(status) {
   if (status === 'processing') return '生成中';
   if (status === 'failed') return '生成失败';
   return '已完成';
-}
-
-function isDraftGeneratedReport(item) {
-  return Boolean(
-    item?.kind === 'page'
-      && item?.draft?.modules?.length
-      && ['draft_planned', 'draft_generated', 'draft_reviewing', 'final_generating'].includes(String(item?.status || '').trim()),
-  );
 }
 
 function hasEditableDraft(item) {
@@ -139,9 +132,7 @@ export default function ReportResultsPanel({
   const activeIndex = items.findIndex((item) => item.id === activeId);
   const activeItem = activeItemOverride || (activeIndex >= 0 ? items[activeIndex] : items[0] || null);
   const canStep = items.length > 1 && activeIndex >= 0;
-  const [featuredViewMode, setFeaturedViewMode] = useState('preview');
   const activeItemCanEditDraft = hasEditableDraft(activeItem);
-  const activeItemIsDraft = isDraftGeneratedReport(activeItem);
   const activeItemReadiness = getDraftReadinessMeta(activeItem?.draft?.readiness);
 
   useEffect(() => {
@@ -167,14 +158,6 @@ export default function ReportResultsPanel({
       hasAutoSelectedRef.current = true;
     }
   }, [activeId, collapsed, controlled, items]);
-
-  useEffect(() => {
-    if (!activeItemCanEditDraft) {
-      setFeaturedViewMode('preview');
-      return;
-    }
-    setFeaturedViewMode(activeItemIsDraft ? 'edit' : 'preview');
-  }, [activeItem?.id, activeItemCanEditDraft, activeItemIsDraft]);
 
   function handleSelect(nextId) {
     if (controlled) {
@@ -209,7 +192,6 @@ export default function ReportResultsPanel({
   }
 
   function renderFeaturedExpanded() {
-    const showDraftEditor = activeItemCanEditDraft && featuredViewMode === 'edit';
     return (
       <div className="report-results-featured-shell">
         <aside className="report-results-featured-list">
@@ -248,22 +230,9 @@ export default function ReportResultsPanel({
             </div>
             <div className="report-results-toolbar">
               {activeItemCanEditDraft ? (
-                <div className="report-results-view-toggle">
-                  <button
-                    className={`ghost-btn compact-inline-btn ${featuredViewMode === 'preview' ? 'is-active' : ''}`.trim()}
-                    type="button"
-                    onClick={() => setFeaturedViewMode('preview')}
-                  >
-                    预览成品
-                  </button>
-                  <button
-                    className={`ghost-btn compact-inline-btn ${featuredViewMode === 'edit' ? 'is-active' : ''}`.trim()}
-                    type="button"
-                    onClick={() => setFeaturedViewMode('edit')}
-                  >
-                    手动编辑
-                  </button>
-                </div>
+                <Link className="ghost-btn compact-inline-btn is-active" href={buildDraftEditorPath(activeItem)}>
+                  进入编辑
+                </Link>
               ) : null}
               {canStep ? (
                 <div className="report-results-stepper">
@@ -291,12 +260,15 @@ export default function ReportResultsPanel({
                   <p>列表已经可用，当前选中的报表详情正在按需加载。</p>
                 </section>
               ) : null}
-              {!activeItemLoading && showDraftEditor ? (
-                <ReportDraftEditor item={activeItem} onItemChange={onItemChange} />
-              ) : !activeItemLoading ? (
+              {!activeItemLoading ? (
                 <>
                   <div className="report-results-featured-actions">
                     <ReportShareActions item={activeItem} />
+                    {activeItemCanEditDraft ? (
+                      <Link className="ghost-btn" href={buildDraftEditorPath(activeItem)}>
+                        打开独立编辑页
+                      </Link>
+                    ) : null}
                     {onDeleteReport ? (
                       <button className="ghost-btn" type="button" onClick={() => onDeleteReport(activeItem.id)}>
                         删除报表

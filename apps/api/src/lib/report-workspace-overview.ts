@@ -34,6 +34,19 @@ function pickTopLibraries(libraries: Array<{ key?: string; label?: string; docum
     .slice(0, limit);
 }
 
+function pickTopDraftScenarios(scenarios: Array<{ label?: string; readyRatio?: number; blocked?: number; total?: number; averageEvidenceCoverage?: number }>, limit = 3) {
+  return [...scenarios]
+    .filter((item) => toNumber(item?.total) > 0)
+    .sort((left, right) => {
+      const ratioDiff = toNumber(right?.readyRatio) - toNumber(left?.readyRatio);
+      if (ratioDiff !== 0) return ratioDiff;
+      const blockedDiff = toNumber(left?.blocked) - toNumber(right?.blocked);
+      if (blockedDiff !== 0) return blockedDiff;
+      return toNumber(right?.total) - toNumber(left?.total);
+    })
+    .slice(0, limit);
+}
+
 function buildOverviewBullets(input: {
   canonicalReady: number;
   totalFiles: number;
@@ -101,9 +114,11 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
   const draftBlockedOutputs = toNumber(operations.output?.summary?.draftBlockedOutputs);
   const draftNeedsAttentionOutputs = toNumber(operations.output?.summary?.draftNeedsAttentionOutputs);
   const staleDynamicOutputs = toNumber(operations.output?.summary?.staleDynamicOutputs);
+  const draftBenchmark = operations.output?.benchmark || { totals: { drafts: 0, ready: 0, needsAttention: 0, blocked: 0, readyRatio: 0 }, scenarios: [] };
   const warningCount = toNumber(operations.stability?.summary?.warningCount);
   const criticalCount = toNumber(operations.stability?.summary?.criticalCount);
   const topLibraries = pickTopLibraries(libraries);
+  const topDraftScenarios = pickTopDraftScenarios(Array.isArray(draftBenchmark?.scenarios) ? draftBenchmark.scenarios : []);
   const selectedVisualStyle = normalizeVisualStyle(options?.visualStyle) || 'signal-board';
   const outputStatusCounts = (reportState.outputs || []).reduce<Record<string, number>>((acc, item) => {
     const key = String(item?.status || 'unknown').trim() || 'unknown';
@@ -141,7 +156,7 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
     layoutVariant: 'operations-cockpit',
     visualStyle: selectedVisualStyle,
     mustHaveModules: ['项目摘要', '关键指标', '数据集分布', '解析链完成度', '采集运行状态', '报表状态', '后续动作'],
-    optionalModules: ['审计建议'],
+    optionalModules: ['静态页基准', '审计建议'],
     evidencePriority: ['文档量', '解析完成度', '采集运行', '报表输出'],
     audienceTone: 'operator-facing',
     riskNotes: (operations.stability?.warnings || []).slice(0, 5).map((item) => `${item.title || '告警'}：${item.detail || ''}`),
@@ -308,7 +323,31 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
         layoutType: 'chart',
       },
       {
-        moduleId: buildModuleId('cta', 8),
+        moduleId: buildModuleId('draft-benchmark', 8),
+        moduleType: 'comparison',
+        title: '静态页基准',
+        purpose: 'Show which draft scenarios are currently easiest to finalize.',
+        contentDraft: topDraftScenarios.length
+          ? '以下场景来自当前真实静态页草稿输出，适合用来判断哪类页面已经可以稳定对外呈现。'
+          : '当前还没有足够的静态页草稿积累来形成可靠基准。',
+        evidenceRefs: ['operations.output.benchmark'],
+        chartIntent: null,
+        cards: [],
+        bullets: topDraftScenarios.map((item) => {
+          const label = String(item.label || '通用静态页').trim();
+          const readyRatio = formatPercent(toNumber(item.readyRatio) * 100, 100);
+          const blocked = toNumber(item.blocked);
+          const total = toNumber(item.total);
+          const evidenceCoverage = formatPercent(toNumber(item.averageEvidenceCoverage) * 100, 100);
+          return `${label}：草稿 ${total} 份，通过率 ${readyRatio}，证据覆盖 ${evidenceCoverage}，阻塞 ${blocked} 份。`;
+        }),
+        enabled: true,
+        status: 'generated',
+        order: 8,
+        layoutType: 'comparison',
+      },
+      {
+        moduleId: buildModuleId('cta', 9),
         moduleType: 'cta',
         title: '下一步动作',
         purpose: 'Convert system signals into concrete operator actions.',
@@ -323,7 +362,7 @@ export async function buildWorkspaceOverviewDraftPayload(options?: { groupKey?: 
         ],
         enabled: true,
         status: 'generated',
-        order: 8,
+        order: 9,
         layoutType: 'cta',
       },
     ],

@@ -38,6 +38,17 @@ export async function fetchReportsSnapshot() {
   return parseApiResponse(response, 'load reports failed');
 }
 
+export async function fetchReportBenchmark(groupKeys = []) {
+  const query = new URLSearchParams();
+  for (const groupKey of Array.isArray(groupKeys) ? groupKeys : []) {
+    const normalized = String(groupKey || '').trim();
+    if (normalized) query.append('groupKey', normalized);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const response = await fetch(buildApiUrl(`/api/reports/benchmark${suffix}`), { cache: 'no-store' });
+  return parseApiResponse(response, 'load report benchmark failed');
+}
+
 export async function fetchReportOutput(reportId) {
   const response = await fetch(buildApiUrl(`/api/reports/output/${encodeURIComponent(reportId)}`), {
     cache: 'no-store',

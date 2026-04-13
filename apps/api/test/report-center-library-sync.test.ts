@@ -143,10 +143,14 @@ test('page outputs should stay in draft until finalized, then sync finalized con
   const reviewingRecord = await reportCenter.updateReportOutputDraft(draftRecord.id, revisedDraft);
   assert.equal(reviewingRecord.status, 'draft_reviewing');
   assert.equal(reviewingRecord.draft?.reviewStatus, 'draft_reviewing');
+  assert.equal(reviewingRecord.draft?.history?.at(-1)?.action, 'saved');
+  assert.equal(reviewingRecord.draft?.history?.at(-1)?.label, '保存草稿');
 
   const finalizedRecord = await reportCenter.finalizeDraftReportOutput(draftRecord.id);
   assert.equal(finalizedRecord.status, 'ready');
   assert.equal(finalizedRecord.draft?.reviewStatus, 'approved');
+  assert.equal(finalizedRecord.draft?.history?.at(-1)?.action, 'finalized');
+  assert.equal(finalizedRecord.draft?.history?.at(-1)?.label, '确认终稿生成');
 
   cache = await documentCacheRepository.readDocumentCache();
   syncedItems = (cache?.items || []).filter((item) => String(item.path || '').includes(`${path.sep}generated-report-library${path.sep}`));
@@ -467,6 +471,61 @@ test('solution overview page outputs should build solution-oriented draft module
   assert.ok((record.draft?.evidencePriority || []).some((title) => title === '能力模块'));
   assert.ok((record.draft?.evidencePriority || []).some((title) => title === '交付路径'));
   assert.ok((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length <= 1);
+});
+
+test('planner quality targets should steer specialized draft module allocation', async () => {
+  const state = await reportCenter.loadReportCenterState();
+  const group = state.groups[0];
+  assert.ok(group);
+
+  const record = await reportCenter.createReportOutput({
+    groupKey: group.key,
+    title: '方案首页（planner 质量目标）',
+    triggerSource: 'chat',
+    kind: 'page',
+    page: {
+      summary: '当前方案草稿已经有能力模块，但还缺收益指标。', 
+      sections: [
+        { title: '方案概览', body: '方案能够覆盖主要业务流程。', bullets: [] },
+        { title: '能力模块', body: '能力模块已经初步成型。', bullets: ['渠道治理', '经营分析'] },
+        { title: '交付路径', body: '交付分三阶段推进。', bullets: ['阶段一：梳理', '阶段二：上线', '阶段三：优化'] },
+      ],
+      pageSpec: {
+        layoutVariant: 'solution-overview',
+        heroCardLabels: [],
+        heroDatavizSlotKeys: [],
+        sections: [
+          { title: '方案概览', purpose: 'Open with the solution summary.', completionMode: 'knowledge-plus-model', datavizSlotKeys: [] },
+          { title: '能力模块', purpose: 'Break the solution into modules.', completionMode: 'knowledge-plus-model', datavizSlotKeys: [] },
+          { title: '交付路径', purpose: 'State the implementation path.', completionMode: 'knowledge-plus-model', datavizSlotKeys: [] },
+        ],
+      },
+      visualStyle: 'midnight-glass',
+    },
+    dynamicSource: {
+      enabled: true,
+      outputType: 'page',
+      request: '输出方案首页',
+      libraries: [],
+      planMustHaveModules: ['收益指标', '交付路径'],
+      planOptionalModules: ['附录材料'],
+      planEvidencePriority: ['收益指标'],
+      planAudienceTone: 'executive-facing',
+      planRiskNotes: ['收益指标仍需补充更完整的来源证据。'],
+    },
+  });
+
+  assert.equal(record.status, 'draft_generated');
+  assert.equal(record.draft?.audienceTone, 'executive-facing');
+  assert.ok((record.draft?.mustHaveModules || []).includes('收益指标'));
+  assert.ok((record.draft?.mustHaveModules || []).includes('交付路径'));
+  assert.ok((record.draft?.optionalModules || []).includes('附录材料'));
+  assert.ok((record.draft?.evidencePriority || []).includes('收益指标'));
+  assert.ok((record.draft?.riskNotes || []).includes('收益指标仍需补充更完整的来源证据。'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '收益指标' && item.moduleType === 'metric-grid'));
+  assert.ok((record.draft?.modules || []).some((item) => item.title === '交付路径' && item.moduleType === 'timeline'));
+  assert.equal(record.draft?.visualMixTargets?.[0]?.moduleType, 'hero');
+  assert.ok((record.draft?.qualityChecklist || []).some((item) => item.key === 'visual-mix'));
 });
 
 test('talent showcase page outputs should build talent-oriented draft modules for review', async () => {

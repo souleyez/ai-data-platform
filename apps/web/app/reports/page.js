@@ -2,7 +2,8 @@
 
 import dynamic from 'next/dynamic';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ConnectedBotAccessEditor from '../components/ConnectedBotAccessEditor';
 import Sidebar from '../components/Sidebar';
 import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
@@ -14,9 +15,11 @@ import {
 } from '../home-api';
 import { buildApiUrl } from '../lib/config';
 import {
+  buildDraftEditorPath,
   copyGeneratedReportLink,
   downloadGeneratedReportAs,
   formatGeneratedReportTime,
+  isDraftGeneratedReport,
   normalizeGeneratedReportRecord,
 } from '../lib/generated-reports';
 import {
@@ -26,10 +29,6 @@ import {
   formatTemplateUploadSourceTypeLabel,
   inferTemplateUploadSourceType,
 } from '../lib/report-template-uploads.mjs';
-import {
-  getReportVisualStyleMeta,
-  REPORT_VISUAL_STYLE_OPTIONS,
-} from '../lib/report-visual-styles';
 import useMobileViewport from '../lib/use-mobile-viewport';
 import {
   normalizeDocumentLibrariesResponse,
@@ -39,7 +38,6 @@ import { sourceItems } from '../lib/mock-data';
 import { createDocumentLibrary } from '../documents/api';
 
 const GeneratedReportDetail = dynamic(() => import('../components/GeneratedReportDetail'));
-const ReportDraftEditor = dynamic(() => import('../components/ReportDraftEditor'));
 
 function formatDateTime(value) {
   if (!value) return '-';
@@ -77,109 +75,6 @@ const REPORT_LAYOUT_VARIANTS = [
   { value: 'research-brief', label: 'Research Brief' },
   { value: 'solution-overview', label: 'Solution Overview' },
 ];
-
-const REPORT_LAYOUT_VARIANT_LABELS = REPORT_LAYOUT_VARIANTS.reduce((acc, item) => {
-  if (item.value) acc[item.value] = item.label;
-  return acc;
-}, {});
-
-function formatPercent(value) {
-  return `${Math.round(Number(value || 0) * 100)}%`;
-}
-
-function resolveReportScenarioKey(item) {
-  const draftLayoutVariant = String(item?.draft?.layoutVariant || '').trim();
-  if (draftLayoutVariant) return draftLayoutVariant;
-  const pageLayoutVariant = String(item?.page?.pageSpec?.layoutVariant || '').trim();
-  if (pageLayoutVariant) return pageLayoutVariant;
-  const dynamicLayoutVariant = String(item?.dynamicSource?.planPageSpec?.layoutVariant || '').trim();
-  if (dynamicLayoutVariant) return dynamicLayoutVariant;
-  return 'other';
-}
-
-function resolveReportScenarioLabel(key) {
-  if (key === 'other') return '通用静态页';
-  return REPORT_LAYOUT_VARIANT_LABELS[key] || key;
-}
-
-function buildReportDraftBenchmarks(items) {
-  const scopedItems = Array.isArray(items) ? items.filter((item) => item?.kind === 'page' && item?.draft) : [];
-  if (!scopedItems.length) {
-    return {
-      totals: {
-        drafts: 0,
-        ready: 0,
-        needsAttention: 0,
-        blocked: 0,
-        readyRatio: 0,
-      },
-      scenarios: [],
-    };
-  }
-
-  const scenarioMap = new Map();
-  let ready = 0;
-  let needsAttention = 0;
-  let blocked = 0;
-
-  for (const item of scopedItems) {
-    const readiness = String(item?.draft?.readiness || 'needs_attention').trim();
-    if (readiness === 'ready') ready += 1;
-    else if (readiness === 'blocked') blocked += 1;
-    else needsAttention += 1;
-
-    const scenarioKey = resolveReportScenarioKey(item);
-    const current = scenarioMap.get(scenarioKey) || {
-      key: scenarioKey,
-      label: resolveReportScenarioLabel(scenarioKey),
-      total: 0,
-      ready: 0,
-      needsAttention: 0,
-      blocked: 0,
-      averageEvidenceCoverage: 0,
-      latestTitle: '',
-      latestCreatedAt: '',
-    };
-
-    current.total += 1;
-    if (readiness === 'ready') current.ready += 1;
-    else if (readiness === 'blocked') current.blocked += 1;
-    else current.needsAttention += 1;
-
-    const coverageRatio = Number(item?.draft?.evidenceCoverage?.ratio || 0);
-    current.averageEvidenceCoverage += Number.isFinite(coverageRatio) ? coverageRatio : 0;
-    const createdAt = String(item?.createdAt || '').trim();
-    if (!current.latestCreatedAt || createdAt > current.latestCreatedAt) {
-      current.latestCreatedAt = createdAt;
-      current.latestTitle = String(item?.title || '').trim();
-    }
-    scenarioMap.set(scenarioKey, current);
-  }
-
-  const scenarios = Array.from(scenarioMap.values())
-    .map((item) => ({
-      ...item,
-      readyRatio: item.total ? item.ready / item.total : 0,
-      averageEvidenceCoverage: item.total ? item.averageEvidenceCoverage / item.total : 0,
-    }))
-    .sort((left, right) => {
-      if (right.readyRatio !== left.readyRatio) return right.readyRatio - left.readyRatio;
-      if (left.blocked !== right.blocked) return left.blocked - right.blocked;
-      return right.total - left.total;
-    });
-
-  const drafts = scopedItems.length;
-  return {
-    totals: {
-      drafts,
-      ready,
-      needsAttention,
-      blocked,
-      readyRatio: drafts ? ready / drafts : 0,
-    },
-    scenarios,
-  };
-}
 
 function UploadedTemplateItem({
   item,
@@ -354,70 +249,10 @@ function SingleReportActions({ item }) {
   );
 }
 
-function ReportDraftBenchmarkPanel({ benchmark, selectedCount }) {
-  return (
-    <section className="card documents-card report-benchmark-panel">
-      <div className="panel-header report-benchmark-header">
-        <div>
-          <h3>静态页草稿基准视图</h3>
-          <p>{selectedCount ? `当前按左侧已选 ${selectedCount} 个数据集分组统计。` : '当前按全部数据集分组统计。'}</p>
-        </div>
-        <div className="report-benchmark-totals">
-          <span className="report-benchmark-total-chip">草稿 {benchmark.totals.drafts}</span>
-          <span className="report-benchmark-total-chip is-ready">可终稿 {benchmark.totals.ready}</span>
-          <span className="report-benchmark-total-chip is-warning">待优化 {benchmark.totals.needsAttention}</span>
-          <span className="report-benchmark-total-chip is-blocked">阻塞 {benchmark.totals.blocked}</span>
-          <span className="report-benchmark-total-chip">通过率 {formatPercent(benchmark.totals.readyRatio)}</span>
-        </div>
-      </div>
-
-      {!benchmark.scenarios.length ? (
-        <div className="report-empty-card">
-          <h4>还没有静态页草稿</h4>
-          <p>先生成项目总览首页草稿，或者在对话里产出静态页后，这里会开始累计各场景的通过率。</p>
-        </div>
-      ) : (
-        <div className="report-benchmark-grid">
-          {benchmark.scenarios.map((scenario) => (
-            <article key={scenario.key} className="report-benchmark-card">
-              <div className="report-benchmark-card-header">
-                <strong>{scenario.label}</strong>
-                <span className="report-benchmark-card-ratio">{formatPercent(scenario.readyRatio)}</span>
-              </div>
-              <div className="report-benchmark-card-meta">
-                <span>草稿 {scenario.total}</span>
-                <span>证据覆盖 {formatPercent(scenario.averageEvidenceCoverage)}</span>
-              </div>
-              <div className="report-benchmark-card-bars">
-                <span className="report-list-chip is-ready">可终稿 {scenario.ready}</span>
-                <span className="report-list-chip is-warning">待优化 {scenario.needsAttention}</span>
-                <span className="report-list-chip is-blocked">阻塞 {scenario.blocked}</span>
-              </div>
-              {scenario.latestTitle ? (
-                <div className="report-benchmark-card-foot">
-                  <span>最近草稿</span>
-                  <strong>{scenario.latestTitle}</strong>
-                </div>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function isDraftGeneratedReport(item) {
-  return Boolean(
-    item?.kind === 'page'
-    && item?.draft?.modules?.length
-    && ['draft_planned', 'draft_generated', 'draft_reviewing', 'final_generating'].includes(String(item?.status || '').trim()),
-  );
-}
-
 function ReportsPageContent() {
   const mobileViewport = useMobileViewport();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const generatedId = searchParams.get('generated') || '';
   const fileInputRef = useRef(null);
   const [data, setData] = useState(null);
@@ -438,7 +273,6 @@ function ReportsPageContent() {
     link: '',
     preferredLayoutVariant: '',
   });
-  const [workspaceOverviewStyle, setWorkspaceOverviewStyle] = useState('signal-board');
   const [templateFile, setTemplateFile] = useState(null);
   const [botItems, setBotItems] = useState([]);
   const [botManageEnabled, setBotManageEnabled] = useState(false);
@@ -520,10 +354,6 @@ function ReportsPageContent() {
     () => (data?.outputRecords || []).map(normalizeGeneratedReportRecord),
     [data],
   );
-  const workspaceOverviewStyleMeta = useMemo(
-    () => getReportVisualStyleMeta(workspaceOverviewStyle),
-    [workspaceOverviewStyle],
-  );
 
   const scopedLibraries = useMemo(
     () => (selectedLibraryKeys.length
@@ -558,17 +388,6 @@ function ReportsPageContent() {
     return items.filter((item) => selectedGroupTemplateKeys.has(item.templateKey));
   }, [data, selectedGroupTemplateKeys]);
 
-  const scopedOutputRecords = useMemo(() => (
-    selectedLibraryKeys.length
-      ? outputRecords.filter((item) => item?.groupKey && selectedLibraryKeys.includes(item.groupKey))
-      : outputRecords
-  ), [outputRecords, selectedLibraryKeys]);
-
-  const draftBenchmark = useMemo(
-    () => buildReportDraftBenchmarks(scopedOutputRecords),
-    [scopedOutputRecords],
-  );
-
   useEffect(() => {
     if (!outputRecords.some((item) => item?.status === 'processing')) return undefined;
     const timer = setInterval(() => {
@@ -585,19 +404,10 @@ function ReportsPageContent() {
     setGeneratedReport(outputRecords.find((item) => item.id === generatedId) || null);
   }, [generatedId, outputRecords]);
 
-  function handleGeneratedReportChange(nextItem) {
-    const normalizedItem = normalizeGeneratedReportRecord(nextItem);
-    setGeneratedReport(normalizedItem);
-    setData((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        outputRecords: (current.outputRecords || []).map((entry) => (
-          entry?.id === normalizedItem.id ? normalizedItem : entry
-        )),
-      };
-    });
-  }
+  useEffect(() => {
+    if (!generatedId || !generatedReport || !isDraftGeneratedReport(generatedReport)) return;
+    router.replace(buildDraftEditorPath(generatedReport));
+  }, [generatedId, generatedReport, router]);
 
   function buildTemplateReferenceDownloadUrl(item) {
     return `${buildApiUrl(`/api/reports/template-reference/${encodeURIComponent(item.id)}/download`)}?templateKey=${encodeURIComponent(item.templateKey)}`;
@@ -818,34 +628,6 @@ function ReportsPageContent() {
     }
   }
 
-  async function generateWorkspaceOverview() {
-    try {
-      setSubmittingKey('generate-workspace-overview');
-      setMessage('');
-      const response = await fetch(buildApiUrl('/api/reports/workspace-overview'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupKey: selectedReportGroup?.key || undefined,
-          visualStyle: workspaceOverviewStyle,
-        }),
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json?.error || 'generate workspace overview failed');
-      await loadReports();
-      const nextId = String(json?.item?.id || '').trim();
-      if (nextId) {
-        window.location.href = `/reports?generated=${encodeURIComponent(nextId)}`;
-        return;
-      }
-      setMessage(json?.message || '已生成项目总览首页草稿。');
-    } catch (generationError) {
-      setMessage(generationError instanceof Error ? generationError.message : '生成项目总览首页失败。');
-    } finally {
-      setSubmittingKey('');
-    }
-  }
-
   if (generatedId) {
     if (!mobileViewport) {
       return (
@@ -878,13 +660,15 @@ function ReportsPageContent() {
                   <h3>{generatedReport.title}</h3>
                   <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
                 </div>
-                {!isDraftGeneratedReport(generatedReport) ? <SingleReportActions item={generatedReport} /> : null}
+                {isDraftGeneratedReport(generatedReport) ? (
+                  <Link className="ghost-btn" href={buildDraftEditorPath(generatedReport)}>
+                    进入独立编辑页
+                  </Link>
+                ) : (
+                  <SingleReportActions item={generatedReport} />
+                )}
               </div>
-              {isDraftGeneratedReport(generatedReport) ? (
-                <ReportDraftEditor item={generatedReport} onItemChange={handleGeneratedReportChange} />
-              ) : (
-                <GeneratedReportDetail item={generatedReport} />
-              )}
+              <GeneratedReportDetail item={generatedReport} />
             </section>
           )}
         </WorkspaceDesktopShell>
@@ -914,13 +698,15 @@ function ReportsPageContent() {
                   <h3>{generatedReport.title}</h3>
                   <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
                 </div>
-                {!isDraftGeneratedReport(generatedReport) ? <SingleReportActions item={generatedReport} /> : null}
+                {isDraftGeneratedReport(generatedReport) ? (
+                  <Link className="ghost-btn" href={buildDraftEditorPath(generatedReport)}>
+                    进入独立编辑页
+                  </Link>
+                ) : (
+                  <SingleReportActions item={generatedReport} />
+                )}
               </div>
-              {isDraftGeneratedReport(generatedReport) ? (
-                <ReportDraftEditor item={generatedReport} onItemChange={handleGeneratedReportChange} />
-              ) : (
-                <GeneratedReportDetail item={generatedReport} />
-              )}
+              <GeneratedReportDetail item={generatedReport} />
             </section>
           )}
         </main>
@@ -932,44 +718,17 @@ function ReportsPageContent() {
     <>
       {error ? <p>{error}</p> : null}
       {message ? <div className="page-note">{message}</div> : null}
-      <div className="reports-page-actions">
-        <div className="reports-page-overview-style">
-          <div className="report-visual-style-grid report-visual-style-grid-compact">
-            {REPORT_VISUAL_STYLE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`report-visual-style-card ${option.previewClassName} ${workspaceOverviewStyle === option.value ? 'is-selected' : ''}`.trim()}
-                onClick={() => setWorkspaceOverviewStyle(option.value)}
-              >
-                <span className="report-visual-style-card-preview" />
-                <strong>{option.label}</strong>
-                <span>{option.description}</span>
-              </button>
-            ))}
+      <section className="card documents-card report-static-workflow-entry">
+        <div className="panel-header">
+          <div>
+            <h3>静态可视化工作台</h3>
+            <p>首页总览、经营页、方案页等静态页面已移到独立工作台，统一完成生成、对比、审改和终稿确认。</p>
           </div>
-          <div className="report-draft-style-note">
-            <strong>{workspaceOverviewStyleMeta.label}</strong>
-            <span>{workspaceOverviewStyleMeta.description}</span>
-          </div>
+          <Link className="primary-btn" href="/reports/draft">
+            打开静态工作台
+          </Link>
         </div>
-        <button
-          className="primary-btn"
-          type="button"
-          disabled={submittingKey === 'generate-workspace-overview'}
-          onClick={() => void generateWorkspaceOverview()}
-        >
-          {submittingKey === 'generate-workspace-overview' ? '生成中...' : '生成项目总览首页草稿'}
-        </button>
-        <span className="report-template-create-hint">
-          直接使用当前项目的文档、采集、报表与审计数据生成一个可视化首页，再进入草稿审改。
-        </span>
-      </div>
-
-      <ReportDraftBenchmarkPanel
-        benchmark={draftBenchmark}
-        selectedCount={selectedLibraryKeys.length}
-      />
+      </section>
 
       {data ? (
         <>

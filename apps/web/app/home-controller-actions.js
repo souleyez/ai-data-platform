@@ -17,7 +17,12 @@ import {
 } from './home-message-helpers';
 import { appendChatMessageKeepingLatestFailure, buildRecentChatHistory } from './lib/chat-memory';
 import { setCloudModelHealthy, setCloudModelUnavailable } from './lib/cloud-model-status';
-import { createGeneratedReport, normalizeGeneratedReportRecord } from './lib/generated-reports';
+import {
+  buildDraftEditorPath,
+  createGeneratedReport,
+  isDraftGeneratedReport,
+  normalizeGeneratedReportRecord,
+} from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
 
 function looksLikeCloudUnavailable(normalized) {
@@ -128,10 +133,18 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
     try {
       await loadReports?.();
       setSelectedReportId?.(savedItem.id);
+      if (typeof window !== 'undefined' && isDraftGeneratedReport(savedItem)) {
+        window.location.href = buildDraftEditorPath(savedItem);
+        return;
+      }
       return;
     } catch {
       setReportItems?.((prev) => [savedItem, ...prev.filter((item) => item.id !== savedItem.id)]);
       setSelectedReportId?.(savedItem.id);
+      if (typeof window !== 'undefined' && isDraftGeneratedReport(savedItem)) {
+        window.location.href = buildDraftEditorPath(savedItem);
+        return;
+      }
       return;
     }
   }
@@ -164,6 +177,9 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
 
   setReportItems?.((prev) => [generatedReport, ...prev]);
   setSelectedReportId?.(generatedReport.id);
+  if (typeof window !== 'undefined' && isDraftGeneratedReport(generatedReport)) {
+    window.location.href = buildDraftEditorPath(generatedReport);
+  }
 }
 
 function buildChatOptions(context, overrides = {}) {
@@ -180,11 +196,24 @@ function buildChatOptions(context, overrides = {}) {
   };
 }
 
+function buildOneTimePreferredDocumentConversationState(ingestItems) {
+  const preferredDocumentPath = [...(Array.isArray(ingestItems) ? ingestItems : [])]
+    .reverse()
+    .find((item) => item?.status === 'success' && typeof item?.path === 'string' && item.path.trim())
+    ?.path
+    ?.trim();
+
+  return preferredDocumentPath
+    ? { kind: 'general', preferredDocumentPath }
+    : null;
+}
+
 export async function runDocumentUpload(files, context) {
   const {
     defaultUploadNote,
     refreshHomeData,
     setMessages,
+    setConversationState,
     setSelectedManualLibraries,
     setUploadLoading,
     uploadInputRef,
@@ -208,6 +237,7 @@ export async function runDocumentUpload(files, context) {
     };
 
     seedSelectedLibraries(setSelectedManualLibraries, feedback.ingestItems);
+    setConversationState?.(buildOneTimePreferredDocumentConversationState(feedback.ingestItems));
 
     appendAssistantMessage(
       setMessages,

@@ -2,7 +2,6 @@ import path from 'node:path';
 import { buildKnowledgeContext } from './knowledge-evidence.js';
 import { buildLibraryKnowledgePagesContextBlock } from './library-knowledge-pages.js';
 import { buildTemplateConfirmationPayload, type TemplateConfirmationPayload } from './chat-template-confirmation.js';
-import { buildGeneralKnowledgeConversationState } from './knowledge-request-state.js';
 import {
   prepareKnowledgeRetrieval,
   prepareKnowledgeScope,
@@ -34,7 +33,7 @@ export type GeneralKnowledgeDispatchResult = {
   intent: 'general';
   mode: 'openclaw';
   debug?: Record<string, unknown> | null;
-  conversationState: ReturnType<typeof buildGeneralKnowledgeConversationState>;
+  conversationState: null;
   routeKind?: 'general' | 'template_confirmation';
   evidenceMode?: 'supply_only' | null;
   guard?: {
@@ -184,6 +183,10 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ].join('\n\n');
 }
 
+export function shouldIncludeUploadedDocumentFullText(preferredDocumentPath?: string | null) {
+  return Boolean(String(preferredDocumentPath || '').trim());
+}
+
 export async function loadLatestVisibleDetailedDocumentContext(input: {
   botDefinition?: BotDefinition | null;
   effectiveVisibleLibraryKeys?: string[];
@@ -266,13 +269,16 @@ export async function runGeneralKnowledgeAwareChat(input: {
     preferredDocumentIds: memorySelection.documentIds,
     ...scopeState,
   });
-  const latestDetailedDocumentContext = await loadLatestVisibleDetailedDocumentContext({
-    botDefinition: input.botDefinition,
-    effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
-    preferredDocumentPath: input.preferredDocumentPath,
-  });
+  const shouldIncludeLatestDocumentFullText = shouldIncludeUploadedDocumentFullText(input.preferredDocumentPath);
+  const latestDetailedDocumentContext = shouldIncludeLatestDocumentFullText
+    ? await loadLatestVisibleDetailedDocumentContext({
+      botDefinition: input.botDefinition,
+      effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
+      preferredDocumentPath: input.preferredDocumentPath,
+    })
+    : { document: null, libraries: [] };
   const latestDetailedDocument = latestDetailedDocumentContext.document;
-  const conversationState = buildGeneralKnowledgeConversationState(latestDetailedDocument?.path);
+  const conversationState = null;
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -299,7 +305,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
     libraryKnowledgePagesContext,
     templateKnowledgeContext,
   ].filter(Boolean);
-  const latestDocumentFullTextBlock = buildLatestParsedDocumentFullTextContextBlock(latestDetailedDocument);
+  const latestDocumentFullTextBlock = shouldIncludeLatestDocumentFullText
+    ? buildLatestParsedDocumentFullTextContextBlock(latestDetailedDocument)
+    : '';
   const chatContextBlocks = [...systemContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
   const references = appendReference(buildAnswerReferences(supply.effectiveRetrieval.documents), latestDetailedDocument);
 

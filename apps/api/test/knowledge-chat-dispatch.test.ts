@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildLatestParsedDocumentFullTextContextBlock,
+  shouldIncludeUploadedDocumentFullText,
   selectLatestDetailedFullTextDocument,
 } from '../src/lib/knowledge-chat-dispatch.js';
 import type { ParsedDocument } from '../src/lib/document-parser.js';
@@ -156,4 +157,14 @@ test('buildLatestParsedDocumentFullTextContextBlock should use markdown text whe
 
   assert.match(block, /页面正文/);
   assert.match(block, /Markdown 供料/);
+});
+
+test('shouldIncludeUploadedDocumentFullText should only accept an explicit uploaded document path', () => {
+  assert.equal(shouldIncludeUploadedDocumentFullText(''), false);
+  assert.equal(shouldIncludeUploadedDocumentFullText('   '), false);
+  assert.equal(shouldIncludeUploadedDocumentFullText(null), false);
+  assert.equal(
+    shouldIncludeUploadedDocumentFullText('C:/storage/files/uploads/1775000000000-bid.pdf'),
+    true,
+  );
 });

@@ -427,6 +427,9 @@ test('operations overview should surface phase1 stability telemetry and warnings
   assert.equal(payload.output.summary.staleDynamicOutputs, 1);
   assert.equal(payload.output.summary.draftOutputs, 1);
   assert.equal(payload.output.summary.draftBlockedOutputs, 1);
+  assert.equal(payload.output.benchmark.totals.drafts, 1);
+  assert.equal(payload.output.benchmark.totals.blocked, 1);
+  assert.equal(payload.output.benchmark.scenarios.length, 1);
   assert.equal(payload.stability.summary.deepParseBacklog, 24);
   assert.equal(payload.stability.summary.datasourceFailedRuns, 3);
   assert.equal(payload.stability.summary.draftBlockedCount, 1);

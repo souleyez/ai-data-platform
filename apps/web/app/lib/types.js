@@ -169,6 +169,16 @@ export function normalizeReportsResponse(data) {
     staticPageTemplates: Array.isArray(data?.staticPageTemplates) ? data.staticPageTemplates : [],
     activePages: Array.isArray(data?.activePages) ? data.activePages : [],
     outputRecords: Array.isArray(data?.outputRecords) ? data.outputRecords : [],
+    benchmark: data?.benchmark || {
+      totals: {
+        drafts: 0,
+        ready: 0,
+        needsAttention: 0,
+        blocked: 0,
+        readyRatio: 0,
+      },
+      scenarios: [],
+    },
     meta: data?.meta || null,
   };
 }

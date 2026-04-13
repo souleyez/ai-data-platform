@@ -103,6 +103,11 @@ test('buildReportPlan should produce a client-facing page plan with reusable env
   assert.equal(plan.datavizSlots[0]?.preferredChartType, 'horizontal-bar');
   assert.equal(plan.pageSpec.layoutVariant, 'risk-brief');
   assert.equal(plan.pageSpec.heroDatavizSlotKeys[0], plan.datavizSlots[0]?.key);
+  assert.ok(plan.mustHaveModules.includes('核心风险'));
+  assert.ok(plan.evidencePriority.includes('高风险主题'));
+  assert.equal(plan.audienceTone, 'client-facing');
+  assert.ok(plan.riskNotes.length > 0);
+  assert.ok(plan.visualMixTargets.some((item) => item.moduleType === 'chart' && item.minCount === 1));
   assert.ok(plan.sections.some((item) => (item.datavizSlotKeys || []).length > 0));
   assert.equal(plan.pageSpec.sections[0]?.displayMode, 'summary');
   assert.ok(plan.sections.some((item) => item.title === 'AI综合分析' && item.completionMode === 'knowledge-plus-model'));
@@ -165,6 +170,10 @@ test('buildReportPlanContextBlock should expose planning constraints for the gen
   assert.match(block, /Planned cards:/);
   assert.match(block, /Planned dataviz slots:/);
   assert.match(block, /Page spec layout: solution-overview/);
+  assert.match(block, /Must-have modules:/);
+  assert.match(block, /Evidence priority:/);
+  assert.match(block, /Audience tone:/);
+  assert.match(block, /Visual mix targets:/);
   assert.match(block, /Page spec sections:/);
   assert.match(block, /type=bar/);
   assert.match(block, /Knowledge libraries: IOT解决方案/);
@@ -253,6 +262,9 @@ test('buildReportPlan should use client-facing resume sections and planned visua
   assert.ok(plan.datavizSlots.every((item) => item.preferredChartType === 'horizontal-bar'));
   assert.deepEqual(plan.pageSpec.heroCardLabels, ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
   assert.equal(plan.pageSpec.layoutVariant, 'talent-showcase');
+  assert.ok(plan.mustHaveModules.includes('项目经历'));
+  assert.equal(plan.audienceTone, 'candidate-facing');
+  assert.ok(plan.visualMixTargets.some((item) => item.moduleType === 'timeline' && item.minCount === 1));
   assert.equal(plan.pageSpec.sections.find((item) => item.title === '匹配建议')?.displayMode, 'cta');
 });
 

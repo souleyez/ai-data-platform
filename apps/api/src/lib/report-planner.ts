@@ -55,6 +55,25 @@ export type ReportPlanLayoutVariant =
   | 'research-brief'
   | 'solution-overview';
 
+export type ReportPlanVisualMixModuleType =
+  | 'hero'
+  | 'summary'
+  | 'metric-grid'
+  | 'insight-list'
+  | 'table'
+  | 'chart'
+  | 'timeline'
+  | 'comparison'
+  | 'cta'
+  | 'appendix';
+
+export type ReportPlanVisualMixTarget = {
+  moduleType: ReportPlanVisualMixModuleType;
+  minCount: number;
+  targetCount: number;
+  maxCount: number;
+};
+
 export type ReportPlanPageSpec = {
   layoutVariant: ReportPlanLayoutVariant;
   heroCardLabels: string[];
@@ -75,6 +94,12 @@ export type ReportPlan = {
   datavizSlots: ReportPlanDatavizSlot[];
   sections: ReportPlanSection[];
   pageSpec: ReportPlanPageSpec;
+  mustHaveModules: string[];
+  optionalModules: string[];
+  evidencePriority: string[];
+  audienceTone: string;
+  riskNotes: string[];
+  visualMixTargets: ReportPlanVisualMixTarget[];
   knowledgeScope: {
     libraryLabels: string[];
     documentCount: number;
@@ -82,6 +107,15 @@ export type ReportPlan = {
     dominantTopics: string[];
     dominantSchemas: string[];
   };
+};
+
+type ReportPlanQualityTargets = {
+  mustHaveModules: string[];
+  optionalModules: string[];
+  evidencePriority: string[];
+  audienceTone: string;
+  riskNotes: string[];
+  visualMixTargets: ReportPlanVisualMixTarget[];
 };
 
 export type ReportPlannerInput = {
@@ -637,6 +671,141 @@ function buildKnowledgeScope(retrieval: RetrievalResult, libraries: Array<{ key?
   };
 }
 
+function buildVisualMixTargets(
+  entries: Array<[ReportPlanVisualMixModuleType, number, number, number]>,
+): ReportPlanVisualMixTarget[] {
+  return entries.map(([moduleType, minCount, targetCount, maxCount]) => ({
+    moduleType,
+    minCount,
+    targetCount,
+    maxCount,
+  }));
+}
+
+function buildPlanQualityTargets(
+  layoutVariant: ReportPlanLayoutVariant,
+  cards: ReportPlanCard[],
+  sections: ReportPlanSection[],
+): ReportPlanQualityTargets {
+  const cardLabels = cards.map((item) => item.label).filter(Boolean);
+  const sectionTitles = sections.map((item) => item.title).filter(Boolean);
+
+  switch (layoutVariant) {
+    case 'operations-cockpit':
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', '关键指标', '风险提醒', '行动建议', ...sectionTitles.filter((item) => /概览|风险|建议|行动/u.test(item))]),
+        optionalModules: uniqueNonEmpty(['关键趋势图', '结构对比']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 3), '风险提醒', '行动建议']),
+        audienceTone: 'operator-facing',
+        riskNotes: [
+          'Prefer concrete operating signals over decorative narrative.',
+          'If trend evidence is weak, show the gap instead of fabricating momentum.',
+        ],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['metric-grid', 1, 1, 1],
+          ['insight-list', 1, 1, 1],
+          ['comparison', 0, 1, 1],
+          ['timeline', 0, 0, 1],
+          ['chart', 1, 1, 2],
+          ['cta', 1, 1, 1],
+        ]),
+      };
+    case 'risk-brief':
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', '核心风险', '应答建议', ...sectionTitles.filter((item) => /风险|缺口|建议|应答/u.test(item))]),
+        optionalModules: uniqueNonEmpty(['风险矩阵', '证据附录']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 2), '核心风险', '应答建议']),
+        audienceTone: 'client-facing',
+        riskNotes: [
+          'Do not finalize if risk sections lack evidence-backed details.',
+          'Keep mitigation wording concrete and bounded by matched materials.',
+        ],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['insight-list', 1, 1, 2],
+          ['comparison', 0, 1, 1],
+          ['chart', 1, 1, 1],
+          ['cta', 1, 1, 1],
+        ]),
+      };
+    case 'research-brief':
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', '核心发现', '局限与风险', '行动建议', ...sectionTitles.filter((item) => /发现|结论|局限|风险|建议/u.test(item))]),
+        optionalModules: uniqueNonEmpty(['方法附录', '证据附录']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 2), '核心发现', '局限与风险']),
+        audienceTone: 'analytical',
+        riskNotes: [
+          'Separate findings from interpretation when evidence is mixed.',
+          'Make uncertainty explicit for thin or conflicting research signals.',
+        ],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['insight-list', 2, 2, 3],
+          ['comparison', 0, 1, 1],
+          ['chart', 1, 1, 2],
+          ['cta', 1, 1, 1],
+        ]),
+      };
+    case 'solution-overview':
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', '能力模块', '交付路径', '行动建议', ...sectionTitles.filter((item) => /模块|交付|建议|行动/u.test(item))]),
+        optionalModules: uniqueNonEmpty(['集成结构', '实施边界']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 3), '能力模块', '交付路径']),
+        audienceTone: 'client-facing',
+        riskNotes: [
+          'Keep module naming stable across draft and final output.',
+          'If delivery path is uncertain, call out assumptions explicitly.',
+        ],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['metric-grid', 0, 1, 1],
+          ['comparison', 1, 1, 2],
+          ['timeline', 1, 1, 1],
+          ['chart', 0, 1, 1],
+          ['cta', 1, 1, 1],
+        ]),
+      };
+    case 'talent-showcase':
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', '核心优势', '项目经历', '代表案例', '联系建议', ...sectionTitles.filter((item) => /优势|经历|案例|建议/u.test(item))]),
+        optionalModules: uniqueNonEmpty(['能力映射', '交付亮点']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 3), '核心优势', '项目经历', '代表案例']),
+        audienceTone: 'candidate-facing',
+        riskNotes: [
+          'Avoid generic praise without project evidence.',
+          'Keep representative projects concrete enough for client evaluation.',
+        ],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['metric-grid', 0, 1, 1],
+          ['insight-list', 1, 1, 1],
+          ['timeline', 1, 1, 1],
+          ['comparison', 1, 1, 1],
+          ['chart', 0, 0, 0],
+          ['cta', 1, 1, 1],
+        ]),
+      };
+    default:
+      return {
+        mustHaveModules: uniqueNonEmpty(['页面摘要', ...sectionTitles.slice(0, 4)]),
+        optionalModules: uniqueNonEmpty(['图表', '附录']),
+        evidencePriority: uniqueNonEmpty([...cardLabels.slice(0, 3), ...sectionTitles.slice(0, 2)]),
+        audienceTone: 'client-facing',
+        riskNotes: ['If evidence is weak, keep the page concise and explicitly mark gaps.'],
+        visualMixTargets: buildVisualMixTargets([
+          ['hero', 1, 1, 1],
+          ['summary', 1, 1, 3],
+          ['metric-grid', 0, 1, 1],
+          ['comparison', 0, 1, 1],
+          ['timeline', 0, 0, 1],
+          ['chart', 0, 1, 1],
+          ['cta', 0, 1, 1],
+        ]),
+      };
+  }
+}
+
 export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
   const knowledgeScope = buildKnowledgeScope(input.retrieval, input.libraries);
   const envelope = resolveBaseEnvelope(input, knowledgeScope.libraryLabels);
@@ -655,6 +824,8 @@ export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
   const datavizSlots = buildDatavizSlotPlan(input.templateTaskHint, charts, sections);
   const sectionModules = attachDatavizSlotsToSections(sections, datavizSlots);
   const preferredLayoutVariant = input.selectedTemplates?.[0]?.template.preferredLayoutVariant;
+  const pageSpec = buildPageSpec(input.templateTaskHint, preferredLayoutVariant, cards, sectionModules, datavizSlots);
+  const qualityTargets = buildPlanQualityTargets(pageSpec.layoutVariant, cards, sectionModules);
 
   return {
     audience: 'client',
@@ -684,7 +855,13 @@ export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
     charts,
     datavizSlots,
     sections: sectionModules,
-    pageSpec: buildPageSpec(input.templateTaskHint, preferredLayoutVariant, cards, sectionModules, datavizSlots),
+    pageSpec,
+    mustHaveModules: qualityTargets.mustHaveModules,
+    optionalModules: qualityTargets.optionalModules,
+    evidencePriority: qualityTargets.evidencePriority,
+    audienceTone: qualityTargets.audienceTone,
+    riskNotes: qualityTargets.riskNotes,
+    visualMixTargets: qualityTargets.visualMixTargets,
     knowledgeScope,
   };
 }
@@ -718,6 +895,12 @@ export function buildReportPlanContextBlock(plan: ReportPlan) {
       `${index + 1}. ${item.title} :: type=${item.preferredChartType} :: placement=${item.placement}${item.sectionTitle ? ` :: section=${item.sectionTitle}` : ''} :: evidence=${item.evidenceFocus} :: items=${item.minItems}-${item.maxItems}`
     )),
     `Page spec layout: ${plan.pageSpec.layoutVariant}`,
+    `Must-have modules: ${plan.mustHaveModules.join(' | ') || '-'}`,
+    `Optional modules: ${plan.optionalModules.join(' | ') || '-'}`,
+    `Evidence priority: ${plan.evidencePriority.join(' | ') || '-'}`,
+    `Audience tone: ${plan.audienceTone || '-'}`,
+    plan.riskNotes.length ? `Risk notes: ${plan.riskNotes.join(' | ')}` : '',
+    `Visual mix targets: ${plan.visualMixTargets.map((item) => `${item.moduleType}:${item.minCount}/${item.targetCount}/${item.maxCount}`).join(' | ') || '-'}`,
     `Page spec hero cards: ${plan.pageSpec.heroCardLabels.join(' | ')}`,
     `Page spec hero dataviz: ${plan.pageSpec.heroDatavizSlotKeys.join(' | ') || '-'}`,
     'Page spec sections:',
