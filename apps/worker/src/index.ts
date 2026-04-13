@@ -16,6 +16,7 @@ const auditHour = Number(process.env.WORKER_AUDIT_HOUR ?? 2);
 const auditMinute = Number(process.env.WORKER_AUDIT_MINUTE ?? 0);
 
 let lastAuditRunKey = '';
+let tickTimer: NodeJS.Timeout | null = null;
 
 type ScanResponse = {
   status?: string;
@@ -133,7 +134,7 @@ async function runAuditPolicyTick(now = new Date()) {
   }
 }
 
-async function runTick() {
+async function runTickBody() {
   if (enableAutoScan) {
     try {
       const result = await triggerScan();
@@ -214,8 +215,27 @@ async function runTick() {
   await runAuditPolicyTick();
 }
 
+function scheduleNextTick(delayMs = pollIntervalMs) {
+  if (tickTimer) {
+    clearTimeout(tickTimer);
+  }
+
+  tickTimer = setTimeout(() => {
+    void runTick();
+  }, delayMs);
+}
+
+async function runTick() {
+  const tickStartedAt = Date.now();
+
+  try {
+    await runTickBody();
+  } finally {
+    const elapsedMs = Date.now() - tickStartedAt;
+    const nextDelayMs = Math.max(0, pollIntervalMs - elapsedMs);
+    scheduleNextTick(nextDelayMs);
+  }
+}
+
 console.log(`[worker:${workerName}] starting with interval=${pollIntervalMs}ms | autoScan=${enableAutoScan} | deepParse=${enableDeepParse} | deepParseBatch=${deepParseBatchSize} | audit=${enableAuditPolicy} | auditAt=${String(auditHour).padStart(2, '0')}:${String(auditMinute).padStart(2, '0')} | scan=${apiBaseUrl}${scanPath} | deepParsePath=${apiBaseUrl}${deepParsePath} | web=${apiBaseUrl}${webCapturePath} | auditPath=${apiBaseUrl}${auditPolicyPath}`);
-await runTick();
-setInterval(() => {
-  void runTick();
-}, pollIntervalMs);
+void runTick();
