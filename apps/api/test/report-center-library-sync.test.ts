@@ -271,6 +271,7 @@ test('operations cockpit page outputs should build specialized draft modules for
   assert.equal(record.draft?.modules?.[0]?.moduleType, 'hero');
   assert.equal(record.draft?.modules?.[1]?.moduleType, 'metric-grid');
   assert.equal(record.draft?.modules?.at(-1)?.moduleType, 'cta');
+  assert.match(record.draft?.modules?.[0]?.contentDraft || '', /订单.*库存指数|库存指数.*订单/);
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'insight-list').length) <= 1);
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length) <= 2);
 });
@@ -333,6 +334,10 @@ test('risk brief page outputs should build risk-oriented draft modules for revie
   assert.equal(record.draft?.audienceTone, 'client-facing');
   assert.ok((record.draft?.modules || []).some((item) => item.title === '资格风险' && item.moduleType === 'insight-list'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '应答建议' && item.moduleType === 'cta'));
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '应答建议')?.contentDraft || '',
+    /建议优先围绕优先补证、重写交付边界说明推进|建议优先处理以下动作/,
+  );
   assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'chart'));
   assert.ok(((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length) <= 1);
 });
@@ -466,6 +471,10 @@ test('solution overview page outputs should build solution-oriented draft module
   assert.ok((record.draft?.modules || []).some((item) => item.moduleType === 'comparison'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '交付路径' && item.moduleType === 'timeline'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '行动建议' && item.moduleType === 'cta'));
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '交付路径')?.contentDraft || '',
+    /建议按以下阶段展开|建议按以下交付阶段推进/,
+  );
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '能力模块'));
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '交付路径'));
   assert.ok((record.draft?.evidencePriority || []).some((title) => title === '能力模块'));
@@ -524,6 +533,10 @@ test('planner quality targets should steer specialized draft module allocation',
   assert.ok((record.draft?.riskNotes || []).includes('收益指标仍需补充更完整的来源证据。'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '收益指标' && item.moduleType === 'metric-grid'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '交付路径' && item.moduleType === 'timeline'));
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '收益指标')?.contentDraft || '',
+    /待补充确认后的关键数据/,
+  );
   assert.equal(record.draft?.visualMixTargets?.[0]?.moduleType, 'hero');
   assert.ok((record.draft?.qualityChecklist || []).some((item) => item.key === 'visual-mix'));
 });
@@ -570,6 +583,10 @@ test('talent showcase page outputs should build talent-oriented draft modules fo
   assert.ok((record.draft?.modules || []).some((item) => item.title === '项目经历' && item.moduleType === 'timeline'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '代表案例' && item.moduleType === 'comparison'));
   assert.ok((record.draft?.modules || []).some((item) => item.title === '联系建议' && item.moduleType === 'cta'));
+  assert.match(
+    (record.draft?.modules || []).find((item) => item.title === '代表案例')?.contentDraft || '',
+    /可优先展示以下代表案例|重点可先按大型交付项目、数据治理项目展开|静态页工作流/,
+  );
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '项目经历'));
   assert.ok((record.draft?.mustHaveModules || []).some((title) => title === '代表案例'));
   assert.equal((record.draft?.modules || []).filter((item) => item.moduleType === 'chart').length, 0);

@@ -5,7 +5,7 @@ import type {
   ReportOutputRecord,
   ReportVisualStylePreset,
 } from './report-center.js';
-import type { ReportPlanDatavizSlot, ReportPlanVisualMixTarget } from './report-planner.js';
+import type { ReportPlanDatavizSlot, ReportPlanLayoutVariant, ReportPlanVisualMixTarget } from './report-planner.js';
 import {
   buildSupplementalVisualModule,
   inferSectionModuleType,
@@ -218,6 +218,13 @@ type ResolvedDraftComposerTargets = {
   visualMixTargets: ReportPlanVisualMixTarget[];
 };
 
+type DraftPolishContext = {
+  layoutVariant: ReportPlanLayoutVariant | 'insight-brief';
+  audienceTone: string;
+  summary: string;
+  metricLabels: string[];
+};
+
 function mergeOrderedTitles(...lists: Array<Array<string> | undefined>) {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -416,6 +423,149 @@ function applySemanticDraftTargets(
   return working;
 }
 
+function ensureSentence(value: unknown) {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+  return /[。！？.!?]$/.test(normalized) ? normalized : `${normalized}。`;
+}
+
+function buildShortList(items: string[], limit = 2) {
+  return items
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function summarizeBulletsForCopy(bullets: string[], limit = 2) {
+  const values = buildShortList(bullets, limit);
+  return values.length ? values.join('、') : '';
+}
+
+function splitBulletLabel(bullet: string) {
+  const normalized = normalizeText(bullet);
+  if (!normalized) return '';
+  const [label = normalized] = normalized.split(/[：:|]/).map((item) => item.trim()).filter(Boolean);
+  return label || normalized;
+}
+
+function buildScenarioLead(
+  layoutVariant: DraftPolishContext['layoutVariant'],
+  moduleType: ReportDraftModuleType,
+  title: string,
+) {
+  if (moduleType === 'cta') {
+    if (layoutVariant === 'risk-brief') return '建议优先处理以下动作';
+    if (layoutVariant === 'research-brief') return '建议先按以下方向收口研究结论';
+    if (layoutVariant === 'solution-overview') return '建议优先推进以下动作';
+    if (layoutVariant === 'talent-showcase') return '建议按以下方式推进沟通';
+    return '建议优先执行以下动作';
+  }
+  if (moduleType === 'timeline') {
+    if (layoutVariant === 'talent-showcase') return '可按以下经历顺序展开';
+    if (layoutVariant === 'solution-overview') return '建议按以下交付阶段推进';
+    return '建议按以下阶段推进';
+  }
+  if (moduleType === 'comparison') {
+    if (layoutVariant === 'solution-overview') return '可按以下能力模块展开';
+    if (layoutVariant === 'talent-showcase') return '可优先展示以下代表案例';
+    return `${normalizeText(title) || '当前内容'}可优先从以下维度展开`;
+  }
+  if (moduleType === 'insight-list') {
+    if (/风险|异常|波动|问题/.test(normalizeText(title))) return '当前需要优先关注的问题集中在';
+    if (layoutVariant === 'research-brief') return '当前最值得保留的研究发现集中在';
+    return '当前最值得保留的关键信号集中在';
+  }
+  return '';
+}
+
+function buildPlaceholderContentDraft(
+  moduleType: ReportDraftModuleType,
+  title: string,
+  summary: string,
+  context?: DraftPolishContext,
+) {
+  const normalizedTitle = normalizeText(title) || '当前模块';
+  if (moduleType === 'cta') {
+    return `${buildScenarioLead(context?.layoutVariant || 'insight-brief', moduleType, normalizedTitle) || '建议先补充以下动作'}，终稿前再替换为确认后的客户口径。`;
+  }
+  if (moduleType === 'timeline') {
+    return `${buildScenarioLead(context?.layoutVariant || 'insight-brief', moduleType, normalizedTitle) || '建议按阶段补充当前路径'}，终稿前补全关键节点和里程碑。`;
+  }
+  if (moduleType === 'comparison') {
+    return `${buildScenarioLead(context?.layoutVariant || 'insight-brief', moduleType, normalizedTitle) || '当前模块可按对比结构补充'}，终稿前补全每个维度的证据和结论。`;
+  }
+  if (moduleType === 'metric-grid') {
+    return `${normalizedTitle} 当前仍待补充确认后的关键数据，终稿前替换为可直接展示的指标卡。`;
+  }
+  if (moduleType === 'chart') {
+    return `${normalizedTitle} 当前保留图表位置，终稿前补充实际数据和标题说明。`;
+  }
+  const normalizedSummary = normalizeText(summary);
+  if (normalizedSummary) {
+    return `${ensureSentence(normalizedSummary)}当前先保留「${normalizedTitle}」区块，终稿前补充更明确的证据和表述。`;
+  }
+  return `当前先保留「${normalizedTitle}」区块，终稿前补充更明确的证据和表述。`;
+}
+
+function buildReadableModuleCopy(module: ReportDraftModule, context: DraftPolishContext) {
+  const body = normalizeText(module.contentDraft);
+  const bullets = Array.isArray(module.bullets) ? module.bullets.filter(Boolean).map((item) => normalizeText(item)) : [];
+  const metricFocus = buildShortList(context.metricLabels, 2).join('、');
+  if (module.moduleType === 'hero') {
+    if (body && metricFocus) return `${ensureSentence(body)}当前页优先围绕${metricFocus}展开。`;
+    if (body) return ensureSentence(body);
+    if (context.summary && metricFocus) return `${ensureSentence(context.summary)}当前页优先围绕${metricFocus}展开。`;
+    return ensureSentence(context.summary);
+  }
+  if (module.moduleType === 'cta') {
+    const topActions = summarizeBulletsForCopy(bullets, 2);
+    if (body && topActions) return `${ensureSentence(body)}建议优先围绕${topActions}推进。`;
+    if (body) return ensureSentence(body);
+    if (topActions) return `${buildScenarioLead(context.layoutVariant, module.moduleType, module.title)}：${topActions}。`;
+    return body;
+  }
+  if (module.moduleType === 'timeline') {
+    const topPhases = summarizeBulletsForCopy(bullets, 3);
+    if (body && bullets.length) return `${ensureSentence(body)}建议按以下阶段展开。`;
+    if (body) return ensureSentence(body);
+    if (topPhases) return `${buildScenarioLead(context.layoutVariant, module.moduleType, module.title)}：${topPhases}。`;
+    return body;
+  }
+  if (module.moduleType === 'comparison') {
+    const dimensions = summarizeBulletsForCopy(bullets.map(splitBulletLabel), 3);
+    if (body && dimensions) return `${ensureSentence(body)}重点可先按${dimensions}展开。`;
+    if (body) return ensureSentence(body);
+    if (dimensions) return `${buildScenarioLead(context.layoutVariant, module.moduleType, module.title)}：${dimensions}。`;
+    return body;
+  }
+  if (module.moduleType === 'insight-list') {
+    const highlights = summarizeBulletsForCopy(bullets, 2);
+    if (body && highlights && !body.includes(highlights)) return `${ensureSentence(body)}重点集中在${highlights}。`;
+    if (body) return ensureSentence(body);
+    if (highlights) return `${buildScenarioLead(context.layoutVariant, module.moduleType, module.title)}${highlights}。`;
+    return body;
+  }
+  if (body) return ensureSentence(body);
+  return body;
+}
+
+function polishDraftModules(modules: ReportDraftModule[], context: DraftPolishContext) {
+  return modules.map((module) => {
+    const normalizedEvidenceRefs = Array.isArray(module.evidenceRefs)
+      ? module.evidenceRefs.map((item) => normalizeText(item)).filter(Boolean)
+      : [];
+    const contentDraft = normalizedEvidenceRefs.includes('composer:placeholder')
+      ? buildPlaceholderContentDraft(module.moduleType, module.title, context.summary, context)
+      : buildReadableModuleCopy(module, context);
+    return {
+      ...module,
+      contentDraft,
+      purpose: normalizeText(module.purpose),
+      evidenceRefs: normalizedEvidenceRefs,
+    };
+  });
+}
+
 function buildPlaceholderModule(
   moduleType: ReportDraftModuleType,
   title: string,
@@ -451,7 +601,7 @@ function buildPlaceholderModule(
       moduleType,
       title,
       purpose: 'Reserve a compact metric cluster for final review.',
-      contentDraft: '',
+      contentDraft: `${normalizeText(title) || '当前指标模块'} 当前仍待补充确认后的关键数据，终稿前替换为可直接展示的指标卡。`,
       evidenceRefs: ['composer:placeholder'],
       chartIntent: null,
       cards: [],
@@ -465,13 +615,13 @@ function buildPlaceholderModule(
 
   return {
     moduleId: buildId('draftmod'),
-    moduleType,
-    title,
-    purpose: 'Reserve a scenario-critical module so the draft structure stays editable before finalization.',
+      moduleType,
+      title,
+      purpose: 'Reserve a scenario-critical module so the draft structure stays editable before finalization.',
     contentDraft: normalizedSummary,
-    evidenceRefs: ['composer:placeholder'],
-    chartIntent: null,
-    cards: [],
+      evidenceRefs: ['composer:placeholder'],
+      chartIntent: null,
+      cards: [],
     bullets: normalizedSummary ? [normalizedSummary] : [],
     enabled: true,
     status: 'generated',
@@ -1064,31 +1214,39 @@ export function buildSpecializedDraftForRecord(
   const effectivePolicy = applyVisualMixTargetsToPolicy(policy, targets.visualMixTargets);
   const semanticModules = applySemanticDraftTargets(modules, record, targets);
   const policyModules = applyDraftComposerPolicy(semanticModules, record, effectivePolicy);
+  const polishedModules = polishDraftModules(policyModules, {
+    layoutVariant: (layoutVariant || 'insight-brief') as DraftPolishContext['layoutVariant'],
+    audienceTone: targets.audienceTone || 'client-facing',
+    summary: normalizeText(record.page?.summary),
+    metricLabels: Array.isArray(record.page?.cards)
+      ? record.page.cards.map((item) => normalizeText(item?.label)).filter(Boolean)
+      : [],
+  });
 
-  const orderedTitles = policyModules.map((item) => item.title).filter(Boolean);
-  const chartTitles = policyModules
+  const orderedTitles = polishedModules.map((item) => item.title).filter(Boolean);
+  const chartTitles = polishedModules
     .filter((item) => item.moduleType === 'chart')
     .map((item) => item.title)
     .filter(Boolean);
   const typeDrivenEvidencePriority = effectivePolicy
     ? (effectivePolicy.evidenceRequiredTypes || [])
-      .flatMap((moduleType) => policyModules.filter((item) => item.moduleType === moduleType).map((item) => item.title))
+      .flatMap((moduleType) => polishedModules.filter((item) => item.moduleType === moduleType).map((item) => item.title))
       .filter(Boolean)
     : [];
-  const semanticEvidencePriority = resolveSemanticPriorityModules(policyModules, targets.evidencePriorityTitles);
+  const semanticEvidencePriority = resolveSemanticPriorityModules(polishedModules, targets.evidencePriorityTitles);
   const riskNotes = mergeOrderedTitles(
     targets.riskNotes,
-    policyModules
+    polishedModules
     .filter((item) => item.moduleType === 'insight-list' && /风险|异常|波动|问题|预警/.test(normalizeText(item.title)))
     .flatMap((item) => item.bullets || [])
     .filter(Boolean)
     .slice(0, 5),
   ).slice(0, 5);
-  const semanticMustHaveModules = resolveSemanticMustHaveModules(policyModules, targets.mustHaveTitles);
+  const semanticMustHaveModules = resolveSemanticMustHaveModules(polishedModules, targets.mustHaveTitles);
   const typeDrivenMustHaveModules = effectivePolicy
     ? (Object.entries(effectivePolicy.minCounts) as Array<[ReportDraftModuleType, number]>)
       .flatMap(([moduleType, minCount]) => {
-        const typedModules = policyModules.filter((item) => item.moduleType === moduleType).slice(0, minCount);
+        const typedModules = polishedModules.filter((item) => item.moduleType === moduleType).slice(0, minCount);
         return typedModules.map((item) => item.title).filter(Boolean);
       })
     : orderedTitles.filter((title) => /摘要|指标|行动|建议|概览|风险|结论|发现/.test(title)).slice(0, 8);
@@ -1104,7 +1262,7 @@ export function buildSpecializedDraftForRecord(
   return {
     reviewStatus: 'draft_generated',
     version: 1,
-    modules: policyModules,
+    modules: polishedModules,
     lastEditedAt: record.createdAt,
     approvedAt: '',
     audience: normalizeText(record.dynamicSource?.planAudience) || 'client',
