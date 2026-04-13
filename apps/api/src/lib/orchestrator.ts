@@ -17,10 +17,7 @@ import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
 import type { KnowledgePlan } from './knowledge-plan.js';
 import {
-  buildGeneralKnowledgeConversationState,
-  parseGeneralKnowledgeConversationState,
   parseKnowledgeConversationState,
-  type GeneralKnowledgeConversationState,
   type KnowledgeConversationState,
 } from './knowledge-request-state.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
@@ -112,7 +109,7 @@ function buildFallbackResponse(
   output: ChatOutput;
   libraries: Array<{ key: string; label: string }>;
   knowledgePlan: KnowledgePlan | null;
-  conversationState: KnowledgeConversationState | GeneralKnowledgeConversationState | null;
+  conversationState: KnowledgeConversationState | null;
   fallbackReason: string;
 } {
   const content = buildCloudUnavailableAnswer();
@@ -148,9 +145,6 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const requestMode = input.mode || 'general';
   const existingKnowledgeState = requestMode === 'knowledge_output'
     ? parseKnowledgeConversationState(input.conversationState)
-    : null;
-  const existingGeneralState = requestMode === 'general'
-    ? parseGeneralKnowledgeConversationState(input.conversationState)
     : null;
   const systemContextBlocks = [
     buildSystemCapabilityContextBlock({
@@ -252,7 +246,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
         const generalChatPromise = runGeneralKnowledgeAwareChat({
           prompt,
           chatHistory,
-          existingState: existingGeneralState,
+          existingState: input.conversationState ?? null,
           sessionUser: input.sessionUser,
           debugResumePage: input.debugResumePage === true,
           systemContextBlocks,
@@ -261,7 +255,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
           accessContext: input.accessContext || null,
           cloudTimeoutMs: input.cloudTimeoutMs,
-          preferredDocumentPath: input.preferredDocumentPath || existingGeneralState?.preferredDocumentPath,
+          preferredDocumentPath: input.preferredDocumentPath,
         });
         const result = await (
           requestMode === 'general' && !input.backgroundContinuation
@@ -301,7 +295,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
             botDefinition,
             effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
             accessContext: input.accessContext || null,
-            preferredDocumentPath: input.preferredDocumentPath || existingGeneralState?.preferredDocumentPath,
+            preferredDocumentPath: input.preferredDocumentPath,
           });
           backgroundHandoff = true;
           savedReport = handoff.savedReport as Record<string, unknown>;
@@ -311,7 +305,7 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
           content = buildBackgroundContinuationAnswer();
           output = { type: 'answer', content };
           mode = 'fallback';
-          conversationState = buildGeneralKnowledgeConversationState(handoff.job.latestDocumentPath);
+          conversationState = null;
           routeKind = 'general';
           evidenceMode = null;
           guard = {
@@ -414,6 +408,13 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       backgroundContinuation: backgroundHandoff,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
+      preferredDocumentPath: String(input.preferredDocumentPath || '').trim(),
+      latestDocumentFullTextIncluded: Boolean(
+        debug
+        && typeof debug === 'object'
+        && 'latestDocumentFullTextIncluded' in debug
+        && debug.latestDocumentFullTextIncluded === true,
+      ),
       botId: botDefinition?.id || '',
       botName: botDefinition?.name || '',
     },

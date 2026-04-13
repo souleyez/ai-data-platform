@@ -25,6 +25,22 @@ import type { ResolvedChannelAccess } from './channel-access-resolver.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
+const UPLOADED_DOCUMENT_CHAT_CONTEXT_CHAR_LIMIT = 5000;
+const UPLOADED_DOCUMENT_FULL_TEXT_HINT_PATTERNS = [
+  /这份(?:文档|文件|材料)?/,
+  /这个(?:文档|文件|材料)?/,
+  /该(?:文档|文件|材料)?/,
+  /刚上传(?:的)?(?:文档|文件|材料)?/,
+  /上传(?:的)?(?:文档|文件|材料)?/,
+  /基于(?:这份|这个|该|刚上传的|上传的)/,
+  /根据(?:这份|这个|该|刚上传的|上传的)/,
+  /围绕(?:这份|这个|该|刚上传的|上传的)/,
+  /uploaded (?:document|file)/i,
+  /just uploaded/i,
+  /this (?:document|file)/i,
+  /based on (?:the )?(?:uploaded|this) (?:document|file)/i,
+];
+
 export type GeneralKnowledgeDispatchResult = {
   libraries: KnowledgeLibraryRef[];
   content: string;
@@ -42,6 +58,13 @@ export type GeneralKnowledgeDispatchResult = {
     confirmation: TemplateConfirmationPayload | null;
   } | null;
 };
+
+function trimUploadedDocumentContextText(text: string, maxChars = UPLOADED_DOCUMENT_CHAT_CONTEXT_CHAR_LIMIT) {
+  const normalized = String(text || '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+}
 
 async function runCloudChatWithSearchFallback(input: {
   prompt: string;
@@ -169,7 +192,7 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ParsedDocument,
   'title' | 'name' | 'path' | 'schemaType' | 'parseStage' | 'detailParseStatus' | 'fullText' | 'markdownText'
 > | null) {
-  const fullText = getParsedDocumentCanonicalText(document);
+  const fullText = trimUploadedDocumentContextText(getParsedDocumentCanonicalText(document));
   if (!fullText) return '';
 
   return [
@@ -183,8 +206,18 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ].join('\n\n');
 }
 
-export function shouldIncludeUploadedDocumentFullText(preferredDocumentPath?: string | null) {
-  return Boolean(String(preferredDocumentPath || '').trim());
+function requestExplicitlyTargetsUploadedDocument(requestText?: string | null) {
+  const source = String(requestText || '').trim();
+  if (!source) return false;
+  return UPLOADED_DOCUMENT_FULL_TEXT_HINT_PATTERNS.some((pattern) => pattern.test(source));
+}
+
+export function shouldIncludeUploadedDocumentFullText(
+  requestText?: string | null,
+  preferredDocumentPath?: string | null,
+) {
+  if (!String(preferredDocumentPath || '').trim()) return false;
+  return requestExplicitlyTargetsUploadedDocument(requestText);
 }
 
 export async function loadLatestVisibleDetailedDocumentContext(input: {
@@ -209,12 +242,15 @@ export async function loadLatestVisibleDetailedDocumentContext(input: {
     )))
     : baseVisibleItems;
 
-  const document = selectLatestDetailedFullTextDocument(visibleItems, input.preferredDocumentPath);
-  const libraries = document
+  const normalizedPreferredPath = String(input.preferredDocumentPath || '').trim().toLowerCase();
+  const preferredDocument = normalizedPreferredPath
+    ? visibleItems.find((item) => String(item.path || '').trim().toLowerCase() === normalizedPreferredPath) || null
+    : null;
+  const preferredLibraries = preferredDocument
     ? documentLibraries
       .filter((library) => (
         (!effectiveVisibleLibrarySet || effectiveVisibleLibrarySet.has(library.key))
-        && documentMatchesLibrary(document, library)
+        && documentMatchesLibrary(preferredDocument, library)
       ))
       .map((library): KnowledgeLibraryRef => ({
         key: library.key,
@@ -222,9 +258,34 @@ export async function loadLatestVisibleDetailedDocumentContext(input: {
       }))
     : [];
 
+  let document = preferredDocument;
+  let libraries = preferredLibraries;
+  if (normalizedPreferredPath && preferredDocument && !isDetailedFullTextDocument(preferredDocument)) {
+    document = null;
+  } else if (normalizedPreferredPath && !preferredDocument) {
+    document = null;
+    libraries = [];
+  } else if (!normalizedPreferredPath) {
+    document = selectLatestDetailedFullTextDocument(visibleItems, input.preferredDocumentPath);
+    const latestVisibleDocument = document;
+    libraries = latestVisibleDocument
+      ? documentLibraries
+        .filter((library) => (
+          (!effectiveVisibleLibrarySet || effectiveVisibleLibrarySet.has(library.key))
+          && documentMatchesLibrary(latestVisibleDocument, library)
+        ))
+        .map((library): KnowledgeLibraryRef => ({
+          key: library.key,
+          label: library.label,
+        }))
+      : [];
+  }
+
   return {
     document,
     libraries,
+    preferredDocument,
+    preferredDocumentReady: Boolean(preferredDocument && isDetailedFullTextDocument(preferredDocument)),
   };
 }
 
@@ -269,16 +330,26 @@ export async function runGeneralKnowledgeAwareChat(input: {
     preferredDocumentIds: memorySelection.documentIds,
     ...scopeState,
   });
-  const shouldIncludeLatestDocumentFullText = shouldIncludeUploadedDocumentFullText(input.preferredDocumentPath);
+  const shouldIncludeLatestDocumentFullText = shouldIncludeUploadedDocumentFullText(
+    requestText,
+    input.preferredDocumentPath,
+  );
   const latestDetailedDocumentContext = shouldIncludeLatestDocumentFullText
     ? await loadLatestVisibleDetailedDocumentContext({
       botDefinition: input.botDefinition,
       effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
       preferredDocumentPath: input.preferredDocumentPath,
     })
-    : { document: null, libraries: [] };
+    : { document: null, libraries: [], preferredDocument: null, preferredDocumentReady: false };
   const latestDetailedDocument = latestDetailedDocumentContext.document;
   const conversationState = null;
+  const latestDocumentFullTextIncluded = Boolean(latestDetailedDocument && shouldIncludeLatestDocumentFullText);
+  const preferredDocumentPath = String(input.preferredDocumentPath || '').trim();
+  const preferredDocumentStatus = !preferredDocumentPath
+    ? 'none'
+    : latestDetailedDocumentContext.preferredDocumentReady
+      ? 'ready'
+      : (latestDetailedDocumentContext.preferredDocument ? 'not_ready' : 'missing');
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -311,6 +382,41 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const chatContextBlocks = [...systemContextBlocks, latestDocumentFullTextBlock].filter(Boolean);
   const references = appendReference(buildAnswerReferences(supply.effectiveRetrieval.documents), latestDetailedDocument);
 
+  if (shouldIncludeLatestDocumentFullText && !latestDetailedDocument) {
+    const content = '该文档还在解析，详细正文尚未就绪，请稍后再试。';
+    return {
+      libraries: supply.libraries,
+      content,
+      output: { type: 'answer', content },
+      references: buildAnswerReferences(supply.effectiveRetrieval.documents),
+      intent: 'general',
+      mode: 'openclaw',
+      debug: {
+        memorySelectedDocuments: memorySelection.documentIds.length,
+        supplyDocuments: supply.effectiveRetrieval.documents.length,
+        supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+        latestDetailedDocument: '',
+        preferredDocumentPath,
+        latestDocumentFullTextIncluded: false,
+        preferredDocumentStatus,
+        botId: input.botDefinition?.id || '',
+        botName: input.botDefinition?.name || '',
+        visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
+          ? input.effectiveVisibleLibraryKeys
+          : (input.botDefinition?.visibleLibraryKeys || []),
+        accessContext: input.accessContext || null,
+      },
+      conversationState,
+      routeKind: 'general',
+      evidenceMode: 'supply_only',
+      guard: {
+        requiresConfirmation: false,
+        reason: '',
+        confirmation: null,
+      },
+    };
+  }
+
   const confirmation = input.skipTemplateConfirmation
     ? null
     : await buildTemplateConfirmationPayload({
@@ -340,6 +446,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
       supplyDocuments: supply.effectiveRetrieval.documents.length,
       supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
       latestDetailedDocument: latestDetailedDocument?.path || '',
+      preferredDocumentPath,
+      latestDocumentFullTextIncluded,
+      preferredDocumentStatus,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -380,6 +489,9 @@ export async function runGeneralKnowledgeAwareChat(input: {
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
       latestDetailedDocument: latestDetailedDocument?.path || '',
+      preferredDocumentPath,
+      latestDocumentFullTextIncluded,
+      preferredDocumentStatus,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)

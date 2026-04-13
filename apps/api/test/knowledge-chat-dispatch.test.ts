@@ -130,6 +130,22 @@ test('buildLatestParsedDocumentFullTextContextBlock should include full text wit
   assert.doesNotMatch(block, /请优先|先分析|再输出|must|should/i);
 });
 
+test('buildLatestParsedDocumentFullTextContextBlock should cap uploaded document context at 5000 chars', () => {
+  const block = buildLatestParsedDocumentFullTextContextBlock({
+    title: 'oversized-md',
+    name: 'oversized.md',
+    path: 'C:/docs/oversized.md',
+    schemaType: 'generic',
+    parseStage: 'detailed',
+    detailParseStatus: 'succeeded',
+    markdownText: `# 标题\n\n${'正文'.repeat(4000)}`,
+  });
+
+  assert.ok(block.length < 5600);
+  assert.match(block, /Full text:/);
+  assert.match(block, /…/);
+});
+
 test('buildLatestParsedDocumentFullTextContextBlock should return empty string when full text is missing', () => {
   assert.equal(buildLatestParsedDocumentFullTextContextBlock(null), '');
   assert.equal(buildLatestParsedDocumentFullTextContextBlock({
@@ -159,12 +175,22 @@ test('buildLatestParsedDocumentFullTextContextBlock should use markdown text whe
   assert.match(block, /Markdown 供料/);
 });
 
-test('shouldIncludeUploadedDocumentFullText should only accept an explicit uploaded document path', () => {
-  assert.equal(shouldIncludeUploadedDocumentFullText(''), false);
-  assert.equal(shouldIncludeUploadedDocumentFullText('   '), false);
-  assert.equal(shouldIncludeUploadedDocumentFullText(null), false);
+test('shouldIncludeUploadedDocumentFullText should only accept explicit uploaded-document questions with a preferred path', () => {
+  assert.equal(shouldIncludeUploadedDocumentFullText('', ''), false);
+  assert.equal(shouldIncludeUploadedDocumentFullText('请总结一下这份文档', ''), false);
+  assert.equal(shouldIncludeUploadedDocumentFullText('请总结一下这份文档', null), false);
   assert.equal(
-    shouldIncludeUploadedDocumentFullText('C:/storage/files/uploads/1775000000000-bid.pdf'),
+    shouldIncludeUploadedDocumentFullText(
+      '请基于刚上传的文档总结重点',
+      'C:/storage/files/uploads/1775000000000-bid.pdf',
+    ),
     true,
+  );
+  assert.equal(
+    shouldIncludeUploadedDocumentFullText(
+      '分析最近30天订单趋势',
+      'C:/storage/files/uploads/1775000000000-bid.pdf',
+    ),
+    false,
   );
 });

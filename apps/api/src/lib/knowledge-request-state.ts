@@ -12,7 +12,10 @@ export type KnowledgeConversationState = {
 export type GeneralKnowledgeConversationState = {
   kind: 'general';
   preferredDocumentPath: string;
+  expiresAt: string;
 };
+
+const GENERAL_KNOWLEDGE_PREFERRED_DOCUMENT_TTL_MS = 10 * 60 * 1000;
 
 const TIME_RANGE_RULES: Array<{ pattern: RegExp; value: string }> = [
   { pattern: /\u6700\u8fd1\u4e0a\u4f20|\u521a\u4e0a\u4f20|recent upload|latest upload/i, value: '最近上传' },
@@ -38,9 +41,11 @@ function normalizeText(text: string) {
 export function buildGeneralKnowledgeConversationState(preferredDocumentPath?: string) {
   const normalizedPath = normalizeText(preferredDocumentPath || '');
   if (!normalizedPath) return null;
+  const expiresAt = new Date(Date.now() + GENERAL_KNOWLEDGE_PREFERRED_DOCUMENT_TTL_MS).toISOString();
   return {
     kind: 'general' as const,
     preferredDocumentPath: normalizedPath,
+    expiresAt,
   };
 }
 
@@ -49,11 +54,14 @@ export function parseGeneralKnowledgeConversationState(value: unknown): GeneralK
   const raw = value as Record<string, unknown>;
   if (raw.kind !== 'general') return null;
   const preferredDocumentPath = normalizeText(String(raw.preferredDocumentPath || ''));
-  if (!preferredDocumentPath) return null;
+  const expiresAt = normalizeText(String(raw.expiresAt || ''));
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!preferredDocumentPath || !expiresAt || !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) return null;
 
   return {
     kind: 'general',
     preferredDocumentPath,
+    expiresAt,
   };
 }
 

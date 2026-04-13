@@ -44,10 +44,12 @@ test('parseGeneralKnowledgeConversationState should accept a persisted preferred
   const state = parseGeneralKnowledgeConversationState({
     kind: 'general',
     preferredDocumentPath: 'C:/storage/files/uploads/1775000000000-bid.pdf',
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(state?.kind, 'general');
   assert.equal(state?.preferredDocumentPath, 'C:/storage/files/uploads/1775000000000-bid.pdf');
+  assert.ok(state?.expiresAt);
 });
 
 test('buildGeneralKnowledgeConversationState should normalize and reject empty paths', () => {
@@ -55,6 +57,17 @@ test('buildGeneralKnowledgeConversationState should normalize and reject empty p
 
   const state = buildGeneralKnowledgeConversationState(' C:/docs/bid.pdf ');
   assert.equal(state?.preferredDocumentPath, 'C:/docs/bid.pdf');
+  assert.ok(Date.parse(String(state?.expiresAt || '')) > Date.now());
+});
+
+test('parseGeneralKnowledgeConversationState should reject expired preferred document state', () => {
+  const state = parseGeneralKnowledgeConversationState({
+    kind: 'general',
+    preferredDocumentPath: 'C:/storage/files/uploads/1775000000000-bid.pdf',
+    expiresAt: '2020-01-01T00:00:00.000Z',
+  });
+
+  assert.equal(state, null);
 });
 
 test('extractNormalizedTimeRange should normalize all-time and recent-upload phrases', () => {

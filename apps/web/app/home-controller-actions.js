@@ -183,6 +183,7 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
 }
 
 function buildChatOptions(context, overrides = {}) {
+  const conversationState = overrides.conversationState ?? context.conversationState ?? null;
   return {
     mode: overrides.mode || 'general',
     confirmedRequest: overrides.confirmedRequest || '',
@@ -190,7 +191,12 @@ function buildChatOptions(context, overrides = {}) {
     preferredLibraries: Array.isArray(overrides.preferredLibraries)
       ? overrides.preferredLibraries
       : (Array.isArray(context.preferredLibraries) ? context.preferredLibraries : []),
-    conversationState: overrides.conversationState ?? context.conversationState ?? null,
+    conversationState:
+      conversationState?.kind === 'general'
+      && typeof conversationState?.expiresAt === 'string'
+      && Date.parse(conversationState.expiresAt) <= Date.now()
+        ? null
+        : conversationState,
     systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
     botId: overrides.botId ?? context.selectedBotId ?? '',
   };
@@ -204,7 +210,11 @@ function buildOneTimePreferredDocumentConversationState(ingestItems) {
     ?.trim();
 
   return preferredDocumentPath
-    ? { kind: 'general', preferredDocumentPath }
+    ? {
+      kind: 'general',
+      preferredDocumentPath,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    }
     : null;
 }
 
