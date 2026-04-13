@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { fetchModelConfig, fetchOperationsOverview, updateModelConfig } from '../home-api';
+import { CLOUD_MODEL_STATUS_EVENT, loadCloudModelStatus } from '../lib/cloud-model-status';
 import ThemeToggleButton from './ThemeToggleButton';
 
 const DESKTOP_NAV_LINKS = [
@@ -38,6 +39,7 @@ export default function HomeWorkspaceToolbar({
   const [modelState, setModelState] = useState(initialModelState);
   const [modelBusy, setModelBusy] = useState(false);
   const [modelMessage, setModelMessage] = useState('');
+  const [cloudStatus, setCloudStatus] = useState(() => loadCloudModelStatus());
   const [healthState, setHealthState] = useState({
     warningCount: 0,
     criticalCount: 0,
@@ -70,6 +72,20 @@ export default function HomeWorkspaceToolbar({
     void loadModelState();
     return () => {
       alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncCloudStatus = () => {
+      setCloudStatus(loadCloudModelStatus());
+    };
+    syncCloudStatus();
+    window.addEventListener(CLOUD_MODEL_STATUS_EVENT, syncCloudStatus);
+    window.addEventListener('storage', syncCloudStatus);
+    return () => {
+      window.removeEventListener(CLOUD_MODEL_STATUS_EVENT, syncCloudStatus);
+      window.removeEventListener('storage', syncCloudStatus);
     };
   }, []);
 
@@ -109,6 +125,64 @@ export default function HomeWorkspaceToolbar({
     () => modelState.currentModel || modelState.availableModels[0] || null,
     [modelState],
   );
+  const configuredProviderCount = useMemo(
+    () => modelState.providers.filter((item) => item.configured).length,
+    [modelState.providers],
+  );
+  const modelConnectionState = useMemo(() => {
+    if (!modelState.openclaw?.running) {
+      return {
+        level: 'critical',
+        badgeText: '未连通',
+        summary: '云端网关未连通',
+        detail: '当前模型网关未连接，云端问答不可用。',
+      };
+    }
+    if (cloudStatus?.status === 'healthy') {
+      return {
+        level: 'healthy',
+        badgeText: '已连接',
+        summary: '云端模型可用',
+        detail: currentModel ? `${currentModel.provider} / ${currentModel.label}` : '最近一次云端调用成功。',
+      };
+    }
+    if (cloudStatus?.status === 'unavailable') {
+      return {
+        level: 'critical',
+        badgeText: '不可用',
+        summary: '云端模型暂不可用',
+        detail: cloudStatus.message || '最近一次云端调用失败，请稍后重试或检查模型连接。',
+      };
+    }
+    if (!currentModel && !modelState.availableModels.length) {
+      return {
+        level: 'critical',
+        badgeText: '未配置',
+        summary: '未配置云端模型',
+        detail: '当前还没有可用模型，请先完成模型连接配置。',
+      };
+    }
+    if (configuredProviderCount === 0) {
+      return {
+        level: 'warning',
+        badgeText: '待验',
+        summary: '云端模型待验证',
+        detail: '当前网关在线，但还没有确认可用的云端提供方。',
+      };
+    }
+    return {
+      level: 'healthy',
+      badgeText: '已连接',
+      summary: '云端模型可用',
+      detail: currentModel ? `${currentModel.provider} / ${currentModel.label}` : '已连接',
+    };
+  }, [
+    cloudStatus,
+    currentModel,
+    configuredProviderCount,
+    modelState.availableModels,
+    modelState.openclaw?.running,
+  ]);
   const healthLabel = healthState.criticalCount > 0
     ? 'critical'
     : healthState.warningCount > 0
@@ -246,10 +320,18 @@ export default function HomeWorkspaceToolbar({
         <div className="home-toolbar-flyout">
           <button type="button" className="ghost-btn home-toolbar-flyout-trigger">
             模型连接
-            <span className="library-tab-count">{modelState.availableModels.length || 1}</span>
+            <span className={`library-tab-count status-${modelConnectionState.level}`}>
+              {modelConnectionState.badgeText}
+            </span>
           </button>
           <div className="home-toolbar-flyout-panel">
             <div className="home-toolbar-flyout-title">模型连接</div>
+            {modelConnectionState.level !== 'healthy' ? (
+              <div className={`home-toolbar-model-warning status-${modelConnectionState.level}`}>
+                <strong>{modelConnectionState.summary}</strong>
+                <span>{modelConnectionState.detail}</span>
+              </div>
+            ) : null}
             <div className="home-toolbar-model-line">
               <strong>运行状态</strong>
               <span>{getRuntimeLabel(modelState.openclaw)}</span>
@@ -257,6 +339,10 @@ export default function HomeWorkspaceToolbar({
             <div className="home-toolbar-model-line">
               <strong>当前模型</strong>
               <span>{currentModel ? `${currentModel.provider} / ${currentModel.label}` : '未配置'}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>已配置提供方</strong>
+              <span>{configuredProviderCount}</span>
             </div>
             <div className="home-toolbar-model-line">
               <strong>本机已配置</strong>

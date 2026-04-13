@@ -78,6 +78,13 @@ export default function HomePageClient({ initialModelState }) {
     return () => mediaQuery.removeEventListener('change', updateViewport);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    window.localStorage.setItem('aidp_theme_mode_v1', 'dark');
+    document.documentElement.dataset.theme = 'dark';
+    document.documentElement.style.colorScheme = 'dark';
+  }, []);
+
   const orderedLibraries = useMemo(
     () => sortLibrariesForRail(documentLibraries),
     [documentLibraries],
@@ -92,22 +99,11 @@ export default function HomePageClient({ initialModelState }) {
     return orderedLibraries.filter((item) => selectedSet.has(item.key));
   }, [orderedLibraries, preferredLibraries]);
   const allSelected = !selectedLibraries.length || (Boolean(allLibraryKeys.length) && selectedLibraries.length === allLibraryKeys.length);
-  const preferredDocumentTotal = useMemo(
-    () => selectedLibraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0),
-    [selectedLibraries],
-  );
-  const scopeLabel = useMemo(() => {
-    if (!selectedLibraries.length || allSelected) return '全部数据集';
-    if (selectedLibraries.length === 1) {
-      return selectedLibraries[0]?.label || selectedLibraries[0]?.name || selectedLibraries[0]?.key || '当前数据集';
-    }
-    return `${selectedLibraries.length} 个数据集`;
-  }, [allSelected, selectedLibraries]);
-  const scopeMeta = useMemo(() => {
-    if (!selectedLibraries.length || allSelected) return `${documentTotal} 份文档`;
-    return `${preferredDocumentTotal} 份文档`;
-  }, [allSelected, documentTotal, preferredDocumentTotal, selectedLibraries.length]);
-
+  const selectionSummaryLabel = selectedLibraries.length
+    ? (selectedLibraries.length === 1
+      ? `当前范围 ${selectedLibraries[0]?.label || selectedLibraries[0]?.name || selectedLibraries[0]?.key || '数据集'}`
+      : `当前范围 ${selectedLibraries.length} 个数据集`)
+    : `当前范围 全部数据集`;
   async function handleCreateLibrary(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed || libraryCreateBusy) return false;
@@ -223,14 +219,12 @@ export default function HomePageClient({ initialModelState }) {
             creating={libraryCreateBusy}
             clearChipActive={allSelected}
             clearChipLabel={`全部数据集 ${documentTotal}`}
-            selectionSummaryLabel={`默认范围 ${scopeLabel}`}
+            selectionSummaryLabel={selectionSummaryLabel}
           />
 
           <section className="home-chat-stage">
             <ChatPanel
               compact
-              scopeLabel={scopeLabel}
-              scopeMeta={scopeMeta}
               messages={messages}
               input={input}
               isLoading={isLoading}

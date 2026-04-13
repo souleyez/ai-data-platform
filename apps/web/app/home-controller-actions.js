@@ -16,8 +16,17 @@ import {
   patchMessagesWithIngestItems,
 } from './home-message-helpers';
 import { appendChatMessageKeepingLatestFailure, buildRecentChatHistory } from './lib/chat-memory';
+import { setCloudModelHealthy, setCloudModelUnavailable } from './lib/cloud-model-status';
 import { createGeneratedReport, normalizeGeneratedReportRecord } from './lib/generated-reports';
 import { normalizeChatResponse } from './lib/types';
+
+function looksLikeCloudUnavailable(normalized) {
+  const content = String(normalized?.message?.content || '').trim();
+  const meta = String(normalized?.message?.meta || '').trim();
+  return normalized?.mode === 'fallback'
+    || content.includes('当前云端模型暂时不可用')
+    || meta.includes('云端回复暂不可用');
+}
 
 function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, message));
@@ -159,11 +168,20 @@ export async function submitQuestion(value, context) {
   try {
     const data = await sendChatPrompt(text, buildRecentChatHistory([...messages, userMessage]), buildChatOptions(context));
     const normalized = normalizeChatResponse(data, null);
+    if (looksLikeCloudUnavailable(normalized)) {
+      setCloudModelUnavailable(normalized.message?.content, 'chat-fallback');
+    } else {
+      setCloudModelHealthy('chat-success');
+    }
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
     await persistGeneratedReport(normalized, message, context, text);
   } catch (error) {
+    setCloudModelUnavailable(
+      error instanceof Error ? error.message : '当前云端模型暂时不可用，请稍后再试。',
+      'chat-error',
+    );
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -201,6 +219,11 @@ export async function confirmTemplateOption(option, context) {
       }),
     );
     const normalized = normalizeChatResponse(data, null);
+    if (looksLikeCloudUnavailable(normalized)) {
+      setCloudModelUnavailable(normalized.message?.content, 'template-chat-fallback');
+    } else {
+      setCloudModelHealthy('template-chat-success');
+    }
     setConversationState?.(normalized.conversationState || null);
     const message = { ...normalized.message, id: createMessageId('assistant') };
     appendAssistantMessage(setMessages, message);
@@ -211,6 +234,10 @@ export async function confirmTemplateOption(option, context) {
       option.confirmedRequest || option.executePrompt || option.title || '',
     );
   } catch (error) {
+    setCloudModelUnavailable(
+      error instanceof Error ? error.message : '当前云端模型暂时不可用，请稍后再试。',
+      'template-chat-error',
+    );
     appendAssistantMessage(setMessages, {
       id: createMessageId('assistant'),
       role: 'assistant',
