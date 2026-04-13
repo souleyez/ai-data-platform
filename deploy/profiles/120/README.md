@@ -124,6 +124,16 @@ That means:
 - it falls back to `home` if the local path fails
 - it remains an independent node rather than a `home`-only runtime
 
+If 120 is temporarily or permanently switched to `HOME_PLATFORM_BRIDGE_MODE=home-first`, add:
+
+- `HOME_PLATFORM_LEASE_PROFILE=server_120m`
+
+That keeps a sticky server lease on the shared `home` model pool:
+
+- higher priority than short client leases
+- renewed automatically while the bridge is alive
+- only reclaimed when the lease has been idle long enough and another request needs the same upstream provider
+
 ## Update flow
 
 Current update flow after GitHub changes:

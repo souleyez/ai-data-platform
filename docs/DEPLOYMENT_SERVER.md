@@ -39,6 +39,8 @@ Primary runtime variables:
 - `OPENCLAW_MODEL`
 - `HOME_PLATFORM_BASE_URL`
 - `HOME_PLATFORM_BRIDGE_MODE`
+- `HOME_PLATFORM_LEASE_PROFILE`
+- `HOME_PLATFORM_LEASE_RENEW_INTERVAL_MS`
 - `HOME_PLATFORM_PROJECT_KEY`
 - `HOME_PLATFORM_PRINCIPAL_KEY`
 - `HOME_PLATFORM_PRINCIPAL_LABEL`
@@ -63,7 +65,24 @@ If `HOME_PLATFORM_BASE_URL` is set, `ai-data-platform-model-bridge` can use the 
 - `HOME_PLATFORM_BRIDGE_MODE=local-first`
   The default and recommended production mode. Local provider keys are used first. `home` is only used as a fallback.
 - `HOME_PLATFORM_BRIDGE_MODE=home-first`
-  Temporary test mode. `home` is used first, and local provider keys are only used as a fallback.
+  `home` is used first, and local provider keys are only used as a fallback.
+
+For server-style nodes that should keep a reserved upstream provider on the shared `home` model pool, set:
+
+- `HOME_PLATFORM_LEASE_PROFILE=server_120m`
+
+That enables a sticky lease on the `home` side:
+
+- higher priority than short client leases
+- renewed automatically by `ai-data-platform-model-bridge`
+- only reclaimed when the lease has been idle long enough and another request needs the same upstream provider
+
+If `HOME_PLATFORM_LEASE_PROFILE` is left empty:
+
+- `home-first` nodes still default to `server_120m`
+- `local-first` nodes do not pre-warm a sticky lease
+
+`HOME_PLATFORM_LEASE_RENEW_INTERVAL_MS` is optional and normally should not be set outside tests or troubleshooting.
 
 ## Deployment flow
 

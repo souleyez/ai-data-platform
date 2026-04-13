@@ -1,6 +1,8 @@
 [Service]
 Environment="HOME_PLATFORM_BASE_URL=http://ad.goods-editor.com/platform-api/api"
 Environment="HOME_PLATFORM_BRIDGE_MODE=local-first"
+# Uncomment on nodes that run home-first and should keep a sticky server lease.
+# Environment="HOME_PLATFORM_LEASE_PROFILE=server_120m"
 Environment="HOME_PLATFORM_PROJECT_KEY=ai-data-platform"
 Environment="HOME_PLATFORM_PRINCIPAL_KEY=server:120.24.251.24"
 Environment="HOME_PLATFORM_PRINCIPAL_LABEL=AI-120"

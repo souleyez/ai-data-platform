@@ -6,7 +6,18 @@ const port = Number(process.env.MODEL_BRIDGE_PORT || 18790);
 const defaultModel = process.env.OPENCLAW_MODEL || 'deepseek/deepseek-chat';
 const fallbackModel = process.env.OPENCLAW_FALLBACK_MODEL || '';
 const platformSessionSkewMs = 5 * 60 * 1000;
+const defaultLeaseRenewIntervalMs = 10 * 60 * 1000;
 let cachedPlatformSession = null;
+let cachedPlatformLease = null;
+let leaseRenewTimer = null;
+let releasingLease = false;
+
+function clearLeaseRenewalTimer() {
+  if (leaseRenewTimer) {
+    clearTimeout(leaseRenewTimer);
+    leaseRenewTimer = null;
+  }
+}
 
 function env(name, fallback = '') {
   const value = process.env[name];
@@ -20,6 +31,35 @@ function hasPlatformProxyConfigured() {
 function resolvePlatformBridgeMode() {
   const mode = env('HOME_PLATFORM_BRIDGE_MODE', 'local-first').toLowerCase();
   return mode === 'home-first' ? 'home-first' : 'local-first';
+}
+
+function resolveHomePlatformLeaseProfile() {
+  const configured = env('HOME_PLATFORM_LEASE_PROFILE');
+  if (configured) {
+    const normalized = configured.toLowerCase();
+    if (['off', 'none', 'disabled', 'proxy'].includes(normalized)) {
+      return '';
+    }
+    return configured;
+  }
+  return hasPlatformProxyConfigured() && resolvePlatformBridgeMode() === 'home-first'
+    ? 'server_120m'
+    : '';
+}
+
+function resolveHomePlatformLeaseRenewIntervalMs(profile) {
+  const explicit = Number.parseInt(env('HOME_PLATFORM_LEASE_RENEW_INTERVAL_MS'), 10);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+  const normalized = String(profile || '').trim().toLowerCase();
+  if (normalized.includes('10')) {
+    return 2 * 60 * 1000;
+  }
+  if (normalized.includes('120')) {
+    return defaultLeaseRenewIntervalMs;
+  }
+  return 60 * 1000;
 }
 
 function isGatewayScopedModel(modelRef) {
@@ -88,6 +128,18 @@ function sessionStillUsable(session) {
   return expiresAtMs - Date.now() > platformSessionSkewMs;
 }
 
+function leaseStillUsable(lease) {
+  if (!lease?.id || !lease?.expiresAt) {
+    return false;
+  }
+  const expiresAtMs = Date.parse(lease.expiresAt);
+  if (!Number.isFinite(expiresAtMs)) {
+    return false;
+  }
+  const renewSkewMs = Math.min(resolveHomePlatformLeaseRenewIntervalMs(lease.leaseProfile), 30 * 60 * 1000);
+  return expiresAtMs - Date.now() > renewSkewMs;
+}
+
 async function requestJson(url, options) {
   const response = await fetch(url, options);
   const text = await response.text();
@@ -136,6 +188,183 @@ async function bootstrapHomePlatformSession(forceRefresh = false) {
     modelAccess: payload.modelAccess || null,
   };
   return cachedPlatformSession;
+}
+
+function scheduleLeaseRenewal(profile) {
+  const intervalMs = resolveHomePlatformLeaseRenewIntervalMs(profile);
+  clearLeaseRenewalTimer();
+  leaseRenewTimer = setTimeout(() => {
+    leaseRenewTimer = null;
+    renewHomePlatformLease().catch((error) => {
+      console.error(`[http-model-bridge] lease renew failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, intervalMs);
+  if (typeof leaseRenewTimer.unref === 'function') {
+    leaseRenewTimer.unref();
+  }
+}
+
+function cachePlatformLease(lease) {
+  if (!lease?.id) {
+    clearLeaseRenewalTimer();
+    cachedPlatformLease = null;
+    return null;
+  }
+  cachedPlatformLease = {
+    id: lease.id,
+    expiresAt: lease.expiresAt || '',
+    providerScope: lease.providerScope || '',
+    leaseMode: lease.leaseMode || '',
+    leaseProfile: lease.leaseProfile || resolveHomePlatformLeaseProfile() || '',
+    lastUsedAt: lease.lastUsedAt || '',
+    lastRenewedAt: lease.lastRenewedAt || '',
+    sticky: Boolean(lease.sticky),
+  };
+  scheduleLeaseRenewal(cachedPlatformLease.leaseProfile);
+  return cachedPlatformLease;
+}
+
+function shouldIgnoreLeaseError(error) {
+  const message = String(error instanceof Error ? error.message : error);
+  return message.includes('MODEL_LEASE_DISABLED')
+    || message.includes('MODEL_LEASE_NOT_FOUND')
+    || message.includes('MODEL_LEASE_NO_PROVIDER_AVAILABLE');
+}
+
+async function requestHomePlatformLeaseStatus(forceRefresh = false) {
+  const leaseProfile = resolveHomePlatformLeaseProfile();
+  if (!leaseProfile) {
+    return null;
+  }
+  const session = await bootstrapHomePlatformSession(forceRefresh);
+  const baseUrl = resolveHomePlatformBaseUrl();
+  const providerScope = resolveHomePlatformProvider(resolveHomePlatformModel(''));
+  const query = new URLSearchParams();
+  if (providerScope) {
+    query.set('providerScope', providerScope);
+  }
+  if (cachedPlatformLease?.id) {
+    query.set('leaseId', cachedPlatformLease.id);
+  }
+  const { response, payload } = await requestJson(`${baseUrl}/client/model-lease/status?${query.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+    },
+  });
+  if (response.status === 401 && !forceRefresh) {
+    return requestHomePlatformLeaseStatus(true);
+  }
+  if (!response.ok) {
+    throw new Error(`home_platform_lease_status_failed:${response.status}:${JSON.stringify(payload)}`);
+  }
+  return cachePlatformLease(payload?.lease || null);
+}
+
+async function ensureHomePlatformLease(forceRefresh = false) {
+  const leaseProfile = resolveHomePlatformLeaseProfile();
+  if (!leaseProfile) {
+    return null;
+  }
+  if (!forceRefresh && leaseStillUsable(cachedPlatformLease)) {
+    return cachedPlatformLease;
+  }
+  const session = await bootstrapHomePlatformSession(forceRefresh);
+  const baseUrl = resolveHomePlatformBaseUrl();
+  const providerScope = resolveHomePlatformProvider(resolveHomePlatformModel(''));
+  const { response, payload } = await requestJson(`${baseUrl}/client/model-lease`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify({
+      projectKey: resolveHomePlatformProjectKey(),
+      providerScope,
+      leaseProfile,
+    }),
+  });
+  if (response.status === 401 && !forceRefresh) {
+    return ensureHomePlatformLease(true);
+  }
+  if (!response.ok) {
+    throw new Error(`home_platform_lease_failed:${response.status}:${JSON.stringify(payload)}`);
+  }
+  return cachePlatformLease(payload?.lease || null);
+}
+
+async function renewHomePlatformLease(forceRefresh = false) {
+  const leaseProfile = resolveHomePlatformLeaseProfile();
+  if (!leaseProfile) {
+    return null;
+  }
+  if (!cachedPlatformLease?.id) {
+    return ensureHomePlatformLease(forceRefresh);
+  }
+  const session = await bootstrapHomePlatformSession(forceRefresh);
+  const baseUrl = resolveHomePlatformBaseUrl();
+  const providerScope = cachedPlatformLease.providerScope || resolveHomePlatformProvider(resolveHomePlatformModel(''));
+  const { response, payload } = await requestJson(`${baseUrl}/client/model-lease/renew`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify({
+      projectKey: resolveHomePlatformProjectKey(),
+      leaseId: cachedPlatformLease.id,
+      providerScope,
+    }),
+  });
+  if (response.status === 401 && !forceRefresh) {
+    return renewHomePlatformLease(true);
+  }
+  if (response.status === 404) {
+    cachedPlatformLease = null;
+    return ensureHomePlatformLease(forceRefresh);
+  }
+  if (!response.ok) {
+    throw new Error(`home_platform_lease_renew_failed:${response.status}:${JSON.stringify(payload)}`);
+  }
+  return cachePlatformLease(payload?.lease || null);
+}
+
+async function releaseHomePlatformLease() {
+  if (releasingLease || !cachedPlatformLease?.id || !sessionStillUsable(cachedPlatformSession)) {
+    return;
+  }
+  releasingLease = true;
+  try {
+    const baseUrl = resolveHomePlatformBaseUrl();
+    const { response } = await requestJson(`${baseUrl}/client/model-lease/release`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cachedPlatformSession.token}`,
+      },
+      body: JSON.stringify({
+        projectKey: resolveHomePlatformProjectKey(),
+        leaseId: cachedPlatformLease.id,
+        providerScope: cachedPlatformLease.providerScope,
+      }),
+    });
+    if (response.ok) {
+      cachePlatformLease(null);
+    }
+  } catch {
+    // Best effort only.
+  } finally {
+    releasingLease = false;
+  }
+}
+
+function registerLeaseReleaseHandlers() {
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, async () => {
+      await releaseHomePlatformLease();
+      process.exit(0);
+    });
+  }
 }
 
 function json(reply, statusCode, payload) {
@@ -279,6 +508,13 @@ function hasDirectProviderFallback() {
 
 async function requestHomePlatformChat(body, forceRefresh = false) {
   const session = await bootstrapHomePlatformSession(forceRefresh);
+  try {
+    await ensureHomePlatformLease(forceRefresh);
+  } catch (error) {
+    if (!shouldIgnoreLeaseError(error)) {
+      throw error;
+    }
+  }
   const baseUrl = resolveHomePlatformBaseUrl();
   const model = resolveHomePlatformModel(body.model);
   const provider = resolveHomePlatformProvider(model);
@@ -299,6 +535,7 @@ async function requestHomePlatformChat(body, forceRefresh = false) {
   });
 
   if (response.status === 401 && !forceRefresh) {
+    cachedPlatformLease = null;
     return requestHomePlatformChat(body, true);
   }
 
@@ -531,6 +768,17 @@ const server = http.createServer(async (request, reply) => {
       const bridgeMode = resolvePlatformBridgeMode();
       if (hasPlatformProxyConfigured() && (bridgeMode === 'home-first' || !hasDirectProviderFallback())) {
         const session = await bootstrapHomePlatformSession();
+        let lease = null;
+        try {
+          lease = await requestHomePlatformLeaseStatus();
+          if (!lease) {
+            lease = await ensureHomePlatformLease();
+          }
+        } catch (error) {
+          if (!shouldIgnoreLeaseError(error)) {
+            throw error;
+          }
+        }
         return json(reply, 200, {
           status: 'ok',
           service: 'http-model-bridge',
@@ -540,6 +788,13 @@ const server = http.createServer(async (request, reply) => {
           model: resolveHomePlatformModel(''),
           provider: resolveHomePlatformProvider(''),
           sessionExpiresAt: session.expiresAt,
+          leaseProfile: resolveHomePlatformLeaseProfile(),
+          leaseId: lease?.id || '',
+          leaseExpiresAt: lease?.expiresAt || '',
+          leaseMode: lease?.leaseMode || '',
+          leaseSticky: Boolean(lease?.sticky),
+          leaseLastUsedAt: lease?.lastUsedAt || '',
+          leaseLastRenewedAt: lease?.lastRenewedAt || '',
           fallback: hasDirectProviderFallback() ? resolveProviderKey(defaultModel) : '',
         });
       }
@@ -609,6 +864,13 @@ const server = http.createServer(async (request, reply) => {
   return json(reply, 404, { error: 'not_found' });
 });
 
+registerLeaseReleaseHandlers();
+
 server.listen(port, host, () => {
   console.log(`HTTP model bridge listening on http://${host}:${port}`);
+  if (hasPlatformProxyConfigured() && resolveHomePlatformLeaseProfile()) {
+    ensureHomePlatformLease().catch((error) => {
+      console.error(`[http-model-bridge] initial lease request failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
 });
