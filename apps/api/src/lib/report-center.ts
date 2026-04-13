@@ -11,6 +11,8 @@ import { DEFAULT_SCAN_DIR, loadParsedDocuments, matchDocumentsByPrompt } from '.
 import { normalizeReportOutput } from './knowledge-output.js';
 import { buildReportPlan, inferReportPlanTaskHint, type ReportPlanDatavizSlot, type ReportPlanLayoutVariant, type ReportPlanPageSpec } from './report-planner.js';
 import { attachDatavizRendersToPage } from './report-dataviz.js';
+import { buildSpecializedDraftForRecord } from './report-draft-composers.js';
+import { inferSectionDisplayMode, inferSectionDisplayModeFromTitle } from './report-visual-intent.js';
 import {
   buildDefaultSystemTemplates,
   expandDatasourceGovernanceProfile,
@@ -111,7 +113,93 @@ export type ReportDynamicSource = {
   planUpdatedAt?: string;
 };
 
-export type ReportOutputStatus = 'processing' | 'ready' | 'failed';
+export type ReportOutputStatus =
+  | 'processing'
+  | 'draft_planned'
+  | 'draft_generated'
+  | 'draft_reviewing'
+  | 'final_generating'
+  | 'ready'
+  | 'failed';
+
+export type ReportVisualStylePreset =
+  | 'signal-board'
+  | 'midnight-glass'
+  | 'editorial-brief'
+  | 'minimal-canvas';
+
+export type ReportDraftModuleType =
+  | 'hero'
+  | 'summary'
+  | 'metric-grid'
+  | 'insight-list'
+  | 'table'
+  | 'chart'
+  | 'timeline'
+  | 'comparison'
+  | 'cta'
+  | 'appendix';
+
+export type ReportDraftModuleStatus = 'generated' | 'edited' | 'disabled';
+
+export type ReportDraftReviewStatus = 'draft_generated' | 'draft_reviewing' | 'approved';
+export type ReportDraftReadiness = 'ready' | 'needs_attention' | 'blocked';
+export type ReportDraftChecklistStatus = 'pass' | 'warning' | 'fail';
+
+export type ReportDraftChecklistItem = {
+  key: string;
+  label: string;
+  status: ReportDraftChecklistStatus;
+  detail?: string;
+  blocking?: boolean;
+};
+
+export type ReportDraftEvidenceCoverage = {
+  coveredModules: number;
+  totalModules: number;
+  ratio: number;
+};
+
+export type ReportDraftModule = {
+  moduleId: string;
+  moduleType: ReportDraftModuleType;
+  title: string;
+  purpose: string;
+  contentDraft: string;
+  evidenceRefs: string[];
+  chartIntent?: {
+    title?: string;
+    preferredChartType?: ReportPlanDatavizSlot['preferredChartType'];
+    items?: Array<{ label?: string; value?: number }>;
+  } | null;
+  cards?: Array<{ label?: string; value?: string; note?: string }>;
+  bullets?: string[];
+  enabled: boolean;
+  status: ReportDraftModuleStatus;
+  order: number;
+  layoutType?: string;
+};
+
+export type ReportOutputDraft = {
+  reviewStatus: ReportDraftReviewStatus;
+  version: number;
+  modules: ReportDraftModule[];
+  lastEditedAt?: string;
+  approvedAt?: string;
+  audience?: string;
+  objective?: string;
+  layoutVariant?: ReportPlanLayoutVariant;
+  visualStyle?: ReportVisualStylePreset;
+  mustHaveModules?: string[];
+  optionalModules?: string[];
+  evidencePriority?: string[];
+  audienceTone?: string;
+  riskNotes?: string[];
+  readiness?: ReportDraftReadiness;
+  qualityChecklist?: ReportDraftChecklistItem[];
+  missingMustHaveModules?: string[];
+  evidenceCoverage?: ReportDraftEvidenceCoverage;
+};
 
 export type ReportOutputRecord = {
   id: string;
@@ -136,9 +224,10 @@ export type ReportOutputRecord = {
   page?: {
     summary?: string;
     cards?: Array<{ label?: string; value?: string; note?: string }>;
-    sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+    sections?: Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>;
     datavizSlots?: ReportPlanDatavizSlot[];
     pageSpec?: ReportPlanPageSpec;
+    visualStyle?: ReportVisualStylePreset;
     charts?: Array<{
       title?: string;
       items?: Array<{ label?: string; value?: number }>;
@@ -154,7 +243,38 @@ export type ReportOutputRecord = {
   libraries?: Array<{ key?: string; label?: string }>;
   downloadUrl?: string;
   dynamicSource?: ReportDynamicSource | null;
+  draft?: ReportOutputDraft | null;
 };
+
+type ReportPageChart = NonNullable<NonNullable<ReportOutputRecord['page']>['charts']>[number];
+
+function normalizeDraftChartType(value: unknown): ReportPlanDatavizSlot['preferredChartType'] | undefined {
+  if (value === 'horizontal-bar' || value === 'line' || value === 'bar') return value;
+  return undefined;
+}
+
+function normalizeVisualStylePreset(value: unknown): ReportVisualStylePreset | undefined {
+  const normalized = String(value || '').trim();
+  if (
+    normalized === 'signal-board'
+    || normalized === 'midnight-glass'
+    || normalized === 'editorial-brief'
+    || normalized === 'minimal-canvas'
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveDefaultReportVisualStyle(layoutVariant?: ReportPlanLayoutVariant | string, title?: string): ReportVisualStylePreset {
+  const normalizedLayout = String(layoutVariant || '').trim();
+  const normalizedTitle = String(title || '').trim().toLowerCase();
+  if (normalizedLayout === 'operations-cockpit') return 'signal-board';
+  if (normalizedLayout === 'research-brief' || normalizedLayout === 'risk-brief') return 'editorial-brief';
+  if (normalizedLayout === 'talent-showcase') return 'minimal-canvas';
+  if (/workspace|overview|dashboard|cockpit|总览|经营|运营/.test(normalizedTitle)) return 'signal-board';
+  return 'midnight-glass';
+}
 
 function getExtensionFromPathLike(value: string) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -682,6 +802,245 @@ async function attachReportDataviz(record: ReportOutputRecord) {
   return page ? { ...record, page } : record;
 }
 
+function buildDraftChartIntentFromChart(
+  chart: ReportPageChart | null | undefined,
+  slot: ReportPlanDatavizSlot | null | undefined,
+) {
+  if (!chart && !slot) return null;
+  return {
+    title: String(chart?.title || slot?.title || '').trim(),
+    preferredChartType: normalizeDraftChartType(chart?.render?.chartType) || slot?.preferredChartType || 'bar',
+    items: Array.isArray(chart?.items) ? chart.items : [],
+  };
+}
+
+function normalizeDraftSlotKey(value: string) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function buildPageDraftModules(record: ReportOutputRecord): ReportDraftModule[] {
+  if (!isNarrativeReportKind(record.kind) || !record.page) return [];
+  const page = record.page;
+  const planPageSpec = page.pageSpec || record.dynamicSource?.planPageSpec || null;
+  const plannedSlots = Array.isArray(page.datavizSlots) && page.datavizSlots.length
+    ? page.datavizSlots
+    : (record.dynamicSource?.planDatavizSlots || []);
+  const slotByKey = new Map(
+    plannedSlots
+      .map((slot) => [String(slot.key || '').trim(), slot] as const)
+      .filter(([key]) => key),
+  );
+  const modules: ReportDraftModule[] = [];
+  let order = 0;
+
+  if (String(page.summary || '').trim()) {
+    modules.push({
+      moduleId: buildId('draftmod'),
+      moduleType: 'hero',
+      title: '页面摘要',
+      purpose: record.dynamicSource?.planObjective || 'Open with a concise page summary.',
+      contentDraft: String(page.summary || '').trim(),
+      evidenceRefs: [],
+      chartIntent: null,
+      cards: [],
+      bullets: [],
+      enabled: true,
+      status: 'generated',
+      order: order++,
+      layoutType: 'hero',
+    });
+  }
+
+  if (Array.isArray(page.cards) && page.cards.length) {
+    modules.push({
+      moduleId: buildId('draftmod'),
+      moduleType: 'metric-grid',
+      title: '关键指标',
+      purpose: 'Highlight the most important page metrics first.',
+      contentDraft: '',
+      evidenceRefs: [],
+      chartIntent: null,
+      cards: page.cards,
+      bullets: [],
+      enabled: true,
+      status: 'generated',
+      order: order++,
+      layoutType: 'metric-grid',
+    });
+  }
+
+  const sectionSpecs = Array.isArray(planPageSpec?.sections) ? planPageSpec.sections : [];
+  const sectionSpecByTitle = new Map(sectionSpecs.map((item) => [String(item.title || '').trim(), item] as const));
+  const sectionDatavizTitles = new Set<string>();
+  for (const spec of sectionSpecs) {
+    for (const slotKey of spec.datavizSlotKeys || []) {
+      const slot = slotByKey.get(String(slotKey || '').trim());
+      const title = String(slot?.title || '').trim();
+      if (title) sectionDatavizTitles.add(title);
+    }
+  }
+
+  for (const section of page.sections || []) {
+    const title = String(section?.title || '').trim() || '内容模块';
+    const spec = sectionSpecByTitle.get(title);
+    modules.push({
+      moduleId: buildId('draftmod'),
+      moduleType: Array.isArray(section?.bullets) && section.bullets.length ? 'insight-list' : 'summary',
+      title,
+      purpose: String(spec?.purpose || '').trim(),
+      contentDraft: String(section?.body || '').trim(),
+      evidenceRefs: [],
+      chartIntent: null,
+      cards: [],
+      bullets: Array.isArray(section?.bullets) ? section.bullets : [],
+      enabled: true,
+      status: 'generated',
+      order: order++,
+      layoutType: Array.isArray(section?.bullets) && section.bullets.length ? 'insight-list' : 'summary',
+    });
+  }
+
+  for (const chart of page.charts || []) {
+    const title = String(chart?.title || '').trim() || '图表模块';
+    const plannedSlot = plannedSlots.find((slot) => String(slot?.title || '').trim() === title)
+      || plannedSlots.find((slot) => String(slot?.key || '').trim() && (planPageSpec?.heroDatavizSlotKeys || []).includes(String(slot.key || '').trim()) && String(slot?.title || '').trim() === title)
+      || null;
+    const chartModuleType: ReportDraftModuleType =
+      sectionDatavizTitles.has(title) ? 'chart' : 'chart';
+    modules.push({
+      moduleId: buildId('draftmod'),
+      moduleType: chartModuleType,
+      title,
+      purpose: String(plannedSlot?.purpose || '').trim(),
+      contentDraft: '',
+      evidenceRefs: [],
+      chartIntent: buildDraftChartIntentFromChart(chart, plannedSlot),
+      cards: [],
+      bullets: [],
+      enabled: true,
+      status: 'generated',
+      order: order++,
+      layoutType: 'chart',
+    });
+  }
+
+  return modules;
+}
+
+function buildDraftForRecord(record: ReportOutputRecord): ReportOutputDraft | null {
+  if (!isNarrativeReportKind(record.kind) || !record.page) return null;
+  const fallbackVisualStyle = record.page?.visualStyle || resolveDefaultReportVisualStyle(
+    record.page?.pageSpec?.layoutVariant || record.dynamicSource?.planPageSpec?.layoutVariant,
+    record.title,
+  );
+  const specializedDraft = buildSpecializedDraftForRecord(record, fallbackVisualStyle);
+  if (specializedDraft) return hydrateDraftQuality(specializedDraft);
+  const modules = buildPageDraftModules(record);
+  if (!modules.length) return null;
+  const layoutVariant = record.page?.pageSpec?.layoutVariant || record.dynamicSource?.planPageSpec?.layoutVariant;
+  return hydrateDraftQuality({
+    reviewStatus: 'draft_generated',
+    version: 1,
+    modules,
+    lastEditedAt: record.createdAt,
+    approvedAt: '',
+    audience: String(record.dynamicSource?.planAudience || 'client').trim(),
+    objective: String(record.dynamicSource?.planObjective || '').trim(),
+    layoutVariant,
+    visualStyle: fallbackVisualStyle,
+    mustHaveModules: (record.dynamicSource?.planSectionTitles || []).slice(0, 8),
+    optionalModules: [],
+    evidencePriority: (record.dynamicSource?.planCardLabels || []).slice(0, 8),
+    audienceTone: 'client-facing',
+    riskNotes: [],
+  });
+}
+
+function draftModulesToPage(draft: ReportOutputDraft, record: ReportOutputRecord): NonNullable<ReportOutputRecord['page']> | null {
+  const enabledModules = (draft.modules || [])
+    .filter((item) => item.enabled !== false && item.status !== 'disabled')
+    .sort((left, right) => left.order - right.order);
+  if (!enabledModules.length) return null;
+
+  const summaryModule = enabledModules.find((item) => item.moduleType === 'hero')
+    || enabledModules.find((item) => item.moduleType === 'summary')
+    || null;
+
+  const cards = enabledModules
+    .filter((item) => item.moduleType === 'metric-grid')
+    .flatMap((item) => item.cards || []);
+
+  const sections = enabledModules
+    .filter((item) => item.moduleType !== 'metric-grid' && item.moduleType !== 'chart')
+    .map((item) => ({
+      title: item.title,
+      body: item.contentDraft,
+      bullets: Array.isArray(item.bullets) ? item.bullets.filter(Boolean) : [],
+      displayMode: inferSectionDisplayMode(item.moduleType),
+    }))
+    .filter((item) => item.title || item.body || item.bullets.length);
+
+  const charts = enabledModules
+    .filter((item) => item.moduleType === 'chart')
+    .map((item) => ({
+      title: item.chartIntent?.title || item.title,
+      items: Array.isArray(item.chartIntent?.items) ? item.chartIntent.items : [],
+      render: null,
+    }))
+    .filter((item) => item.title || item.items.length);
+
+  const datavizSlots = charts.map((chart, index) => ({
+    key: normalizeDraftSlotKey(String(chart.title || 'draft-chart')) || `draft-chart-${index + 1}`,
+    title: String(chart.title || `图表 ${index + 1}`),
+    purpose: '',
+    preferredChartType: enabledModules.find((item) => item.moduleType === 'chart' && (item.chartIntent?.title || item.title) === chart.title)?.chartIntent?.preferredChartType || 'bar',
+    placement: index === 0 ? 'hero' as const : 'section' as const,
+    sectionTitle: index === 0 ? '' : (sections[Math.min(index - 1, Math.max(sections.length - 1, 0))]?.title || ''),
+    evidenceFocus: '',
+    minItems: 2,
+    maxItems: 8,
+  }));
+
+  const pageSpec = {
+    layoutVariant: draft.layoutVariant || record.page?.pageSpec?.layoutVariant || record.dynamicSource?.planPageSpec?.layoutVariant || 'insight-brief',
+    heroCardLabels: cards.map((item) => String(item?.label || '').trim()).filter(Boolean),
+    heroDatavizSlotKeys: datavizSlots.slice(0, 1).map((item) => item.key),
+    sections: sections.map((item, index) => ({
+      title: item.title || `模块 ${index + 1}`,
+      purpose: enabledModules.find((module) => module.title === item.title)?.purpose || '',
+      completionMode: 'knowledge-plus-model' as const,
+      displayMode: (item.displayMode || 'summary') as ReportPlanPageSpec['sections'][number]['displayMode'],
+      datavizSlotKeys: datavizSlots
+        .filter((slot) => slot.sectionTitle && slot.sectionTitle === item.title)
+        .map((slot) => slot.key),
+    })),
+  } satisfies ReportPlanPageSpec;
+
+  return {
+    summary: summaryModule?.contentDraft || record.page?.summary || '',
+    cards,
+    sections,
+    charts,
+    datavizSlots,
+    pageSpec,
+    visualStyle: draft.visualStyle || record.page?.visualStyle || resolveDefaultReportVisualStyle(pageSpec.layoutVariant, record.title),
+  };
+}
+
+function withDraftPreviewPage(record: ReportOutputRecord, draft: ReportOutputDraft | null): ReportOutputRecord {
+  if (!draft) return { ...record, draft: null };
+  const nextPage = draftModulesToPage(draft, record) || record.page || null;
+  return {
+    ...record,
+    page: nextPage,
+    draft,
+  };
+}
+
 async function finalizeReportOutputRecord(record: ReportOutputRecord) {
   if (record.status !== 'ready') return record;
   if (record.kind === 'md') return record;
@@ -750,6 +1109,19 @@ function normalizeStoredDatavizSlots(value: unknown): ReportPlanDatavizSlot[] {
 
 function normalizeStoredPageSpec(value: unknown): ReportPlanPageSpec | undefined {
   if (!isRecord(value) || !Array.isArray(value.sections)) return undefined;
+  const inferStoredDisplayMode = (
+    title: string,
+    rawDisplayMode: unknown,
+  ): ReportPlanPageSpec['sections'][number]['displayMode'] => {
+    const explicit = normalizeTextField(rawDisplayMode);
+    if (explicit === 'summary' || explicit === 'insight-list' || explicit === 'timeline' || explicit === 'comparison' || explicit === 'cta' || explicit === 'appendix') {
+      return explicit;
+    }
+    return inferSectionDisplayModeFromTitle(
+      title,
+      /建议|行动|应答|下一步/i.test(title) ? 'cta' : 'summary',
+    );
+  };
   return {
     layoutVariant: String(value.layoutVariant || '').trim() as ReportPlanPageSpec['layoutVariant'] || 'insight-brief',
     heroCardLabels: Array.isArray(value.heroCardLabels)
@@ -765,6 +1137,7 @@ function normalizeStoredPageSpec(value: unknown): ReportPlanPageSpec | undefined
         title: String(item?.title || '').trim(),
         purpose: String(item?.purpose || '').trim(),
         completionMode,
+        displayMode: inferStoredDisplayMode(String(item?.title || '').trim(), item?.displayMode),
         datavizSlotKeys: Array.isArray(item?.datavizSlotKeys)
           ? item.datavizSlotKeys.map((entry: any) => String(entry || '').trim()).filter(Boolean)
           : [],
@@ -1049,6 +1422,7 @@ function buildDynamicPlanMetadata(plan: ReturnType<typeof buildReportPlan>) {
         title: item.title,
         purpose: item.purpose,
         completionMode: item.completionMode,
+        displayMode: item.displayMode,
         datavizSlotKeys: item.datavizSlotKeys,
       })),
     },
@@ -1440,8 +1814,9 @@ function normalizeStoredPageSection(value: unknown) {
   const title = normalizeTextField(value.title);
   const body = normalizeTextField(value.body);
   const bullets = normalizeStringList(value.bullets);
+  const displayMode = normalizeTextField(value.displayMode);
   return title || body || bullets.length
-    ? { title, body, bullets }
+    ? { title, body, bullets, displayMode }
     : null;
 }
 
@@ -1492,13 +1867,116 @@ function normalizeStoredPage(value: unknown): ReportOutputRecord['page'] | null 
     : [];
   const datavizSlots = normalizeStoredDatavizSlots(value.datavizSlots);
   const pageSpec = normalizeStoredPageSpec(value.pageSpec);
+  const visualStyle = normalizeVisualStylePreset(value.visualStyle);
   const charts: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }> = Array.isArray(value.charts)
     ? value.charts.map((item) => normalizeStoredPageChart(item)).filter(Boolean) as Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>
     : [];
 
-  return summary || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec
-    ? { summary, cards, sections, datavizSlots, pageSpec, charts }
+  return summary || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec || visualStyle
+    ? { summary, cards, sections, datavizSlots, pageSpec, visualStyle, charts }
     : null;
+}
+
+function normalizeStoredDraftModuleType(value: unknown): ReportDraftModuleType {
+  const normalized = normalizeTextField(value);
+  if (
+    normalized === 'hero'
+    || normalized === 'summary'
+    || normalized === 'metric-grid'
+    || normalized === 'insight-list'
+    || normalized === 'table'
+    || normalized === 'chart'
+    || normalized === 'timeline'
+    || normalized === 'comparison'
+    || normalized === 'cta'
+    || normalized === 'appendix'
+  ) {
+    return normalized;
+  }
+  return 'summary';
+}
+
+function normalizeStoredDraftModuleStatus(value: unknown): ReportDraftModuleStatus {
+  const normalized = normalizeTextField(value);
+  if (normalized === 'edited' || normalized === 'disabled') return normalized;
+  return 'generated';
+}
+
+function normalizeStoredDraftReviewStatus(value: unknown): ReportDraftReviewStatus {
+  const normalized = normalizeTextField(value);
+  if (normalized === 'draft_reviewing' || normalized === 'approved') return normalized;
+  return 'draft_generated';
+}
+
+function normalizeStoredDraftModule(value: unknown, fallbackOrder = 0): ReportDraftModule | null {
+  if (!isRecord(value)) return null;
+
+  const moduleId = normalizeTextField(value.moduleId) || buildId('draftmod');
+  const moduleType = normalizeStoredDraftModuleType(value.moduleType);
+  const title = normalizeTextField(value.title) || '未命名模块';
+  const purpose = normalizeTextField(value.purpose);
+  const contentDraft = normalizeTextField(value.contentDraft);
+  const evidenceRefs = normalizeStringList(value.evidenceRefs);
+  const bullets = normalizeStringList(value.bullets);
+  const cards = Array.isArray(value.cards)
+    ? value.cards.map((item) => normalizeStoredPageCard(item)).filter(Boolean) as Array<{ label?: string; value?: string; note?: string }>
+    : [];
+  const chartIntent = isRecord(value.chartIntent)
+    ? {
+        title: normalizeTextField(value.chartIntent.title),
+        preferredChartType: normalizeDraftChartType(value.chartIntent.preferredChartType),
+        items: Array.isArray(value.chartIntent.items)
+          ? value.chartIntent.items
+            .map((item) => normalizeStoredPageChart({ items: [item] })?.items?.[0] || null)
+            .filter(Boolean) as Array<{ label?: string; value?: number }>
+          : [],
+      }
+    : null;
+
+  return {
+    moduleId,
+    moduleType,
+    title,
+    purpose,
+    contentDraft,
+    evidenceRefs,
+    chartIntent,
+    cards,
+    bullets,
+    enabled: value.enabled !== false && normalizeStoredDraftModuleStatus(value.status) !== 'disabled',
+    status: normalizeStoredDraftModuleStatus(value.status),
+    order: Number.isFinite(Number(value.order)) ? Number(value.order) : fallbackOrder,
+    layoutType: normalizeTextField(value.layoutType) || moduleType,
+  };
+}
+
+function normalizeStoredDraft(value: unknown): ReportOutputDraft | null {
+  if (!isRecord(value)) return null;
+
+  const modules = Array.isArray(value.modules)
+    ? value.modules
+      .map((item, index) => normalizeStoredDraftModule(item, index))
+      .filter(Boolean) as ReportDraftModule[]
+    : [];
+
+  if (!modules.length) return null;
+
+  return hydrateDraftQuality({
+    reviewStatus: normalizeStoredDraftReviewStatus(value.reviewStatus),
+    version: Math.max(1, Number(value.version || 1) || 1),
+    modules: modules.sort((left, right) => left.order - right.order),
+    lastEditedAt: normalizeTextField(value.lastEditedAt),
+    approvedAt: normalizeTextField(value.approvedAt),
+    audience: normalizeTextField(value.audience),
+    objective: normalizeTextField(value.objective),
+    layoutVariant: normalizeTextField(value.layoutVariant) as ReportPlanLayoutVariant,
+    visualStyle: normalizeVisualStylePreset(value.visualStyle),
+    mustHaveModules: normalizeStringList(value.mustHaveModules),
+    optionalModules: normalizeStringList(value.optionalModules),
+    evidencePriority: normalizeStringList(value.evidencePriority),
+    audienceTone: normalizeTextField(value.audienceTone),
+    riskNotes: normalizeStringList(value.riskNotes),
+  });
 }
 
 function normalizeStoredTable(value: unknown): ReportOutputRecord['table'] | null {
@@ -1530,7 +2008,16 @@ function normalizeStoredOutputKind(value: unknown): ReportOutputRecord['kind'] |
 
 function normalizeReportOutputStatus(value: unknown): ReportOutputStatus {
   const normalized = normalizeTextField(value);
-  if (normalized === 'processing' || normalized === 'failed') return normalized;
+  if (
+    normalized === 'processing'
+    || normalized === 'draft_planned'
+    || normalized === 'draft_generated'
+    || normalized === 'draft_reviewing'
+    || normalized === 'final_generating'
+    || normalized === 'failed'
+  ) {
+    return normalized;
+  }
   return 'ready';
 }
 
@@ -1579,6 +2066,7 @@ function normalizeStoredOutput(value: unknown): ReportOutputRecord | null {
         libraries,
       },
     ),
+    draft: normalizeStoredDraft(value.draft),
   };
 }
 
@@ -2123,10 +2611,10 @@ export async function loadReportCenterStateWithOptions(options?: {
   let nextOutputs = outputs;
   let refreshedChanged = false;
   const refreshDynamicPages = options?.refreshDynamicPages !== false;
-  if (refreshDynamicPages && nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled)) {
+  if (refreshDynamicPages && nextOutputs.some((item) => item.kind === 'page' && item.dynamicSource?.enabled && !item.draft)) {
     const documentState = await loadParsedDocuments(400, false);
     nextOutputs = await Promise.all(nextOutputs.map(async (item) => {
-      if (!(item.kind === 'page' && item.dynamicSource?.enabled)) return item;
+      if (!(item.kind === 'page' && item.dynamicSource?.enabled) || item.draft) return item;
       const conceptMode = Boolean(item.dynamicSource?.conceptMode)
         || !String(item.dynamicSource?.templateKey || '').trim();
       const template = conceptMode
@@ -2182,6 +2670,7 @@ export async function createReportOutput(input: {
   content?: string;
   table?: ReportOutputRecord['table'];
   page?: ReportOutputRecord['page'];
+  draft?: ReportOutputRecord['draft'];
   libraries?: ReportOutputRecord['libraries'];
   downloadUrl?: string;
   dynamicSource?: Partial<ReportDynamicSource> | null;
@@ -2200,7 +2689,8 @@ export async function createReportOutput(input: {
 
   const createdAt = new Date().toISOString();
   const resolvedKind = input.kind || resolveDefaultReportKind(template.type);
-  const resolvedStatus = input.status || 'ready';
+  const shouldCreateDraft = resolvedKind === 'page' && Boolean(input.page || input.draft || input.dynamicSource);
+  const resolvedStatus = input.status || (shouldCreateDraft ? 'draft_generated' : 'ready');
   const baseRecord: ReportOutputRecord = {
     id: buildId('report'),
     groupKey: group.key,
@@ -2216,6 +2706,14 @@ export async function createReportOutput(input: {
     summary: String(input.summary || '').trim()
       || (resolvedStatus === 'processing'
         ? `${group.label} 分组内容已转入后台继续生成。`
+        : resolvedStatus === 'draft_planned'
+          ? `${group.label} 分组已生成静态页草稿规划。`
+          : resolvedStatus === 'draft_generated'
+            ? `${group.label} 分组已生成可审改的静态页草稿。`
+            : resolvedStatus === 'draft_reviewing'
+              ? `${group.label} 分组静态页草稿正在审改。`
+              : resolvedStatus === 'final_generating'
+                ? `${group.label} 分组静态页草稿已确认，正在生成终稿。`
         : resolvedStatus === 'failed'
           ? `${group.label} 分组内容生成失败。`
           : `${group.label} 分组已按 ${template.label} 模板生成成型报表。`),
@@ -2234,9 +2732,14 @@ export async function createReportOutput(input: {
         ? input.libraries
         : [{ key: group.key, label: group.label }],
       }),
+    draft: input.draft || null,
   };
 
-  const record = await finalizeReportOutputRecord(baseRecord);
+  const recordWithDraft = shouldCreateDraft
+    ? withDraftPreviewPage(baseRecord, input.draft || buildDraftForRecord(baseRecord))
+    : baseRecord;
+
+  const record = await finalizeReportOutputRecord(recordWithDraft);
 
   const nextOutputs = [record, ...state.outputs].slice(0, 100);
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
@@ -2253,6 +2756,7 @@ export async function updateReportOutput(outputId: string, patch: {
   content?: string;
   table?: ReportOutputRecord['table'];
   page?: ReportOutputRecord['page'];
+  draft?: ReportOutputRecord['draft'];
   libraries?: ReportOutputRecord['libraries'];
   downloadUrl?: string;
   dynamicSource?: ReportOutputRecord['dynamicSource'];
@@ -2271,11 +2775,15 @@ export async function updateReportOutput(outputId: string, patch: {
     content: patch.content !== undefined ? String(patch.content || '') : current.content,
     table: patch.table !== undefined ? patch.table || null : current.table,
     page: patch.page !== undefined ? patch.page || null : current.page,
+    draft: patch.draft !== undefined ? patch.draft || null : current.draft,
     libraries: patch.libraries !== undefined ? (Array.isArray(patch.libraries) ? patch.libraries : []) : current.libraries,
     downloadUrl: patch.downloadUrl !== undefined ? String(patch.downloadUrl || '').trim() : current.downloadUrl,
     dynamicSource: patch.dynamicSource !== undefined ? patch.dynamicSource || null : current.dynamicSource,
   };
-  const nextRecord = await finalizeReportOutputRecord(nextBase);
+  const nextPrepared = nextBase.kind === 'page'
+    ? withDraftPreviewPage(nextBase, nextBase.draft || buildDraftForRecord(nextBase))
+    : nextBase;
+  const nextRecord = await finalizeReportOutputRecord(nextPrepared);
   const nextOutputs = state.outputs.map((item) => (item.id === outputId ? nextRecord : item));
   await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
   await syncReportOutputToKnowledgeLibrarySafely(nextRecord);
@@ -2627,6 +3135,561 @@ export async function readSharedTemplateReferenceFile(templateKey: string, refer
     reference,
     absolutePath,
   };
+}
+
+function findReportOutputOrThrow(outputs: ReportOutputRecord[], outputId: string) {
+  const record = outputs.find((item) => item.id === outputId);
+  if (!record) throw new Error('report output not found');
+  return record;
+}
+
+function parseFirstJsonBlock<T>(content: string): T | null {
+  const source = String(content || '').trim();
+  if (!source) return null;
+  const fenceMatch = source.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenceMatch?.[1] || source;
+  const startIndex = Math.min(
+    ...['{', '[']
+      .map((token) => candidate.indexOf(token))
+      .filter((index) => index >= 0),
+  );
+  if (!Number.isFinite(startIndex)) return null;
+
+  for (let index = candidate.length; index > startIndex; index -= 1) {
+    const snippet = candidate.slice(startIndex, index).trim();
+    try {
+      return JSON.parse(snippet) as T;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+function coerceDraftModuleFromModel(value: unknown, fallback: ReportDraftModule): ReportDraftModule {
+  if (!isRecord(value)) return fallback;
+  const parsed = normalizeStoredDraftModule({
+    moduleId: fallback.moduleId,
+    moduleType: value.moduleType ?? fallback.moduleType,
+    title: value.title ?? fallback.title,
+    purpose: value.purpose ?? fallback.purpose,
+    contentDraft: value.contentDraft ?? value.body ?? fallback.contentDraft,
+    evidenceRefs: value.evidenceRefs ?? fallback.evidenceRefs,
+    chartIntent: value.chartIntent ?? fallback.chartIntent,
+    cards: value.cards ?? fallback.cards,
+    bullets: value.bullets ?? fallback.bullets,
+    enabled: value.enabled ?? fallback.enabled,
+    status: value.status ?? 'edited',
+    order: value.order ?? fallback.order,
+    layoutType: value.layoutType ?? fallback.layoutType,
+  }, fallback.order);
+  return parsed || fallback;
+}
+
+function buildDraftStructureSummary(draft: ReportOutputDraft) {
+  return (draft.modules || [])
+    .sort((left, right) => left.order - right.order)
+    .map((module) => ({
+      moduleId: module.moduleId,
+      moduleType: module.moduleType,
+      title: module.title,
+      enabled: module.enabled,
+      order: module.order,
+      layoutType: module.layoutType || module.moduleType,
+    }));
+}
+
+function normalizeDraftChecklistLabel(value: string) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function doesDraftModuleMatchRequirement(module: ReportDraftModule, requirement: string) {
+  const normalizedRequirement = normalizeDraftChecklistLabel(requirement);
+  if (!normalizedRequirement) return false;
+  const candidates = [
+    module.title,
+    module.purpose,
+    module.layoutType,
+    module.moduleType,
+  ]
+    .map((item) => normalizeDraftChecklistLabel(item || ''))
+    .filter(Boolean);
+  return candidates.some((candidate) => (
+    candidate === normalizedRequirement
+    || candidate.includes(normalizedRequirement)
+    || normalizedRequirement.includes(candidate)
+  ));
+}
+
+function getEnabledDraftModules(draft: ReportOutputDraft) {
+  return (draft.modules || [])
+    .filter((module) => module.enabled !== false && module.status !== 'disabled')
+    .sort((left, right) => left.order - right.order);
+}
+
+function hasMeaningfulDraftContent(module: ReportDraftModule) {
+  return Boolean(
+    String(module.contentDraft || '').trim()
+    || (Array.isArray(module.bullets) && module.bullets.some((item) => String(item || '').trim()))
+    || (Array.isArray(module.cards) && module.cards.some((item) => String(item?.label || '').trim() || String(item?.value || '').trim()))
+    || (Array.isArray(module.chartIntent?.items) && module.chartIntent.items.some((item) => String(item?.label || '').trim()))
+  );
+}
+
+function hasMeaningfulEvidenceRefs(module: ReportDraftModule) {
+  return Array.isArray(module.evidenceRefs)
+    && module.evidenceRefs.some((item) => {
+      const normalized = String(item || '').trim().toLowerCase();
+      return Boolean(normalized && normalized !== 'composer:placeholder');
+    });
+}
+
+function hasEvidenceSignals(module: ReportDraftModule) {
+  return Boolean(
+    hasMeaningfulEvidenceRefs(module)
+    || (Array.isArray(module.cards) && module.cards.some((item) => String(item?.label || '').trim() || String(item?.value || '').trim()))
+    || (Array.isArray(module.chartIntent?.items) && module.chartIntent.items.some((item) => String(item?.label || '').trim()))
+  );
+}
+
+function isPriorityEvidenceModule(module: ReportDraftModule, draft: ReportOutputDraft) {
+  const priorities = Array.isArray(draft.evidencePriority) ? draft.evidencePriority : [];
+  if (!priorities.length) return false;
+  return priorities.some((item) => doesDraftModuleMatchRequirement(module, item));
+}
+
+function buildDraftQualityChecklist(draft: ReportOutputDraft) {
+  const enabledModules = getEnabledDraftModules(draft);
+  const meaningfulModules = enabledModules.filter(hasMeaningfulDraftContent);
+  const missingMustHaveModules = (draft.mustHaveModules || [])
+    .filter((title) => String(title || '').trim())
+    .filter((title) => !enabledModules.some((module) => doesDraftModuleMatchRequirement(module, title)));
+
+  const evidenceCoverage = {
+    coveredModules: enabledModules.filter(hasEvidenceSignals).length,
+    totalModules: enabledModules.length,
+    ratio: enabledModules.length
+      ? Number((enabledModules.filter(hasEvidenceSignals).length / enabledModules.length).toFixed(3))
+      : 0,
+  } satisfies ReportDraftEvidenceCoverage;
+  const priorityEvidenceModules = enabledModules.filter((module) => isPriorityEvidenceModule(module, draft));
+  const priorityEvidenceCoverage = {
+    coveredModules: priorityEvidenceModules.filter(hasEvidenceSignals).length,
+    totalModules: priorityEvidenceModules.length,
+    ratio: priorityEvidenceModules.length
+      ? Number((priorityEvidenceModules.filter(hasEvidenceSignals).length / priorityEvidenceModules.length).toFixed(3))
+      : 0,
+  };
+
+  const hasVisualModule = enabledModules.some((module) => (
+    module.moduleType === 'metric-grid'
+    || module.moduleType === 'chart'
+    || module.moduleType === 'timeline'
+    || module.moduleType === 'comparison'
+  ));
+  const heroOrSummaryPresent = enabledModules.some((module) => module.moduleType === 'hero' || module.moduleType === 'summary');
+
+  const checklist: ReportDraftChecklistItem[] = [
+    {
+      key: 'enabled-modules',
+      label: '已启用模块',
+      status: enabledModules.length ? 'pass' : 'fail',
+      detail: enabledModules.length
+        ? `已启用 ${enabledModules.length} 个模块。`
+        : '当前草稿没有启用模块。',
+      blocking: true,
+    },
+    {
+      key: 'must-have-modules',
+      label: '关键模块完整度',
+      status: missingMustHaveModules.length ? 'fail' : 'pass',
+      detail: missingMustHaveModules.length
+        ? `缺少关键模块：${missingMustHaveModules.join('、')}`
+        : '关键模块已覆盖。',
+      blocking: true,
+    },
+    {
+      key: 'meaningful-content',
+      label: '模块内容完整度',
+      status: meaningfulModules.length ? 'pass' : 'fail',
+      detail: meaningfulModules.length
+        ? `有内容的模块 ${meaningfulModules.length}/${enabledModules.length || 0}。`
+        : '当前没有可读的模块正文或图表草稿。',
+      blocking: true,
+    },
+    {
+      key: 'hero-summary',
+      label: '开场摘要',
+      status: heroOrSummaryPresent ? 'pass' : 'warning',
+      detail: heroOrSummaryPresent ? '已包含开场摘要模块。' : '建议补一个 hero 或 summary 模块。',
+    },
+    {
+      key: 'visual-coverage',
+      label: '可视化覆盖',
+      status: hasVisualModule ? 'pass' : 'warning',
+      detail: hasVisualModule ? '已包含指标、对比、时间线或图表模块。' : '建议补至少一个指标、对比、时间线或图表模块。',
+    },
+    {
+      key: 'evidence-coverage',
+      label: '证据与数据覆盖',
+      status: evidenceCoverage.totalModules === 0
+        ? 'warning'
+        : evidenceCoverage.ratio >= 0.4
+          ? 'pass'
+          : 'warning',
+      detail: evidenceCoverage.totalModules
+        ? `有证据或数据支撑的模块 ${evidenceCoverage.coveredModules}/${evidenceCoverage.totalModules}。`
+        : '当前还没有可评估的模块。',
+    },
+    {
+      key: 'priority-evidence',
+      label: '关键模块证据覆盖',
+      status: priorityEvidenceCoverage.totalModules === 0
+        ? 'warning'
+        : priorityEvidenceCoverage.ratio >= 0.6
+          ? 'pass'
+          : 'warning',
+      detail: priorityEvidenceCoverage.totalModules
+        ? `重点模块证据覆盖 ${priorityEvidenceCoverage.coveredModules}/${priorityEvidenceCoverage.totalModules}。`
+        : '当前还没有声明需要重点覆盖证据的模块。',
+    },
+  ];
+
+  const blockingFailures = checklist.some((item) => item.blocking && item.status === 'fail');
+  const warnings = checklist.some((item) => item.status === 'warning');
+  const readiness: ReportDraftReadiness = blockingFailures
+    ? 'blocked'
+    : warnings
+      ? 'needs_attention'
+      : 'ready';
+
+  return {
+    readiness,
+    qualityChecklist: checklist,
+    missingMustHaveModules,
+    evidenceCoverage,
+  };
+}
+
+function hydrateDraftQuality(draft: ReportOutputDraft): ReportOutputDraft {
+  const quality = buildDraftQualityChecklist(draft);
+  return {
+    ...draft,
+    ...quality,
+  };
+}
+
+export async function updateReportOutputDraft(outputId: string, nextDraftInput: ReportOutputDraft) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft editing only supports static pages');
+
+  const currentDraft = record.draft || buildDraftForRecord(record);
+  if (!currentDraft) throw new Error('draft is not available for this output');
+  const reviewStatus: ReportDraftReviewStatus =
+    nextDraftInput?.reviewStatus === 'approved' ? 'approved' : 'draft_reviewing';
+
+  const normalizedDraft = normalizeStoredDraft({
+    ...nextDraftInput,
+    version: Math.max(currentDraft.version + 1, Number(nextDraftInput?.version || 0) || 0, 1),
+    reviewStatus,
+    lastEditedAt: new Date().toISOString(),
+    approvedAt: reviewStatus === 'approved' ? (nextDraftInput?.approvedAt || new Date().toISOString()) : '',
+  });
+  if (!normalizedDraft) throw new Error('draft payload is invalid');
+
+  const nextRecordBase: ReportOutputRecord = {
+    ...record,
+    status: normalizedDraft.reviewStatus === 'approved' ? 'final_generating' : 'draft_reviewing',
+    draft: normalizedDraft,
+    summary: normalizedDraft.reviewStatus === 'approved'
+      ? '草稿已确认，正在生成终稿。'
+      : '静态页草稿已更新，等待继续生成终稿。',
+  };
+  const nextRecord = withDraftPreviewPage(nextRecordBase, normalizedDraft);
+  const nextOutputs = state.outputs.map((item) => (item.id === outputId ? nextRecord : item));
+  await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
+  return nextRecord;
+}
+
+export async function reviseReportOutputDraftModule(outputId: string, moduleId: string, instruction: string) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft module revise only supports static pages');
+
+  const draft = record.draft || buildDraftForRecord(record);
+  if (!draft) throw new Error('draft is not available for this output');
+  const moduleIndex = draft.modules.findIndex((item) => item.moduleId === moduleId);
+  if (moduleIndex < 0) throw new Error('draft module not found');
+
+  const currentModule = draft.modules[moduleIndex];
+  let revisedModule = {
+    ...currentModule,
+    status: 'edited' as const,
+  };
+
+  if (isOpenClawGatewayConfigured()) {
+    try {
+      const response = await runOpenClawChat({
+        prompt: [
+          '请根据用户要求，只改写这个静态页草稿模块。',
+          `用户要求：${String(instruction || '').trim()}`,
+          '',
+          '请输出 JSON 对象，字段只允许包含：',
+          'title, moduleType, contentDraft, bullets, layoutType, chartIntent',
+          '',
+          JSON.stringify({
+            pageTitle: record.title,
+            groupLabel: record.groupLabel,
+            draftObjective: draft.objective || '',
+            module: currentModule,
+          }, null, 2),
+        ].join('\n'),
+        systemPrompt: [
+          '你是企业静态页编辑助手。',
+          '你只修改一个模块，不要影响其他模块。',
+          '返回严格 JSON，不要解释。',
+          '如果模块是 chart，只更新 chartIntent.title、chartIntent.preferredChartType、contentDraft。',
+        ].join('\n'),
+      });
+      const parsed = parseFirstJsonBlock<unknown>(response.content);
+      revisedModule = {
+        ...coerceDraftModuleFromModel(parsed, currentModule),
+        moduleId: currentModule.moduleId,
+        order: currentModule.order,
+        status: 'edited',
+      };
+    } catch {
+      revisedModule = {
+        ...currentModule,
+        contentDraft: instruction ? `${currentModule.contentDraft}\n\n${instruction}`.trim() : currentModule.contentDraft,
+        status: 'edited',
+      };
+    }
+  }
+
+  const nextDraft: ReportOutputDraft = {
+    ...draft,
+    reviewStatus: 'draft_reviewing',
+    version: draft.version + 1,
+    lastEditedAt: new Date().toISOString(),
+    modules: draft.modules.map((item, index) => (index === moduleIndex ? revisedModule : item)),
+  };
+  return updateReportOutputDraft(outputId, nextDraft);
+}
+
+export async function reviseReportOutputDraftStructure(outputId: string, instruction: string) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft structure revise only supports static pages');
+
+  const draft = record.draft || buildDraftForRecord(record);
+  if (!draft) throw new Error('draft is not available for this output');
+
+  let nextModules = draft.modules;
+  if (isOpenClawGatewayConfigured()) {
+    try {
+      const response = await runOpenClawChat({
+        prompt: [
+          '请根据用户要求，只调整静态页草稿的模块结构。',
+          `用户要求：${String(instruction || '').trim()}`,
+          '',
+          '返回 JSON 数组。每个元素只允许包含：',
+          'moduleId, moduleType, title, enabled, order, layoutType',
+          '',
+          JSON.stringify({
+            pageTitle: record.title,
+            groupLabel: record.groupLabel,
+            objective: draft.objective || '',
+            modules: buildDraftStructureSummary(draft),
+          }, null, 2),
+        ].join('\n'),
+        systemPrompt: [
+          '你是企业静态页结构编辑助手。',
+          '只调整模块结构，不改正文内容。',
+          '返回严格 JSON 数组，不要解释。',
+        ].join('\n'),
+      });
+      const parsed = parseFirstJsonBlock<Array<unknown>>(response.content);
+      if (Array.isArray(parsed) && parsed.length) {
+        const currentById = new Map(draft.modules.map((item) => [item.moduleId, item]));
+        const reordered = parsed
+          .map((item, index) => {
+            const entry = isRecord(item) ? item : null;
+            const fallback = currentById.get(String(entry?.moduleId || '').trim());
+            if (!fallback) return null;
+            const next = coerceDraftModuleFromModel({
+              ...(entry || {}),
+              contentDraft: fallback.contentDraft,
+              bullets: fallback.bullets,
+              cards: fallback.cards,
+              chartIntent: fallback.chartIntent,
+              evidenceRefs: fallback.evidenceRefs,
+            }, fallback);
+            return {
+              ...next,
+              moduleId: fallback.moduleId,
+              order: Number.isFinite(Number(entry?.order))
+                ? Number(entry?.order)
+                : index,
+            };
+          })
+          .filter(Boolean) as ReportDraftModule[];
+        if (reordered.length) {
+          nextModules = reordered;
+        }
+      }
+    } catch {
+      // keep original structure
+    }
+  }
+
+  const nextDraft: ReportOutputDraft = {
+    ...draft,
+    reviewStatus: 'draft_reviewing',
+    version: draft.version + 1,
+    lastEditedAt: new Date().toISOString(),
+    modules: nextModules,
+  };
+  return updateReportOutputDraft(outputId, nextDraft);
+}
+
+export async function reviseReportOutputDraftCopy(outputId: string, instruction: string) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft copy revise only supports static pages');
+
+  const draft = record.draft || buildDraftForRecord(record);
+  if (!draft) throw new Error('draft is not available for this output');
+
+  let nextModules = draft.modules;
+  if (isOpenClawGatewayConfigured()) {
+    try {
+      const response = await runOpenClawChat({
+        prompt: [
+          '请根据用户要求，只重写静态页草稿各模块的标题、正文、要点和图表意图。',
+          `用户要求：${String(instruction || '').trim()}`,
+          '',
+          '返回 JSON 数组。每个元素只允许包含：',
+          'moduleId, title, contentDraft, bullets, chartIntent',
+          '',
+          JSON.stringify({
+            pageTitle: record.title,
+            groupLabel: record.groupLabel,
+            objective: draft.objective || '',
+            audience: draft.audience || '',
+            modules: draft.modules.map((module) => ({
+              moduleId: module.moduleId,
+              moduleType: module.moduleType,
+              title: module.title,
+              purpose: module.purpose,
+              contentDraft: module.contentDraft,
+              bullets: module.bullets,
+              chartIntent: module.chartIntent,
+            })),
+          }, null, 2),
+        ].join('\n'),
+        systemPrompt: [
+          '你是企业静态页文案编辑助手。',
+          '只重写模块内容，不改模块顺序，不改启用状态，不改模块类型。',
+          '返回严格 JSON 数组，不要解释。',
+        ].join('\n'),
+      });
+      const parsed = parseFirstJsonBlock<Array<unknown>>(response.content);
+      if (Array.isArray(parsed) && parsed.length) {
+        const patchById = new Map(
+          parsed
+            .map((item) => (isRecord(item) ? item : null))
+            .filter(Boolean)
+            .map((item) => [String(item?.moduleId || '').trim(), item] as const)
+            .filter(([moduleId]) => moduleId),
+        );
+        nextModules = draft.modules.map((module) => {
+          const patch = patchById.get(module.moduleId);
+          if (!patch) return module;
+          const revised = coerceDraftModuleFromModel({
+            ...patch,
+            moduleType: module.moduleType,
+            layoutType: module.layoutType,
+            cards: module.cards,
+            evidenceRefs: module.evidenceRefs,
+          }, module);
+          return {
+            ...revised,
+            moduleId: module.moduleId,
+            moduleType: module.moduleType,
+            layoutType: module.layoutType,
+            order: module.order,
+            enabled: module.enabled,
+            status: 'edited',
+          };
+        });
+      }
+    } catch {
+      nextModules = draft.modules.map((module) => ({
+        ...module,
+        contentDraft: instruction ? `${module.contentDraft}\n\n${instruction}`.trim() : module.contentDraft,
+        status: 'edited',
+      }));
+    }
+  } else {
+    nextModules = draft.modules.map((module) => ({
+      ...module,
+      contentDraft: instruction ? `${module.contentDraft}\n\n${instruction}`.trim() : module.contentDraft,
+      status: 'edited',
+    }));
+  }
+
+  const nextDraft: ReportOutputDraft = {
+    ...draft,
+    reviewStatus: 'draft_reviewing',
+    version: draft.version + 1,
+    lastEditedAt: new Date().toISOString(),
+    modules: nextModules,
+  };
+  return updateReportOutputDraft(outputId, nextDraft);
+}
+
+export async function finalizeDraftReportOutput(outputId: string) {
+  const state = await loadReportCenterState();
+  const record = findReportOutputOrThrow(state.outputs, outputId);
+  if (record.kind !== 'page') throw new Error('draft finalize only supports static pages');
+
+  const draft = record.draft || buildDraftForRecord(record);
+  if (!draft) throw new Error('draft is not available for this output');
+
+  const validatedDraft = hydrateDraftQuality(draft);
+  if (validatedDraft.readiness === 'blocked') {
+    const blockingIssues = (validatedDraft.qualityChecklist || [])
+      .filter((item) => item.blocking && item.status === 'fail')
+      .map((item) => item.detail || item.label)
+      .filter(Boolean);
+    throw new Error(blockingIssues.length
+      ? `draft is not ready to finalize: ${blockingIssues.join('；')}`
+      : 'draft is not ready to finalize');
+  }
+
+  const approvedDraft: ReportOutputDraft = hydrateDraftQuality({
+    ...validatedDraft,
+    reviewStatus: 'approved',
+    version: draft.version + 1,
+    approvedAt: new Date().toISOString(),
+    lastEditedAt: new Date().toISOString(),
+  });
+  const baseRecord = withDraftPreviewPage({
+    ...record,
+    status: 'ready',
+    summary: '静态页草稿已确认，并已生成终稿。',
+    draft: approvedDraft,
+    dynamicSource: record.dynamicSource
+      ? { ...record.dynamicSource, lastRenderedAt: new Date().toISOString() }
+      : record.dynamicSource,
+  }, approvedDraft);
+  const finalized = await finalizeReportOutputRecord(baseRecord);
+  const nextOutputs = state.outputs.map((item) => (item.id === outputId ? finalized : item));
+  await saveGroupsAndOutputs(state.groups, nextOutputs, state.templates);
+  await syncReportOutputToKnowledgeLibrarySafely(finalized);
+  return finalized;
 }
 
 export async function reviseReportOutput(outputId: string, instruction: string) {

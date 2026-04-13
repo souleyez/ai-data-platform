@@ -34,8 +34,20 @@ export async function fetchDocumentsSnapshot() {
 }
 
 export async function fetchReportsSnapshot() {
-  const response = await fetch(buildApiUrl('/api/reports'));
+  const response = await fetch(buildApiUrl('/api/reports/snapshot'), { cache: 'no-store' });
   return parseApiResponse(response, 'load reports failed');
+}
+
+export async function fetchReportOutput(reportId) {
+  const response = await fetch(buildApiUrl(`/api/reports/output/${encodeURIComponent(reportId)}`), {
+    cache: 'no-store',
+  });
+  return parseApiResponse(response, 'load report output failed');
+}
+
+export async function fetchOperationsOverview() {
+  const response = await fetch(buildApiUrl('/api/operations-overview'), { cache: 'no-store' });
+  return parseApiResponse(response, 'load operations overview failed');
 }
 
 export async function fetchBots() {

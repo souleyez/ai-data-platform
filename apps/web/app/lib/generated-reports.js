@@ -124,6 +124,7 @@ function normalizePage(page) {
   if (!page) return null;
   return {
     summary: page?.summary || '',
+    visualStyle: String(page?.visualStyle || '').trim(),
     cards: Array.isArray(page?.cards)
       ? page.cards
           .map((card) => ({
@@ -153,6 +154,114 @@ function normalizePage(page) {
           }))
           .filter((chart) => chart.title || chart.items.length || chart.render)
       : [],
+  };
+}
+
+function normalizeDraftModuleType(value) {
+  const normalized = String(value || '').trim();
+  return normalized || 'summary';
+}
+
+function normalizeDraftReviewStatus(value) {
+  const normalized = String(value || '').trim();
+  return normalized || 'draft_generated';
+}
+
+function normalizeDraftModule(module, index = 0) {
+  if (!module || typeof module !== 'object') return null;
+  const cards = Array.isArray(module.cards)
+    ? module.cards
+      .map((card) => ({
+        label: String(card?.label || '').trim(),
+        value: String(card?.value || '').trim(),
+        note: String(card?.note || '').trim(),
+      }))
+      .filter((card) => card.label || card.value || card.note)
+    : [];
+  const bullets = Array.isArray(module.bullets)
+    ? module.bullets.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const chartIntent = module.chartIntent && typeof module.chartIntent === 'object'
+    ? {
+        title: String(module.chartIntent?.title || '').trim(),
+        preferredChartType: String(module.chartIntent?.preferredChartType || '').trim() || 'bar',
+        items: normalizeChartItems(module.chartIntent?.items),
+      }
+    : null;
+  return {
+    moduleId: String(module.moduleId || `draft-module-${index + 1}`).trim(),
+    moduleType: normalizeDraftModuleType(module.moduleType),
+    title: String(module.title || '').trim(),
+    purpose: String(module.purpose || '').trim(),
+    contentDraft: String(module.contentDraft || '').trim(),
+    evidenceRefs: Array.isArray(module.evidenceRefs)
+      ? module.evidenceRefs.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    chartIntent,
+    cards,
+    bullets,
+    enabled: module.enabled !== false,
+    status: String(module.status || 'generated').trim(),
+    order: normalizeNumber(module.order),
+    layoutType: String(module.layoutType || '').trim(),
+  };
+}
+
+function normalizeDraft(draft) {
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.modules)) return null;
+  const modules = draft.modules
+    .map((item, index) => normalizeDraftModule(item, index))
+    .filter(Boolean)
+    .sort((left, right) => left.order - right.order);
+  if (!modules.length) return null;
+  const qualityChecklist = Array.isArray(draft.qualityChecklist)
+    ? draft.qualityChecklist
+      .map((item) => ({
+        key: String(item?.key || '').trim(),
+        label: String(item?.label || '').trim(),
+        status: String(item?.status || '').trim() || 'warning',
+        detail: String(item?.detail || '').trim(),
+        blocking: item?.blocking === true,
+      }))
+      .filter((item) => item.key || item.label)
+    : [];
+  const missingMustHaveModules = Array.isArray(draft.missingMustHaveModules)
+    ? draft.missingMustHaveModules.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const evidenceCoverage = draft.evidenceCoverage && typeof draft.evidenceCoverage === 'object'
+    ? {
+        coveredModules: normalizeNumber(draft.evidenceCoverage.coveredModules),
+        totalModules: normalizeNumber(draft.evidenceCoverage.totalModules),
+        ratio: Number(draft.evidenceCoverage.ratio || 0) || 0,
+      }
+    : null;
+  return {
+    reviewStatus: normalizeDraftReviewStatus(draft.reviewStatus),
+    readiness: String(draft.readiness || '').trim() || 'needs_attention',
+    version: Math.max(1, normalizeNumber(draft.version) || 1),
+    modules,
+    lastEditedAt: String(draft.lastEditedAt || '').trim(),
+    approvedAt: String(draft.approvedAt || '').trim(),
+    audience: String(draft.audience || '').trim(),
+    objective: String(draft.objective || '').trim(),
+    layoutVariant: String(draft.layoutVariant || '').trim() || 'insight-brief',
+    visualStyle: String(draft.visualStyle || '').trim() || 'midnight-glass',
+    mustHaveModules: Array.isArray(draft.mustHaveModules)
+      ? draft.mustHaveModules.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    optionalModules: Array.isArray(draft.optionalModules)
+      ? draft.optionalModules.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    evidencePriority: Array.isArray(draft.evidencePriority)
+      ? draft.evidencePriority.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    audienceTone: String(draft.audienceTone || '').trim(),
+    riskNotes: Array.isArray(draft.riskNotes)
+      ? draft.riskNotes.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    qualityChecklist,
+    missingMustHaveModules,
+    evidenceCoverage,
   };
 }
 
@@ -235,6 +344,7 @@ export function createGeneratedReport({ response, message, requestPrompt = '' })
     templateKey: reportTemplate?.key || '',
     templateLabel: reportTemplate?.label || '',
     dynamicSource,
+    draft: normalizeDraft(output?.draft),
   };
 }
 
@@ -260,6 +370,7 @@ export function normalizeGeneratedReportRecord(item) {
     templateKey: item?.templateKey || '',
     templateLabel: item?.templateLabel || '',
     dynamicSource: normalizeDynamicSource(item?.dynamicSource),
+    draft: normalizeDraft(item?.draft),
   };
 }
 
@@ -277,6 +388,7 @@ export function buildGeneratedReportPersistPayload(item) {
     libraries: item.libraries || [],
     downloadUrl: item.downloadUrl || '',
     dynamicSource: item.dynamicSource || null,
+    draft: item.draft || null,
   };
 }
 

@@ -319,6 +319,26 @@ export const PLATFORM_CAPABILITY_AREAS: PlatformCapabilityArea[] = [
         description: 'Revise one saved output in place.',
       },
       {
+        key: 'reports.revise-draft-module',
+        command: 'pnpm system:control -- reports revise-draft-module --output "<output-id>" --module "<module-id>" --instruction "<instruction>"',
+        description: 'Regenerate one draft module without rewriting the whole static page.',
+      },
+      {
+        key: 'reports.revise-draft-structure',
+        command: 'pnpm system:control -- reports revise-draft-structure --output "<output-id>" --instruction "<instruction>"',
+        description: 'Rewrite the draft module structure for one static page without touching all copy manually.',
+      },
+      {
+        key: 'reports.revise-draft-copy',
+        command: 'pnpm system:control -- reports revise-draft-copy --output "<output-id>" --instruction "<instruction>"',
+        description: 'Rewrite all draft module copy for one static page while keeping the structure stable.',
+      },
+      {
+        key: 'reports.finalize-page',
+        command: 'pnpm system:control -- reports finalize-page --output "<output-id>"',
+        description: 'Finalize one reviewed static-page draft into a ready report output.',
+      },
+      {
         key: 'reports.delete-output',
         command: 'pnpm system:control -- reports delete-output --output "<output-id>"',
         description: 'Delete one saved output from the report center.',

@@ -46,9 +46,11 @@ export default function HomePageClient({ initialModelState }) {
     preferredLibraries,
     reportCollapsed,
     reportItems,
+    reportDetailLoading,
     refreshHomeData,
     runDocumentUpload,
     selectedManualLibraries,
+    selectedReportItem,
     selectedReportId,
     setReportCollapsed,
     setInput,
@@ -61,6 +63,7 @@ export default function HomePageClient({ initialModelState }) {
     submitQuestion,
     systemConstraints,
     deleteReport,
+    updateReportItem,
     uploadInputRef,
     uploadLoading,
   } = useHomePageController();
@@ -179,9 +182,12 @@ export default function HomePageClient({ initialModelState }) {
                 collapsed={reportCollapsed}
                 onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
                 reportItems={reportItems}
+                activeReportItem={selectedReportItem}
+                reportDetailLoading={reportDetailLoading}
                 selectedReportId={selectedReportId}
                 onSelectReport={setSelectedReportId}
                 onDeleteReport={deleteReport}
+                onItemChange={updateReportItem}
               />
             </section>
           </section>
@@ -251,9 +257,12 @@ export default function HomePageClient({ initialModelState }) {
             collapsed={reportCollapsed}
             onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
             reportItems={reportItems}
+            activeReportItem={selectedReportItem}
+            reportDetailLoading={reportDetailLoading}
             selectedReportId={selectedReportId}
             onSelectReport={setSelectedReportId}
             onDeleteReport={deleteReport}
+            onItemChange={updateReportItem}
           />
         </section>
       </main>

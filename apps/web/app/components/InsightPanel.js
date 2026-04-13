@@ -8,9 +8,12 @@ export default function InsightPanel({
   collapsed = false,
   onToggleCollapsed,
   reportItems = [],
+  activeReportItem = null,
+  reportDetailLoading = false,
   selectedReportId,
   onSelectReport,
   onDeleteReport,
+  onItemChange,
 }) {
   const longPressTimerRef = useRef(null);
   const longPressTriggeredRef = useRef(false);
@@ -78,9 +81,12 @@ export default function InsightPanel({
         title="已出报表"
         description=""
         items={reportItems}
+        activeItemOverride={activeReportItem}
+        activeItemLoading={reportDetailLoading}
         selectedReportId={selectedReportId}
         onSelectReport={onSelectReport}
         onDeleteReport={onDeleteReport}
+        onItemChange={onItemChange}
         collapsed={collapsed}
         onToggleCollapsed={onToggleCollapsed}
         onRequestExpand={(id) => {
@@ -90,6 +96,7 @@ export default function InsightPanel({
         mobileViewport={mobileViewport}
         className="report-results-home"
         showStepper={false}
+        featuredExpanded
       />
     </aside>
   );

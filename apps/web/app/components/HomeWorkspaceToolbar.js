@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchModelConfig, updateModelConfig } from '../home-api';
+import { fetchModelConfig, fetchOperationsOverview, updateModelConfig } from '../home-api';
 import ThemeToggleButton from './ThemeToggleButton';
 
 const DESKTOP_NAV_LINKS = [
@@ -38,6 +38,15 @@ export default function HomeWorkspaceToolbar({
   const [modelState, setModelState] = useState(initialModelState);
   const [modelBusy, setModelBusy] = useState(false);
   const [modelMessage, setModelMessage] = useState('');
+  const [healthState, setHealthState] = useState({
+    warningCount: 0,
+    criticalCount: 0,
+    deepParseBacklog: 0,
+    captureErrorTasks: 0,
+    dynamicOutputCount: 0,
+    draftBlockedCount: 0,
+    draftNeedsAttentionCount: 0,
+  });
 
   useEffect(() => {
     let alive = true;
@@ -64,10 +73,52 @@ export default function HomeWorkspaceToolbar({
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+
+    async function loadHealthState() {
+      try {
+        const json = await fetchOperationsOverview();
+        if (!alive) return;
+        setHealthState({
+          warningCount: Number(json?.stability?.summary?.warningCount || 0),
+          criticalCount: Number(json?.stability?.summary?.criticalCount || 0),
+          deepParseBacklog: Number(json?.stability?.summary?.deepParseBacklog || 0),
+          captureErrorTasks: Number(json?.stability?.summary?.captureErrorTasks || 0),
+          dynamicOutputCount: Number(json?.stability?.summary?.dynamicOutputCount || 0),
+          draftBlockedCount: Number(json?.stability?.summary?.draftBlockedCount || 0),
+          draftNeedsAttentionCount: Number(json?.stability?.summary?.draftNeedsAttentionCount || 0),
+        });
+      } catch {
+        if (!alive) return;
+        setHealthState((current) => current);
+      }
+    }
+
+    void loadHealthState();
+    const timer = setInterval(() => {
+      void loadHealthState();
+    }, 30000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   const currentModel = useMemo(
     () => modelState.currentModel || modelState.availableModels[0] || null,
     [modelState],
   );
+  const healthLabel = healthState.criticalCount > 0
+    ? 'critical'
+    : healthState.warningCount > 0
+      ? 'warning'
+      : 'healthy';
+  const healthText = healthState.criticalCount > 0
+    ? '需要处理'
+    : healthState.warningCount > 0
+      ? '需要关注'
+      : '运行正常';
 
   async function refreshModelState(message = '') {
     try {
@@ -126,6 +177,53 @@ export default function HomeWorkspaceToolbar({
 
       <div className="home-toolbar-right">
         <ThemeToggleButton compact />
+
+        <div className="home-toolbar-flyout">
+          <button type="button" className="ghost-btn home-toolbar-flyout-trigger">
+            系统健康
+            <span className={`library-tab-count health-${healthLabel}`}>
+              {healthState.criticalCount > 0 ? `${healthState.criticalCount} 严重` : healthState.warningCount > 0 ? `${healthState.warningCount} 提醒` : '正常'}
+            </span>
+          </button>
+          <div className="home-toolbar-flyout-panel">
+            <div className="home-toolbar-flyout-title">系统健康</div>
+            <div className="home-toolbar-health-status">
+              <div className="home-toolbar-model-line">
+                <strong>当前状态</strong>
+                <span>{healthText}</span>
+              </div>
+              <span className={`home-toolbar-health-badge health-${healthLabel}`}>{healthText}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>严重告警</strong>
+              <span>{healthState.criticalCount}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>一般提醒</strong>
+              <span>{healthState.warningCount}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>深解析积压</strong>
+              <span>{healthState.deepParseBacklog}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>采集错误任务</strong>
+              <span>{healthState.captureErrorTasks}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>动态报表</strong>
+              <span>{healthState.dynamicOutputCount}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>草稿需补齐</strong>
+              <span>{healthState.draftBlockedCount}</span>
+            </div>
+            <div className="home-toolbar-model-line">
+              <strong>草稿待优化</strong>
+              <span>{healthState.draftNeedsAttentionCount}</span>
+            </div>
+          </div>
+        </div>
 
         <div className="home-toolbar-flyout">
           <button type="button" className="ghost-btn home-toolbar-flyout-trigger">

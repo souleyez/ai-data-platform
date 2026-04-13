@@ -240,6 +240,10 @@ test('platform control should expose capability registry metadata', async () => 
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.set-group-template'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-reference-file'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.template-reference-link'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.revise-draft-module'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.revise-draft-structure'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.revise-draft-copy'));
+  assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.finalize-page'));
   assert.ok(reportsArea?.commands?.some((item) => item.key === 'reports.delete-output'));
 
   const integrations = (listResult.data?.integrations as Array<{ id?: string }>) || [];
@@ -408,6 +412,68 @@ test('platform control should queue canonical markdown backfill candidates into 
     path.join(scanRoot, 'legacy.html'),
     path.join(scanRoot, 'note.md'),
   ]);
+});
+
+test('platform control should finalize one static-page draft into a ready output', async () => {
+  const library = await documentLibraries.createDocumentLibrary({
+    name: 'ops-draft',
+    description: 'Operations draft library',
+    permissionLevel: 0,
+  });
+  const state = await reportCenter.loadReportCenterState();
+  const group = state.groups[0];
+  assert.ok(group);
+
+  const draftRecord = await reportCenter.createReportOutput({
+    groupKey: group.key,
+    title: '经营静态页草稿',
+    triggerSource: 'chat',
+    kind: 'page',
+    page: {
+      summary: '本周经营总览',
+      sections: [
+        { title: '经营概览', body: '收入稳定增长。', bullets: ['转化率提升'] },
+      ],
+      cards: [{ label: '订单', value: '128', note: '环比 +12%' }],
+    },
+    libraries: [{ key: library.key, label: library.label }],
+  });
+
+  assert.equal(draftRecord.status, 'draft_generated');
+
+  const draftCopyResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'revise-draft-copy',
+    '--output',
+    draftRecord.id,
+    '--instruction',
+    '整体改成更客户化语气，并压缩字数。',
+  ]);
+  assert.equal(draftCopyResult.ok, true);
+  assert.equal(draftCopyResult.action, 'reports.revise-draft-copy');
+
+  const finalizeResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'finalize-page',
+    '--output',
+    draftRecord.id,
+  ]);
+
+  assert.equal(finalizeResult.ok, true);
+  assert.equal(finalizeResult.action, 'reports.finalize-page');
+  assert.equal((finalizeResult.data?.item as { status?: string })?.status, 'ready');
+
+  const outputsResult = await platformControl.executePlatformControlCommand([
+    'reports',
+    'outputs',
+    '--library',
+    library.label,
+    '--limit',
+    '10',
+  ]);
+  const matched = ((outputsResult.data?.items as Array<{ id?: string; status?: string }>) || [])
+    .find((item) => item.id === draftRecord.id);
+  assert.equal(matched?.status, 'ready');
 });
 
 test('platform control should capture one url into the requested knowledge library', async () => {

@@ -268,6 +268,50 @@ async function seedTelemetryState() {
           lastRenderedAt: staleTime,
         },
       },
+      {
+        id: 'report-draft-blocked-1',
+        groupKey: 'ioa',
+        groupLabel: 'IOA',
+        templateKey: 'shared-static-page-default',
+        templateLabel: '默认静态页',
+        title: '阻塞草稿页',
+        outputType: 'page',
+        kind: 'page',
+        createdAt: generatedAt,
+        status: 'draft_reviewing',
+        summary: 'draft summary',
+        triggerSource: 'chat',
+        page: {
+          summary: 'draft page',
+          cards: [],
+          sections: [{ title: '页面摘要', body: '只有摘要。', bullets: [] }],
+          charts: [],
+        },
+        draft: {
+          reviewStatus: 'draft_reviewing',
+          version: 2,
+          readiness: 'blocked',
+          mustHaveModules: ['能力模块'],
+          missingMustHaveModules: ['能力模块'],
+          qualityChecklist: [
+            { key: 'must-have-modules', label: '关键模块完整度', status: 'fail', detail: '缺少关键模块：能力模块', blocking: true },
+          ],
+          modules: [
+            {
+              moduleId: 'draftmod-hero',
+              moduleType: 'hero',
+              title: '页面摘要',
+              purpose: '开场摘要',
+              contentDraft: '只有摘要。',
+              evidenceRefs: ['page.summary'],
+              enabled: true,
+              status: 'generated',
+              order: 0,
+              layoutType: 'hero',
+            },
+          ],
+        },
+      },
     ],
   }, null, 2), 'utf8');
 
@@ -381,8 +425,11 @@ test('operations overview should surface phase1 stability telemetry and warnings
   assert.equal(payload.capture.taskSummary.errorTasks, 1);
   assert.equal(payload.parse.queueSummary.queued, 24);
   assert.equal(payload.output.summary.staleDynamicOutputs, 1);
+  assert.equal(payload.output.summary.draftOutputs, 1);
+  assert.equal(payload.output.summary.draftBlockedOutputs, 1);
   assert.equal(payload.stability.summary.deepParseBacklog, 24);
   assert.equal(payload.stability.summary.datasourceFailedRuns, 3);
+  assert.equal(payload.stability.summary.draftBlockedCount, 1);
   assert.equal(payload.stability.failures.datavizStatus, 'skipped');
   assert.equal(payload.parse.markdownSummary.canonicalReady, 2);
   assert.equal(payload.parse.markdownSummary.markdownReady, 1);
@@ -394,4 +441,5 @@ test('operations overview should surface phase1 stability telemetry and warnings
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'capture-error-tasks-warning'));
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'memory-sync-stale-critical'));
   assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'dataviz-runtime-warning'));
+  assert.ok(payload.stability.warnings.some((item: { key: string }) => item.key === 'draft-output-blocked-warning'));
 });

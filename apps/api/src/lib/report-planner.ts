@@ -1,16 +1,19 @@
 import type { RetrievalResult } from './document-retrieval.js';
 import type { KnowledgeTemplateTaskHint, SelectedKnowledgeTemplate } from './knowledge-template.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
+import { inferSectionDisplayModeFromTitle } from './report-visual-intent.js';
 
 export type ReportPlanAudience = 'client';
 export type ReportPlanTemplateMode = 'concept-page' | 'shared-template';
 export type ReportPlanCompletionMode = 'knowledge-first' | 'knowledge-plus-model';
+export type ReportPlanSectionDisplayMode = 'summary' | 'insight-list' | 'timeline' | 'comparison' | 'cta' | 'appendix';
 
 export type ReportPlanSection = {
   title: string;
   purpose: string;
   evidenceFocus: string;
   completionMode: ReportPlanCompletionMode;
+  displayMode: ReportPlanSectionDisplayMode;
   datavizSlotKeys?: string[];
 };
 
@@ -40,6 +43,7 @@ export type ReportPlanPageSpecSection = {
   title: string;
   purpose: string;
   completionMode: ReportPlanCompletionMode;
+  displayMode: ReportPlanSectionDisplayMode;
   datavizSlotKeys: string[];
 };
 
@@ -559,17 +563,27 @@ function buildPageSpec(
       title: section.title,
       purpose: section.purpose,
       completionMode: section.completionMode,
+      displayMode: section.displayMode,
       datavizSlotKeys: section.datavizSlotKeys || [],
     })),
   };
 }
 
+function inferPlannedSectionDisplayMode(title: string) {
+  return inferSectionDisplayModeFromTitle(
+    title,
+    /建议|行动|应答|下一步/i.test(title) ? 'cta' : 'summary',
+  ) as ReportPlanSectionDisplayMode;
+}
+
 function buildSectionPurpose(title: string) {
+  const displayMode = inferPlannedSectionDisplayMode(title);
   if (/AI综合分析|综合分析/i.test(title)) {
     return {
       purpose: 'Add conservative synthesis and next-step guidance after the evidence sections.',
       evidenceFocus: 'Cross-section patterns, gaps, and business implications.',
       completionMode: 'knowledge-plus-model' as const,
+      displayMode,
     };
   }
   if (/建议|行动|应答|应对|补货|优先级/i.test(title)) {
@@ -577,6 +591,7 @@ function buildSectionPurpose(title: string) {
       purpose: 'Turn evidence into a clear next-step recommendation.',
       evidenceFocus: 'High-confidence findings, gaps, and practical actions.',
       completionMode: 'knowledge-plus-model' as const,
+      displayMode,
     };
   }
   if (/风险|缺口|异常|波动/i.test(title)) {
@@ -584,6 +599,7 @@ function buildSectionPurpose(title: string) {
       purpose: 'Highlight what can block delivery, understanding, or decision-making.',
       evidenceFocus: 'Risk signals, missing evidence, and unstable areas.',
       completionMode: 'knowledge-first' as const,
+      displayMode,
     };
   }
   if (/概览|概况|摘要|总览|渠道结构/i.test(title)) {
@@ -591,12 +607,14 @@ function buildSectionPurpose(title: string) {
       purpose: 'Open with a clear conclusion and scope summary that a client can scan fast.',
       evidenceFocus: 'Library scope, coverage, and dominant signals.',
       completionMode: 'knowledge-plus-model' as const,
+      displayMode,
     };
   }
   return {
     purpose: 'Organize the matched evidence into a stable, presentation-ready block.',
     evidenceFocus: 'Strongest matched documents, grouped dimensions, and evidence excerpts.',
     completionMode: 'knowledge-first' as const,
+    displayMode,
   };
 }
 
@@ -629,6 +647,7 @@ export function buildReportPlan(input: ReportPlannerInput): ReportPlan {
       purpose: sectionPlan.purpose,
       evidenceFocus: sectionPlan.evidenceFocus,
       completionMode: sectionPlan.completionMode,
+      displayMode: sectionPlan.displayMode,
     };
   }) || [];
   const charts = buildChartPlan(input.templateTaskHint);
@@ -703,11 +722,11 @@ export function buildReportPlanContextBlock(plan: ReportPlan) {
     `Page spec hero dataviz: ${plan.pageSpec.heroDatavizSlotKeys.join(' | ') || '-'}`,
     'Page spec sections:',
     ...plan.pageSpec.sections.map((item, index) => (
-      `${index + 1}. ${item.title} :: completion=${item.completionMode} :: dataviz=${item.datavizSlotKeys.join(' | ') || '-'}`
+      `${index + 1}. ${item.title} :: completion=${item.completionMode} :: display=${item.displayMode} :: dataviz=${item.datavizSlotKeys.join(' | ') || '-'}`
     )),
     'Planned sections:',
     ...plan.sections.map((item, index) => (
-      `${index + 1}. ${item.title} :: purpose=${item.purpose} :: evidence=${item.evidenceFocus} :: completion=${item.completionMode} :: dataviz=${item.datavizSlotKeys?.join(' | ') || '-'}`
+      `${index + 1}. ${item.title} :: purpose=${item.purpose} :: evidence=${item.evidenceFocus} :: completion=${item.completionMode} :: display=${item.displayMode} :: dataviz=${item.datavizSlotKeys?.join(' | ') || '-'}`
     )),
   ]
     .filter(Boolean)

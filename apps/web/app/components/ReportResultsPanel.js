@@ -1,12 +1,15 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
-import GeneratedReportDetail from './GeneratedReportDetail';
 import {
   downloadGeneratedReportAs,
   formatGeneratedReportTime,
   getGeneratedReportShareActions,
 } from '../lib/generated-reports';
+
+const GeneratedReportDetail = dynamic(() => import('./GeneratedReportDetail'));
+const ReportDraftEditor = dynamic(() => import('./ReportDraftEditor'));
 
 function ReportShareActions({ item }) {
   if (item?.status === 'processing') return null;
@@ -35,6 +38,25 @@ function formatReportStatus(status) {
   return '已完成';
 }
 
+function isDraftGeneratedReport(item) {
+  return Boolean(
+    item?.kind === 'page'
+      && item?.draft?.modules?.length
+      && ['draft_planned', 'draft_generated', 'draft_reviewing', 'final_generating'].includes(String(item?.status || '').trim()),
+  );
+}
+
+function hasEditableDraft(item) {
+  return Boolean(item?.kind === 'page' && item?.draft?.modules?.length);
+}
+
+function getDraftReadinessMeta(readiness) {
+  if (readiness === 'ready') return { label: '可终稿', className: 'is-ready' };
+  if (readiness === 'blocked') return { label: '需先补齐', className: 'is-blocked' };
+  if (readiness === 'needs_attention') return { label: '可继续优化', className: 'is-warning' };
+  return null;
+}
+
 function ReportResultItem({
   item,
   expanded,
@@ -42,9 +64,11 @@ function ReportResultItem({
   onSelect,
   onDeleteReport,
   onRequestExpand,
+  stickySelection = false,
 }) {
   const metaLabel = item.templateLabel || item.outputType || item.kind || '报表';
   const statusLabel = formatReportStatus(item.status);
+  const readinessMeta = getDraftReadinessMeta(item?.draft?.readiness);
 
   return (
     <article className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`}>
@@ -52,16 +76,21 @@ function ReportResultItem({
         className="report-list-trigger"
         type="button"
         onClick={() => {
-          if (collapsed) {
+          if (collapsed && onRequestExpand) {
             onRequestExpand?.(item.id);
             return;
           }
-          onSelect?.(expanded ? '' : item.id);
+          onSelect?.(expanded && !stickySelection ? '' : item.id);
         }}
       >
         <span className="report-list-title-row">
           <span className="report-list-title">{item.title}</span>
-          <span className="report-list-meta">{formatGeneratedReportTime(item.createdAt)} · {statusLabel}</span>
+          <span className="report-list-meta">
+            {formatGeneratedReportTime(item.createdAt)} · {statusLabel}
+            {readinessMeta ? (
+              <span className={`report-list-chip ${readinessMeta.className}`.trim()}>{readinessMeta.label}</span>
+            ) : null}
+          </span>
         </span>
         <span className="report-list-subtitle">{metaLabel}</span>
       </button>
@@ -90,6 +119,8 @@ export default function ReportResultsPanel({
   description = '',
   items = [],
   selectedReportId = '',
+  activeItemOverride = null,
+  activeItemLoading = false,
   onSelectReport,
   onDeleteReport,
   collapsed = false,
@@ -98,13 +129,20 @@ export default function ReportResultsPanel({
   mobileViewport = false,
   className = '',
   showStepper = true,
+  featuredExpanded = false,
+  onItemChange,
 }) {
   const [internalSelectedId, setInternalSelectedId] = useState('');
   const controlled = typeof onSelectReport === 'function';
   const activeId = controlled ? selectedReportId : internalSelectedId;
   const hasAutoSelectedRef = useRef(false);
   const activeIndex = items.findIndex((item) => item.id === activeId);
+  const activeItem = activeItemOverride || (activeIndex >= 0 ? items[activeIndex] : items[0] || null);
   const canStep = items.length > 1 && activeIndex >= 0;
+  const [featuredViewMode, setFeaturedViewMode] = useState('preview');
+  const activeItemCanEditDraft = hasEditableDraft(activeItem);
+  const activeItemIsDraft = isDraftGeneratedReport(activeItem);
+  const activeItemReadiness = getDraftReadinessMeta(activeItem?.draft?.readiness);
 
   useEffect(() => {
     if (controlled) return;
@@ -130,6 +168,14 @@ export default function ReportResultsPanel({
     }
   }, [activeId, collapsed, controlled, items]);
 
+  useEffect(() => {
+    if (!activeItemCanEditDraft) {
+      setFeaturedViewMode('preview');
+      return;
+    }
+    setFeaturedViewMode(activeItemIsDraft ? 'edit' : 'preview');
+  }, [activeItem?.id, activeItemCanEditDraft, activeItemIsDraft]);
+
   function handleSelect(nextId) {
     if (controlled) {
       onSelectReport?.(nextId);
@@ -144,52 +190,186 @@ export default function ReportResultsPanel({
     handleSelect(items[nextIndex]?.id || '');
   }
 
-  return (
-    <section className={`card documents-card report-results-card ${className}`.trim()}>
-      <div className="panel-header report-results-header">
-        <div>
-          <h3>{title}</h3>
-          {description ? <p>{description}</p> : null}
-        </div>
-        <div className="report-results-toolbar">
-          {showStepper && canStep ? (
-            <div className="report-results-stepper">
-              <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(-1)}>
-                上一份
-              </button>
-              <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(1)}>
-                下一份
-              </button>
-            </div>
-          ) : null}
-          {onToggleCollapsed ? (
-            <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
-              {collapsed ? '展开报表' : mobileViewport ? '长按侧边收起' : '收起'}
-            </button>
-          ) : null}
-        </div>
-      </div>
+  function renderCompactList() {
+    return (
+      <section className={`report-center-list ${collapsed ? 'report-center-list-compact' : ''}`}>
+        {items.map((item) => (
+          <ReportResultItem
+            key={item.id}
+            item={item}
+            expanded={!collapsed && item.id === activeId}
+            collapsed={collapsed}
+            onSelect={handleSelect}
+            onDeleteReport={onDeleteReport}
+            onRequestExpand={onRequestExpand}
+          />
+        ))}
+      </section>
+    );
+  }
 
-      {!items.length ? (
-        <section className="report-empty-card">
-          <h4>还没有已出报表</h4>
-          <p>生成表格、静态页、PPT 或文档后，这里会自动沉淀结果。</p>
-        </section>
-      ) : (
-        <div className="reports-scroll-panel report-results-scroll">
-          <section className={`report-center-list ${collapsed ? 'report-center-list-compact' : ''}`}>
+  function renderFeaturedExpanded() {
+    const showDraftEditor = activeItemCanEditDraft && featuredViewMode === 'edit';
+    return (
+      <div className="report-results-featured-shell">
+        <aside className="report-results-featured-list">
+          <div className="report-results-featured-list-head">
+            <strong>已出报表</strong>
+            <span>{items.length} 份</span>
+          </div>
+          <section className="report-center-list report-center-list-featured">
             {items.map((item) => (
               <ReportResultItem
                 key={item.id}
                 item={item}
-                expanded={!collapsed && item.id === activeId}
-                collapsed={collapsed}
+                expanded={item.id === activeId}
+                collapsed
                 onSelect={handleSelect}
                 onDeleteReport={onDeleteReport}
                 onRequestExpand={onRequestExpand}
+                stickySelection
               />
             ))}
           </section>
+        </aside>
+
+        <section className="report-results-featured-main">
+          <div className="panel-header report-results-featured-header">
+            <div className="report-results-featured-copy">
+              <h3>{activeItem?.title || title}</h3>
+              <p>
+                {activeItem
+                  ? `${formatGeneratedReportTime(activeItem.createdAt)} · ${formatReportStatus(activeItem.status)}`
+                  : '选择一份报表后可在这里展开查看、切换和编辑。'}
+              </p>
+              {activeItemReadiness ? (
+                <div className={`report-list-chip ${activeItemReadiness.className}`.trim()}>{activeItemReadiness.label}</div>
+              ) : null}
+            </div>
+            <div className="report-results-toolbar">
+              {activeItemCanEditDraft ? (
+                <div className="report-results-view-toggle">
+                  <button
+                    className={`ghost-btn compact-inline-btn ${featuredViewMode === 'preview' ? 'is-active' : ''}`.trim()}
+                    type="button"
+                    onClick={() => setFeaturedViewMode('preview')}
+                  >
+                    预览成品
+                  </button>
+                  <button
+                    className={`ghost-btn compact-inline-btn ${featuredViewMode === 'edit' ? 'is-active' : ''}`.trim()}
+                    type="button"
+                    onClick={() => setFeaturedViewMode('edit')}
+                  >
+                    手动编辑
+                  </button>
+                </div>
+              ) : null}
+              {canStep ? (
+                <div className="report-results-stepper">
+                  <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(-1)}>
+                    上一份
+                  </button>
+                  <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(1)}>
+                    下一份
+                  </button>
+                </div>
+              ) : null}
+              {onToggleCollapsed ? (
+                <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
+                  收起
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {activeItem ? (
+            <div className="report-results-featured-body">
+              {activeItemLoading ? (
+                <section className="report-empty-card">
+                  <h4>正在加载报表详情</h4>
+                  <p>列表已经可用，当前选中的报表详情正在按需加载。</p>
+                </section>
+              ) : null}
+              {!activeItemLoading && showDraftEditor ? (
+                <ReportDraftEditor item={activeItem} onItemChange={onItemChange} />
+              ) : !activeItemLoading ? (
+                <>
+                  <div className="report-results-featured-actions">
+                    <ReportShareActions item={activeItem} />
+                    {onDeleteReport ? (
+                      <button className="ghost-btn" type="button" onClick={() => onDeleteReport(activeItem.id)}>
+                        删除报表
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="report-results-featured-preview">
+                    <GeneratedReportDetail item={activeItem} />
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <section className="report-empty-card">
+              <h4>还没有已出报表</h4>
+              <p>生成表格、静态页、PPT 或文档后，这里会自动沉淀结果。</p>
+            </section>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <section className={`card documents-card report-results-card ${className}`.trim()}>
+      {!items.length ? (
+        <>
+          <div className="panel-header report-results-header">
+            <div>
+              <h3>{title}</h3>
+              {description ? <p>{description}</p> : null}
+            </div>
+            <div className="report-results-toolbar">
+              {onToggleCollapsed ? (
+                <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
+                  {collapsed ? '展开报表' : mobileViewport ? '长按侧边收起' : '收起'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <section className="report-empty-card">
+            <h4>还没有已出报表</h4>
+            <p>生成表格、静态页、PPT 或文档后，这里会自动沉淀结果。</p>
+          </section>
+        </>
+      ) : featuredExpanded && !collapsed && !mobileViewport ? (
+        renderFeaturedExpanded()
+      ) : (
+        <div className="reports-scroll-panel report-results-scroll">
+          <div className="panel-header report-results-header">
+            <div>
+              <h3>{title}</h3>
+              {description ? <p>{description}</p> : null}
+            </div>
+            <div className="report-results-toolbar">
+              {showStepper && canStep ? (
+                <div className="report-results-stepper">
+                  <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(-1)}>
+                    上一份
+                  </button>
+                  <button className="ghost-btn compact-inline-btn" type="button" onClick={() => stepSelection(1)}>
+                    下一份
+                  </button>
+                </div>
+              ) : null}
+              {onToggleCollapsed ? (
+                <button className="ghost-btn report-panel-toggle" type="button" onClick={onToggleCollapsed}>
+                  {collapsed ? '展开报表' : mobileViewport ? '长按侧边收起' : '收起'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {renderCompactList()}
         </div>
       )}
     </section>

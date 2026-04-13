@@ -42,6 +42,8 @@ export type Phase1StabilityBlock = {
     datasourceFailedRuns: number;
     captureErrorTasks: number;
     dynamicOutputCount: number;
+    draftBlockedCount: number;
+    draftNeedsAttentionCount: number;
   };
   backlog: {
     deepParseQueued: number;
@@ -176,6 +178,10 @@ export async function loadOperationsOverviewPayload() {
   const captureErrorTasks = webCaptureTasks.filter((task) => task.lastStatus === 'error');
   const captureScheduledCount = webCaptureTasks.filter((task) => task.captureStatus !== 'paused' && task.frequency !== 'manual').length;
   const dynamicOutputs = reportState.outputs.filter((item) => item.dynamicSource?.enabled);
+  const draftOutputs = reportState.outputs.filter((item) => item.kind === 'page' && item.draft?.modules?.length);
+  const draftBlockedCount = draftOutputs.filter((item) => item.draft?.readiness === 'blocked').length;
+  const draftNeedsAttentionCount = draftOutputs.filter((item) => item.draft?.readiness === 'needs_attention').length;
+  const draftReadyCount = draftOutputs.filter((item) => item.draft?.readiness === 'ready').length;
   const dynamicOutputStaleCount = dynamicOutputs.filter((item) => {
     const lastRenderedAt = toTimestamp(item.dynamicSource?.lastRenderedAt || item.dynamicSource?.updatedAt || item.createdAt);
     return Boolean(lastRenderedAt) && Date.now() - lastRenderedAt >= DYNAMIC_OUTPUT_STALE_WARNING_MS;
@@ -295,6 +301,16 @@ export async function loadOperationsOverviewPayload() {
     ));
   }
 
+  if (draftBlockedCount > 0) {
+    warnings.push(buildWarning(
+      'draft-output-blocked-warning',
+      'warning',
+      'report',
+      '静态页草稿存在终稿阻塞',
+      `当前有 ${draftBlockedCount} 份静态页草稿缺少关键模块或内容，无法直接进入终稿。`,
+    ));
+  }
+
   const warningCount = warnings.filter((item) => item.level === 'warning').length;
   const criticalCount = warnings.filter((item) => item.level === 'critical').length;
   const stability: Phase1StabilityBlock = {
@@ -306,6 +322,8 @@ export async function loadOperationsOverviewPayload() {
       datasourceFailedRuns: runStatusCounts.failed || 0,
       captureErrorTasks: captureErrorTasks.length,
       dynamicOutputCount: dynamicOutputs.length,
+      draftBlockedCount,
+      draftNeedsAttentionCount,
     },
     backlog: {
       deepParseQueued,
@@ -442,6 +460,10 @@ export async function loadOperationsOverviewPayload() {
         outputs: reportState.outputs.length,
         dynamicOutputs: dynamicOutputs.length,
         staleDynamicOutputs: dynamicOutputStaleCount,
+        draftOutputs: draftOutputs.length,
+        draftReadyOutputs: draftReadyCount,
+        draftNeedsAttentionOutputs: draftNeedsAttentionCount,
+        draftBlockedOutputs: draftBlockedCount,
       },
       recentOutputs,
     },

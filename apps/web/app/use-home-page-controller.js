@@ -5,6 +5,7 @@ import {
   deleteReportOutput,
   fetchDatasources,
   fetchDocumentsSnapshot,
+  fetchReportOutput,
   fetchReportsSnapshot,
 } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
@@ -70,6 +71,8 @@ export function useHomePageController() {
   const [reportCollapsed, setReportCollapsed] = useState(true);
   const [reportItems, setReportItems] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState('');
+  const [selectedReportItem, setSelectedReportItem] = useState(null);
+  const [reportDetailLoading, setReportDetailLoading] = useState(false);
   const hasAutoSelectedReportRef = useRef(false);
   const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [isLoading, setIsLoading] = useState(false);
@@ -143,6 +146,51 @@ export function useHomePageController() {
   }, [reportItems]);
 
   useEffect(() => {
+    let alive = true;
+
+    async function loadSelectedReportDetail() {
+      if (reportCollapsed) {
+        setReportDetailLoading(false);
+        return;
+      }
+      if (!selectedReportId) {
+        setSelectedReportItem(null);
+        setReportDetailLoading(false);
+        return;
+      }
+      const fromList = reportItems.find((item) => item.id === selectedReportId) || null;
+      if (!fromList) {
+        setSelectedReportItem(null);
+        setReportDetailLoading(false);
+        return;
+      }
+      if (fromList?.draft?.modules?.length || fromList?.page?.sections?.length || fromList?.page?.charts?.length || fromList?.content) {
+        setSelectedReportItem(fromList);
+        setReportDetailLoading(false);
+        return;
+      }
+      setSelectedReportItem(fromList);
+      setReportDetailLoading(true);
+      try {
+        const json = await fetchReportOutput(selectedReportId);
+        if (!alive) return;
+        const nextItem = normalizeGeneratedReportRecord(json?.item || null);
+        setSelectedReportItem(nextItem);
+        setReportItems((prev) => prev.map((item) => (item.id === nextItem.id ? { ...item, ...nextItem } : item)));
+      } catch {
+        if (!alive) return;
+      } finally {
+        if (alive) setReportDetailLoading(false);
+      }
+    }
+
+    void loadSelectedReportDetail();
+    return () => {
+      alive = false;
+    };
+  }, [reportCollapsed, reportItems, selectedReportId]);
+
+  useEffect(() => {
     persistChatMessages(messages);
   }, [messages]);
 
@@ -196,11 +244,11 @@ export function useHomePageController() {
       return;
     }
 
-    if (!hasAutoSelectedReportRef.current) {
+    if (!reportCollapsed && !hasAutoSelectedReportRef.current) {
       setSelectedReportId(reportItems[0].id);
       hasAutoSelectedReportRef.current = true;
     }
-  }, [reportItems, selectedReportId]);
+  }, [reportCollapsed, reportItems, selectedReportId]);
 
   function resetConversation() {
     setMessages(initialMessages);
@@ -215,9 +263,21 @@ export function useHomePageController() {
     try {
       await deleteReportOutput(reportId);
       setReportItems((prev) => prev.filter((item) => item.id !== reportId));
+      setSelectedReportItem((current) => (current?.id === reportId ? null : current));
     } catch {
       // Keep current list when deletion fails.
     }
+  }
+
+  function updateReportItem(nextItem) {
+    const normalized = normalizeGeneratedReportRecord(nextItem);
+    setReportItems((prev) => {
+      const hasMatch = prev.some((item) => item.id === normalized.id);
+      if (!hasMatch) return [normalized, ...prev];
+      return prev.map((item) => (item.id === normalized.id ? normalized : item));
+    });
+    setSelectedReportItem(normalized);
+    setSelectedReportId(normalized.id);
   }
 
   const baseActionContext = {
@@ -249,7 +309,9 @@ export function useHomePageController() {
     messages,
     reportCollapsed,
     reportItems,
+    selectedReportItem,
     selectedReportId,
+    reportDetailLoading,
     selectedManualLibraries,
     preferredLibraries,
     conversationState,
@@ -265,6 +327,7 @@ export function useHomePageController() {
     setConversationState,
     setSystemConstraints,
     deleteReport,
+    updateReportItem,
     resetConversation,
     refreshHomeData,
     submitQuestion: (value) => submitQuestion(value, {

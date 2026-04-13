@@ -82,8 +82,12 @@ import {
   createSharedReportTemplate,
   deleteReportOutput,
   deleteSharedReportTemplate,
+  finalizeDraftReportOutput,
   inferReportTemplateTypeFromSource,
   loadReportCenterState,
+  reviseReportOutputDraftCopy,
+  reviseReportOutputDraftModule,
+  reviseReportOutputDraftStructure,
   reviseReportOutput,
   updateReportGroupTemplate,
   updateSharedReportTemplate,
@@ -1526,6 +1530,7 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
         title: item.title,
         groupKey: item.groupKey,
         groupLabel: item.groupLabel,
+        status: item.status,
         kind: item.kind || '',
         format: item.format || '',
         outputType: item.outputType,
@@ -1599,6 +1604,74 @@ async function runReportCommand(subcommand: string, flags: CommandFlags): Promis
       ok: true,
       action: 'reports.revise',
       summary: `Revised output "${item.title}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'revise-draft-module') {
+    const outputId = String(flags.output || flags.id || '').trim();
+    const moduleId = String(flags.module || flags['module-id'] || '').trim();
+    const instruction = String(flags.instruction || '').trim();
+    if (!outputId) throw new Error('Missing --output for reports revise-draft-module.');
+    if (!moduleId) throw new Error('Missing --module for reports revise-draft-module.');
+    if (!instruction) throw new Error('Missing --instruction for reports revise-draft-module.');
+
+    const item = await reviseReportOutputDraftModule(outputId, moduleId, instruction);
+    return {
+      ok: true,
+      action: 'reports.revise-draft-module',
+      summary: `Revised module "${moduleId}" for "${item.title}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'revise-draft-structure') {
+    const outputId = String(flags.output || flags.id || '').trim();
+    const instruction = String(flags.instruction || '').trim();
+    if (!outputId) throw new Error('Missing --output for reports revise-draft-structure.');
+    if (!instruction) throw new Error('Missing --instruction for reports revise-draft-structure.');
+
+    const item = await reviseReportOutputDraftStructure(outputId, instruction);
+    return {
+      ok: true,
+      action: 'reports.revise-draft-structure',
+      summary: `Updated draft structure for "${item.title}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'revise-draft-copy') {
+    const outputId = String(flags.output || flags.id || '').trim();
+    const instruction = String(flags.instruction || '').trim();
+    if (!outputId) throw new Error('Missing --output for reports revise-draft-copy.');
+    if (!instruction) throw new Error('Missing --instruction for reports revise-draft-copy.');
+
+    const item = await reviseReportOutputDraftCopy(outputId, instruction);
+    return {
+      ok: true,
+      action: 'reports.revise-draft-copy',
+      summary: `Updated draft copy for "${item.title}".`,
+      data: {
+        item,
+      },
+    };
+  }
+
+  if (subcommand === 'finalize-page') {
+    const outputId = String(flags.output || flags.id || '').trim();
+    if (!outputId) throw new Error('Missing --output for reports finalize-page.');
+
+    const item = await finalizeDraftReportOutput(outputId);
+    return {
+      ok: true,
+      action: 'reports.finalize-page',
+      summary: `Finalized static-page draft "${item.title}".`,
       data: {
         item,
       },

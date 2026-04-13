@@ -104,6 +104,7 @@ test('buildReportPlan should produce a client-facing page plan with reusable env
   assert.equal(plan.pageSpec.layoutVariant, 'risk-brief');
   assert.equal(plan.pageSpec.heroDatavizSlotKeys[0], plan.datavizSlots[0]?.key);
   assert.ok(plan.sections.some((item) => (item.datavizSlotKeys || []).length > 0));
+  assert.equal(plan.pageSpec.sections[0]?.displayMode, 'summary');
   assert.ok(plan.sections.some((item) => item.title === 'AI综合分析' && item.completionMode === 'knowledge-plus-model'));
   assert.match(plan.objective, /bid analysis page/i);
   assert.deepEqual(plan.knowledgeScope.dominantTopics, ['资格风险', '材料缺口', '时间风险', '交付要求']);
@@ -252,6 +253,7 @@ test('buildReportPlan should use client-facing resume sections and planned visua
   assert.ok(plan.datavizSlots.every((item) => item.preferredChartType === 'horizontal-bar'));
   assert.deepEqual(plan.pageSpec.heroCardLabels, ['候选人覆盖', '公司覆盖', '项目匹配', '技能热点']);
   assert.equal(plan.pageSpec.layoutVariant, 'talent-showcase');
+  assert.equal(plan.pageSpec.sections.find((item) => item.title === '匹配建议')?.displayMode, 'cta');
 });
 
 test('buildReportPlan should keep footfall reports at mall-zone aggregation level', () => {
@@ -307,6 +309,8 @@ test('buildReportPlan should keep footfall reports at mall-zone aggregation leve
   assert.equal(plan.datavizSlots[0]?.preferredChartType, 'bar');
   assert.equal(plan.datavizSlots[1]?.preferredChartType, 'horizontal-bar');
   assert.ok(plan.pageSpec.sections.some((item) => item.datavizSlotKeys.length > 0));
+  assert.equal(plan.pageSpec.sections.find((item) => item.title === '重点分区对比')?.displayMode, 'comparison');
+  assert.equal(plan.pageSpec.sections.find((item) => item.title === '商场动线提示')?.displayMode, 'timeline');
 });
 
 test('buildReportPlan should prefer business-specific footfall titles when the request names a mall', () => {

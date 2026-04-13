@@ -172,6 +172,7 @@ test('normalizeReportOutput should align page charts to planned dataviz slots', 
             title: '行动建议',
             purpose: '聚焦补货动作',
             completionMode: 'knowledge-plus-model',
+            displayMode: 'cta',
             datavizSlotKeys: ['restock-queue'],
           },
         ],
@@ -192,10 +193,12 @@ test('normalizeReportOutput should align page charts to planned dataviz slots', 
         title: '行动建议',
         purpose: '聚焦补货动作',
         completionMode: 'knowledge-plus-model',
+        displayMode: 'cta',
         datavizSlotKeys: ['restock-queue'],
       },
     ],
   });
+  assert.equal(output.page?.sections?.find((item) => item.title === '行动建议')?.displayMode, 'cta');
 });
 
 test('buildKnowledgeFallbackOutput should produce resume company table when cloud output is unavailable', () => {

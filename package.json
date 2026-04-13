@@ -62,9 +62,11 @@
     "check:text-integrity": "node tools/check-text-integrity.mjs",
     "build": "corepack pnpm -r --filter ./apps/api --filter ./apps/web --filter ./apps/worker build",
     "test": "corepack pnpm --filter api test",
+    "test:visual:reports": "corepack pnpm exec playwright test apps/web/e2e/report-benchmarks.spec.ts",
     "lint": "corepack pnpm check:text-integrity && corepack pnpm build"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "clawhub": "^0.9.0"
   }
 }

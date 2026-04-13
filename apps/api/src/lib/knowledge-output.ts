@@ -2,6 +2,7 @@ import type { ParsedDocument, ResumeFields } from './document-parser.js';
 import { isLikelyResumePersonName } from './document-schema.js';
 import type { ReportPlanDatavizSlot, ReportPlanPageSpec } from './report-planner.js';
 import type { ReportTemplateEnvelope } from './report-center.js';
+import { inferSectionDisplayModeFromTitle as inferVisualSectionDisplayModeFromTitle } from './report-visual-intent.js';
 import { sanitizeResumeDisplayCompany } from './resume-display-company.js';
 import type { ResumeDisplayProfile } from './resume-display-profile-provider.js';
 import { isWeakResumeCandidateName, mergeResumeFields } from './resume-canonicalizer.js';
@@ -23,7 +24,7 @@ export type ChatOutput =
       page?: {
         summary?: string;
         cards?: Array<{ label?: string; value?: string; note?: string }>;
-        sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
+        sections?: Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>;
         datavizSlots?: ReportPlanDatavizSlot[];
         pageSpec?: ReportPlanPageSpec;
         charts?: Array<{
@@ -417,8 +418,26 @@ function normalizeSections(value: unknown) {
       title: sanitizeText(item.title),
       body: sanitizeText(item.body || item.content || item.summary),
       bullets: sanitizeStringArray(item.bullets || item.points || item.items),
+      displayMode: normalizeSectionDisplayMode(item.displayMode),
     }))
     .filter((item) => item.title || item.body || item.bullets.length);
+}
+
+function normalizeSectionDisplayMode(value: unknown) {
+  const normalized = sanitizeText(value);
+  return ['summary', 'insight-list', 'timeline', 'comparison', 'cta', 'appendix'].includes(normalized)
+    ? normalized
+    : '';
+}
+
+function inferSectionDisplayModeFromTitle(title: string, fallback?: string) {
+  return (
+    normalizeSectionDisplayMode(fallback)
+    || inferVisualSectionDisplayModeFromTitle(
+      title,
+      /建议|行动|应答|下一步/i.test(title) ? 'cta' : 'summary',
+    )
+  );
 }
 
 function normalizeChartRender(value: unknown) {
@@ -510,6 +529,7 @@ function normalizeReportPlanPageSpec(pageSpec: ReportPlanPageSpec | undefined) {
         title,
         purpose: pickString(item?.purpose),
         completionMode: item?.completionMode === 'knowledge-plus-model' ? 'knowledge-plus-model' : 'knowledge-first',
+        displayMode: inferSectionDisplayModeFromTitle(title, item?.displayMode),
         datavizSlotKeys: Array.isArray(item?.datavizSlotKeys)
           ? item.datavizSlotKeys.map((slotKey) => normalizeDatavizSlotKey(slotKey)).filter(Boolean)
           : [],
@@ -1172,7 +1192,7 @@ function alignRowsToColumns(rows: string[][], columns: string[]) {
 }
 
 function alignSectionsToEnvelope(
-  sections: Array<{ title?: string; body?: string; bullets?: string[] }>,
+  sections: Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>,
   envelopeSections: string[],
   summary: string,
 ) {
@@ -1193,6 +1213,24 @@ function alignSectionsToEnvelope(
       title,
       body: matched?.body || (index === 0 ? summary : ''),
       bullets: matched?.bullets || [],
+      displayMode: normalizeSectionDisplayMode(matched?.displayMode),
+    };
+  });
+}
+
+function applyPageSpecSectionDisplayModes(
+  sections: Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>,
+  pageSpec: ReturnType<typeof normalizeReportPlanPageSpec>,
+) {
+  if (!pageSpec?.sections?.length) return sections;
+  return sections.map((section, index) => {
+    const normalizedTitle = normalizeText(section.title || '');
+    const matchedSection =
+      pageSpec.sections.find((item) => normalizeText(item.title) === normalizedTitle)
+      || pageSpec.sections[index];
+    return {
+      ...section,
+      displayMode: inferSectionDisplayModeFromTitle(String(section.title || ''), section.displayMode || matchedSection?.displayMode),
     };
   });
 }
@@ -3870,6 +3908,18 @@ export function normalizeReportOutput(
       options.datavizSlots || [],
     );
     const effectiveSections = alignedSections.length ? alignedSections : rawSections;
+    const normalizedPageSpec = normalizeReportPlanPageSpec(options.pageSpec) || undefined;
+    const plannedSections = applyPageSpecSectionDisplayModes(
+      alignedSections.length
+        ? alignedSections
+        : (envelope?.pageSections || []).map((sectionTitle, index) => ({
+            title: sectionTitle,
+            body: index === 0 ? summary : '',
+            bullets: [],
+            displayMode: '',
+          })),
+      normalizedPageSpec || null,
+    );
     const resumeDocuments = documents.filter((item) => item.schemaType === 'resume');
     const footfallDocuments = documents.filter(isFootfallReportDocument);
     const orderDocuments = documents.filter(isOrderInventoryDocument);
@@ -3909,15 +3959,9 @@ export function normalizeReportOutput(
       page: {
         summary,
         cards,
-        sections: alignedSections.length
-          ? alignedSections
-          : (envelope?.pageSections || []).map((sectionTitle, index) => ({
-              title: sectionTitle,
-              body: index === 0 ? summary : '',
-              bullets: [],
-            })),
+        sections: plannedSections,
         datavizSlots: normalizeReportPlanDatavizSlots(options.datavizSlots),
-        pageSpec: normalizeReportPlanPageSpec(options.pageSpec) || undefined,
+        pageSpec: normalizedPageSpec,
         charts,
       },
     };

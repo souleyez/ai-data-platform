@@ -224,12 +224,14 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
         title: '风险概览',
         purpose: 'Open with a clear conclusion.',
         completionMode: 'knowledge-plus-model',
+        displayMode: 'summary',
         datavizSlotKeys: ['risk-clusters'],
       },
       {
         title: '资格风险',
         purpose: 'Highlight blocking risks.',
         completionMode: 'knowledge-first',
+        displayMode: 'insight-list',
         datavizSlotKeys: [],
       },
     ],
@@ -256,8 +258,73 @@ test('normalizePersistedReportState should preserve dynamic page planner metadat
         title: '风险概览',
         purpose: 'Open with a clear conclusion.',
         completionMode: 'knowledge-plus-model',
+        displayMode: 'summary',
         datavizSlotKeys: ['risk-clusters'],
       },
     ],
   });
+});
+
+test('normalizePersistedReportState should preserve draft workflow metadata for page outputs', () => {
+  const normalized = normalizePersistedReportState({
+    version: REPORT_STATE_VERSION,
+    outputs: [
+      {
+        id: 'output-draft-1',
+        groupKey: 'bids',
+        groupLabel: 'bids',
+        title: '草稿静态页',
+        outputType: 'page',
+        kind: 'page',
+        status: 'draft_reviewing',
+        summary: 'draft summary',
+        page: {
+          summary: '经营总览',
+          visualStyle: 'signal-board',
+          sections: [
+            { title: '经营概览', body: '收入稳定。', bullets: ['转化率提升'] },
+          ],
+        },
+        draft: {
+          reviewStatus: 'draft_reviewing',
+          version: 3,
+          lastEditedAt: '2026-04-13T08:00:00.000Z',
+          visualStyle: 'signal-board',
+          modules: [
+            {
+              moduleId: 'hero-1',
+              moduleType: 'hero',
+              title: '经营总览',
+              purpose: '开场摘要',
+              contentDraft: '收入稳定。',
+              enabled: true,
+              status: 'edited',
+              order: 0,
+            },
+            {
+              moduleId: 'summary-1',
+              moduleType: 'summary',
+              title: '经营概览',
+              purpose: '解释重点变化',
+              contentDraft: '转化率提升。',
+              bullets: ['转化率提升'],
+              enabled: true,
+              status: 'edited',
+              order: 1,
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(normalized.outputs[0]?.status, 'draft_reviewing');
+  assert.equal(normalized.outputs[0]?.draft?.reviewStatus, 'draft_reviewing');
+  assert.equal(normalized.outputs[0]?.draft?.version, 3);
+  assert.equal(normalized.outputs[0]?.draft?.visualStyle, 'signal-board');
+  assert.equal(normalized.outputs[0]?.draft?.readiness, 'needs_attention');
+  assert.ok((normalized.outputs[0]?.draft?.qualityChecklist || []).length >= 3);
+  assert.equal(normalized.outputs[0]?.page?.visualStyle, 'signal-board');
+  assert.equal(normalized.outputs[0]?.draft?.modules?.length, 2);
+  assert.equal(normalized.outputs[0]?.draft?.modules?.[1]?.title, '经营概览');
 });

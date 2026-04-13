@@ -20,6 +20,11 @@ function normalizeVariantClass(value) {
   return normalized ? `generated-page-plan-variant-${normalized}` : '';
 }
 
+function normalizeVisualStyleClass(value) {
+  const normalized = String(value || '').trim();
+  return normalized ? `generated-page-style-${normalized}` : '';
+}
+
 function ReportTable({ table }) {
   if (!table) return null;
 
@@ -69,10 +74,34 @@ function PageSections({ sections, className = '' }) {
   return (
     <div className={`generated-page-sections ${className}`.trim()}>
       {sections.map((section, index) => (
-        <section className="generated-page-section" key={`${section.title || 'section'}-${index}`}>
+        <section
+          className={`generated-page-section ${section.displayMode ? `generated-page-section-${section.displayMode}` : ''}`.trim()}
+          key={`${section.title || 'section'}-${index}`}
+        >
           {section.title ? <h4>{section.title}</h4> : null}
           {section.body ? <p>{section.body}</p> : null}
-          {section.bullets?.length ? (
+          {section.displayMode === 'timeline' && section.bullets?.length ? (
+            <ol className="generated-page-timeline-list">
+              {section.bullets.map((bullet, bulletIndex) => (
+                <li key={`${section.title || 'section'}-bullet-${bulletIndex}`}>
+                  <span className="generated-page-timeline-marker" />
+                  <span>{bullet}</span>
+                </li>
+              ))}
+            </ol>
+          ) : section.displayMode === 'comparison' && section.bullets?.length ? (
+            <div className="generated-page-comparison-list">
+              {section.bullets.map((bullet, bulletIndex) => {
+                const [left = '', right = ''] = String(bullet || '').split(/[：:|]/).map((item) => item.trim());
+                return (
+                  <div className="generated-page-comparison-row" key={`${section.title || 'section'}-bullet-${bulletIndex}`}>
+                    <strong>{left || bullet}</strong>
+                    {right ? <span>{right}</span> : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : section.bullets?.length ? (
             <ul>
               {section.bullets.map((bullet, bulletIndex) => (
                 <li key={`${section.title || 'section'}-bullet-${bulletIndex}`}>{bullet}</li>
@@ -206,9 +235,10 @@ function buildPlannedPageView(page, dynamicSource) {
 function PageDetail({ page, content, dynamicSource }) {
   if (!page && !content) return null;
   const plannedView = buildPlannedPageView(page, dynamicSource);
+  const visualStyleClass = normalizeVisualStyleClass(page?.visualStyle || 'midnight-glass');
 
   return (
-    <div className="generated-page-detail">
+    <div className={`generated-page-detail ${visualStyleClass}`.trim()}>
       {content ? (
         <div className="generated-report-section">
           <p style={{ whiteSpace: 'pre-wrap' }}>{content}</p>
