@@ -21,6 +21,7 @@ docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
 docker run -d \
   --name "${CONTAINER_NAME}" \
+  --runtime=nvidia \
   --gpus all \
   --restart unless-stopped \
   -p "127.0.0.1:${HOST_PORT}:11434" \

@@ -12,6 +12,8 @@ services:
       HOST: 0.0.0.0
       AI_DATA_PLATFORM_STORAGE_ROOT: /data/storage
       OPENCLAW_GATEWAY_URL: ${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:18789}
+      OPENCLAW_GATEWAY_TIMEOUT_MS: ${OPENCLAW_GATEWAY_TIMEOUT_MS:-120000}
+      CHAT_BACKGROUND_HANDOFF_TIMEOUT_MS: ${CHAT_BACKGROUND_HANDOFF_TIMEOUT_MS:-120000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
