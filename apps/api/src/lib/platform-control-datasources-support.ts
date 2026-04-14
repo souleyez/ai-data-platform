@@ -48,10 +48,10 @@ export function resolveDatasourceKindFlag(value: string | undefined): Datasource
   const normalized = normalizeText(value || '').replace(/\s+/g, '_');
   if (!normalized) return 'web_public';
   if (normalized === 'local_directory') return 'local_directory';
-  if (normalized === 'web' || normalized === 'public_web') return 'web_public';
+  if (normalized === 'web_public' || normalized === 'web' || normalized === 'public_web') return 'web_public';
   if (normalized === 'web_login' || normalized === 'login_web') return 'web_login';
   if (normalized === 'web_discovery' || normalized === 'discovery_web') return 'web_discovery';
-  if (normalized === 'upload' || normalized === 'public_upload') return 'upload_public';
+  if (normalized === 'upload_public' || normalized === 'upload' || normalized === 'public_upload') return 'upload_public';
   if (normalized === 'local' || normalized === 'directory' || normalized === 'folder') return 'local_directory';
   if (normalized === 'database') return 'database';
   if (normalized === 'erp') return 'erp';

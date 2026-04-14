@@ -1,5 +1,5 @@
 import type { ReportTemplateEnvelope } from './report-center.js';
-import type { ChatOutput } from './knowledge-output.js';
+import type { ChatOutput } from './knowledge-output-types.js';
 import {
   containsAny,
   isObject,

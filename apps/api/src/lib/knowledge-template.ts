@@ -101,9 +101,9 @@ function buildTemplateEnvelopeInstruction(group: ReportGroup, template: SharedRe
     `Template: ${envelope.title}`,
     `Knowledge base: ${group.label}`,
     'Fixed structure:',
-    ...envelope.fixedStructure.map((item, index) => `${index + 1}. ${item}`),
+    ...envelope.fixedStructure.map((item: string, index: number) => `${index + 1}. ${item}`),
     'Variable zones:',
-    ...envelope.variableZones.map((item, index) => `${index + 1}. ${item}`),
+    ...envelope.variableZones.map((item: string, index: number) => `${index + 1}. ${item}`),
     `Output hint: ${envelope.outputHint}`,
   ].join('\n');
 }

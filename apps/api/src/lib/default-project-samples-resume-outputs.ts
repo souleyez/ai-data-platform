@@ -1,0 +1,37 @@
+import { LABEL_RESUME, type SampleOutputDefinition } from './default-project-samples-types.js';
+
+export const DEFAULT_SAMPLE_RESUME_OUTPUTS: SampleOutputDefinition[] = [
+  {
+    title: '[\u7cfb\u7edf\u6837\u4f8b] \u7b80\u5386\u5bf9\u6bd4\u8868\u683c',
+    groupLabel: LABEL_RESUME,
+    kind: 'table',
+    content: '\u6700\u8fd1\u4e00\u4e2a\u6708\u7b80\u5386\u5e93\u5019\u9009\u4eba\u7684\u6a2a\u5411\u5bf9\u6bd4\u7cfb\u7edf\u6837\u4f8b\u3002',
+    table: {
+      title: '\u7b80\u5386\u6a2a\u5411\u5bf9\u6bd4',
+      columns: ['\u5019\u9009\u4eba', '\u7b2c\u4e00\u5b66\u5386', '\u6700\u8fd1\u5c31\u804c\u516c\u53f8', '\u6838\u5fc3\u80fd\u529b', '\u5e74\u9f84', '\u5de5\u4f5c\u5e74\u9650', '\u5339\u914d\u5224\u65ad', '\u8bc1\u636e\u6765\u6e90'],
+      rows: [
+        [
+          '\u90d1\u5b87\u5b81',
+          '\u672c\u79d1',
+          '\u5e7f\u5dde\u4e2d\u79d1\u5de5\u4e1a\u6280\u672f\u7814\u7a76\u9662 / \u6280\u672f\u5408\u4f5c\u65b9\u5411\u7ecf\u7406',
+          'AI+\u786c\u4ef6+\u8f6f\u4ef6+\u4e1a\u52a1\u7efc\u5408\u80fd\u529b',
+          '36',
+          '15\u5e74',
+          '\u9002\u5408\u7efc\u5408\u578b\u6280\u672f\u7ba1\u7406\u5c97\u4f4d',
+          '\u6837\u4f8b\u7b80\u5386\u5e93',
+        ],
+        [
+          '\u674e\u660e\u8f69',
+          '\u672c\u79d1',
+          '\u6df1\u5733\u661f\u62d3\u667a\u80fd\u79d1\u6280\u6709\u9650\u516c\u53f8',
+          '\u591a\u5e73\u53f0\u7ecf\u8425\u5206\u6790\u3001\u5e93\u5b58\u7ba1\u7406\u3001\u56e2\u961f\u534f\u540c',
+          '32',
+          '9\u5e74',
+          '\u9002\u5408\u7535\u5546\u8fd0\u8425\u8d1f\u8d23\u4eba\u5c97\u4f4d',
+          '\u7cfb\u7edf\u6837\u4f8b\u7b80\u5386',
+        ],
+      ],
+    },
+  },
+];
+
