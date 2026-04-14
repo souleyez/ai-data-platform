@@ -20,6 +20,7 @@ import { loadOpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js'
 import {
   buildOpenClawLongTermMemoryContextBlock,
   buildOpenClawLongTermMemoryDirectAnswer,
+  resolveOpenClawLongTermMemoryRequestedLibraries,
   shouldAnswerFromOpenClawLongTermMemoryDirectory,
 } from './openclaw-memory-directory.js';
 import { isOrderInventoryDocumentSignal } from './document-domain-signals.js';
@@ -639,6 +640,11 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
     limit: preferLiveDetail ? 4 : 6,
     effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
   });
+  const requestedLongTermMemoryLibraries = resolveOpenClawLongTermMemoryRequestedLibraries({
+    snapshot: catalogSnapshot,
+    requestText,
+    effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
+  });
 
   let libraries = input.preferredLibraries || [];
   let knowledgeChatHistory = input.chatHistory;
@@ -668,7 +674,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
     buildOpenClawLongTermMemoryDirectAnswer({
       snapshot: catalogSnapshot,
       requestText,
-      libraries,
+      libraries: requestedLongTermMemoryLibraries.length ? requestedLongTermMemoryLibraries : undefined,
       effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
     }),
     preferLiveDetail && effectiveRetrieval?.documents.length
@@ -722,7 +728,7 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
         }),
         buildOpenClawLongTermMemoryContextBlock({
           snapshot: catalogSnapshot,
-          libraries,
+          libraries: requestedLongTermMemoryLibraries.length ? requestedLongTermMemoryLibraries : undefined,
           effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
         }),
         libraryKnowledgePagesContext,

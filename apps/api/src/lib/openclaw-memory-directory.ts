@@ -39,6 +39,25 @@ function normalizeRequestText(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeMatchText(value: unknown) {
+  return normalizeRequestText(value).toLowerCase();
+}
+
+function buildLibraryMatchTerms(library: Pick<OpenClawMemoryLibrarySnapshot, 'key' | 'label'>) {
+  const rawTerms = [
+    String(library.label || '').trim(),
+    String(library.key || '').trim(),
+  ].filter(Boolean);
+  const terms = new Set<string>();
+  for (const rawTerm of rawTerms) {
+    const normalized = normalizeMatchText(rawTerm);
+    if (normalized) terms.add(normalized);
+    const compact = normalized.replace(/\s+/g, '');
+    if (compact) terms.add(compact);
+  }
+  return [...terms];
+}
+
 function sortDocumentsByLibraryAndTime(documents: OpenClawMemoryDocumentCard[]) {
   return [...documents].sort((left, right) => (
     left.libraryKeys.join(',').localeCompare(right.libraryKeys.join(','), 'zh-CN')
@@ -206,6 +225,30 @@ export function shouldAnswerFromOpenClawLongTermMemoryDirectory(requestText: str
   if (!source) return false;
   if (LONG_TERM_MEMORY_DETAIL_REQUEST_PATTERNS.some((pattern) => pattern.test(source))) return false;
   return LONG_TERM_MEMORY_DIRECTORY_HINT_PATTERNS.some((pattern) => pattern.test(source));
+}
+
+export function resolveOpenClawLongTermMemoryRequestedLibraries(input: {
+  snapshot: OpenClawMemoryCatalogSnapshot | null;
+  requestText: string;
+  effectiveVisibleLibraryKeys?: string[];
+}) {
+  const requestText = normalizeMatchText(input.requestText);
+  if (!requestText || !input.snapshot?.libraries?.length) return [] as KnowledgeLibraryRef[];
+
+  const visibleLibrarySet = Array.isArray(input.effectiveVisibleLibraryKeys)
+    ? new Set(input.effectiveVisibleLibraryKeys.map((item) => String(item || '').trim()).filter(Boolean))
+    : null;
+  const compactRequestText = requestText.replace(/\s+/g, '');
+
+  return input.snapshot.libraries
+    .filter((library) => !visibleLibrarySet || visibleLibrarySet.has(library.key))
+    .filter((library) => buildLibraryMatchTerms(library).some((term) => (
+      requestText.includes(term) || compactRequestText.includes(term)
+    )))
+    .map((library) => ({
+      key: library.key,
+      label: library.label,
+    }));
 }
 
 function shouldIncludeReportDirectorySection(requestText: string) {

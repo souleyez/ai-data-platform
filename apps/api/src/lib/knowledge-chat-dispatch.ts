@@ -20,6 +20,7 @@ import { loadOpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js'
 import {
   buildOpenClawLongTermMemoryContextBlock,
   buildOpenClawLongTermMemoryDirectAnswer,
+  resolveOpenClawLongTermMemoryRequestedLibraries,
   shouldAnswerFromOpenClawLongTermMemoryDirectory,
 } from './openclaw-memory-directory.js';
 import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
@@ -345,6 +346,11 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const preferredDocumentPath = String(input.preferredDocumentPath || generalState?.preferredDocumentPath || '').trim();
   const useExternalScopedMemory = input.accessContext?.source === 'external-directory';
   const catalogSnapshot = await loadOpenClawMemoryCatalogSnapshot();
+  const requestedLongTermMemoryLibraries = resolveOpenClawLongTermMemoryRequestedLibraries({
+    snapshot: catalogSnapshot,
+    requestText,
+    effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
+  });
   const memoryState = await loadOpenClawMemorySelectionState({
     botId: input.botDefinition?.id,
     forceGlobalState: useExternalScopedMemory,
@@ -366,7 +372,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
     ? buildOpenClawLongTermMemoryDirectAnswer({
       snapshot: catalogSnapshot,
       requestText,
-      libraries: scopeState.libraries,
+      libraries: requestedLongTermMemoryLibraries.length ? requestedLongTermMemoryLibraries : undefined,
       effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
     })
     : '';
@@ -381,7 +387,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: 'openclaw',
       debug: {
         memorySelectedDocuments: memorySelection.documentIds.length,
-        catalogMemoryLibraries: scopeState.libraries.length || catalogSnapshot?.libraryCount || 0,
+        catalogMemoryLibraries: requestedLongTermMemoryLibraries.length || catalogSnapshot?.libraryCount || 0,
         catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
         catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
         matchedSupplyDocuments: 0,
@@ -442,7 +448,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
       : (latestDetailedDocumentContext.preferredDocument ? 'not_ready' : 'missing');
   const longTermMemoryContextBlock = buildOpenClawLongTermMemoryContextBlock({
     snapshot: catalogSnapshot,
-    libraries: supply.libraries,
+    libraries: requestedLongTermMemoryLibraries.length ? requestedLongTermMemoryLibraries : undefined,
     effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
   });
 

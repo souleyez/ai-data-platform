@@ -4,6 +4,7 @@ import {
   buildOpenClawLongTermMemoryDirectAnswer,
   buildOpenClawLongTermMemoryContextBlock,
   filterOpenClawMemoryCatalogSnapshot,
+  resolveOpenClawLongTermMemoryRequestedLibraries,
   shouldAnswerFromOpenClawLongTermMemoryDirectory,
   summarizeOpenClawLongTermMemory,
 } from '../src/lib/openclaw-memory-directory.js';
@@ -175,6 +176,20 @@ test('shouldAnswerFromOpenClawLongTermMemoryDirectory should only match director
   assert.equal(shouldAnswerFromOpenClawLongTermMemoryDirectory('我就要看数量和文档详情'), true);
   assert.equal(shouldAnswerFromOpenClawLongTermMemoryDirectory('平台系统里有哪些文档，以及这些文档的摘要'), true);
   assert.equal(shouldAnswerFromOpenClawLongTermMemoryDirectory('请给我这份文档的全文'), false);
+});
+
+test('resolveOpenClawLongTermMemoryRequestedLibraries should only scope when the request explicitly names a library', () => {
+  const broadScope = resolveOpenClawLongTermMemoryRequestedLibraries({
+    snapshot,
+    requestText: '按库分组下，先告诉我有哪些集合',
+  });
+  assert.deepEqual(broadScope, []);
+
+  const explicitScope = resolveOpenClawLongTermMemoryRequestedLibraries({
+    snapshot,
+    requestText: '订单分析里有哪些文档和报表摘要',
+  });
+  assert.deepEqual(explicitScope, [{ key: 'orders', label: '订单分析' }]);
 });
 
 test('buildOpenClawLongTermMemoryDirectAnswer should enumerate documents and outputs from long-term memory', () => {
