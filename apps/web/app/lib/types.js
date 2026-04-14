@@ -49,19 +49,10 @@ export function buildOrchestrationDebugChips(orchestration) {
     chips.push({ key: 'mode', label: baseLabel, tone: 'neutral' });
   }
 
-  if (orchestration.recentUploadSummaryIncluded) {
-    const count = Number(orchestration.recentUploadSummaryItemCount || 0);
-    chips.push({
-      key: 'recent-upload-summary',
-      label: count > 0 ? `上传摘要 ${count} 份` : '上传摘要已附带',
-      tone: 'supply',
-    });
-  }
-
   if (orchestration.latestDocumentFullTextIncluded) {
     chips.push({
       key: 'latest-document-full-text',
-      label: '上传全文已附带',
+      label: '命中文档全文已附带',
       tone: 'supply',
     });
   }
@@ -119,20 +110,31 @@ export function buildOrchestrationDebugDetails(orchestration) {
     });
   }
 
-  if (orchestration.recentUploadSummaryIncluded) {
-    const count = Number(orchestration.recentUploadSummaryItemCount || 0);
-    details.push({
-      key: 'recent-upload-summary',
-      label: '上传摘要供料',
-      value: count > 0 ? `已附带 ${count} 份` : '已附带',
-    });
-  }
-
   if (orchestration.latestDocumentFullTextIncluded) {
     details.push({
       key: 'latest-document-full-text',
-      label: '上传全文供料',
+      label: '命中文档全文供料',
       value: '已附带',
+    });
+  }
+
+  if (typeof orchestration.matchedFullTextDocuments === 'number' && orchestration.matchedFullTextDocuments > 0) {
+    details.push({
+      key: 'matched-full-text-documents',
+      label: '全文供料文档',
+      value: `${orchestration.matchedFullTextDocuments} 份`,
+    });
+  }
+
+  if (
+    typeof orchestration.catalogMemoryLibraries === 'number'
+    || typeof orchestration.catalogMemoryDocuments === 'number'
+    || typeof orchestration.catalogMemoryOutputs === 'number'
+  ) {
+    details.push({
+      key: 'catalog-memory',
+      label: '长期记忆目录',
+      value: `${Number(orchestration.catalogMemoryLibraries || 0)} 个分组 / ${Number(orchestration.catalogMemoryDocuments || 0)} 份文档 / ${Number(orchestration.catalogMemoryOutputs || 0)} 份报表`,
     });
   }
 

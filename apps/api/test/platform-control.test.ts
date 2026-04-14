@@ -777,19 +777,6 @@ test('platform control supply preview should expose uploaded document supply con
     preferredLibraryKeys: [library.key],
   });
 
-  const summaryJson = JSON.stringify({
-    uploadedAt: new Date().toISOString(),
-    items: [
-      {
-        path: filePath,
-        name: '订单分析周报',
-        docType: 'markdown',
-        summary: '最近30天订单趋势平稳，退款率下降。',
-        libraries: [{ key: library.key, label: library.label }],
-      },
-    ],
-  });
-
   const result = await platformControl.executePlatformControlCommand([
     'supply',
     'preview',
@@ -797,8 +784,6 @@ test('platform control supply preview should expose uploaded document supply con
     '请基于刚上传的文档总结重点',
     '--preferred-document',
     filePath,
-    '--recent-upload-summary-json',
-    summaryJson,
     '--library',
     library.key,
   ]);
@@ -807,9 +792,8 @@ test('platform control supply preview should expose uploaded document supply con
   assert.equal(result.action, 'supply.preview');
   assert.equal((result.data?.supplyContext as { preferredDocumentPath?: string })?.preferredDocumentPath, filePath);
   assert.equal((result.data?.supplyContext as { preferredDocumentStatus?: string })?.preferredDocumentStatus, 'not_ready');
-  assert.equal((result.data?.supplyContext as { latestDocumentFullTextIncluded?: boolean })?.latestDocumentFullTextIncluded, true);
-  assert.equal((result.data?.supplyContext as { recentUploadSummaryIncluded?: boolean })?.recentUploadSummaryIncluded, true);
-  assert.equal((result.data?.supplyContext as { recentUploadSummaryItemCount?: number })?.recentUploadSummaryItemCount, 1);
+  assert.equal((result.data?.supplyContext as { latestDocumentFullTextIncluded?: boolean })?.latestDocumentFullTextIncluded, false);
+  assert.ok(((result.data?.supplyContext as { catalogMemoryDocuments?: number })?.catalogMemoryDocuments || 0) >= 1);
 });
 
 test('platform control should run authenticated capture and expose web tasks', async () => {

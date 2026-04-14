@@ -15,14 +15,15 @@ import {
   loadOpenClawMemorySelectionState,
   selectOpenClawMemoryDocumentCandidates,
   selectOpenClawMemoryDocumentCandidatesFromState,
-  type OpenClawMemorySelection,
 } from './openclaw-memory-selection.js';
+import { loadOpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js';
+import {
+  buildOpenClawLongTermMemoryContextBlock,
+  buildOpenClawLongTermMemoryDirectAnswer,
+  shouldAnswerFromOpenClawLongTermMemoryDirectory,
+} from './openclaw-memory-directory.js';
 import { isOrderInventoryDocumentSignal } from './document-domain-signals.js';
 import type { BotDefinition } from './bot-definitions.js';
-import type {
-  OpenClawMemoryChange,
-  OpenClawMemoryState,
-} from './openclaw-memory-changes.js';
 import { detectOutputKind } from './knowledge-plan.js';
 import {
   buildKnowledgeAnswerPrompt,
@@ -202,259 +203,6 @@ function buildKnowledgeCatalogAnswerContextBlock(input: {
       ? `Supplied live detail: documents=${input.detailDocuments} evidence=${input.detailEvidence || 0}`
       : '',
   ].join('\n');
-}
-
-function formatCatalogTimestamp(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return '-';
-  const parsed = Date.parse(text);
-  if (!Number.isFinite(parsed) || parsed <= 0) return text;
-  return new Date(parsed).toISOString();
-}
-
-function trimCatalogText(value: unknown, maxLength = 120) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  return text.length > maxLength
-    ? `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`
-    : text;
-}
-
-function isCatalogSelectableAvailability(value: string) {
-  return value === 'available' || value === 'structured-only';
-}
-
-function formatCatalogChange(change: OpenClawMemoryChange) {
-  const type = change.type === 'added'
-    ? 'added'
-    : change.type === 'updated'
-      ? 'updated'
-      : change.type === 'deleted'
-        ? 'deleted'
-        : change.type === 'audit-excluded'
-          ? 'audit excluded'
-          : 'audit restored';
-  return `${type} | ${trimCatalogText(change.title, 72)} | at=${formatCatalogTimestamp(change.happenedAt)}`;
-}
-
-function resolveCatalogFocusLibraries(input: {
-  libraries: Array<{ key: string; label: string }>;
-  selection: OpenClawMemorySelection;
-}) {
-  const resolved = new Map<string, string>();
-  for (const library of input.libraries) {
-    const key = String(library.key || '').trim();
-    if (!key) continue;
-    resolved.set(key, String(library.label || library.key).trim() || key);
-  }
-  if (!resolved.size) {
-    for (const candidate of input.selection.candidates) {
-      for (const key of candidate.libraryKeys) {
-        const normalizedKey = String(key || '').trim();
-        if (!normalizedKey || resolved.has(normalizedKey)) continue;
-        resolved.set(normalizedKey, normalizedKey);
-      }
-    }
-  }
-  return resolved;
-}
-
-type CatalogLibrarySnapshot = {
-  key: string;
-  label: string;
-  documents: OpenClawMemoryState['documents'][string][];
-  usableCount: number;
-  excludedCount: number;
-  latestUpdateAt: string;
-  recentTitles: string[];
-};
-
-function collectKnowledgeCatalogLibrarySnapshots(input: {
-  state: OpenClawMemoryState | null;
-  libraries: Array<{ key: string; label: string }>;
-  selection: OpenClawMemorySelection;
-}) {
-  const documents = Object.values(input.state?.documents || {});
-  if (!documents.length) return [];
-
-  const explicitFocusLibraries = resolveCatalogFocusLibraries({
-    libraries: input.libraries,
-    selection: input.selection,
-  });
-  let focusLibraries = explicitFocusLibraries;
-  let resolvedKeys = [...focusLibraries.keys()];
-
-  if (resolvedKeys.length) {
-    const hasMatchingDocuments = documents.some((item) => item.libraryKeys.some((key) => focusLibraries.has(key)));
-    if (!hasMatchingDocuments && input.selection.candidates.length) {
-      focusLibraries = resolveCatalogFocusLibraries({
-        libraries: [],
-        selection: input.selection,
-      });
-      resolvedKeys = [...focusLibraries.keys()];
-    }
-  }
-
-  if (!resolvedKeys.length && input.selection.candidates.length) {
-    focusLibraries = resolveCatalogFocusLibraries({
-      libraries: [],
-      selection: input.selection,
-    });
-    resolvedKeys = [...focusLibraries.keys()];
-  }
-
-  if (!resolvedKeys.length) {
-    resolvedKeys = ['__all__'];
-  }
-
-  return resolvedKeys
-    .map((key) => {
-      const label = key === '__all__' ? '当前知识库目录' : (focusLibraries.get(key) || key);
-      const libraryDocuments = key === '__all__'
-        ? documents
-        : documents.filter((item) => item.libraryKeys.includes(key));
-      if (!libraryDocuments.length) return null;
-
-      const sortedDocuments = [...libraryDocuments].sort((left, right) => (
-        Date.parse(String(right.updatedAt || '')) - Date.parse(String(left.updatedAt || ''))
-      ));
-      const latestDocument = sortedDocuments.find((item) => String(item.updatedAt || '').trim());
-      return {
-        key,
-        label,
-        documents: libraryDocuments,
-        usableCount: libraryDocuments.filter((item) => isCatalogSelectableAvailability(item.availability)).length,
-        excludedCount: libraryDocuments.filter((item) => item.availability === 'audit-excluded').length,
-        latestUpdateAt: latestDocument?.updatedAt || '',
-        recentTitles: sortedDocuments
-          .slice(0, 3)
-          .map((item) => trimCatalogText(item.title, 48))
-          .filter(Boolean),
-      } satisfies CatalogLibrarySnapshot;
-    })
-    .filter((item): item is CatalogLibrarySnapshot => Boolean(item));
-}
-
-function buildKnowledgeCatalogStateContextBlock(input: {
-  state: OpenClawMemoryState | null;
-  libraries: Array<{ key: string; label: string }>;
-  selection: OpenClawMemorySelection;
-}) {
-  const librarySnapshots = collectKnowledgeCatalogLibrarySnapshots(input);
-  if (!librarySnapshots.length) return '';
-
-  const lines = [
-    'Current catalog snapshot:',
-    `Generated at: ${formatCatalogTimestamp(input.state?.generatedAt || '')}`,
-  ];
-
-  const libraryLines = librarySnapshots
-    .map((snapshot) => [
-      `${snapshot.label} | documents=${snapshot.documents.length} | usable=${snapshot.usableCount} | excluded=${snapshot.excludedCount}`,
-      snapshot.latestUpdateAt ? `latest update=${formatCatalogTimestamp(snapshot.latestUpdateAt)}` : '',
-      snapshot.recentTitles.length ? `recent titles=${snapshot.recentTitles.join(' | ')}` : '',
-    ]
-      .filter(Boolean)
-      .join(' | '))
-    .filter(Boolean);
-
-  if (libraryLines.length) {
-    lines.push(...libraryLines);
-  }
-
-  const focusKeys = new Set(librarySnapshots.map((item) => item.key).filter((key) => key !== '__all__'));
-  const recentChanges = (input.state?.recentChanges || [])
-    .filter((change) => !focusKeys.size || change.libraryKeys.some((key) => focusKeys.has(key)))
-    .slice(0, 4);
-  if (recentChanges.length) {
-    lines.push('Recent catalog changes:');
-    lines.push(...recentChanges.map((change) => `- ${formatCatalogChange(change)}`));
-  }
-
-  return lines.join('\n');
-}
-
-function buildKnowledgeCatalogSelectionDetailBlock(selection: OpenClawMemorySelection) {
-  if (!selection.candidates.length) return '';
-  return [
-    'Catalog-selected document summaries:',
-    ...selection.candidates.slice(0, 4).map((item, index) => (
-      `${index + 1}. ${trimCatalogText(item.title, 72)} | updatedAt=${formatCatalogTimestamp(item.updatedAt)} | summary=${trimCatalogText(item.summary, 140)}`
-    )),
-  ].join('\n');
-}
-
-function buildKnowledgeCatalogFallbackAnswer(input: {
-  requestText: string;
-  libraries: Array<{ key: string; label: string }>;
-  state: OpenClawMemoryState | null;
-  selection: OpenClawMemorySelection;
-}) {
-  const snapshots = collectKnowledgeCatalogLibrarySnapshots(input);
-  const libraryText = snapshots.length
-    ? snapshots.map((item) => item.label).join('、')
-    : input.libraries.length
-      ? input.libraries.map((item) => item.label || item.key).join('、')
-      : '当前知识库目录';
-  const snapshotSummary = snapshots
-    .slice(0, 2)
-    .map((item) => `${item.label} 当前有 ${item.documents.length} 份文档，可直接使用 ${item.usableCount} 份${item.latestUpdateAt ? `，最近更新时间 ${formatCatalogTimestamp(item.latestUpdateAt)}` : ''}`)
-    .join('；');
-  const recentTitles = input.selection.candidates
-    .slice(0, 3)
-    .map((item) => trimCatalogText(item.title, 36))
-    .filter(Boolean);
-  const focusKeys = new Set(snapshots.map((item) => item.key).filter((key) => key !== '__all__'));
-  const recentChanges = (input.state?.recentChanges || [])
-    .filter((change) => !focusKeys.size || change.libraryKeys.some((key) => focusKeys.has(key)))
-    .slice(0, 2)
-    .map((change) => formatCatalogChange(change));
-  const summaryParts = [
-    `我先按当前知识库目录来回答。现在优先关注的是 ${libraryText}。`,
-    snapshotSummary ? `${snapshotSummary}。` : '',
-    recentTitles.length ? `目录里可直接关注的文档有：${recentTitles.join('、')}。` : '',
-    recentChanges.length ? `最近的目录变化包括：${recentChanges.join('；')}。` : '',
-    '如果你接下来要问某份文档的具体字段、金额、日期、公司或原文依据，我再去调取文档详情。',
-  ].filter(Boolean);
-  return summaryParts.join('');
-}
-
-function buildUnifiedKnowledgeAnswerFallback(input: {
-  requestText: string;
-  libraries: Array<{ key: string; label: string }>;
-  state: OpenClawMemoryState | null;
-  selection: OpenClawMemorySelection;
-  retrieval: RetrievalResult | null;
-  timeRange?: string;
-  contentFocus?: string;
-  preferLiveDetail: boolean;
-}) {
-  const catalogFallback = buildKnowledgeCatalogFallbackAnswer({
-    requestText: input.requestText,
-    libraries: input.libraries,
-    state: input.state,
-    selection: input.selection,
-  });
-
-  if (!input.preferLiveDetail || !input.retrieval?.documents.length) {
-    return catalogFallback;
-  }
-
-  const detailFallback = buildKnowledgeDetailFallbackAnswer({
-    requestText: input.requestText,
-    libraries: input.libraries,
-    retrieval: input.retrieval,
-    timeRange: input.timeRange,
-    contentFocus: input.contentFocus,
-  });
-
-  return [
-    '我先基于当前知识库目录和已命中的文档详情整理这次回答。',
-    catalogFallback,
-    detailFallback,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
 }
 
 function looksLikeCatalogAccessMiss(content: string) {
@@ -877,10 +625,13 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
   const requestText = String(input.prompt || '').trim();
   const preferLiveDetail = (input.answerMode || 'live_detail') === 'live_detail';
   const useExternalScopedMemory = input.forceGlobalMemorySelection === true;
-  const memoryState = await loadOpenClawMemorySelectionState({
-    botId: input.botDefinition?.id,
-    forceGlobalState: useExternalScopedMemory,
-  });
+  const [memoryState, catalogSnapshot] = await Promise.all([
+    loadOpenClawMemorySelectionState({
+      botId: input.botDefinition?.id,
+      forceGlobalState: useExternalScopedMemory,
+    }),
+    loadOpenClawMemoryCatalogSnapshot(),
+  ]);
   const memorySelection = selectOpenClawMemoryDocumentCandidatesFromState({
     state: memoryState,
     requestText,
@@ -913,16 +664,33 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
       : null;
   }
 
-  const fallbackContent = buildUnifiedKnowledgeAnswerFallback({
-    requestText,
-    libraries,
-    state: memoryState,
-    selection: memorySelection,
-    retrieval: effectiveRetrieval,
-    timeRange: input.timeRange,
-    contentFocus: input.contentFocus,
-    preferLiveDetail,
-  });
+  const fallbackContent = [
+    buildOpenClawLongTermMemoryDirectAnswer({
+      snapshot: catalogSnapshot,
+      requestText,
+      libraries,
+      effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
+    }),
+    preferLiveDetail && effectiveRetrieval?.documents.length
+      ? buildKnowledgeDetailFallbackAnswer({
+        requestText,
+        libraries,
+        retrieval: effectiveRetrieval,
+        timeRange: input.timeRange,
+        contentFocus: input.contentFocus,
+      })
+      : '',
+  ].filter(Boolean).join('\n\n') || buildKnowledgeMissMessage(libraries);
+
+  if (!preferLiveDetail || shouldAnswerFromOpenClawLongTermMemoryDirectory(requestText)) {
+    return {
+      libraries,
+      output: { type: 'answer', content: fallbackContent },
+      content: fallbackContent,
+      intent: 'general',
+      mode: 'openclaw',
+    };
+  }
 
   if (!isOpenClawGatewayConfigured()) {
     return {
@@ -952,13 +720,11 @@ export async function executeKnowledgeAnswer(input: KnowledgeAnswerInput): Promi
           detailDocuments: effectiveRetrieval?.documents.length || 0,
           detailEvidence: effectiveRetrieval?.evidenceMatches.length || 0,
         }),
-        buildKnowledgeCatalogStateContextBlock({
-          state: memoryState,
+        buildOpenClawLongTermMemoryContextBlock({
+          snapshot: catalogSnapshot,
           libraries,
-          selection: memorySelection,
+          effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
         }),
-        buildOpenClawMemorySelectionContextBlock(memorySelection),
-        buildKnowledgeCatalogSelectionDetailBlock(memorySelection),
         libraryKnowledgePagesContext,
         effectiveRetrieval?.documents.length
           ? buildKnowledgeContext(requestText, libraries, effectiveRetrieval, {

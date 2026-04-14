@@ -1,9 +1,5 @@
-import { promises as fs } from 'node:fs';
-import { execFile } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
-import { detectBizCategoryFromConfig, type DocumentCategoryConfig } from './document-config.js';
+import { type DocumentCategoryConfig } from './document-config.js';
 import {
   loadDocumentExtractionGovernance,
   resolveDocumentExtractionProfile,
@@ -11,17 +7,57 @@ import {
   type DocumentLibraryContext,
 } from './document-extraction-governance.js';
 import { applyDocumentParseFeedback } from './document-parse-feedback.js';
-import { buildStructuredProfile, deriveSchemaProfile, includesAnyText, inferSchemaType, isLikelyResumePersonName, refreshDerivedSchemaProfile } from './document-schema.js';
-import { canonicalizeResumeFields } from './resume-canonicalizer.js';
+import { buildStructuredProfile, deriveSchemaProfile, inferSchemaType, refreshDerivedSchemaProfile } from './document-schema.js';
 import { resolveDocumentMarkdownForFile, supportsMarkItDownExtension } from './document-markdown-provider.js';
+import { normalizeText } from './document-parser-text-normalization.js';
+import { readTextWithBestEffortEncoding } from './document-parser-text-reading.js';
+import { extractPdfText as extractPdfTextInternal, renderPdfDocumentToImages as renderPdfDocumentToImagesInternal } from './document-parser-pdf.js';
+import { extractPptxTextFromArchive, extractPresentationTextViaPdf as extractPresentationTextViaPdfInternal, renderPresentationDocumentToImages as renderPresentationDocumentToImagesInternal } from './document-parser-presentation.js';
+import { extractImageTextWithTesseract as extractImageTextWithTesseractInternal } from './document-parser-ocr.js';
+import { extractTextForDocument } from './document-parser-text-extraction.js';
+import { extractFootfallFields as extractFootfallFieldsInternal, extractOrderFields as extractOrderFieldsInternal } from './document-parser-table-derived-fields.js';
 import {
-  buildAugmentedEnv,
-  getOcrMyPdfCommandCandidates,
-  getPythonCommandCandidates,
-  getSofficeCommandCandidates,
-  getTesseractLanguageCandidates,
-} from './runtime-executables.js';
-import { extractWithUIEWorker } from './uie-process-client.js';
+  buildWorkbookTableSummary,
+  flattenSpreadsheetRows,
+  normalizeTableColumnKey,
+  stripHtmlTags,
+} from './document-parser-table-summary.js';
+import {
+  buildCatchErrorParsedDocument,
+  buildDetailedParsedDocument,
+  buildParseErrorParsedDocument,
+  buildQuickParsedDocument,
+  buildUnsupportedParsedDocument,
+} from './document-parser-result-builders.js';
+import {
+  extractContractFields as extractContractFieldsInternal,
+  extractEnterpriseGuidanceFields as extractEnterpriseGuidanceFieldsInternal,
+  refineEnterpriseGuidanceFields as refineEnterpriseGuidanceFieldsInternal,
+} from './document-parser-guidance-fields.js';
+import { extractResumeFields as extractResumeFieldsInternal } from './document-parser-resume-fields.js';
+import {
+  applyGovernedSchemaType as applyGovernedSchemaTypeInternal,
+  applyGovernedSchemaTypeWithEnterpriseGuidance as applyGovernedSchemaTypeWithEnterpriseGuidanceInternal,
+  detectBizCategory as detectBizCategoryInternal,
+  detectCategory as detectCategoryInternal,
+  detectRiskLevel as detectRiskLevelInternal,
+  detectTopicTags as detectTopicTagsInternal,
+  mergeGovernedTopicTags as mergeGovernedTopicTagsInternal,
+  shouldForceExtraction,
+} from './document-parser-classification.js';
+import { buildEvidence, inferTitle } from './document-parser-metadata.js';
+import { extractStructuredData } from './document-parser-structured-data.js';
+import { excerpt, splitEvidenceChunks, summarize } from './document-parser-evidence.js';
+import {
+  extractImageTextWithTesseractWithRuntime,
+  extractPdfTextWithRuntime,
+  extractPresentationTextViaPdfWithRuntime,
+  inferParseMethod,
+  shouldAttemptDetailedMarkdownResolution,
+  shouldPreserveLegacyAuxiliaryExtraction,
+  shouldTreatLegacyExtractionAsCanonical,
+  withTemporaryAsciiCopy,
+} from './document-parser-runtime.js';
 
 export { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-schema.js';
 
@@ -326,17 +362,6 @@ export type ParseDocumentOptions = {
   resolveMarkdown?: typeof resolveDocumentMarkdownForFile;
 };
 
-const CATEGORY_HINTS: Record<'contract' | 'technical' | 'paper' | 'report', string[]> = {
-  contract: ['contract', '合同', '协议', '条款', '付款', '甲方', '乙方', '采购'],
-  technical: ['技术', '方案', '需求', '架构', '系统', '接口', '部署', '采集', '智能化', '白皮书', '知识库'],
-  paper: ['paper', 'study', 'research', 'trial', 'randomized', 'placebo', 'abstract', 'introduction', 'methods', 'results', 'conclusion', 'mouse model', 'mice', 'zebrafish', '文献', '研究', '实验', '随机', '双盲'],
-  report: ['report', '日报', '周报', '月报', '复盘'],
-};
-
-const RESUME_HINTS = ['简历', '履历', '候选人', '应聘', '求职', '教育经历', '工作经历', '项目经历', '期望薪资', '目标岗位', 'resume', 'curriculum vitae', 'cv'];
-
-type KeywordRule = string | RegExp;
-const execFileAsync = promisify(execFile);
 export const DOCUMENT_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'] as const;
 export const DOCUMENT_PRESENTATION_EXTENSIONS = ['.ppt', '.pptx', '.pptm'] as const;
 export const DOCUMENT_AUDIO_EXTENSIONS = ['.wav', '.mp3'] as const;
@@ -362,2436 +387,45 @@ const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS
 const AUDIO_EXTENSIONS = new Set<string>(DOCUMENT_AUDIO_EXTENSIONS);
 const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、epub、wav、mp3、ppt、pptx、pptm、png、jpg、jpeg、webp、gif、bmp。';
 
-type PdfExtractionResult = {
-  text: string;
-  pageCount: number;
-  method: 'pdf-parse' | 'pypdf' | 'ocrmypdf';
-};
-
-const ENABLE_PADDLE_UIE = process.env.ENABLE_PADDLE_UIE === '1' || process.env.ENABLE_PADDLE_UIE_SERVICE === '1';
-const UIE_SCHEMA_BASE = ['\u4eba\u7fa4', '\u6210\u5206', '\u83cc\u682a', '\u529f\u6548', '\u5242\u91cf', '\u673a\u6784', '\u6307\u6807'] as const;
-const UIE_SCHEMA_TECHNICAL = ['\u529f\u6548', '\u673a\u6784', '\u6307\u6807'] as const;
-const UIE_SCHEMA_CONTRACT = ['\u673a\u6784', '\u6307\u6807'] as const;
-
-function getUIESchemaForCategory(category: string) {
-  if (category === 'technical') return UIE_SCHEMA_TECHNICAL;
-  if (category === 'contract') return UIE_SCHEMA_CONTRACT;
-  return UIE_SCHEMA_BASE;
-}
-
-function mergeUIESlotMaps(slotMaps: Array<Record<string, string[]>>) {
-  const merged = new Map<string, string[]>();
-
-  for (const slotMap of slotMaps) {
-    for (const [key, values] of Object.entries(slotMap || {})) {
-      const existing = merged.get(key) || [];
-      for (const value of values || []) {
-        const normalized = String(value || '').trim();
-        if (normalized && !existing.includes(normalized)) {
-          existing.push(normalized);
-        }
-      }
-      merged.set(key, existing);
-    }
-  }
-
-  return Object.fromEntries(merged.entries());
-}
-const UIE_SCHEMA = ['人群', '成分', '菌株', '功效', '剂量', '机构', '指标'] as const;
-
-function needsTemporaryAsciiPath(filePath: string) {
-  return process.platform === 'win32' && /[^\x00-\x7F]/.test(filePath);
-}
-
-async function withTemporaryAsciiCopy<T>(filePath: string, run: (inputPath: string) => Promise<T>) {
-  if (!needsTemporaryAsciiPath(filePath)) {
-    return run(filePath);
-  }
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-pdf-'));
-  const tempFilePath = path.join(tempDir, `input${path.extname(filePath) || '.pdf'}`);
-  try {
-    await fs.copyFile(filePath, tempFilePath);
-    return await run(tempFilePath);
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
-function decodeXmlEntities(input: string) {
-  return String(input || '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, '\'')
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, value: string) => String.fromCodePoint(Number.parseInt(value, 10)));
-}
-
-function extractPresentationXmlText(xml: string) {
-  const values = Array.from(String(xml || '').matchAll(/<(?:a:)?t\b[^>]*>([\s\S]*?)<\/(?:a:)?t>/gi))
-    .map((match) => decodeXmlEntities(match[1] || '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-  return [...new Set(values)].join('\n');
-}
-
-function extractPresentationSequenceNumber(entryPath: string) {
-  const match = path.basename(entryPath).match(/(\d+)/);
-  return Number.parseInt(match?.[1] || '0', 10) || 0;
-}
-
-function toLocalFileUri(filePath: string) {
-  const resolved = path.resolve(filePath).replace(/\\/g, '/');
-  return process.platform === 'win32'
-    ? `file:///${resolved}`
-    : `file://${resolved}`;
-}
-
-async function extractPptxTextFromArchive(filePath: string) {
-  const { default: JSZip } = await import('jszip');
-  const buffer = await fs.readFile(filePath);
-  const archive = await JSZip.loadAsync(buffer);
-  const slidePaths = Object.keys(archive.files)
-    .filter((entryPath) => /^ppt\/slides\/slide\d+\.xml$/i.test(entryPath))
-    .sort((left, right) => extractPresentationSequenceNumber(left) - extractPresentationSequenceNumber(right));
-
-  if (!slidePaths.length) return '';
-
-  const noteTexts = new Map<number, string>();
-  const notePaths = Object.keys(archive.files)
-    .filter((entryPath) => /^ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(entryPath))
-    .sort((left, right) => extractPresentationSequenceNumber(left) - extractPresentationSequenceNumber(right));
-
-  for (const notePath of notePaths) {
-    const noteXml = await archive.file(notePath)?.async('text');
-    const noteText = extractPresentationXmlText(noteXml || '');
-    if (noteText) {
-      noteTexts.set(extractPresentationSequenceNumber(notePath), noteText);
-    }
-  }
-
-  const blocks: string[] = [];
-  for (const slidePath of slidePaths) {
-    const slideNumber = extractPresentationSequenceNumber(slidePath);
-    const slideXml = await archive.file(slidePath)?.async('text');
-    const slideText = extractPresentationXmlText(slideXml || '');
-    const noteText = noteTexts.get(slideNumber) || '';
-    if (!slideText && !noteText) continue;
-    blocks.push([
-      `# Slide ${slideNumber || blocks.length + 1}`,
-      slideText,
-      noteText ? `Speaker notes:\n${noteText}` : '',
-    ].filter(Boolean).join('\n\n'));
-  }
-
-  return blocks.join('\n\n');
-}
-
-async function convertPresentationToPdf(filePath: string) {
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-presentation-'));
-  const profileDir = path.join(workDir, 'libreoffice-profile');
-  await fs.mkdir(profileDir, { recursive: true });
-
-  try {
-    const converted = await withTemporaryAsciiCopy(filePath, async (inputPath) => {
-      const outputName = `${path.parse(inputPath).name}.pdf`;
-      for (const command of getSofficeCommandCandidates()) {
-        try {
-          await execFileAsync(command, [
-            '--headless',
-            `-env:UserInstallation=${toLocalFileUri(profileDir)}`,
-            '--convert-to',
-            'pdf',
-            '--outdir',
-            workDir,
-            inputPath,
-          ], {
-            maxBuffer: 32 * 1024 * 1024,
-            timeout: 120000,
-            env: buildAugmentedEnv(),
-          });
-
-          const pdfPath = path.join(workDir, outputName);
-          const stat = await fs.stat(pdfPath).catch(() => null);
-          if (stat?.isFile() && stat.size > 0) {
-            return pdfPath;
-          }
-        } catch {
-          // try next soffice candidate
-        }
-      }
-      return '';
-    });
-
-    if (!converted) {
-      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
-      return null;
-    }
-
-    return { pdfPath: converted, workDir };
-  } catch {
-    await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
-    return null;
-  }
-}
-
-async function extractPresentationTextViaPdf(filePath: string) {
-  const converted = await convertPresentationToPdf(filePath);
-  if (!converted) {
-    return { text: '', parseMethod: 'presentation-pdf-convert-unavailable' };
-  }
-
-  try {
-    const result = await extractPdfText(converted.pdfPath);
-    return {
-      text: result.text,
-      parseMethod: result.method === 'ocrmypdf'
-        ? 'presentation-pdf-ocr'
-        : 'presentation-pdf-convert',
-    };
-  } finally {
-    await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
-async function renderPdfPagesToImages(filePath: string, maxPages = 12) {
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-presentation-render-'));
-  const pythonScript = [
-    'import json, sys',
-    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
-    'from pathlib import Path',
-    'try:',
-    '    import pypdfium2 as pdfium',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-    '    sys.exit(0)',
-    'pdf_path = sys.argv[1]',
-    'work_dir = Path(sys.argv[2])',
-    'max_pages = max(1, int(sys.argv[3]))',
-    'work_dir.mkdir(parents=True, exist_ok=True)',
-    'images = []',
-    'try:',
-    '    pdf = pdfium.PdfDocument(pdf_path)',
-    '    page_count = len(pdf)',
-    '    for index in range(min(page_count, max_pages)):',
-    '        page = pdf[index]',
-    '        bitmap = page.render(scale=2)',
-    '        image = bitmap.to_pil()',
-    '        image_path = work_dir / f"page-{index + 1}.png"',
-    '        image.save(image_path)',
-    '        images.append({"pageNumber": index + 1, "imagePath": str(image_path)})',
-    '    print(json.dumps({"ok": True, "images": images}, ensure_ascii=False))',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-  ].join('\n');
-
-  try {
-    const rendered = await withTemporaryAsciiCopy(filePath, async (inputPath) => {
-      const candidates = getPythonCommandCandidates().map((command) => ({
-        command,
-        args: ['-c', pythonScript, inputPath, workDir, String(Math.max(1, maxPages))],
-      }));
-
-      for (const candidate of candidates) {
-        try {
-          const { stdout } = await execFileAsync(candidate.command, candidate.args, {
-            maxBuffer: 64 * 1024 * 1024,
-            timeout: 120000,
-            env: buildAugmentedEnv(),
-          });
-          const parsed = JSON.parse(String(stdout || '{}')) as {
-            ok?: boolean;
-            images?: Array<{ pageNumber?: number; imagePath?: string }>;
-          };
-          if (!parsed.ok || !Array.isArray(parsed.images) || !parsed.images.length) continue;
-          const images = parsed.images
-            .map((entry) => ({
-              pageNumber: Number(entry.pageNumber || 0) || 0,
-              imagePath: String(entry.imagePath || '').trim(),
-            }))
-            .filter((entry) => entry.pageNumber > 0 && entry.imagePath);
-          if (images.length) return images;
-        } catch {
-          // try next python candidate
-        }
-      }
-
-      return [];
-    });
-
-    if (!rendered.length) {
-      await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
-      return null;
-    }
-
-    return { images: rendered, workDir };
-  } catch {
-    await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined);
-    return null;
-  }
-}
-
 export async function renderPresentationDocumentToImages(filePath: string, options?: { maxSlides?: number }) {
-  const converted = await convertPresentationToPdf(filePath);
-  if (!converted) return null;
-
-  const rendered = await renderPdfPagesToImages(converted.pdfPath, Math.max(1, Number(options?.maxSlides || 12)));
-  if (!rendered) {
-    await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
-    return null;
-  }
-
-  return {
-    images: rendered.images,
-    cleanup: async () => {
-      await fs.rm(rendered.workDir, { recursive: true, force: true }).catch(() => undefined);
-      await fs.rm(converted.workDir, { recursive: true, force: true }).catch(() => undefined);
-    },
-  };
+  return renderPresentationDocumentToImagesInternal(filePath, options, { withTemporaryAsciiCopy });
 }
 
 export async function renderPdfDocumentToImages(filePath: string, options?: { maxPages?: number }) {
-  const rendered = await renderPdfPagesToImages(filePath, Math.max(1, Number(options?.maxPages || 12)));
-  if (!rendered) return null;
-
-  return {
-    images: rendered.images,
-    cleanup: async () => {
-      await fs.rm(rendered.workDir, { recursive: true, force: true }).catch(() => undefined);
-    },
-  };
+  return renderPdfDocumentToImagesInternal(filePath, options);
 }
 
-function stripMarkdownSyntax(text: string) {
-  return text
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^[-*+]\s+/gm, '')
-    .replace(/`{1,3}([^`]+)`{1,3}/g, '$1')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
-}
-
-function normalizeText(text: string) {
-  return stripMarkdownSyntax(text).replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function isValidStrainCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^IL-\d+$/i.test(text)) return false;
-  if (/^(IFN|TNF|TGF)-?[A-Z0-9]+$/i.test(text)) return false;
-  if (/\b(?:interleukin|cytokine|transforming growth factor|interferon)\b/i.test(text)) return false;
-  if (/\b(?:and|in|on|of|for)\b/i.test(text) && !/\b(?:Lactobacillus|Bifidobacterium|Bacillus|Streptococcus)\b/i.test(text)) return false;
-  return true;
-}
-
-function isValidDoseCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^\d+(?:\.\d+)?\s?(?:mg|g|kg|ml|ug|IU|CFU)$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?\s?(?:x|×)\s?10\^?\d+\s?(?:CFU)?$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?e[+-]?\d{1,2}$/i.test(text)) return true;
-  return false;
-}
-
-function filterSlotValues(values: string[] | undefined, type: StructuredEntity['type']) {
-  const normalized = uniqStrings(values || []);
-  if (type === 'strain') return normalized.filter(isValidStrainCandidate);
-  if (type === 'dose') return normalized.filter(isStrictDoseCandidate);
-  return normalized;
-}
-
-function isStrictDoseCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^\d+(?:\.\d+)?\s?(?:mg|g|kg|ml|ug|μg|IU)$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?\s?(?:x|×|脳)\s?10\^?\d+\s?(?:CFU)?$/i.test(text)) return true;
-  const scientificMatch = text.match(/^(\d+(?:\.\d+)?)e([+-]?\d{1,2})$/i);
-  if (!scientificMatch) return false;
-  const mantissa = Number(scientificMatch[1]);
-  const exponent = Number(scientificMatch[2]);
-  return mantissa > 0 && mantissa <= 20 && exponent >= 6 && exponent <= 12;
-}
-
-function splitEvidenceChunksLegacy(text: string): EvidenceChunk[] {
-  const normalized = String(text || '').replace(/\r/g, '').trim();
-  if (!normalized) return [];
-
-  const blocks = normalized
-    .split(/\n{2,}/)
-    .map((item) => item.replace(/\s+/g, ' ').trim())
-    .filter((item) => item.length >= 40);
-
-  const sourceBlocks = blocks.length ? blocks : normalized
-    .split(/(?<=[。！？.!?])\s+|\n+/)
-    .map((item) => item.replace(/\s+/g, ' ').trim())
-    .filter((item) => item.length >= 40);
-
-  const chunks: EvidenceChunk[] = [];
-  const maxChunkLength = 420;
-
-  for (const block of sourceBlocks) {
-    if (block.length <= maxChunkLength) {
-      chunks.push({
-        id: `chunk-${chunks.length + 1}`,
-        order: chunks.length,
-        text: block,
-        charLength: block.length,
-      });
-      continue;
-    }
-
-    let cursor = 0;
-    while (cursor < block.length) {
-      let next = Math.min(cursor + maxChunkLength, block.length);
-      if (next < block.length) {
-        const window = block.slice(cursor, next);
-        const softCut = Math.max(
-          window.lastIndexOf('。'),
-          window.lastIndexOf('；'),
-          window.lastIndexOf('. '),
-          window.lastIndexOf('; '),
-        );
-        if (softCut >= 120) next = cursor + softCut + 1;
-      }
-
-      const piece = block.slice(cursor, next).trim();
-      if (piece.length >= 40) {
-        chunks.push({
-          id: `chunk-${chunks.length + 1}`,
-          order: chunks.length,
-          text: piece,
-          charLength: piece.length,
-        });
-      }
-      cursor = next;
-    }
-  }
-
-  return chunks.slice(0, 12);
-}
-
-function inferSectionTitle(block: string) {
-  const lines = String(block || '')
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (!lines.length) return undefined;
-
-  const [firstLine, secondLine = ''] = lines;
-  if (/^#{1,6}\s+/.test(firstLine)) {
-    return firstLine.replace(/^#{1,6}\s+/, '').trim() || undefined;
-  }
-
-  if (secondLine && /^[=-]{3,}$/.test(secondLine) && firstLine.length <= 80) {
-    return firstLine;
-  }
-
-  if (
-    /^(?:第[\d一二三四五六七八九十百零]+[章节部分条款]|(?:\d+|[一二三四五六七八九十]+)[.、．)）])\s*/.test(firstLine) &&
-    firstLine.length <= 80
-  ) {
-    return firstLine;
-  }
-
-  if (firstLine.length <= 40 && /[:：]$/.test(firstLine)) {
-    return firstLine.replace(/[:：]+$/, '').trim() || undefined;
-  }
-
-  return undefined;
-}
-
-function isHeadingOnlyBlock(block: string, sectionTitle: string | undefined) {
-  if (!sectionTitle) return false;
-  const normalized = String(block || '').replace(/\s+/g, ' ').trim();
-  if (!normalized) return false;
-  if (normalized === sectionTitle) return true;
-  if (normalized === `# ${sectionTitle}` || normalized === `## ${sectionTitle}`) return true;
-  return normalized.length <= Math.max(sectionTitle.length + 10, 60) && !/[。.!?；;]/.test(normalized);
-}
-
-function slugifyRegionHint(value: string | undefined) {
-  const normalized = String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
-  return normalized || '';
-}
-
-function buildRegionHint(page: number, sectionTitle: string | undefined) {
-  const pageHint = `page-${page}`;
-  const sectionSlug = slugifyRegionHint(sectionTitle);
-  if (!sectionSlug) return `${pageHint}:body`;
-  return `${pageHint}:${sectionSlug}`;
-}
-
-function createEvidenceChunk(
-  chunks: EvidenceChunk[],
-  text: string,
-  page: number,
-  sectionTitle: string | undefined,
-) {
-  const normalizedText = String(text || '').trim();
-  if (normalizedText.length < 40 || chunks.length >= 12) return;
-
-  chunks.push({
-    id: `chunk-${chunks.length + 1}`,
-    order: chunks.length,
-    text: normalizedText,
-    charLength: normalizedText.length,
-    page,
-    ...(sectionTitle ? { sectionTitle, title: sectionTitle } : {}),
-    regionHint: buildRegionHint(page, sectionTitle),
-  });
-}
-
-function splitEvidenceChunks(text: string): EvidenceChunk[] {
-  const normalized = String(text || '').replace(/\r/g, '').trim();
-  if (!normalized) return [];
-
-  const rawPages = normalized.includes('\f')
-    ? normalized.split(/\f+/).map((item) => item.trim()).filter(Boolean)
-    : [normalized];
-
-  const chunks: EvidenceChunk[] = [];
-  const maxChunkLength = 420;
-
-  for (const [pageIndex, rawPage] of rawPages.entries()) {
-    let currentSectionTitle: string | undefined;
-    const pageNumber = pageIndex + 1;
-    const rawBlocks = rawPage
-      .split(/\n{2,}/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    const sourceBlocks = rawBlocks.length
-      ? rawBlocks
-      : rawPage
-          .split(/(?<=[銆傦紒锛?!?])\s+|\n+/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-
-    for (const block of sourceBlocks) {
-      const detectedSectionTitle = inferSectionTitle(block);
-      if (detectedSectionTitle) {
-        currentSectionTitle = detectedSectionTitle;
-      }
-
-      if (isHeadingOnlyBlock(block, detectedSectionTitle)) {
-        continue;
-      }
-
-      const normalizedBlock = block.replace(/\s+/g, ' ').trim();
-      if (normalizedBlock.length <= maxChunkLength) {
-        createEvidenceChunk(chunks, normalizedBlock, pageNumber, currentSectionTitle);
-        continue;
-      }
-
-      let cursor = 0;
-      while (cursor < normalizedBlock.length && chunks.length < 12) {
-        let next = Math.min(cursor + maxChunkLength, normalizedBlock.length);
-        if (next < normalizedBlock.length) {
-          const window = normalizedBlock.slice(cursor, next);
-          const softCut = Math.max(
-            window.lastIndexOf('。'),
-            window.lastIndexOf('；'),
-            window.lastIndexOf('. '),
-            window.lastIndexOf('; '),
-          );
-          if (softCut >= 120) next = cursor + softCut + 1;
-        }
-
-        const piece = normalizedBlock.slice(cursor, next).trim();
-        createEvidenceChunk(chunks, piece, pageNumber, currentSectionTitle);
-        cursor = next;
-      }
-    }
-  }
-
-  return chunks.slice(0, 12);
-}
-
-function stripHtmlTags(text: string) {
-  return text
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ');
-}
-
-function flattenSpreadsheetRows(rows: unknown[][]) {
-  return rows
-    .map((row) => row.map((cell) => String(cell ?? '').trim()).filter(Boolean).join(' | '))
-    .filter(Boolean)
-    .join('\n');
-}
-
-function normalizeTableCell(value: unknown) {
-  return String(value ?? '').replace(/\s+/g, ' ').trim();
-}
-
-function trimTrailingEmptyCells(row: string[]) {
-  const next = row.slice();
-  while (next.length && !next[next.length - 1]) {
-    next.pop();
-  }
-  return next;
-}
-
-function normalizeTableRows(rows: unknown[][]) {
-  return rows
-    .map((row) => trimTrailingEmptyCells((Array.isArray(row) ? row : []).map(normalizeTableCell)))
-    .filter((row) => row.some(Boolean));
-}
-
-function looksLikeHeaderRow(row: string[]) {
-  const cells = row.filter(Boolean);
-  if (!cells.length) return false;
-  const textLikeCount = cells.filter((cell) => /[A-Za-z_\u4e00-\u9fff]/.test(cell)).length;
-  const numericLikeCount = cells.filter((cell) => /^[0-9.,%:/-]+$/.test(cell)).length;
-  const uniqueCount = new Set(cells.map((cell) => cell.toLowerCase())).size;
-  return textLikeCount >= Math.max(1, Math.ceil(cells.length / 2))
-    && numericLikeCount < Math.ceil(cells.length / 2)
-    && uniqueCount >= Math.max(1, cells.length - 1);
-}
-
-function buildTableColumns(headerRow: string[], columnCount: number) {
-  const seen = new Map<string, number>();
-  const columns: string[] = [];
-  for (let index = 0; index < columnCount; index += 1) {
-    const raw = normalizeTableCell(headerRow[index] || '');
-    const base = raw || `column_${index + 1}`;
-    const duplicateCount = seen.get(base) || 0;
-    seen.set(base, duplicateCount + 1);
-    columns.push(duplicateCount ? `${base}_${duplicateCount + 1}` : base);
-  }
-  return columns;
-}
-
-function normalizeTableColumnKey(value: string) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
-function parseTableDateValue(value: string): { normalized: string; granularity: 'month' | 'date' | 'datetime' } | undefined {
-  const text = String(value || '').trim();
-  if (!text) return undefined;
-
-  let matched = text.match(/^(\d{4})[/-](\d{1,2})$/);
-  if (matched) {
-    const [, year, month] = matched;
-    return {
-      normalized: `${year}-${month.padStart(2, '0')}`,
-      granularity: 'month',
-    };
-  }
-
-  matched = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
-  if (matched) {
-    const [, year, month, day] = matched;
-    return {
-      normalized: `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`,
-      granularity: 'date',
-    };
-  }
-
-  matched = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (matched) {
-    const [, month, day, yearToken] = matched;
-    const normalizedYear = yearToken.length === 2 ? `20${yearToken}` : yearToken;
-    return {
-      normalized: `${normalizedYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`,
-      granularity: 'date',
-    };
-  }
-
-  matched = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (matched) {
-    const [, year, month, day, hour, minute, second = '00'] = matched;
-    return {
-      normalized: `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute}:${second}`,
-      granularity: 'datetime',
-    };
-  }
-
-  return undefined;
-}
-
-function detectMetricKind(column: string, values: string[]) {
-  const key = normalizeTableColumnKey(column);
-  if (values.some((value) => /[%％]$/.test(value)) || /(margin|ratio|rate|percent|pct|毛利率|占比|比率|比例)/i.test(key)) {
-    return 'percent' as const;
-  }
-  if (values.some((value) => /[￥¥$]/.test(value)) || /(amount|sales|revenue|gmv|profit|price|金额|销售额|收入|利润|单价)/i.test(key)) {
-    return 'currency' as const;
-  }
-  return 'number' as const;
-}
-
-function parseTableNumericValue(value: string, kind: TableMetricSummary['kind']) {
-  const raw = String(value || '').trim();
-  if (!raw) return undefined;
-  const cleaned = raw.replace(/[%％￥¥$,，]/g, '').trim();
-  if (!/^-?\d+(?:\.\d+)?$/.test(cleaned)) return undefined;
-  const numeric = Number(cleaned);
-  if (!Number.isFinite(numeric)) return undefined;
-  if (kind === 'percent' && /[%％]$/.test(raw)) {
-    return numeric / 100;
-  }
-  return numeric;
-}
-
-function buildTableInsights(columns: string[], rows: string[][]): TableInsightSummary | undefined {
-  if (!columns.length || !rows.length) return undefined;
-
-  const dateColumns: TableDateSummary[] = [];
-  const metricColumns: TableMetricSummary[] = [];
-  const dimensionColumns: TableDimensionSummary[] = [];
-
-  columns.forEach((column, index) => {
-    const values = rows
-      .map((row) => normalizeTableCell(row[index] || ''))
-      .filter(Boolean);
-    if (!values.length) return;
-
-    const dateValues = values
-      .map((value) => parseTableDateValue(value))
-      .filter((value): value is { normalized: string; granularity: 'month' | 'date' | 'datetime' } => Boolean(value));
-    if (dateValues.length >= Math.max(2, Math.ceil(values.length * 0.6))) {
-      const normalizedDates = [...new Set(dateValues.map((entry) => entry.normalized))].sort();
-      const granularity = dateValues.every((entry) => entry.granularity === 'month')
-        ? 'month'
-        : dateValues.some((entry) => entry.granularity === 'datetime')
-          ? 'datetime'
-          : 'date';
-      dateColumns.push({
-        column,
-        min: normalizedDates[0],
-        max: normalizedDates[normalizedDates.length - 1],
-        distinctCount: normalizedDates.length,
-        granularity,
-      });
-      return;
-    }
-
-    const metricKind = detectMetricKind(column, values);
-    const numericValues = values
-      .map((value) => parseTableNumericValue(value, metricKind))
-      .filter((value): value is number => Number.isFinite(value));
-    if (numericValues.length >= Math.max(2, Math.ceil(values.length * 0.7))) {
-      const sum = numericValues.reduce((accumulator, value) => accumulator + value, 0);
-      metricColumns.push({
-        column,
-        kind: metricKind,
-        nonEmptyCount: numericValues.length,
-        min: Number(Math.min(...numericValues).toFixed(4)),
-        max: Number(Math.max(...numericValues).toFixed(4)),
-        sum: Number(sum.toFixed(4)),
-        avg: Number((sum / numericValues.length).toFixed(4)),
-      });
-      return;
-    }
-
-    const counts = new Map<string, number>();
-    values.forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
-    const distinctCount = counts.size;
-    const key = normalizeTableColumnKey(column);
-    const isKnownDimension = /(platform|platform_focus|channel|category|类目|品类|warehouse|仓|risk|priority|recommendation|region|mall_zone|mall_area|mall_partition|shopping_zone|business_zone|floor_zone|floor_area|floor_partition|room_unit|shop_unit|shop_no|商场分区|商场区域|楼层分区|楼层区域|楼层|单间|铺位|店铺|区域|分区|片区|位置|点位)/i.test(key);
-    if (
-      distinctCount >= 2
-      && (distinctCount <= Math.min(12, Math.max(4, Math.ceil(values.length * 0.25))) || isKnownDimension)
-    ) {
-      const topValues = [...counts.entries()]
-        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
-        .slice(0, 5)
-        .map(([value, count]) => ({ value, count }));
-      dimensionColumns.push({
-        column,
-        distinctCount,
-        topValues,
-      });
-    }
-  });
-
-  const insights: TableInsightSummary = {};
-  if (dateColumns.length) insights.dateColumns = dateColumns;
-  if (metricColumns.length) insights.metricColumns = metricColumns;
-  if (dimensionColumns.length) insights.dimensionColumns = dimensionColumns;
-  return Object.keys(insights).length ? insights : undefined;
-}
-
-function mapSampleRows(columns: string[], rows: string[][]) {
-  return rows.slice(0, 5).map((row) => {
-    const record: Record<string, string> = {};
-    columns.forEach((column, index) => {
-      record[column] = normalizeTableCell(row[index] || '');
-    });
-    return record;
-  });
-}
-
-function detectRecordKeyField(columns: string[], rows: string[][]) {
-  const preferredAliases = [
-    'order_id',
-    'sku',
-    'product_id',
-    'item_id',
-    'inventory_id',
-    'contract_no',
-    'document_no',
-    'id',
-  ];
-
-  for (const alias of preferredAliases) {
-    const matched = columns.find((column) => normalizeTableColumnKey(column) === alias);
-    if (matched) return matched;
-  }
-
-  for (const column of columns) {
-    const values = rows
-      .map((row) => normalizeTableCell(row[columns.indexOf(column)] || ''))
-      .filter(Boolean);
-    if (!values.length) continue;
-    const uniqueCount = new Set(values).size;
-    if (uniqueCount >= Math.max(2, Math.ceil(values.length * 0.9))) {
-      return column;
-    }
-  }
-
-  return undefined;
-}
-
-function findTableColumnByAliases(columns: string[], aliases: string[]) {
-  const aliasSet = new Set(aliases.map(normalizeTableColumnKey));
-  return columns.find((column) => aliasSet.has(normalizeTableColumnKey(column)));
-}
-
-function buildRecordFieldRoles(columns: string[]) {
-  const roles: TableRecordFieldRoles = {
-    periodField: findTableColumnByAliases(columns, ['month', 'date', 'order_date', 'snapshot_date', 'period', '时间', '日期', '统计时间', '报表日期']),
-    platformField: findTableColumnByAliases(columns, ['platform', 'platform_focus', 'channel']),
-    categoryField: findTableColumnByAliases(columns, ['category', 'category_name', '类目', '品类']),
-    skuField: findTableColumnByAliases(columns, ['sku', 'sku_id', 'product_id', 'item_id']),
-    mallZoneField: findTableColumnByAliases(columns, [
-      'mall_zone',
-      'mall_area',
-      'mall_partition',
-      'shopping_zone',
-      'business_zone',
-      'mall_region',
-      '商场分区',
-      '商场区域',
-      '商场片区',
-      '商业分区',
-      '区域',
-      '分区',
-      '片区',
-    ]),
-    floorZoneField: findTableColumnByAliases(columns, [
-      'floor_zone',
-      'floor_area',
-      'floor_partition',
-      'floor_region',
-      '楼层分区',
-      '楼层区域',
-      '楼面分区',
-      '楼层',
-      '楼面',
-      '楼层片区',
-    ]),
-    roomUnitField: findTableColumnByAliases(columns, [
-      'room_unit',
-      'room_no',
-      'unit_no',
-      'shop_unit',
-      'shop_no',
-      'store_unit',
-      '单间',
-      '铺位',
-      '店铺',
-      '商户',
-      '位置',
-      '点位',
-      '铺位号',
-      '门店',
-    ]),
-    footfallField: findTableColumnByAliases(columns, [
-      'visitor_count',
-      'visitors',
-      'footfall',
-      'traffic_count',
-      'entry_count',
-      'passenger_flow',
-      '客流',
-      '人流',
-      '到访量',
-      '进店客流',
-      '进入人数',
-      '进场人数',
-      '入场人数',
-      '进店人数',
-      '进馆人数',
-      '客流人数',
-    ]),
-    orderCountField: findTableColumnByAliases(columns, ['order_count', 'orders', 'units_sold']),
-    quantityField: findTableColumnByAliases(columns, ['quantity', 'qty', 'count']),
-    netSalesField: findTableColumnByAliases(columns, ['net_amount', 'net_sales', 'revenue', 'gmv']),
-    grossAmountField: findTableColumnByAliases(columns, ['gross_amount', 'sales_amount']),
-    refundAmountField: findTableColumnByAliases(columns, ['refund_amount', 'refund_total', 'refund']),
-    grossProfitField: findTableColumnByAliases(columns, ['gross_profit', 'profit']),
-    grossMarginField: findTableColumnByAliases(columns, ['gross_margin', 'margin', 'profit_rate']),
-    inventoryBeforeField: findTableColumnByAliases(columns, ['inventory_before', 'stock_before', 'opening_stock']),
-    inventoryAfterField: findTableColumnByAliases(columns, ['inventory_after', 'stock_after', 'closing_stock']),
-    inventoryRiskField: findTableColumnByAliases(columns, ['inventory_risk', 'risk_flag', 'inventory_status']),
-    recommendationField: findTableColumnByAliases(columns, ['recommendation', 'replenishment', 'action']),
-    replenishmentPriorityField: findTableColumnByAliases(columns, ['replenishment_priority', 'priority']),
-  };
-
-  return Object.fromEntries(
-    Object.entries(roles).filter(([, value]) => String(value || '').trim()),
-  ) as TableRecordFieldRoles;
-}
-
-function deriveRecordBusinessFields(
-  rowValues: Record<string, string>,
-  roles: TableRecordFieldRoles,
-) {
-  const derivedFields: Record<string, string> = {};
-  const readRole = (columnName?: string) => (columnName ? normalizeTableCell(rowValues[columnName] || '') : '');
-  const periodValue = readRole(roles.periodField);
-  const parsedPeriod = parseTableDateValue(periodValue);
-  const platform = readRole(roles.platformField);
-  const category = readRole(roles.categoryField);
-  const sku = readRole(roles.skuField);
-  const mallZone = readRole(roles.mallZoneField);
-  const floorZone = readRole(roles.floorZoneField);
-  const roomUnit = readRole(roles.roomUnitField);
-  const footfall = readRole(roles.footfallField);
-  const orderCount = readRole(roles.orderCountField) || readRole(roles.quantityField);
-  const netSales = readRole(roles.netSalesField) || readRole(roles.grossAmountField);
-  const grossMarginDirect = readRole(roles.grossMarginField);
-  const grossProfit = readRole(roles.grossProfitField);
-  const inventoryBefore = readRole(roles.inventoryBeforeField);
-  const inventoryAfter = readRole(roles.inventoryAfterField);
-  const inventoryStatus = readRole(roles.inventoryRiskField);
-  const recommendation = readRole(roles.recommendationField);
-  const replenishmentPriority = readRole(roles.replenishmentPriorityField);
-
-  if (parsedPeriod?.normalized) derivedFields.period = parsedPeriod.normalized;
-  else if (periodValue) derivedFields.period = periodValue;
-  if (platform) derivedFields.platform = platform;
-  if (category) derivedFields.category = category;
-  if (sku) derivedFields.sku = sku;
-  if (mallZone) derivedFields.mallZone = mallZone;
-  if (floorZone) derivedFields.floorZone = floorZone;
-  if (roomUnit) derivedFields.roomUnit = roomUnit;
-  if (footfall) derivedFields.footfall = footfall;
-  if (orderCount) derivedFields.orderCount = orderCount;
-  if (netSales) derivedFields.netSales = netSales;
-  if (grossMarginDirect) derivedFields.grossMargin = grossMarginDirect;
-  else if (grossProfit && netSales) {
-    const grossProfitValue = parseTableNumericValue(grossProfit, 'currency');
-    const netSalesValue = parseTableNumericValue(netSales, /%/.test(netSales) ? 'percent' : 'currency');
-    if (grossProfitValue && netSalesValue) {
-      derivedFields.grossMargin = `${((grossProfitValue / netSalesValue) * 100).toFixed(2)}%`;
-    }
-  }
-  if (inventoryBefore) derivedFields.inventoryBefore = inventoryBefore;
-  if (inventoryAfter) derivedFields.inventoryAfter = inventoryAfter;
-  if (inventoryStatus) derivedFields.inventoryStatus = inventoryStatus;
-  if (recommendation) derivedFields.recommendation = recommendation;
-  if (replenishmentPriority) derivedFields.replenishmentPriority = replenishmentPriority;
-
-  return derivedFields;
-}
-
-function buildTopValueList(values: string[]) {
-  const counts = new Map<string, number>();
-  values
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
-  return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
-    .slice(0, 3)
-    .map(([value]) => value);
-}
-
-function buildTopValueCounts(values: string[]) {
-  const counts = new Map<string, number>();
-  values
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-    .forEach((value) => counts.set(value, (counts.get(value) || 0) + 1));
-  return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
-    .slice(0, 3)
-    .map(([value]) => value);
-}
-
-function roundMetricValue(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Number(value.toFixed(2));
-}
-
-function parsePercentText(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return undefined;
-  const numeric = parseTableNumericValue(text, 'percent');
-  return typeof numeric === 'number' ? numeric : undefined;
-}
-
-function parseCurrencyText(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return undefined;
-  const numeric = parseTableNumericValue(text, 'currency');
-  return typeof numeric === 'number' ? numeric : undefined;
-}
-
-function buildRecordInsights(recordRows: TableStructuredRow[]) {
-  if (!recordRows.length) return undefined;
-
-  const alerts: TableRecordAlert[] = [];
-  let lowMarginRowCount = 0;
-  let highRefundRowCount = 0;
-  let inventoryRiskRowCount = 0;
-  let totalFootfall = 0;
-  const riskSkuCandidates: string[] = [];
-  const replenishmentCandidates: string[] = [];
-  const refundHotspotCandidates: string[] = [];
-  const platformSummary = new Map<string, { platform: string; rowCount: number; netSales: number; inventoryRiskRowCount: number }>();
-  const categorySummary = new Map<string, { category: string; rowCount: number; netSales: number; inventoryRiskRowCount: number }>();
-  const mallZoneSummary = new Map<string, {
-    mallZone: string;
-    rowCount: number;
-    footfall: number;
-    floorZones: Set<string>;
-    roomUnits: Set<string>;
-  }>();
-  const skuNetSalesSummary = new Map<string, { sku: string; platform?: string; rowCount: number; netSales: number; inventoryStatus?: string }>();
-  const inventoryRiskSummary = new Map<string, number>();
-
-  for (const row of recordRows) {
-    const derived = row.derivedFields || {};
-    const grossMargin = parsePercentText(String(derived.grossMargin || ''));
-    const netSales = parseCurrencyText(String(derived.netSales || ''));
-    const grossAmount = parseCurrencyText(String(row.values?.gross_amount || ''));
-    const refundAmount = parseCurrencyText(String(row.values?.refund_amount || ''));
-    const inventoryStatus = String(derived.inventoryStatus || '').trim();
-    const sku = String(derived.sku || row.keyValue || '').trim();
-    const mallZone = String(derived.mallZone || '').trim();
-    const floorZone = String(derived.floorZone || '').trim();
-    const roomUnit = String(derived.roomUnit || '').trim();
-    const footfall = parseTableNumericValue(String(derived.footfall || ''), 'number');
-    const platform = String(derived.platform || '').trim();
-    const category = String(derived.category || '').trim();
-    const recommendation = String(derived.recommendation || '').trim();
-    const replenishmentPriority = String(derived.replenishmentPriority || '').trim();
-    const hasInventoryRisk = Boolean(inventoryStatus && !/^healthy$/i.test(inventoryStatus));
-
-    if (platform) {
-      const current = platformSummary.get(platform) || { platform, rowCount: 0, netSales: 0, inventoryRiskRowCount: 0 };
-      current.rowCount += 1;
-      current.netSales += typeof netSales === 'number' ? netSales : 0;
-      current.inventoryRiskRowCount += hasInventoryRisk ? 1 : 0;
-      platformSummary.set(platform, current);
-    }
-
-    if (category) {
-      const current = categorySummary.get(category) || { category, rowCount: 0, netSales: 0, inventoryRiskRowCount: 0 };
-      current.rowCount += 1;
-      current.netSales += typeof netSales === 'number' ? netSales : 0;
-      current.inventoryRiskRowCount += hasInventoryRisk ? 1 : 0;
-      categorySummary.set(category, current);
-    }
-
-    if (mallZone) {
-      const current = mallZoneSummary.get(mallZone) || {
-        mallZone,
-        rowCount: 0,
-        footfall: 0,
-        floorZones: new Set<string>(),
-        roomUnits: new Set<string>(),
-      };
-      current.rowCount += 1;
-      current.footfall += typeof footfall === 'number' ? footfall : 0;
-      if (floorZone) current.floorZones.add(floorZone);
-      if (roomUnit) current.roomUnits.add(roomUnit);
-      mallZoneSummary.set(mallZone, current);
-      totalFootfall += typeof footfall === 'number' ? footfall : 0;
-    }
-
-    if (sku) {
-      const skuKey = [sku, platform].filter(Boolean).join('||');
-      const current = skuNetSalesSummary.get(skuKey) || {
-        sku,
-        ...(platform ? { platform } : {}),
-        rowCount: 0,
-        netSales: 0,
-        ...(inventoryStatus ? { inventoryStatus } : {}),
-      };
-      current.rowCount += 1;
-      current.netSales += typeof netSales === 'number' ? netSales : 0;
-      if (inventoryStatus) current.inventoryStatus = inventoryStatus;
-      skuNetSalesSummary.set(skuKey, current);
-    }
-
-    if (typeof grossMargin === 'number' && grossMargin <= 0.2) {
-      lowMarginRowCount += 1;
-      alerts.push({
-        type: 'low_margin',
-        rowNumber: row.rowNumber,
-        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
-        severity: grossMargin <= 0.12 ? 'high' : 'medium',
-        message: `毛利率偏低：${(grossMargin * 100).toFixed(2)}%`,
-      });
-    }
-
-    if (typeof refundAmount === 'number' && ((typeof grossAmount === 'number' && grossAmount > 0 && refundAmount / grossAmount >= 0.2) || (typeof netSales === 'number' && netSales > 0 && refundAmount / netSales >= 0.25))) {
-      highRefundRowCount += 1;
-      if (platform || category) {
-        refundHotspotCandidates.push([platform, category].filter(Boolean).join(' / '));
-      }
-      alerts.push({
-        type: 'high_refund',
-        rowNumber: row.rowNumber,
-        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
-        severity: 'high',
-        message: `退款金额偏高：${refundAmount.toFixed(2)}`,
-      });
-    }
-
-    if (inventoryStatus) {
-      inventoryRiskSummary.set(inventoryStatus, (inventoryRiskSummary.get(inventoryStatus) || 0) + 1);
-    }
-
-    if (hasInventoryRisk) {
-      inventoryRiskRowCount += 1;
-      if (sku) riskSkuCandidates.push(sku);
-      alerts.push({
-        type: 'inventory_risk',
-        rowNumber: row.rowNumber,
-        ...(row.keyValue ? { keyValue: row.keyValue } : {}),
-        severity: /^understock|^overstock/i.test(inventoryStatus) ? 'high' : 'medium',
-        message: `库存状态：${inventoryStatus}`,
-      });
-    }
-
-    const shouldPrioritizeReplenishment = /^understock/i.test(inventoryStatus)
-      || /^P0|^P1/i.test(replenishmentPriority)
-      || /补货|replenish|restock/i.test(recommendation);
-    if (shouldPrioritizeReplenishment && sku) {
-      replenishmentCandidates.push(sku);
-    }
-  }
-
-  const topPlatforms = buildTopValueList(recordRows.map((row) => String(row.derivedFields?.platform || '')));
-  const topCategories = buildTopValueList(recordRows.map((row) => String(row.derivedFields?.category || '')));
-
-  const summary: TableRecordInsightSummary = {};
-  if (topPlatforms.length) summary.topPlatforms = topPlatforms;
-  if (topCategories.length) summary.topCategories = topCategories;
-  const mallZoneBreakdown = [...mallZoneSummary.values()]
-    .sort((left, right) => right.footfall - left.footfall || right.rowCount - left.rowCount || left.mallZone.localeCompare(right.mallZone, 'zh-CN'))
-    .slice(0, 6)
-    .map((entry) => ({
-      mallZone: entry.mallZone,
-      rowCount: entry.rowCount,
-      footfall: roundMetricValue(entry.footfall),
-      floorZoneCount: entry.floorZones.size,
-      roomUnitCount: entry.roomUnits.size,
-    }));
-  if (mallZoneBreakdown.length) {
-    summary.mallZoneBreakdown = mallZoneBreakdown;
-    summary.topMallZones = mallZoneBreakdown.slice(0, 3).map((entry) => entry.mallZone);
-  }
-  if (totalFootfall > 0) summary.totalFootfall = roundMetricValue(totalFootfall);
-  if (lowMarginRowCount) summary.lowMarginRowCount = lowMarginRowCount;
-  if (highRefundRowCount) summary.highRefundRowCount = highRefundRowCount;
-  if (inventoryRiskRowCount) summary.inventoryRiskRowCount = inventoryRiskRowCount;
-  const topRiskSkus = buildTopValueCounts(riskSkuCandidates);
-  const priorityReplenishmentItems = buildTopValueCounts(replenishmentCandidates);
-  const refundHotspots = buildTopValueCounts(refundHotspotCandidates);
-  if (topRiskSkus.length) summary.topRiskSkus = topRiskSkus;
-  if (priorityReplenishmentItems.length) summary.priorityReplenishmentItems = priorityReplenishmentItems;
-  if (refundHotspots.length) summary.refundHotspots = refundHotspots;
-  const platformBreakdown = [...platformSummary.values()]
-    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.platform.localeCompare(right.platform, 'zh-CN'))
-    .slice(0, 5)
-    .map((entry) => ({
-      platform: entry.platform,
-      rowCount: entry.rowCount,
-      netSales: roundMetricValue(entry.netSales),
-      inventoryRiskRowCount: entry.inventoryRiskRowCount,
-    }));
-  const categoryBreakdown = [...categorySummary.values()]
-    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.category.localeCompare(right.category, 'zh-CN'))
-    .slice(0, 5)
-    .map((entry) => ({
-      category: entry.category,
-      rowCount: entry.rowCount,
-      netSales: roundMetricValue(entry.netSales),
-      inventoryRiskRowCount: entry.inventoryRiskRowCount,
-    }));
-  const topSkuNetSales = [...skuNetSalesSummary.values()]
-    .sort((left, right) => right.netSales - left.netSales || right.rowCount - left.rowCount || left.sku.localeCompare(right.sku, 'zh-CN'))
-    .slice(0, 5)
-    .map((entry) => ({
-      sku: entry.sku,
-      ...(entry.platform ? { platform: entry.platform } : {}),
-      rowCount: entry.rowCount,
-      netSales: roundMetricValue(entry.netSales),
-      ...(entry.inventoryStatus ? { inventoryStatus: entry.inventoryStatus } : {}),
-    }));
-  const inventoryRiskBreakdown = [...inventoryRiskSummary.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'zh-CN'))
-    .slice(0, 5)
-    .map(([inventoryStatus, count]) => ({ inventoryStatus, count }));
-  if (platformBreakdown.length) summary.platformBreakdown = platformBreakdown;
-  if (categoryBreakdown.length) summary.categoryBreakdown = categoryBreakdown;
-  if (topSkuNetSales.length) summary.topSkuNetSales = topSkuNetSales;
-  if (inventoryRiskBreakdown.length) summary.inventoryRiskBreakdown = inventoryRiskBreakdown;
-  if (alerts.length) summary.alerts = alerts.slice(0, 8);
-  return Object.keys(summary).length ? summary : undefined;
-}
-
-function looksLikeWideFootfallZoneColumn(column: string) {
-  const normalized = normalizeTableColumnKey(column);
-  if (!normalized) return false;
-  if (/^(date|month|time|period|时间|日期|统计时间|报表日期|合计|总计|total|sum)$/i.test(normalized)) return false;
-  if (/(mall|zone|area|region|partition|商场|区域|分区|片区|停车|楼外|楼层|楼面|电玩|中庭|广场)/i.test(normalized)) return true;
-  return /^[\u4e00-\u9fff]{1,6}$/.test(column.trim());
-}
-
-function isWideFootfallTotalColumn(column: string) {
-  const normalized = normalizeTableColumnKey(column);
-  return /^(total|sum|合计|总计|总客流|总人流)$/i.test(normalized);
-}
-
-function buildWideFootfallSheetSummary(columns: string[], rows: string[][]) {
-  if (columns.length < 3 || !rows.length) return undefined;
-
-  const firstColumn = columns[0];
-  const firstColumnValues = rows
-    .map((row) => normalizeTableCell(row[0] || ''))
-    .filter(Boolean);
-  const dateLikeCount = firstColumnValues
-    .map((value) => parseTableDateValue(value))
-    .filter(Boolean).length;
-  if (dateLikeCount < Math.max(1, Math.ceil(firstColumnValues.length * 0.6))) return undefined;
-
-  const numericColumns = columns.slice(1).filter((column, offset) => {
-    const values = rows
-      .map((row) => normalizeTableCell(row[offset + 1] || ''))
-      .filter(Boolean);
-    if (!values.length) return false;
-    const numericValues = values
-      .map((value) => parseTableNumericValue(value, 'number'))
-      .filter((value): value is number => Number.isFinite(value));
-    return numericValues.length >= Math.max(1, Math.ceil(values.length * 0.7));
-  });
-  const totalColumn = numericColumns.find((column) => isWideFootfallTotalColumn(column));
-  const mallZoneColumns = numericColumns.filter((column) => !isWideFootfallTotalColumn(column) && looksLikeWideFootfallZoneColumn(column));
-  if (!totalColumn && mallZoneColumns.length < 2) return undefined;
-
-  const mallZoneBreakdown = mallZoneColumns
-    .map((column) => {
-      const columnIndex = columns.indexOf(column);
-      const footfall = rows.reduce((sum, row) => {
-        const numeric = parseTableNumericValue(normalizeTableCell(row[columnIndex] || ''), 'number');
-        return sum + (typeof numeric === 'number' ? numeric : 0);
-      }, 0);
-      return {
-        mallZone: column,
-        rowCount: rows.length,
-        footfall: roundMetricValue(footfall),
-        floorZoneCount: 0,
-        roomUnitCount: 0,
-      } satisfies TableMallZoneBreakdown;
-    })
-    .filter((entry) => entry.footfall > 0)
-    .sort((left, right) => right.footfall - left.footfall || left.mallZone.localeCompare(right.mallZone, 'zh-CN'))
-    .slice(0, 8);
-  if (!mallZoneBreakdown.length) return undefined;
-
-  const totalFootfall = totalColumn
-    ? roundMetricValue(rows.reduce((sum, row) => {
-      const numeric = parseTableNumericValue(normalizeTableCell(row[columns.indexOf(totalColumn)] || ''), 'number');
-      return sum + (typeof numeric === 'number' ? numeric : 0);
-    }, 0))
-    : roundMetricValue(mallZoneBreakdown.reduce((sum, entry) => sum + entry.footfall, 0));
-
-  return {
-    recordFieldRoles: {
-      periodField: firstColumn,
-      ...(totalColumn ? { footfallField: totalColumn } : {}),
-    } satisfies TableRecordFieldRoles,
-    recordInsights: {
-      totalFootfall,
-      topMallZones: mallZoneBreakdown.slice(0, 3).map((entry) => entry.mallZone),
-      mallZoneBreakdown,
-    } satisfies TableRecordInsightSummary,
-  };
-}
-
-function mapRecordRows(columns: string[], rows: string[][], recordKeyField?: string, recordFieldRoles: TableRecordFieldRoles = {}) {
-  const recordKeyIndex = recordKeyField ? columns.findIndex((column) => column === recordKeyField) : -1;
-  return rows
-    .slice(0, 20)
-    .map((row, index) => {
-      const values: Record<string, string> = {};
-      columns.forEach((column, columnIndex) => {
-        values[column] = normalizeTableCell(row[columnIndex] || '');
-      });
-
-      const keyValue = recordKeyIndex >= 0 ? normalizeTableCell(row[recordKeyIndex] || '') : '';
-      const derivedFields = deriveRecordBusinessFields(values, recordFieldRoles);
-      return {
-        rowNumber: index + 1,
-        ...(keyValue ? { keyValue } : {}),
-        values,
-        ...(Object.keys(derivedFields).length ? { derivedFields } : {}),
-      } satisfies TableStructuredRow;
-    })
-    .filter((row) => Object.values(row.values).some(Boolean));
-}
-
-function buildTableSheetSummary(
-  name: string,
-  rows: unknown[][],
-): TableSheetSummary | undefined {
-  const normalizedRows = normalizeTableRows(rows);
-  if (!normalizedRows.length) return undefined;
-
-  const headerLike = looksLikeHeaderRow(normalizedRows[0] || []);
-  const dataRows = headerLike ? normalizedRows.slice(1) : normalizedRows;
-  const columnCount = Math.max(
-    ...(headerLike ? [normalizedRows[0]?.length || 0] : dataRows.map((row) => row.length)),
-    0,
-  );
-
-  if (!columnCount) return undefined;
-
-  const columns = headerLike
-    ? buildTableColumns(normalizedRows[0] || [], columnCount)
-    : buildTableColumns([], columnCount);
-  const insights = buildTableInsights(columns, dataRows);
-  const recordKeyField = detectRecordKeyField(columns, dataRows);
-  const wideFootfallSummary = buildWideFootfallSheetSummary(columns, dataRows);
-  const recordFieldRoles = {
-    ...buildRecordFieldRoles(columns),
-    ...(wideFootfallSummary?.recordFieldRoles || {}),
-  };
-  const recordRows = mapRecordRows(columns, dataRows, recordKeyField, recordFieldRoles);
-  const parsedRecordInsights = buildRecordInsights(recordRows);
-  const recordInsights = parsedRecordInsights || wideFootfallSummary?.recordInsights
-    ? {
-        ...(parsedRecordInsights || {}),
-        ...(wideFootfallSummary?.recordInsights || {}),
-      }
-    : undefined;
-
-  return {
-    name,
-    rowCount: dataRows.length,
-    columnCount,
-    columns,
-    sampleRows: mapSampleRows(columns, dataRows),
-    ...(recordKeyField ? { recordKeyField } : {}),
-    ...(Object.keys(recordFieldRoles).length ? { recordFieldRoles } : {}),
-    ...(recordRows.length ? { recordRows } : {}),
-    ...(recordInsights ? { recordInsights } : {}),
-    insights,
-  };
-}
-
-function scoreTableSheetSummary(sheet: TableSheetSummary) {
-  const roles = sheet.recordFieldRoles || {};
-  const insights = sheet.recordInsights || {};
-  const mallZoneBreakdownCount = (insights.mallZoneBreakdown || []).length;
-  let score = 0;
-
-  if (roles.mallZoneField && roles.footfallField) score += 80;
-  if (roles.netSalesField || roles.orderCountField || roles.skuField) score += 60;
-  if (roles.periodField) score += 15;
-  if (mallZoneBreakdownCount) score += 60 + mallZoneBreakdownCount * 25;
-  if ((insights.platformBreakdown || []).length || (insights.categoryBreakdown || []).length) score += 40;
-  if ((sheet.recordRows || []).length) score += Math.min(20, Math.ceil((sheet.recordRows || []).length / 5));
-  if (/(汇总|总表|summary|总览)/i.test(sheet.name)) {
-    score += mallZoneBreakdownCount > 1 ? 90 : 15;
-  }
-  score += Math.min(10, Math.ceil(sheet.rowCount / 20));
-
-  return score;
-}
-
-function buildWorkbookTableSummary(
-  format: 'csv' | 'xlsx',
-  sheets: Array<{ name: string; rows: unknown[][] }>,
-): TableSummary | undefined {
-  const sheetSummaries = sheets
-    .map((sheet) => buildTableSheetSummary(sheet.name, sheet.rows))
-    .filter((sheet): sheet is TableSheetSummary => Boolean(sheet));
-
-  if (!sheetSummaries.length) return undefined;
-
-  const [primarySheet] = [...sheetSummaries]
-    .sort((left, right) => scoreTableSheetSummary(right) - scoreTableSheetSummary(left) || right.rowCount - left.rowCount || left.name.localeCompare(right.name, 'zh-CN'));
-  return {
-    format,
-    rowCount: sheetSummaries.reduce((sum, sheet) => sum + sheet.rowCount, 0),
-    columnCount: primarySheet.columnCount,
-    columns: primarySheet.columns,
-    sampleRows: primarySheet.sampleRows,
-    sheetCount: sheetSummaries.length,
-    primarySheetName: primarySheet.name,
-    recordKeyField: primarySheet.recordKeyField,
-    recordFieldRoles: primarySheet.recordFieldRoles,
-    recordRows: primarySheet.recordRows,
-    recordInsights: primarySheet.recordInsights,
-    sheets: format === 'xlsx' && sheetSummaries.length > 1 ? sheetSummaries : undefined,
-    insights: primarySheet.insights,
-  };
-}
-
-async function buildPreprocessedImageVariants(filePath: string) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-ocr-image-'));
-  const pythonScript = [
-    'import json, os, sys',
-    'from pathlib import Path',
-    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
-    'try:',
-    '    from PIL import Image, ImageOps, ImageFilter',
-    'except Exception:',
-    '    print(json.dumps({"ok": False, "variants": []}, ensure_ascii=False))',
-    '    sys.exit(0)',
-    'source = Path(sys.argv[1])',
-    'target_dir = Path(sys.argv[2])',
-    'target_dir.mkdir(parents=True, exist_ok=True)',
-    'image = Image.open(source)',
-    'image = ImageOps.exif_transpose(image)',
-    'base = image.convert("L")',
-    'variants = []',
-    'def save_variant(name, variant):',
-    '    output = target_dir / name',
-    '    variant.save(output)',
-    '    variants.append(str(output))',
-    'width, height = base.size',
-    'scale = 2 if max(width, height) < 1800 else 1',
-    'if scale > 1:',
-    '    resized = base.resize((max(1, width * scale), max(1, height * scale)))',
-    'else:',
-    '    resized = base.copy()',
-    'save_variant("gray.png", resized)',
-    'enhanced = ImageOps.autocontrast(resized)',
-    'save_variant("gray-autocontrast.png", enhanced)',
-    'denoised = enhanced.filter(ImageFilter.MedianFilter(size=3))',
-    'save_variant("gray-denoised.png", denoised)',
-    'thresholded = denoised.point(lambda pixel: 255 if pixel > 170 else 0)',
-    'save_variant("bw-threshold.png", thresholded)',
-    'inverted = ImageOps.invert(thresholded)',
-    'save_variant("bw-inverted.png", inverted)',
-    'print(json.dumps({"ok": True, "variants": variants}, ensure_ascii=False))',
-  ].join('\n');
-
-  try {
-    for (const candidate of getPythonCommandCandidates()) {
-      try {
-        const { stdout } = await execFileAsync(candidate, ['-c', pythonScript, filePath, tempDir], {
-          maxBuffer: 8 * 1024 * 1024,
-          env: buildAugmentedEnv(),
-        });
-        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; variants?: string[] };
-        if (parsed.ok && Array.isArray(parsed.variants) && parsed.variants.length) {
-          return {
-            tempDir,
-            variants: parsed.variants.map((item) => String(item || '').trim()).filter(Boolean),
-          };
-        }
-      } catch {
-        // try next python interpreter
-      }
-    }
-  } catch {
-    // fall through to cleanup + empty result
-  }
-
-  await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-  return {
-    tempDir: '',
-    variants: [] as string[],
-  };
-}
-
-async function extractImageTextWithTesseract(filePath: string) {
-  const env = buildAugmentedEnv();
-  const candidates = [
-    env.TESSERACT_BIN || '',
-    process.platform === 'win32' ? 'C:\\Program Files\\Tesseract-OCR\\tesseract.exe' : '',
-    'tesseract',
-  ].filter(Boolean);
-  const languageCandidates = getTesseractLanguageCandidates();
-  const psmCandidates = ['6', '3'];
-
-  return withTemporaryAsciiCopy(filePath, async (inputPath) => {
-    const preprocessed = await buildPreprocessedImageVariants(inputPath);
-    const variantPaths = [inputPath, ...preprocessed.variants];
-    let bestText = '';
-
-    try {
-      for (const variantPath of variantPaths) {
-        for (const command of candidates) {
-          for (const language of languageCandidates) {
-            for (const psm of psmCandidates) {
-              try {
-                const { stdout } = await execFileAsync(command, [variantPath, 'stdout', '--psm', psm, '-l', language], {
-                  maxBuffer: 16 * 1024 * 1024,
-                  env,
-                });
-                const text = normalizeText(String(stdout || ''));
-                if (text.length > bestText.length) {
-                  bestText = text;
-                }
-              } catch {
-                // Try the next OCR configuration.
-              }
-            }
-          }
-        }
-      }
-    } finally {
-      if (preprocessed.tempDir) {
-        await fs.rm(preprocessed.tempDir, { recursive: true, force: true }).catch(() => undefined);
-      }
-    }
-
-    return bestText;
-  });
-}
-
-async function readUtf8Text(filePath: string) {
-  const buffer = await fs.readFile(filePath);
-  return buffer.toString('utf8');
-}
-
-function hasUtf8Bom(buffer: Buffer) {
-  return buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf;
-}
-
-function hasUtf16LeBom(buffer: Buffer) {
-  return buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe;
-}
-
-function hasUtf16BeBom(buffer: Buffer) {
-  return buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff;
-}
-
-function isExactUtf8RoundTrip(buffer: Buffer) {
-  try {
-    return Buffer.from(buffer.toString('utf8'), 'utf8').equals(buffer);
-  } catch {
-    return false;
-  }
-}
-
-function scoreDecodedText(text: string) {
-  if (!text) return -1000;
-
-  const replacementCount = (text.match(/\uFFFD/g) || []).length;
-  const nullCount = (text.match(/\u0000/g) || []).length;
-  const controlCount = (text.match(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
-  const cjkCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
-  const asciiWordCount = (text.match(/[A-Za-z0-9]/g) || []).length;
-  const whitespaceCount = (text.match(/\s/g) || []).length;
-  const mojibakeChars = [0x951F, 0x9225, 0x935A, 0x93C2, 0x7EE0]
-    .map((codePoint) => String.fromCodePoint(codePoint));
-  const mojibakeCount = mojibakeChars.reduce(
-    (count, char) => count + ((text.match(new RegExp(char, 'g')) || []).length),
-    0,
-  );
-
-  return (cjkCount * 3)
-    + asciiWordCount
-    + whitespaceCount
-    - (replacementCount * 40)
-    - (nullCount * 30)
-    - (controlCount * 20)
-    - (mojibakeCount * 8);
-}
-
-async function readTextWithBestEffortEncoding(filePath: string) {
-  const buffer = await fs.readFile(filePath);
-
-  if (hasUtf8Bom(buffer)) {
-    return { text: new TextDecoder('utf-8').decode(buffer), encoding: 'utf8-bom' };
-  }
-
-  if (hasUtf16LeBom(buffer)) {
-    return { text: new TextDecoder('utf-16le').decode(buffer), encoding: 'utf16le' };
-  }
-
-  if (hasUtf16BeBom(buffer)) {
-    return { text: new TextDecoder('utf-16be').decode(buffer), encoding: 'utf16be' };
-  }
-
-  // Prefer UTF-8 when the raw bytes round-trip exactly. This avoids misclassifying
-  // mostly-ASCII CSV files with a small amount of Chinese text as gb18030.
-  if (isExactUtf8RoundTrip(buffer)) {
-    return { text: buffer.toString('utf8'), encoding: 'utf8' };
-  }
-
-  const candidates: Array<{ text: string; encoding: string }> = [
-    { text: buffer.toString('utf8'), encoding: 'utf8' },
-  ];
-
-  try {
-    candidates.push({ text: new TextDecoder('gb18030').decode(buffer), encoding: 'gb18030' });
-  } catch {
-    // ignore
-  }
-
-  try {
-    candidates.push({ text: new TextDecoder('utf-16le').decode(buffer), encoding: 'utf16le' });
-  } catch {
-    // ignore
-  }
-
-  try {
-    candidates.push({ text: new TextDecoder('utf-16be').decode(buffer), encoding: 'utf16be' });
-  } catch {
-    // ignore
-  }
-
-  const ranked = candidates
-    .map((candidate) => ({ ...candidate, score: scoreDecodedText(candidate.text) }))
-    .sort((left, right) => right.score - left.score);
-
-  return ranked[0] || { text: buffer.toString('utf8'), encoding: 'utf8' };
-}
-
-async function extractPdfTextWithPdfParse(filePath: string) {
-  const buffer = await fs.readFile(filePath);
-  const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
-  const result = await pdfParse(buffer);
-  return String(result.text || '');
-}
-
-async function extractPdfTextWithPyPdf(filePath: string) {
-  const pythonScript = [
-    'import json, sys',
-    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
-    'try:',
-    '    from pypdf import PdfReader',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-    '    sys.exit(0)',
-    'try:',
-    '    reader = PdfReader(sys.argv[1])',
-    '    text = "\\f".join((page.extract_text() or "") for page in reader.pages)',
-    '    print(json.dumps({"ok": True, "text": text}, ensure_ascii=False))',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-  ].join('\n');
-
-  const candidates = getPythonCommandCandidates().map((command) => ({
-    command,
-    args: ['-c', pythonScript, filePath],
-  }));
-
-  for (const candidate of candidates) {
-    try {
-      const { stdout } = await execFileAsync(candidate.command, candidate.args, {
-        maxBuffer: 16 * 1024 * 1024,
-        env: buildAugmentedEnv(),
-      });
-      const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string };
-      if (parsed.ok && parsed.text) return parsed.text;
-    } catch {
-      // Try the next interpreter.
-    }
-  }
-
-  return '';
-}
-
-async function extractPdfInfoWithPyPdf(filePath: string) {
-  const pythonScript = [
-    'import json, sys',
-    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
-    'try:',
-    '    from pypdf import PdfReader',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-    '    sys.exit(0)',
-    'try:',
-    '    reader = PdfReader(sys.argv[1])',
-    '    text = "\\f".join((page.extract_text() or "") for page in reader.pages)',
-    '    print(json.dumps({"ok": True, "text": text, "pageCount": len(reader.pages)}, ensure_ascii=False))',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-  ].join('\n');
-
-  const candidates = getPythonCommandCandidates().map((command) => ({
-    command,
-    args: ['-c', pythonScript, filePath],
-  }));
-
-  return withTemporaryAsciiCopy(filePath, async (inputPath) => {
-    const inputCandidates = getPythonCommandCandidates().map((command) => ({
-      command,
-      args: ['-c', pythonScript, inputPath],
-    }));
-
-    for (const candidate of inputCandidates) {
-      try {
-        const { stdout } = await execFileAsync(candidate.command, candidate.args, {
-          maxBuffer: 32 * 1024 * 1024,
-          env: buildAugmentedEnv(),
-        });
-        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string; pageCount?: number };
-        if (parsed.ok) {
-          return {
-            text: String(parsed.text || ''),
-            pageCount: Number(parsed.pageCount || 0),
-          };
-        }
-      } catch {
-        // try next interpreter
-      }
-    }
-
-    return {
-      text: '',
-      pageCount: 0,
-    };
-  });
-}
-
-function isPdfTextLowQuality(text: string, pageCount: number) {
-  const normalized = normalizeText(text);
-  if (!normalized.length) return true;
-  const charsPerPage = pageCount > 0 ? normalized.length / pageCount : normalized.length;
-  const whitespaceRatio = text.length > 0 ? normalized.length / text.length : 0;
-  return normalized.length < 120 || (pageCount >= 2 && charsPerPage < 80) || whitespaceRatio < 0.35;
-}
-
-async function extractPdfTextWithOcrMyPdf(filePath: string) {
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aidp-ocr-'));
-  const sidecarPath = path.join(tempDir, 'sidecar.txt');
-  const outputPdfPath = path.join(tempDir, 'ocr-output.pdf');
-
-  try {
-    return withTemporaryAsciiCopy(filePath, async (inputPath) => {
-      for (const command of getOcrMyPdfCommandCandidates()) {
-        try {
-          await execFileAsync(command, [
-            '--force-ocr',
-            '--skip-big',
-            '50',
-            '--sidecar',
-            sidecarPath,
-            inputPath,
-            outputPdfPath,
-          ], {
-            maxBuffer: 32 * 1024 * 1024,
-            env: buildAugmentedEnv(),
-          });
-
-          const text = await fs.readFile(sidecarPath, 'utf8').catch(() => '');
-          if (normalizeText(text)) return text;
-        } catch {
-          // try next OCRmyPDF location
-        }
-      }
-
-      return '';
-    });
-  } catch {
-    return '';
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
-  }
-}
-
-async function extractPdfTextWithTesseractRender(filePath: string) {
-  const pythonScript = [
-    'import json, os, shutil, subprocess, sys, tempfile',
-    'if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")',
-    'from pathlib import Path',
-    'try:',
-    '    import pypdfium2 as pdfium',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-    '    sys.exit(0)',
-    'texts = []',
-    'work = tempfile.mkdtemp(prefix="aidp-ocr-render-")',
-    'try:',
-    '    pdf = pdfium.PdfDocument(sys.argv[1])',
-    '    page_count = len(pdf)',
-    '    for index in range(min(page_count, 20)):',
-    '        page = pdf[index]',
-    '        bitmap = page.render(scale=2)',
-    '        image = bitmap.to_pil()',
-    '        image_path = Path(work) / f"page-{index + 1}.png"',
-    '        image.save(image_path)',
-    '        tesseract_bin = os.environ.get("TESSERACT_BIN", "tesseract")',
-    '        command = [tesseract_bin, str(image_path), "stdout", "--psm", "3"]',
-    '        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="ignore")',
-    '        if result.returncode == 0 and result.stdout.strip():',
-    '            texts.append(result.stdout.strip())',
-    '    print(json.dumps({"ok": True, "text": "\\f".join(texts)}, ensure_ascii=False))',
-    'except Exception as exc:',
-    '    print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))',
-    'finally:',
-    '    shutil.rmtree(work, ignore_errors=True)',
-  ].join('\n');
-
-  return withTemporaryAsciiCopy(filePath, async (inputPath) => {
-    const candidates = getPythonCommandCandidates().map((command) => ({
-      command,
-      args: ['-c', pythonScript, inputPath],
-    }));
-
-    for (const candidate of candidates) {
-      try {
-        const { stdout } = await execFileAsync(candidate.command, candidate.args, {
-          maxBuffer: 64 * 1024 * 1024,
-          env: buildAugmentedEnv(),
-        });
-        const parsed = JSON.parse(String(stdout || '{}')) as { ok?: boolean; text?: string };
-        if (parsed.ok && normalizeText(String(parsed.text || ''))) {
-          return String(parsed.text || '');
-        }
-      } catch {
-        // try next interpreter
-      }
-    }
-
-    return '';
+async function extractPresentationTextViaPdf(filePath: string) {
+  return extractPresentationTextViaPdfWithRuntime(filePath, {
+    normalizeText,
+    withTemporaryAsciiCopy,
+    extractPresentationTextViaPdfInternal,
   });
 }
 
 async function extractPdfText(filePath: string) {
-  let primaryText = '';
-  try {
-    primaryText = await extractPdfTextWithPdfParse(filePath);
-  } catch {
-    primaryText = '';
-  }
-
-  const primaryNormalized = normalizeText(primaryText);
-  const fallbackInfo = await extractPdfInfoWithPyPdf(filePath);
-  const fallbackNormalized = normalizeText(fallbackInfo.text);
-  const bestText = fallbackNormalized.length > primaryNormalized.length ? fallbackInfo.text : primaryText;
-  const bestNormalized = normalizeText(bestText);
-  const pageCount = fallbackInfo.pageCount || 0;
-
-  if (!isPdfTextLowQuality(bestText, pageCount)) {
-    return {
-      text: bestText,
-      pageCount,
-      method: fallbackNormalized.length > primaryNormalized.length ? 'pypdf' : 'pdf-parse',
-    } satisfies PdfExtractionResult;
-  }
-
-  const ocrText = await extractPdfTextWithOcrMyPdf(filePath);
-  const ocrNormalized = normalizeText(ocrText);
-  if (ocrNormalized.length > bestNormalized.length) {
-    return {
-      text: ocrText,
-      pageCount,
-      method: 'ocrmypdf',
-    } satisfies PdfExtractionResult;
-  }
-
-  const renderedOcrText = await extractPdfTextWithTesseractRender(filePath);
-  const renderedOcrNormalized = normalizeText(renderedOcrText);
-  if (renderedOcrNormalized.length > bestNormalized.length) {
-    return {
-      text: renderedOcrText,
-      pageCount,
-      method: 'ocrmypdf',
-    } satisfies PdfExtractionResult;
-  }
-
-  if (bestNormalized.length > 0) {
-    return {
-      text: bestText,
-      pageCount,
-      method: fallbackNormalized.length > primaryNormalized.length ? 'pypdf' : 'pdf-parse',
-    } satisfies PdfExtractionResult;
-  }
-
-  throw new Error('PDF text extraction returned empty content');
-}
-
-function summarize(text: string, fallback: string) {
-  const normalized = normalizeText(text);
-  if (!normalized) return fallback;
-  return normalized.slice(0, 140) + (normalized.length > 140 ? '...' : '');
-}
-
-function excerpt(text: string, fallback: string) {
-  const normalized = normalizeText(text);
-  if (!normalized) return fallback;
-  return normalized.slice(0, 360) + (normalized.length > 360 ? '...' : '');
-}
-
-function uniqStrings(values: Array<string | undefined>) {
-  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
-}
-
-function mergeStringArrays(...groups: Array<string[] | undefined>) {
-  return uniqStrings(groups.flatMap((group) => group || []));
-}
-
-function uniqEntities(items: StructuredEntity[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = `${item.type}:${item.text.toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  return extractPdfTextWithRuntime(filePath, {
+    normalizeText,
+    withTemporaryAsciiCopy,
+    extractPdfTextInternal,
   });
 }
 
-function findChunkIdForText(evidenceChunks: EvidenceChunk[] | undefined, text: string) {
-  if (!text || !evidenceChunks?.length) return undefined;
-  const lowered = text.toLowerCase();
-  return evidenceChunks.find((chunk) => chunk.text.toLowerCase().includes(lowered))?.id;
+async function extractImageTextWithTesseract(filePath: string) {
+  return extractImageTextWithTesseractWithRuntime(filePath, {
+    normalizeText,
+    withTemporaryAsciiCopy,
+    extractImageTextWithTesseractInternal,
+  });
 }
 
-function collectRegexMatches(text: string, patterns: RegExp[]) {
-  const found = new Set<string>();
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = String(match[0] || '').trim();
-      if (value) found.add(value);
-    }
-  }
-  return [...found];
-}
-
-async function extractStructuredDataWithUIE(
-  text: string,
-  category: string,
-  evidenceChunks: EvidenceChunk[],
-): Promise<Partial<IntentSlots>> {
-  if (!ENABLE_PADDLE_UIE) {
-    return {};
-  }
-
-  try {
-    const schema = getUIESchemaForCategory(category);
-    const segments = [
-      text.slice(0, 1200),
-      ...evidenceChunks
-        .slice(0, 6)
-        .map((chunk) => chunk.text)
-        .filter(Boolean),
-    ]
-      .map((item) => normalizeText(item))
-      .filter((item, index, items) => item.length >= 40 && items.indexOf(item) === index);
-
-    if (!segments.length) {
-      return {};
-    }
-
-    const slotMaps = await Promise.all(
-      segments.map((segment) => extractWithUIEWorker({
-        text: segment.slice(0, 2000),
-        model: process.env.PADDLE_UIE_MODEL || 'uie-base',
-        schema,
-      })),
-    );
-
-    const slots = mergeUIESlotMaps(slotMaps);
-
-    return {
-      audiences: slots['\u4eba\u7fa4'] || [],
-      ingredients: slots['\u6210\u5206'] || [],
-      strains: slots['\u83cc\u682a'] || [],
-      benefits: slots['\u529f\u6548'] || [],
-      doses: slots['\u5242\u91cf'] || [],
-      organizations: slots['\u673a\u6784'] || [],
-      metrics: slots['\u6307\u6807'] || [],
-    };
-  } catch {
-    // ignore and fallback to rule extractor
-  }
-
-  return {};
-}
-
-async function extractStructuredData(
-  text: string,
-  category: string,
-  evidenceChunks: EvidenceChunk[],
-  topicTags: string[],
-  contractFields: ParsedDocument['contractFields'],
-) {
-  const normalized = normalizeText(text);
-  const lowered = normalized.toLowerCase();
-
-  const ingredientMatches = uniqStrings(collectRegexMatches(normalized, [
-    /\b(?:HMO|HMOs|DHA|ARA|FOS|GOS|MFGM|EPA|DPA)\b/gi,
-    /(?:乳铁蛋白|叶黄素|胆碱|牛磺酸|低聚果糖|低聚半乳糖|核苷酸|后生元|益生元|益生菌|蛋白质|钙|铁|锌)/g,
-  ]));
-  const strainMatches = category === 'contract'
-    ? []
-    : collectRegexMatches(normalized, [
-      /\b[A-Z]{1,5}-\d{1,5}\b/g,
-      /\b(?:Lactobacillus|Bifidobacterium|Bacillus|Streptococcus)\s+[A-Za-z-]+\b/gi,
-      /(?:鼠李糖乳杆菌|乳双歧杆菌|动物双歧杆菌|副干酪乳杆菌|嗜酸乳杆菌)/g,
-    ]).filter(isValidStrainCandidate);
-  const audienceMatches = uniqStrings([
-    ...collectRegexMatches(normalized, [
-      /(?:婴儿|婴幼儿|宝宝|儿童|青少年|成人|中老年|孕妇|老年人|幼猫|成猫|幼犬|成犬)/g,
-    ]),
-  ]);
-  const benefitMatches = uniqStrings([
-    ...topicTags,
-    ...collectRegexMatches(normalized, [
-      /(?:肠道健康|免疫支持|脑健康|认知支持|过敏免疫|体重管理|骨骼健康|睡眠舒缓|抗抑郁|消化吸收|皮毛健康|泌尿道健康)/g,
-    ]),
-  ]);
-  const doseMatches = filterSlotValues(uniqStrings([
-    ...collectRegexMatches(normalized, [
-      /\b\d+(?:\.\d+)?\s?(?:mg|g|kg|ml|μg|ug|IU|CFU)\b/gi,
-      /\b\d+(?:\.\d+)?\s?×\s?10\^?\d+\s?(?:CFU|cfu)\b/g,
-      /\b\d+(?:\.\d+)?E[+-]?\d+\b/gi,
-    ]),
-  ]), 'dose');
-  const organizationMatches = uniqStrings([
-    ...collectRegexMatches(normalized, [
-      /\b(?:WHO|FAO|EFSA|FDA|CDC|PMC|DOAJ|arXiv)\b/g,
-      /(?:世界卫生组织|国家卫健委|欧盟食品安全局|美国食品药品监督管理局)/g,
-    ]),
-  ]);
-  const metricMatches = uniqStrings([
-    ...collectRegexMatches(normalized, [
-      /\b(?:p\s?[<=>]\s?0\.\d+|OR\s?[=:]?\s?\d+(?:\.\d+)?|RR\s?[=:]?\s?\d+(?:\.\d+)?|CI\s?[=:]?\s?\d+(?:\.\d+)?)/gi,
-    ]),
-  ]);
-
-  const ruleEntities: StructuredEntity[] = [
-    ...ingredientMatches.map((item) => ({
-      text: item,
-      type: 'ingredient' as const,
-      source: 'rule' as const,
-      confidence: 0.72,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...strainMatches.map((item) => ({
-      text: item,
-      type: 'strain' as const,
-      source: 'rule' as const,
-      confidence: 0.8,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...audienceMatches.map((item) => ({
-      text: item,
-      type: 'audience' as const,
-      source: 'rule' as const,
-      confidence: 0.76,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...benefitMatches.map((item) => ({
-      text: item,
-      type: 'benefit' as const,
-      source: 'rule' as const,
-      confidence: 0.68,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...doseMatches.map((item) => ({
-      text: item,
-      type: 'dose' as const,
-      source: 'rule' as const,
-      confidence: 0.74,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...organizationMatches.map((item) => ({
-      text: item,
-      type: 'organization' as const,
-      source: 'rule' as const,
-      confidence: 0.7,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...metricMatches.map((item) => ({
-      text: item,
-      type: 'metric' as const,
-      source: 'rule' as const,
-      confidence: 0.64,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(contractFields?.contractNo ? [{
-      text: contractFields.contractNo,
-      type: 'identifier' as const,
-      source: 'rule' as const,
-      confidence: 0.9,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, contractFields.contractNo),
-    }] : []),
-  ];
-
-  const claims: StructuredClaim[] = [];
-  for (const benefit of benefitMatches.slice(0, 6)) {
-    if (strainMatches.length) {
-      for (const strain of strainMatches.slice(0, 3)) {
-        claims.push({
-          subject: strain,
-          predicate: 'supports',
-          object: benefit,
-          confidence: 0.66,
-          evidenceChunkId: findChunkIdForText(evidenceChunks, strain) || findChunkIdForText(evidenceChunks, benefit),
-        });
-      }
-    } else if (ingredientMatches.length) {
-      for (const ingredient of ingredientMatches.slice(0, 3)) {
-        claims.push({
-          subject: ingredient,
-          predicate: 'related_to',
-          object: benefit,
-          confidence: 0.6,
-          evidenceChunkId: findChunkIdForText(evidenceChunks, ingredient) || findChunkIdForText(evidenceChunks, benefit),
-        });
-      }
-    }
-  }
-
-  if (contractFields?.contractNo) {
-    claims.push({
-      subject: contractFields.contractNo,
-      predicate: 'contract_amount',
-      object: contractFields.amount || '-',
-      confidence: 0.84,
-    });
-  }
-
-  const rawUieSlots = category === 'paper' || category === 'technical' || category === 'contract'
-    ? await extractStructuredDataWithUIE(normalized, category, evidenceChunks)
-    : {};
-  const uieSlots: IntentSlots = {
-    audiences: filterSlotValues(rawUieSlots.audiences, 'audience'),
-    ingredients: filterSlotValues(rawUieSlots.ingredients, 'ingredient'),
-    strains: filterSlotValues(rawUieSlots.strains, 'strain'),
-    benefits: filterSlotValues(rawUieSlots.benefits, 'benefit'),
-    doses: filterSlotValues(rawUieSlots.doses, 'dose'),
-    organizations: filterSlotValues(rawUieSlots.organizations, 'organization'),
-    metrics: filterSlotValues(rawUieSlots.metrics, 'metric'),
-  };
-
-  const uieEntities: StructuredEntity[] = [
-    ...(uieSlots.audiences || []).map((item) => ({
-      text: item,
-      type: 'audience' as const,
-      source: 'uie' as const,
-      confidence: 0.86,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.ingredients || []).map((item) => ({
-      text: item,
-      type: 'ingredient' as const,
-      source: 'uie' as const,
-      confidence: 0.86,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.strains || []).map((item) => ({
-      text: item,
-      type: 'strain' as const,
-      source: 'uie' as const,
-      confidence: 0.88,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.benefits || []).map((item) => ({
-      text: item,
-      type: 'benefit' as const,
-      source: 'uie' as const,
-      confidence: 0.84,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.doses || []).map((item) => ({
-      text: item,
-      type: 'dose' as const,
-      source: 'uie' as const,
-      confidence: 0.82,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.organizations || []).map((item) => ({
-      text: item,
-      type: 'organization' as const,
-      source: 'uie' as const,
-      confidence: 0.82,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-    ...(uieSlots.metrics || []).map((item) => ({
-      text: item,
-      type: 'metric' as const,
-      source: 'uie' as const,
-      confidence: 0.8,
-      evidenceChunkId: findChunkIdForText(evidenceChunks, item),
-    })),
-  ];
-
-  return {
-    entities: uniqEntities([...uieEntities, ...ruleEntities]).slice(0, 40),
-    claims: claims.slice(0, 20),
-    intentSlots: {
-      audiences: mergeStringArrays(audienceMatches, uieSlots.audiences),
-      ingredients: mergeStringArrays(ingredientMatches, uieSlots.ingredients),
-      strains: mergeStringArrays(strainMatches, uieSlots.strains),
-      benefits: mergeStringArrays(benefitMatches, uieSlots.benefits),
-      doses: mergeStringArrays(doseMatches, uieSlots.doses),
-      organizations: mergeStringArrays(organizationMatches, uieSlots.organizations),
-      metrics: mergeStringArrays(metricMatches, uieSlots.metrics),
-    } satisfies IntentSlots,
-  };
-}
-
-function cleanTitleCandidate(line: string) {
-  return line
-    .replace(/^#{1,6}\s+/, '')
-    .replace(/^[-*+]\s+/, '')
-    .replace(/^\d+[.)、]\s*/, '')
-    .replace(/^[（(][^)）]{1,12}[)）]\s*/, '')
-    .trim();
-}
-
-function inferTitle(text: string, fallbackName: string) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => cleanTitleCandidate(line.trim()))
-    .filter(Boolean);
-
-  const picked = lines.find((line) => line.length >= 4 && line.length <= 160 && !/^[\d\W_]+$/.test(line));
-  if (picked) return picked;
-
-  return path.parse(fallbackName).name;
-}
-
-function buildEvidence(filePath: string, text = '') {
-  const name = path.basename(filePath);
-  const normalizedText = normalizeText(text).slice(0, 8000);
-  return `${filePath} ${name} ${normalizedText}`.toLowerCase();
-}
-
-function escapeRegex(text: string) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function matchesKeyword(text: string, rule: KeywordRule) {
-  if (!text) return false;
-  if (rule instanceof RegExp) return rule.test(text);
-
-  const normalizedRule = rule.toLowerCase();
-  if (!/[a-z]/.test(normalizedRule)) return text.includes(normalizedRule);
-
-  return new RegExp(`\\b${escapeRegex(normalizedRule)}\\b`, 'i').test(text);
-}
-
-function scoreHints(evidence: string, hints: string[]) {
-  return hints.reduce((score, hint) => score + (matchesKeyword(evidence, hint) ? (hint.length >= 6 ? 3 : 2) : 0), 0);
-}
 
 export function detectCategory(filePath: string, text = '') {
-  const evidence = buildEvidence(filePath, text);
-  if (RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'resume';
-  if (includesAnyText(evidence, ['ioa', '审批', '操作指引', '应用技巧', '预算调整', 'q&a', 'faq'])) {
-    return 'technical';
-  }
-  const scores = {
-    contract: scoreHints(evidence, CATEGORY_HINTS.contract),
-    technical: scoreHints(evidence, CATEGORY_HINTS.technical),
-    paper: scoreHints(evidence, CATEGORY_HINTS.paper),
-    report: scoreHints(evidence, CATEGORY_HINTS.report),
-  };
-
-  if (scores.contract >= 4 && scores.contract >= scores.paper) return 'contract';
-  if (scores.paper >= 4 && scores.paper >= scores.technical) return 'paper';
-  if (scores.report >= 4 && scores.report >= scores.technical) return 'report';
-  if (scores.technical >= 3) return 'technical';
-
-  const lower = filePath.toLowerCase();
-  if (lower.includes('contract') || lower.includes('合同')) return 'contract';
-  if (lower.includes('tech') || lower.includes('技术')) return 'technical';
-  if (lower.includes('paper') || lower.includes('论文')) return 'paper';
-  if (lower.includes('report') || lower.includes('日报') || lower.includes('周报')) return 'report';
-  return 'general';
+  return detectCategoryInternal(filePath, text);
 }
 
 export function detectBizCategory(filePath: string, category: string, text = '', config?: DocumentCategoryConfig): ParsedDocument['bizCategory'] {
-  if (config) {
-    const matched = detectBizCategoryFromConfig(filePath, config);
-    if (matched) return matched;
-  }
-
-  const evidence = buildEvidence(filePath, text);
-  const hasFootfallMetricSignal = /(footfall|visitor_count|visitor count|visitors|traffic_count|entry_count|passenger_flow|客流|人流|到访量|进店客流|进入人数|进场人数|入场人数|离开人数)/i.test(evidence);
-  const hasFootfallSpatialSignal = /(mall_zone|mall zone|mall_area|mall partition|shopping_zone|business_zone|floor_zone|floor zone|room_unit|shop_unit|shop_no|商场分区|商场区域|商业分区|楼层分区|楼层区域|楼层|单间|铺位|店铺|区域|位置|点位)/i.test(evidence);
-  const hasOrderFieldSignal = /(order_id|order_count|units_sold|net_sales|gross_profit|gross_margin|avg_order_value|refund_total|discount_total|shop_name)/i.test(evidence);
-  const hasInventoryFieldSignal = /(inventory_index|days_of_cover|safety_stock|replenishment_priority|risk_flag|platform_focus|warehouse|inbound_7d)/i.test(evidence);
-  const hasFootfallPathSignal = /(?:footfall|visitor|traffic|客流|人流)[-_/\\]/i.test(filePath);
-  const hasOrderPathSignal = /(?:order|orders|sales)[-_/\\]/i.test(filePath);
-  const hasInventoryPathSignal = /(?:inventory|stock|sku)[-_/\\]/i.test(filePath);
-  if (category === 'resume' || RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()))) return 'general';
-  if (scoreHints(evidence, ['发票', '票据', '凭据', 'invoice']) >= 4) return 'invoice';
-  if ((hasFootfallMetricSignal && hasFootfallSpatialSignal) || (hasFootfallPathSignal && hasFootfallMetricSignal)) return 'footfall';
-  if (hasOrderFieldSignal) return 'order';
-  if (hasInventoryFieldSignal) return 'inventory';
-  if (hasInventoryPathSignal) return 'inventory';
-  if (hasOrderPathSignal) return 'order';
-  if (scoreHints(evidence, ['客流', '人流', '商场分区', '楼层分区', 'visitor', 'footfall']) >= 6) return 'footfall';
-  if (scoreHints(evidence, ['订单', '回款', '销售', 'order']) >= 4) return 'order';
-  if (scoreHints(evidence, ['客服', '工单', '投诉', 'service']) >= 4) return 'service';
-  if (scoreHints(evidence, ['库存', 'sku', '出入库', 'inventory']) >= 4) return 'inventory';
-  if (category === 'contract' || scoreHints(evidence, CATEGORY_HINTS.contract) >= 4) return 'contract';
-  if (category === 'report' || scoreHints(evidence, CATEGORY_HINTS.report) >= 4) return 'daily';
-  if (category === 'paper' || scoreHints(evidence, CATEGORY_HINTS.paper) >= 5) return 'paper';
-  return 'general';
-}
-
-function normalizeResumeTextValue(value: string) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function inferResumeNameFromTitle(title: string) {
-  const normalized = String(title || '')
-    .replace(/^\d{10,}-/, '')
-    .replace(/\.[a-z0-9]+$/i, '')
-    .replace(/[_-]+/g, ' ')
-    .trim();
-  const fromResumePattern = normalized.match(/简历[-\s(（]*([\u4e00-\u9fff·]{2,12})|([\u4e00-\u9fff·]{2,12})[-\s]*简历/);
-  const candidate = fromResumePattern?.[1] || fromResumePattern?.[2] || '';
-  if (isLikelyResumePersonName(candidate)) return candidate;
-  const chineseName = normalized.match(/[\u4e00-\u9fff·]{2,12}/g)?.find(isLikelyResumePersonName);
-  return chineseName || normalized;
-}
-
-function cutOffNextResumeLabel(value: string) {
-  const normalized = normalizeResumeTextValue(value);
-  return normalized.replace(/\s+(?:姓名|Name|候选人|应聘岗位|目标岗位|求职方向|当前职位|职位|岗位|工作经验|学历|专业|期望城市|意向城市|工作城市|地点|期望薪资|薪资要求|期望工资|最近工作经历|最近公司|现任公司|就职公司|核心技能|项目经历)[:：][\s\S]*$/i, '').trim();
-}
-
-function extractResumeLabelMap(text: string) {
-  const map = new Map<string, string>();
-  const lines = String(text || '')
-    .replace(/\r/g, '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const match = line.match(/^([^:：]{1,20})[:：]\s*(.+)$/);
-    if (!match) continue;
-    map.set(normalizeResumeTextValue(match[1]), cutOffNextResumeLabel(match[2]));
-  }
-
-  return map;
-}
-
-function extractResumeValue(text: string, patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    const value = match?.[1] || match?.[2];
-    if (value) return cutOffNextResumeLabel(value);
-  }
-  return '';
-}
-
-function collectResumeSkills(text: string) {
-  const keywords = [
-    'Java', 'Python', 'Go', 'C++', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Kafka',
-    'React', 'Vue', 'Node.js', 'TypeScript', 'JavaScript', 'Spring Boot',
-    '产品设计', '需求分析', '用户研究', 'Axure', 'Xmind', '数据分析', '项目管理',
-    '微服务', '分布式', '机器学习', '品牌营销', '销售管理', '招聘',
-  ];
-  return [...new Set(keywords.filter((keyword) => new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)))].slice(0, 8);
-}
-
-function extractResumeHighlights(text: string) {
-  const normalized = String(text || '').replace(/\r/g, '');
-  const lines = normalized
-    .split(/\n+/)
-    .map((item) => item.replace(/\s+/g, ' ').trim())
-    .filter((item) => item.length >= 12);
-
-  const priority = lines.filter((line) => /(负责|主导|参与|完成|推动|落地|优化|提升|增长|实现|设计|搭建|管理|项目)/.test(line));
-  return [...new Set((priority.length ? priority : lines).slice(0, 4).map((item) => item.slice(0, 80)))];
-}
-
-function normalizeResumeCompanyValue(value: string) {
-  return normalizeResumeTextValue(value)
-    .replace(/^\d{4}[./-]?\d{0,2}\s*(?:至|-|~|—)?\s*\d{4}[./-]?\d{0,2}\s*/, '')
-    .replace(/^\d{4}[./-]?\d{0,2}\s*(?:至今|现在|今)?\s*/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function collectResumeCompanies(text: string, latestCompany?: string) {
-  const normalizedLines = String(text || '')
-    .replace(/\r/g, '')
-    .split(/\n+/)
-    .map((item) => normalizeResumeCompanyValue(item))
-    .filter((item) => item.length >= 2);
-
-  const companyMatches = new Set<string>();
-  const pushCompany = (value?: string) => {
-    const normalized = normalizeResumeCompanyValue(String(value || ''));
-    if (!normalized) return;
-    if (
-      /(联系电话|电话|手机|邮箱|email|education|skills|项目经历|工作经历|简历|候选人)/i.test(normalized)
-      || /^[\d\-./~\s]+$/.test(normalized)
-    ) return;
-    if (
-      /(?:有限公司|有限责任公司|股份有限公司|集团|科技|信息|网络|软件|电子|通信|银行|医院|研究院|大学|学院|实验室|事务所|公司)$/i.test(normalized)
-      || /\b(?:inc|ltd|llc|corp|co\.?)\b/i.test(normalized)
-    ) {
-      companyMatches.add(normalized);
-    }
-  };
-
-  pushCompany(latestCompany);
-
-  const companyPattern = /([A-Za-z0-9\u4e00-\u9fff（）()·&\-. ]{2,60}(?:有限公司|有限责任公司|股份有限公司|集团|科技|信息|网络|软件|电子|通信|银行|医院|研究院|大学|学院|实验室|事务所|公司))/g;
-  const englishCompanyPattern = /([A-Z][A-Za-z0-9 .,&\-]{2,60}\b(?:Inc|Ltd|LLC|Corp|Co\.?))/g;
-
-  for (const line of normalizedLines) {
-    pushCompany(line);
-    for (const match of line.matchAll(companyPattern)) {
-      pushCompany(match[1]);
-    }
-    for (const match of line.matchAll(englishCompanyPattern)) {
-      pushCompany(match[1]);
-    }
-  }
-
-  return [...companyMatches].slice(0, 8);
-}
-
-function extractResumeProjectHighlights(text: string) {
-  const lines = String(text || '')
-    .replace(/\r/g, '')
-    .split(/\n+/)
-    .map((item) => normalizeResumeTextValue(item))
-    .filter((item) => item.length >= 8);
-
-  const projectLike = lines.filter((line) => /(项目|系统|平台|接口|架构|上线|实施|交付|开发|搭建|设计|优化|ERP|CRM|IoT|API|中台|管理系统|数据平台|小程序|App|网站)/i.test(line));
-  const actionLike = lines.filter((line) => /(负责|主导|参与|完成|推动|落地|实现|优化|设计|搭建|管理)/.test(line));
-  const selected = projectLike.length ? projectLike : actionLike;
-  return [...new Set(selected.slice(0, 8).map((item) => item.slice(0, 120)))];
-}
-
-function extractResumeItProjectHighlights(text: string, skills: string[] = []) {
-  const projectHighlights = extractResumeProjectHighlights(text);
-  const skillHints = skills.map((item) => item.toLowerCase());
-  const filtered = projectHighlights.filter((line) => (
-    /(IT|信息化|系统|平台|接口|架构|开发|实施|交付|运维|数据库|微服务|云|网络|安全|ERP|CRM|MES|WMS|IoT|API|Java|Python|Go|Node|React|Vue)/i.test(line)
-    || skillHints.some((skill) => line.toLowerCase().includes(skill))
-  ));
-  return [...new Set((filtered.length ? filtered : projectHighlights).slice(0, 6))];
+  return detectBizCategoryInternal(filePath, category, text, config);
 }
 
 function extractResumeFields(
@@ -2801,191 +435,22 @@ function extractResumeFields(
   claims: StructuredClaim[] = [],
   options?: { force?: boolean },
 ): ResumeFields | undefined {
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  const titleText = String(title || '').trim();
-  const evidence = `${titleText} ${normalized}`.toLowerCase();
-  const looksLikeResume = RESUME_HINTS.some((hint) => evidence.includes(hint.toLowerCase()));
-  if (!looksLikeResume && options?.force !== true) return undefined;
-  const labelMap = extractResumeLabelMap(text);
-  const byLabel = (...labels: string[]) => {
-    for (const label of labels) {
-      const value = labelMap.get(label);
-      if (value) return value;
-    }
-    return '';
-  };
-
-  const skillsFromEntities = entities
-    .filter((item) => item.type === 'ingredient' || item.type === 'term')
-    .map((item) => normalizeResumeTextValue(item.text))
-    .filter(Boolean);
-  const highlightsFromClaims = claims
-    .map((claim) => `${claim.subject} ${claim.predicate} ${claim.object}`.trim())
-    .filter(Boolean);
-
-  const skills = [...new Set([...collectResumeSkills(normalized), ...skillsFromEntities])].slice(0, 8);
-  const latestCompany = byLabel('最近工作经历', '最近公司', '现任公司', '就职公司') || extractResumeValue(normalized, [
-    /(?:最近工作经历|最近公司|现任公司|就职公司)[:：]?\s*([^，。；;\n]{2,60})/i,
-  ]);
-  const projectHighlights = extractResumeProjectHighlights(text);
-  const itProjectHighlights = extractResumeItProjectHighlights(text, skills);
-
-  const fields: ResumeFields = {
-    candidateName: byLabel('姓名', 'Name', '候选人') || extractResumeValue(normalized, [
-      /(?:姓名|name)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
-      /(?:候选人)[:：]?\s*([A-Za-z\u4e00-\u9fff·]{2,20})/i,
-    ]) || inferResumeNameFromTitle(titleText),
-    targetRole: byLabel('应聘岗位', '目标岗位', '求职方向') || extractResumeValue(normalized, [
-      /(?:应聘岗位|目标岗位|求职方向)[:：]?\s*([^，。；;\n]{2,40})/i,
-    ]),
-    currentRole: byLabel('当前职位', '现任职位'),
-    yearsOfExperience: byLabel('工作经验') || extractResumeValue(normalized, [
-      /(\d{1,2}\+?\s*年(?:工作经验)?)/i,
-      /(工作经验[^，。；;\n]{0,12}\d{1,2}\+?\s*年)/i,
-    ]),
-    education: byLabel('学历') || extractResumeValue(normalized, [
-      /(博士|硕士|本科|大专|中专|MBA|EMBA|研究生)/i,
-    ]),
-    major: byLabel('专业') || extractResumeValue(normalized, [
-      /(?:专业)[:：]?\s*([^，。；;\n]{2,40})/i,
-    ]),
-    expectedCity: byLabel('期望城市', '意向城市', '工作城市', '地点') || extractResumeValue(normalized, [
-      /(?:期望城市|意向城市|工作城市|地点)[:：]?\s*([^，。；;\n]{2,30})/i,
-    ]),
-    expectedSalary: byLabel('期望薪资', '薪资要求', '期望工资') || extractResumeValue(normalized, [
-      /(?:期望薪资|薪资要求|期望工资)[:：]?\s*([^，。；;\n]{2,30})/i,
-    ]),
-    latestCompany,
-    companies: collectResumeCompanies(text, latestCompany),
-    skills,
-    highlights: [...new Set([...highlightsFromClaims, ...extractResumeHighlights(text)])].slice(0, 4),
-    projectHighlights,
-    itProjectHighlights,
-  };
-
-  const hasAnyValue = Object.values(fields).some((value) => Array.isArray(value) ? value.length : Boolean(value));
-  if (fields.candidateName && !isLikelyResumePersonName(fields.candidateName)) {
-    fields.candidateName = inferResumeNameFromTitle(titleText);
-  }
-  return hasAnyValue
-    ? canonicalizeResumeFields(fields, {
-      title,
-      sourceName: title,
-      fullText: text,
-    })
-    : undefined;
+  return extractResumeFieldsInternal(text, title, entities, claims, options);
 }
 
 function detectRiskLevel(text: string, category: string): 'low' | 'medium' | 'high' | undefined {
-  if (category !== 'contract') return undefined;
-  const normalized = text.toLowerCase();
-  if (normalized.includes('违约') || normalized.includes('罚则') || normalized.includes('未约定')) return 'high';
-  if (normalized.includes('付款') || normalized.includes('账期') || normalized.includes('期限')) return 'medium';
-  return 'low';
+  return detectRiskLevelInternal(text, category);
 }
 
 function detectTopicTags(text: string, category: string, bizCategory: ParsedDocument['bizCategory']) {
-  if (category === 'resume') {
-    const normalized = text.toLowerCase();
-    const tags = ['人才简历'];
-    if (/(java|spring|backend|后端)/i.test(normalized)) tags.push('Java后端');
-    if (/(产品经理|product manager|axure|xmind)/i.test(normalized)) tags.push('产品经理');
-    if (/(算法|machine learning|deep learning)/i.test(normalized)) tags.push('算法工程师');
-    if (/(前端|frontend|react|vue)/i.test(normalized)) tags.push('前端开发');
-    if (/(技术总监|技术负责人|cto)/i.test(normalized)) tags.push('技术管理');
-    return tags;
-  }
-
-  if (bizCategory === 'order' || bizCategory === 'inventory') {
-    const normalized = text.toLowerCase();
-    const tags = [bizCategory === 'inventory' ? '库存监控' : '订单分析'];
-    if (/(tmall|jd|douyin|pinduoduo|kuaishou|wechatmall|天猫|京东|抖音|拼多多|快手|小程序)/i.test(normalized)) {
-      tags.push('渠道经营');
-    }
-    if (/(sku|category|品类|类目|耳机|智能穿戴|智能家居|平板周边|手机配件|电脑外设)/i.test(normalized)) {
-      tags.push('SKU结构');
-    }
-    if (/(inventory|stock|inventory_index|days_of_cover|safety_stock|库存|周转|安全库存)/i.test(normalized)) {
-      tags.push('库存管理');
-    }
-    if (/(replenishment|restock|备货|补货|调拨|priority|优先级)/i.test(normalized)) {
-      tags.push('备货建议');
-    }
-    if (/(yoy|mom|forecast|gmv|net_sales|gross_margin|同比|环比|预测|净销售额|毛利)/i.test(normalized)) {
-      tags.push('经营复盘');
-    }
-    if (/(risk_flag|anomaly|warning|异常|风险|波动|overstock|stockout)/i.test(normalized)) {
-      tags.push('异常波动');
-    }
-    return [...new Set(tags)];
-  }
-
-  if (bizCategory === 'footfall') {
-    const normalized = text.toLowerCase();
-    const tags = ['客流分析'];
-    if (/(mall_zone|mall area|mall partition|shopping_zone|商场分区|商场区域|商业分区)/i.test(normalized)) {
-      tags.push('商场分区');
-    }
-    if (/(floor_zone|floor area|floor partition|楼层分区|楼层区域|楼层)/i.test(normalized)) {
-      tags.push('楼层明细');
-    }
-    if (/(room_unit|shop_unit|shop_no|单间|店铺|铺位|商户)/i.test(normalized)) {
-      tags.push('单间明细');
-    }
-    if (/(visitor_count|visitors|footfall|traffic_count|entry_count|客流|人流|到访量)/i.test(normalized)) {
-      tags.push('客流报表');
-    }
-    return [...new Set(tags)];
-  }
-
-  if (category !== 'technical' && category !== 'paper') return [];
-
-  const normalized = text.toLowerCase();
-  const tagRules: Array<[string, KeywordRule[]]> = [
-    ['企业规范', ['规范', '制度', '标准', '合规']],
-    ['审批流程', ['审批', '流程', '申请', '节点']],
-    ['预算调整', ['预算调整', '预算', '调整']],
-    ['系统操作', ['操作指引', '应用技巧', '登录', '入口', '路径']],
-    ['常见问题', [/\bq&a\b/i, /\bfaq\b/i, '常见问题']],
-    ['设备接入', ['接入', /\bdevice\b/i, '协议']],
-    ['边缘计算', ['边缘', /\bedge\b/i]],
-    ['数据采集', ['采集', /\bcollector\b/i]],
-    ['告警联动', ['告警', '报警']],
-    ['部署规范', ['部署', /\binstall\b/i]],
-    ['接口设计', ['接口', /\bapi\b/i]],
-    ['肠道健康', [/\bgut\b/i, /\bintestinal\b/i, '肠道', /\bibs\b/i, /\bflora\b/i, /\bmicrobiome\b/i]],
-    ['过敏免疫', [/\ballergic\b/i, /\brhinitis\b/i, '过敏', '鼻炎', /\bimmune\b/i]],
-    ['脑健康', [/\bbrain\b/i, '脑', '认知', /\balzheimer/i]],
-    ['运动代谢', [/\bexercise\b/i, '减脂', '运动', /\bmetabolism\b/i, /weight loss/i]],
-    ['奶粉配方', ['奶粉', '配方', '乳粉', '婴配粉', /\bformula\b/i, /\binfant\b/i, /\bpediatric\b/i]],
-    ['益生菌', [/\bprobiotic\b/i, /\bprebiotic\b/i, /\bsynbiotic\b/i, /\blactobacillus\b/i, /\bbifidobacterium\b/i, '益生菌', '益生元', '菌株']],
-    ['营养强化', [/\bnutrition\b/i, /\bnutritional\b/i, /\bhmo\b/i, /\bhmos\b/i, '营养', '强化']],
-    ['白皮书', [/white\s*paper/i, '白皮书']],
-    ['随机对照', [/\brandomized\b/i, /\bplacebo\b/i, /double-blind/i, '双盲', '随机']],
-  ];
-
-  return tagRules
-    .filter(([, keywords]) => keywords.some((keyword) => matchesKeyword(normalized, keyword)))
-    .map(([label]) => label);
-}
-
-function shouldForceExtraction(profile: DocumentExtractionProfile | null | undefined, fieldSet: DocumentExtractionProfile['fieldSet']) {
-  return profile?.fieldSet === fieldSet;
+  return detectTopicTagsInternal(text, category, bizCategory);
 }
 
 function applyGovernedSchemaType(
   inferredSchemaType: ParsedDocument['schemaType'],
   profile: DocumentExtractionProfile | null | undefined,
 ): ParsedDocument['schemaType'] {
-  if (!profile?.fallbackSchemaType) return inferredSchemaType;
-  if (inferredSchemaType === profile.fallbackSchemaType) return inferredSchemaType;
-
-  if (profile.fallbackSchemaType === 'contract' && inferredSchemaType === 'generic') return 'contract';
-  if (profile.fallbackSchemaType === 'resume' && inferredSchemaType === 'generic') return 'resume';
-  if (profile.fallbackSchemaType === 'order' && ['generic', 'report'].includes(String(inferredSchemaType))) return 'order';
-  if (profile.fallbackSchemaType === 'technical' && inferredSchemaType === 'generic') return 'technical';
-
-  return inferredSchemaType;
+  return applyGovernedSchemaTypeInternal(inferredSchemaType, profile);
 }
 
 function applyGovernedSchemaTypeWithEnterpriseGuidance(
@@ -2993,62 +458,15 @@ function applyGovernedSchemaTypeWithEnterpriseGuidance(
   profile: DocumentExtractionProfile | null | undefined,
   enterpriseGuidanceFields: ParsedDocument['enterpriseGuidanceFields'] | undefined,
 ): ParsedDocument['schemaType'] {
-  const governed = applyGovernedSchemaType(inferredSchemaType, profile);
-  if (profile?.fieldSet !== 'enterprise-guidance') return governed;
-  if (!enterpriseGuidanceFields) return governed;
-  if (governed === 'resume' || governed === 'order') return governed;
-
-  const hasGuidanceSignal = Boolean(
-    enterpriseGuidanceFields.businessSystem
-    || enterpriseGuidanceFields.documentKind
-    || enterpriseGuidanceFields.applicableScope
-    || enterpriseGuidanceFields.operationEntry
-    || enterpriseGuidanceFields.approvalLevels?.length
-    || enterpriseGuidanceFields.policyFocus?.length
-    || enterpriseGuidanceFields.contacts?.length
-  );
-
-  if (hasGuidanceSignal && ['generic', 'contract', 'paper', 'report', 'technical'].includes(String(governed))) {
-    return 'technical';
-  }
-
-  return governed;
+  return applyGovernedSchemaTypeWithEnterpriseGuidanceInternal(inferredSchemaType, profile, enterpriseGuidanceFields);
 }
 
 function mergeGovernedTopicTags(topicTags: string[], profile: DocumentExtractionProfile | null | undefined) {
-  if (!profile) return topicTags;
-
-  const governedTags = profile.fieldSet === 'contract'
-    ? ['合同']
-    : profile.fieldSet === 'resume'
-      ? ['人才简历']
-      : profile.fieldSet === 'order'
-        ? ['订单分析']
-        : ['企业规范'];
-
-  return [...new Set([...topicTags, ...governedTags])];
+  return mergeGovernedTopicTagsInternal(topicTags, profile);
 }
 
 function extractContractFields(text: string, category: string, profile?: DocumentExtractionProfile | null) {
-  if (category !== 'contract' && !shouldForceExtraction(profile, 'contract')) return undefined;
-  const normalized = text.replace(/\s+/g, ' ');
-  const partyA = normalized.match(/(?:甲方|发包方|采购方|委托方)[:：]?\s*(.+?)(?=(?:乙方|承包方|供应商|服务方|受托方|签订日期|签约日期|生效日期|金额|付款方式|付款条款|服务期|合同期|期限|$))/i)?.[1]?.trim();
-  const partyB = normalized.match(/(?:乙方|承包方|供应商|服务方|受托方)[:：]?\s*(.+?)(?=(?:签订日期|签约日期|生效日期|金额|付款方式|付款条款|服务期|合同期|期限|$))/i)?.[1]?.trim();
-  const signDate = normalized.match(/(?:签订日期|签约日期|签订时间|合同签订日)[:：]?\s*([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}日?)/i)?.[1]?.trim();
-  const effectiveDate = normalized.match(/(?:生效日期|生效时间|起始日期|开始日期)[:：]?\s*([0-9]{4}[年/-][0-9]{1,2}[月/-][0-9]{1,2}日?)/i)?.[1]?.trim();
-  const contractNo = normalized.match(/(合同编号|编号)[:：]?\s*([A-Za-z0-9-]+)/)?.[2];
-  const amount = normalized.match(/(金额|合同金额)[:：]?\s*([￥¥]?[0-9,.]+[万千元]*)/)?.[2];
-  const paymentTerms = normalized.match(/(付款方式|付款条款)[:：]?\s*([^。；;]+)/)?.[2];
-  const duration = normalized.match(/(期限|服务期|合同期)[:：]?\s*(.*?)(?:违约责任|备注|付款条款|$|[。；;])/ )?.[2]?.trim();
-  return { contractNo, partyA, partyB, amount, signDate, effectiveDate, paymentTerms, duration };
-}
-
-function collectNormalizedMatches(text: string, pattern: RegExp) {
-  return [...new Set(
-    [...String(text || '').matchAll(pattern)]
-      .map((match) => String(match[1] || match[0] || '').replace(/\s+/g, ' ').trim())
-      .filter(Boolean),
-  )];
+  return extractContractFieldsInternal(text, category, profile, { shouldForceExtraction });
 }
 
 function extractEnterpriseGuidanceFields(
@@ -3058,82 +476,9 @@ function extractEnterpriseGuidanceFields(
   category: string,
   profile?: DocumentExtractionProfile | null,
 ): ParsedDocument['enterpriseGuidanceFields'] | undefined {
-  if (category !== 'technical' && !shouldForceExtraction(profile, 'enterprise-guidance')) return undefined;
-
-  const rawText = String(text || '');
-  const normalized = rawText.replace(/\s+/g, ' ').trim();
-  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
-  const looksLikeGuidance = includesAnyText(evidence, [
-    'ioa',
-    '流程',
-    '审批',
-    '指引',
-    '规范',
-    '制度',
-    'q&a',
-    'faq',
-    '预算调整',
-    '登录',
-    '应用技巧',
-  ]);
-  if (!looksLikeGuidance) return undefined;
-
-  const businessSystem = /(?:新中)?i\s*oa|ioa系统|ioa/i.test(evidence)
-    ? 'IOA'
-    : includesAnyText(evidence, ['erp']) ? 'ERP' : '';
-
-  const documentKind = /(?:q&a|faq|常见问题)/i.test(evidence)
-    ? 'faq'
-    : /预算调整/i.test(evidence)
-      ? 'budget-adjustment'
-      : /审批流程|审批/i.test(evidence)
-        ? 'approval-flow'
-        : /应用技巧|操作指引|登录|入口/i.test(evidence)
-          ? 'operation-guide'
-          : /规范|制度|标准/i.test(evidence)
-            ? 'policy-standard'
-            : 'guidance';
-
-  const applicableScope = normalized.match(/(?:适用范围|适用对象|适用于)[:：]?\s*([^。；;\n]{2,120})/i)?.[1]?.trim();
-  const operationEntry = normalized.match(/(?:操作路径|进入路径|入口|登录方式|系统登录|登录地址|访问地址)[:：]?\s*([^。；;\n]{2,160})/i)?.[1]?.trim();
-  const contacts = collectNormalizedMatches(
-    rawText,
-    /(?:支持联系方式|联系人|联系方式|技术支持|支持邮箱|咨询电话)[:：]?\s*([^\n。；;]{2,80})/gi,
-  ).slice(0, 4);
-  const approvalLevels = collectNormalizedMatches(
-    rawText,
-    /((?:一级|二级|三级|四级)?审批(?:节点|层级)?|部门负责人|分管领导|财务负责人|总经理|集团审批)/gi,
-  ).slice(0, 6);
-
-  const policyFocus = [...new Set([
-    /规范|制度|标准/i.test(evidence) ? '企业规范' : '',
-    /审批流程|审批/i.test(evidence) ? '审批流程' : '',
-    /预算调整/i.test(evidence) ? '预算调整' : '',
-    /登录|入口|应用技巧|操作指引/i.test(evidence) ? '系统操作' : '',
-    /q&a|faq|常见问题/i.test(evidence) ? '常见问题' : '',
-  ].filter(Boolean))];
-
-  const hasAnyValue = Boolean(
-    businessSystem
-    || documentKind
-    || applicableScope
-    || operationEntry
-    || approvalLevels.length
-    || policyFocus.length
-    || contacts.length
-  );
-
-  return hasAnyValue
-    ? {
-        businessSystem,
-        documentKind,
-        applicableScope,
-        operationEntry,
-        approvalLevels,
-        policyFocus,
-        contacts,
-      }
-    : undefined;
+  return extractEnterpriseGuidanceFieldsInternal(text, title, topicTags, category, profile, {
+    shouldForceExtraction,
+  });
 }
 
 function refineEnterpriseGuidanceFields(
@@ -3145,156 +490,7 @@ function refineEnterpriseGuidanceFields(
     profile?: DocumentExtractionProfile | null;
   },
 ): ParsedDocument['enterpriseGuidanceFields'] | undefined {
-  const rawText = String(input.text || '');
-  const title = String(input.title || '');
-  const evidence = `${title} ${rawText} ${(input.topicTags || []).join(' ')}`.toLowerCase();
-  const forceGuidance = shouldForceExtraction(input.profile, 'enterprise-guidance');
-  const looksLikeXinshijieIoa = includesAnyText(evidence, [
-    '新世界ioa',
-    '新中ioa',
-    'ioa系统q&a',
-    'ioa应用技巧',
-    'ioa平台操作指引',
-    '固定资产',
-    'it政策',
-    'it守则',
-  ]);
-
-  if (!fields && !forceGuidance && !looksLikeXinshijieIoa) {
-    return undefined;
-  }
-
-  const nextFields: ParsedDocument['enterpriseGuidanceFields'] = {
-    ...(fields || {}),
-  };
-
-  if (!nextFields.businessSystem) {
-    if (/(?:新中|新世界)?i\s*oa|ioa/i.test(evidence)) nextFields.businessSystem = 'IOA';
-    else if (includesAnyText(evidence, ['固定资产', 'fixed asset'])) nextFields.businessSystem = 'fixed-assets';
-    else if (includesAnyText(evidence, ['it政策', 'it守则', 'it policy', 'it governance'])) nextFields.businessSystem = 'IT';
-  }
-
-  if (!nextFields.documentKind) {
-    if (/(?:q&a|faq|常见问题)/i.test(evidence)) nextFields.documentKind = 'faq';
-    else if (/(?:用户手册|manual|user guide)/i.test(evidence)) nextFields.documentKind = 'user-manual';
-    else if (/预算调整/i.test(evidence)) nextFields.documentKind = 'budget-adjustment';
-    else if (/审批流程|审批/i.test(evidence)) nextFields.documentKind = 'approval-flow';
-    else if (/应用技巧|操作指引|登录|入口/i.test(evidence)) nextFields.documentKind = 'operation-guide';
-    else if (/规范|制度|标准|政策|守则/i.test(evidence)) nextFields.documentKind = 'policy-standard';
-    else if (forceGuidance || looksLikeXinshijieIoa) nextFields.documentKind = 'guidance';
-  }
-
-  if (/(?:用户手册|manual|user guide)/i.test(title)) {
-    nextFields.documentKind = 'user-manual';
-  } else if (/(?:政策|守则|规范|制度|standard|policy)/i.test(title)) {
-    nextFields.documentKind = 'policy-standard';
-  }
-
-  nextFields.policyFocus = [...new Set([
-    ...(nextFields.policyFocus || []),
-    /规范|制度|标准|政策|守则/i.test(evidence) ? '企业规范' : '',
-    /审批流程|审批/i.test(evidence) ? '审批流程' : '',
-    /预算调整/i.test(evidence) ? '预算调整' : '',
-    /登录|入口|应用技巧|操作指引/i.test(evidence) ? '系统操作' : '',
-    /q&a|faq|常见问题/i.test(evidence) ? '常见问题' : '',
-    /固定资产|fixed asset/i.test(evidence) ? '资产管理' : '',
-    /it政策|it守则|it policy|it governance/i.test(evidence) ? 'IT治理' : '',
-  ].filter(Boolean))];
-
-  return Object.values(nextFields).some((value) => Array.isArray(value) ? value.length > 0 : Boolean(value))
-    ? nextFields
-    : undefined;
-}
-
-function findTableDateSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
-  const aliasSet = new Set(aliases.map(normalizeTableColumnKey));
-  return (tableSummary?.insights?.dateColumns || []).find((entry) => aliasSet.has(normalizeTableColumnKey(entry.column)));
-}
-
-function findTableMetricSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
-  const metrics = tableSummary?.insights?.metricColumns || [];
-  for (const alias of aliases) {
-    const normalizedAlias = normalizeTableColumnKey(alias);
-    const matched = metrics.find((entry) => normalizeTableColumnKey(entry.column) === normalizedAlias);
-    if (matched) return matched;
-  }
-  return undefined;
-}
-
-function findTableDimensionSummary(tableSummary: TableSummary | undefined, aliases: string[]) {
-  const dimensions = tableSummary?.insights?.dimensionColumns || [];
-  for (const alias of aliases) {
-    const normalizedAlias = normalizeTableColumnKey(alias);
-    const matched = dimensions.find((entry) => normalizeTableColumnKey(entry.column) === normalizedAlias);
-    if (matched) return matched;
-  }
-  return undefined;
-}
-
-function formatMetricValue(value: number, kind: TableMetricSummary['kind']) {
-  if (!Number.isFinite(value)) return '';
-  if (kind === 'currency') return `￥${value.toFixed(2)}`;
-  if (kind === 'percent') {
-    const percent = Math.abs(value) <= 1.5 ? value * 100 : value;
-    return `${percent.toFixed(2).replace(/\.00$/, '')}%`;
-  }
-  if (Number.isInteger(value)) return String(Math.round(value));
-  return value.toFixed(2).replace(/\.00$/, '');
-}
-
-function formatDateRange(dateSummary: TableDateSummary | undefined) {
-  if (!dateSummary) return '';
-  return dateSummary.min === dateSummary.max
-    ? dateSummary.min
-    : `${dateSummary.min} 至 ${dateSummary.max}`;
-}
-
-function derivePlatformFromTableSummary(tableSummary: TableSummary | undefined) {
-  const platformSummary = findTableDimensionSummary(tableSummary, ['platform', 'platform_focus', 'channel']);
-  if (!platformSummary?.topValues?.length) return '';
-  return platformSummary.topValues.slice(0, 3).map((entry) => entry.value).join(' / ');
-}
-
-function deriveTopCategoryFromTableSummary(tableSummary: TableSummary | undefined) {
-  const categorySummary = findTableDimensionSummary(tableSummary, ['category', 'category_name', '类目', '品类']);
-  return categorySummary?.topValues?.[0]?.value || '';
-}
-
-function deriveInventoryStatusFromTableSummary(tableSummary: TableSummary | undefined) {
-  const riskSummary = findTableDimensionSummary(tableSummary, ['risk_flag', 'inventory_risk']);
-  if (riskSummary?.topValues?.length) {
-    return riskSummary.topValues[0].value;
-  }
-
-  const inventoryIndex = findTableMetricSummary(tableSummary, ['inventory_index']);
-  if (inventoryIndex) {
-    if (inventoryIndex.avg >= 1.3) return 'overstock_risk';
-    if (inventoryIndex.avg <= 0.8) return 'understock_risk';
-    return 'healthy';
-  }
-
-  const daysOfCover = findTableMetricSummary(tableSummary, ['days_of_cover']);
-  if (daysOfCover) {
-    if (daysOfCover.avg >= 90) return 'overstock_risk';
-    if (daysOfCover.avg <= 20) return 'understock_risk';
-    return 'healthy';
-  }
-
-  return '';
-}
-
-function deriveReplenishmentActionFromTableSummary(tableSummary: TableSummary | undefined, inventoryStatus: string) {
-  const recommendation = findTableDimensionSummary(tableSummary, ['recommendation', 'replenishment']);
-  if (recommendation?.topValues?.length) {
-    return recommendation.topValues[0].value;
-  }
-
-  const priority = findTableDimensionSummary(tableSummary, ['replenishment_priority']);
-  const topPriority = priority?.topValues?.[0]?.value || '';
-  if (/^P0|^P1/i.test(topPriority)) return '优先补货';
-  if (inventoryStatus === 'overstock_risk') return '放缓补货';
-  if (inventoryStatus === 'understock_risk') return '加速补货';
-  return '';
+  return refineEnterpriseGuidanceFieldsInternal(fields, input, { shouldForceExtraction });
 }
 
 function extractOrderFields(
@@ -3305,150 +501,10 @@ function extractOrderFields(
   profile?: DocumentExtractionProfile | null,
   tableSummary?: TableSummary,
 ): ParsedDocument['orderFields'] | undefined {
-  if (bizCategory !== 'order' && !shouldForceExtraction(profile, 'order')) return undefined;
-
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
-
-  const textPlatform = [
-    /(tmall|天猫)/i.test(evidence) ? 'tmall' : '',
-    /(jd|京东)/i.test(evidence) ? 'jd' : '',
-    /(douyin|抖音)/i.test(evidence) ? 'douyin' : '',
-    /(pinduoduo|拼多多)/i.test(evidence) ? 'pinduoduo' : '',
-    /(kuaishou|快手)/i.test(evidence) ? 'kuaishou' : '',
-    /(wechatmall|小程序)/i.test(evidence) ? 'wechatmall' : '',
-  ].find(Boolean) || '';
-
-  const textPeriod = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
-    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim()
-    || '';
-  const textOrderCount = normalized.match(/(?:订单量|订单数|order_count)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim() || '';
-  const textNetSales = normalized.match(/(?:净销售额|销售额|gmv|net_sales)[:：]?\s*([￥¥]?[0-9,.万亿%]+)/i)?.[1]?.trim() || '';
-  const textGrossMargin = normalized.match(/(?:毛利率|gross_margin)[:：]?\s*([0-9.]+%?)/i)?.[1]?.trim() || '';
-  const textTopCategory = normalized.match(/(?:重点品类|top\s*category|品类|类目)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim() || '';
-  const textInventoryStatus = /(库存|days_of_cover|safety_stock)/i.test(evidence) ? 'inventory-related' : '';
-  const textReplenishmentAction = /(备货|补货|restock|replenishment)/i.test(evidence) ? 'replenishment-needed' : '';
-
-  const orderCountMetric = findTableMetricSummary(tableSummary, ['order_count']);
-  const netSalesMetric = findTableMetricSummary(tableSummary, ['net_amount', 'net_sales', 'revenue', 'gross_amount']);
-  const grossMarginMetric = findTableMetricSummary(tableSummary, ['gross_margin']);
-  const grossProfitMetric = findTableMetricSummary(tableSummary, ['gross_profit']);
-  const period = formatDateRange(findTableDateSummary(tableSummary, ['month', 'date', 'order_date', 'snapshot_date', 'period'])) || textPeriod;
-  const platform = derivePlatformFromTableSummary(tableSummary) || textPlatform;
-  const orderCount = orderCountMetric
-    ? formatMetricValue(orderCountMetric.sum, 'number')
-    : ((tableSummary?.rowCount && (tableSummary.columns || []).some((column) => normalizeTableColumnKey(column) === 'order_id'))
-      ? String(tableSummary.rowCount)
-      : textOrderCount);
-  const netSales = netSalesMetric ? formatMetricValue(netSalesMetric.sum, netSalesMetric.kind) : textNetSales;
-  const grossMargin = grossMarginMetric
-    ? formatMetricValue(grossMarginMetric.avg, 'percent')
-    : (grossProfitMetric && netSalesMetric && netSalesMetric.sum
-      ? formatMetricValue(grossProfitMetric.sum / netSalesMetric.sum, 'percent')
-      : textGrossMargin);
-  const topCategory = deriveTopCategoryFromTableSummary(tableSummary) || textTopCategory;
-  const inventoryStatus = deriveInventoryStatusFromTableSummary(tableSummary) || textInventoryStatus;
-  const replenishmentAction = deriveReplenishmentActionFromTableSummary(tableSummary, inventoryStatus) || textReplenishmentAction;
-
-  const hasAnyValue = Boolean(
-    period
-    || platform
-    || orderCount
-    || netSales
-    || grossMargin
-    || topCategory
-    || inventoryStatus
-    || replenishmentAction
-  );
-
-  return hasAnyValue
-    ? {
-        period,
-        platform,
-        orderCount,
-        netSales,
-        grossMargin,
-        topCategory,
-        inventoryStatus,
-        replenishmentAction,
-      }
-    : undefined;
-}
-
-function deriveTopMallZoneFromTableSummary(tableSummary: TableSummary | undefined) {
-  const recordInsights = [
-    tableSummary?.recordInsights,
-    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
-  ].find((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length)) as TableRecordInsightSummary | undefined;
-  if (recordInsights?.mallZoneBreakdown?.length) {
-    return recordInsights.mallZoneBreakdown[0]?.mallZone || '';
-  }
-  const mallZoneSummary = findTableDimensionSummary(tableSummary, [
-    'mall_zone',
-    'mall_area',
-    'mall_partition',
-    'shopping_zone',
-    'business_zone',
-    '商场分区',
-    '商场区域',
-    '商业分区',
-    '区域',
-    '分区',
-    '片区',
-  ]);
-  return mallZoneSummary?.topValues?.[0]?.value || '';
-}
-
-function deriveTotalFootfallFromTableSummary(tableSummary: TableSummary | undefined) {
-  const recordInsights = [
-    tableSummary?.recordInsights,
-    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
-  ].find((entry) => typeof (entry as TableRecordInsightSummary | undefined)?.totalFootfall === 'number') as TableRecordInsightSummary | undefined;
-  if (typeof recordInsights?.totalFootfall === 'number' && recordInsights.totalFootfall > 0) {
-    return formatMetricValue(recordInsights.totalFootfall, 'number');
-  }
-  const metric = findTableMetricSummary(tableSummary, [
-    'visitor_count',
-    'visitors',
-    'footfall',
-    'traffic_count',
-    'entry_count',
-    'passenger_flow',
-    '客流',
-    '人流',
-    '到访量',
-    '进店客流',
-    '进入人数',
-    '进场人数',
-    '入场人数',
-    '进店人数',
-    '进馆人数',
-  ]);
-  return metric ? formatMetricValue(metric.sum, 'number') : '';
-}
-
-function deriveMallZoneCountFromTableSummary(tableSummary: TableSummary | undefined) {
-  const recordInsights = [
-    tableSummary?.recordInsights,
-    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
-  ].find((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length)) as TableRecordInsightSummary | undefined;
-  if (recordInsights?.mallZoneBreakdown?.length) {
-    return String(recordInsights.mallZoneBreakdown.length);
-  }
-  const dimension = findTableDimensionSummary(tableSummary, [
-    'mall_zone',
-    'mall_area',
-    'mall_partition',
-    'shopping_zone',
-    'business_zone',
-    '商场分区',
-    '商场区域',
-    '商业分区',
-    '区域',
-    '分区',
-    '片区',
-  ]);
-  return dimension?.distinctCount ? String(dimension.distinctCount) : '';
+  return extractOrderFieldsInternal(text, title, bizCategory, topicTags, profile, tableSummary, {
+    normalizeTableColumnKey,
+    shouldForceExtraction,
+  });
 }
 
 function extractFootfallFields(
@@ -3458,199 +514,31 @@ function extractFootfallFields(
   topicTags: string[],
   tableSummary?: TableSummary,
 ): ParsedDocument['footfallFields'] | undefined {
-  if (bizCategory !== 'footfall') return undefined;
-
-  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-  const evidence = `${title} ${normalized} ${(topicTags || []).join(' ')}`.toLowerCase();
-  const textPeriod = normalized.match(/(?:统计周期|时间范围|周期|日期范围)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim()
-    || normalized.match(/((?:20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?(?:\s*至\s*|-\s*)20\d{2}[/-]\d{1,2}(?:[/-]\d{1,2})?)|Q[1-4]\s*20\d{2})/i)?.[1]?.trim()
-    || '';
-  const textTopMallZone = normalized.match(/(?:商场分区|重点分区|top\s*mall\s*zone)[:：]?\s*([^。；;\n]{2,60})/i)?.[1]?.trim() || '';
-  const period = formatDateRange(findTableDateSummary(tableSummary, ['month', 'date', 'snapshot_date', 'period', '时间', '日期', '统计时间', '报表日期'])) || textPeriod;
-  const totalFootfall = deriveTotalFootfallFromTableSummary(tableSummary)
-    || normalized.match(/(?:总客流|累计客流|总到访量)[:：]?\s*([0-9,.万kK]+)/i)?.[1]?.trim()
-    || '';
-  const topMallZone = deriveTopMallZoneFromTableSummary(tableSummary) || textTopMallZone;
-  const mallZoneCount = deriveMallZoneCountFromTableSummary(tableSummary);
-  const aggregationLevel = [
-    tableSummary?.recordInsights,
-    ...((tableSummary?.sheets || []).map((sheet) => sheet.recordInsights)),
-  ].some((entry) => Boolean((entry as TableRecordInsightSummary | undefined)?.mallZoneBreakdown?.length))
-    ? 'mall-zone'
-    : 'report';
-
-  const hasAnyValue = Boolean(period || totalFootfall || topMallZone || mallZoneCount || aggregationLevel);
-  return hasAnyValue
-    ? {
-        period,
-        totalFootfall,
-        topMallZone,
-        mallZoneCount,
-        aggregationLevel,
-      }
-    : undefined;
+  return extractFootfallFieldsInternal(text, title, bizCategory, topicTags, tableSummary, {
+    normalizeTableColumnKey,
+    shouldForceExtraction,
+  });
 }
 
 async function extractText(filePath: string, ext: string) {
-  if (ext === '.txt' || ext === '.md' || ext === '.csv') {
-    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
-    const parseMethod = ext === '.txt'
-      ? `text-${encoding}`
-      : ext === '.md'
-        ? `markdown-${encoding}`
-        : `csv-${encoding}`;
-    let tableSummary: TableSummary | undefined;
-    if (ext === '.csv') {
-      try {
-        const { read, utils } = await import('xlsx');
-        const workbook = read(content, { type: 'string', raw: false });
-        tableSummary = buildWorkbookTableSummary('csv', workbook.SheetNames.map((sheetName) => ({
-          name: sheetName,
-          rows: utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false }) as unknown[][],
-        })));
-      } catch {
-        tableSummary = undefined;
-      }
-    }
-    return { status: 'parsed' as const, text: content, parseMethod, tableSummary };
-  }
-
-  if (ext === '.json') {
-    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
-    const parsed = JSON.parse(content);
-    return { status: 'parsed' as const, text: JSON.stringify(parsed, null, 2), parseMethod: `json-${encoding}` };
-  }
-
-  if (ext === '.html' || ext === '.htm' || ext === '.xml') {
-    const { text: content, encoding } = await readTextWithBestEffortEncoding(filePath);
-    return { status: 'parsed' as const, text: stripHtmlTags(content), parseMethod: `html-${encoding}` };
-  }
-
-  if (ext === '.pdf') {
-    const result = await extractPdfText(filePath);
-    const methodNote = result.method === 'ocrmypdf'
-      ? '\n\n[解析链路] 当前 PDF 使用 OCR fallback 提取文本。'
-      : '';
-    return { status: 'parsed' as const, text: `${result.text}${methodNote}` };
-  }
-
-  if (ext === '.docx') {
-    const { default: mammoth } = await import('mammoth');
-    const result = await mammoth.extractRawText({ path: filePath });
-    return { status: 'parsed' as const, text: result.value || '', parseMethod: 'mammoth' };
-  }
-
-  if (ext === '.pptx' || ext === '.pptm') {
-    const archiveText = await extractPptxTextFromArchive(filePath).catch(() => '');
-    if (normalizeText(archiveText)) {
-      return { status: 'parsed' as const, text: archiveText, parseMethod: 'pptx-ooxml' };
-    }
-    const fallback = await extractPresentationTextViaPdf(filePath);
-    if (normalizeText(fallback.text)) {
-      return { status: 'parsed' as const, text: fallback.text, parseMethod: fallback.parseMethod };
-    }
-    return {
-      status: 'error' as const,
-      text: `Presentation file: ${path.basename(filePath)}\n\nText was not extracted from this presentation.`,
-      parseMethod: fallback.parseMethod,
-    };
-  }
-
-  if (ext === '.ppt') {
-    const fallback = await extractPresentationTextViaPdf(filePath);
-    if (normalizeText(fallback.text)) {
-      return { status: 'parsed' as const, text: fallback.text, parseMethod: fallback.parseMethod };
-    }
-    return {
-      status: 'error' as const,
-      text: `Presentation file: ${path.basename(filePath)}\n\nText was not extracted from this presentation.`,
-      parseMethod: fallback.parseMethod,
-    };
-  }
-
-  if (ext === '.xlsx' || ext === '.xls') {
-    const xlsx = await import('xlsx');
-    const workbook = xlsx.default?.readFile
-      ? xlsx.default.readFile(filePath)
-      : xlsx.read(await fs.readFile(filePath), { type: 'buffer', raw: false });
-    const { utils } = xlsx;
-    const sheetRows = workbook.SheetNames.map((sheetName) => ({
-      name: sheetName,
-      rows: utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, raw: false }) as unknown[][],
-    }));
-    const text = workbook.SheetNames
-      .map((sheetName) => {
-        const rows = sheetRows.find((entry) => entry.name === sheetName)?.rows || [];
-        const body = flattenSpreadsheetRows(rows.slice(0, 80));
-        return [`# ${sheetName}`, body].filter(Boolean).join('\n');
-      })
-      .filter(Boolean)
-      .join('\n\n');
-    return {
-      status: 'parsed' as const,
-      text,
-      parseMethod: 'xlsx-sheet-reader',
-      tableSummary: buildWorkbookTableSummary('xlsx', sheetRows),
-    };
-  }
-
-  if (IMAGE_EXTENSIONS.has(ext)) {
-    const imageName = path.basename(filePath);
-    const ocrText = await extractImageTextWithTesseract(filePath);
-    if (ocrText) {
-      return {
-        status: 'parsed' as const,
-        text: `Image file: ${imageName}\n\nOCR text:\n${ocrText}`,
-        parseMethod: 'image-ocr',
-      };
-    }
-
-    return {
-      status: 'error' as const,
-      text: `Image file: ${imageName}\n\nOCR text was not extracted from this image.`,
-      parseMethod: 'image-ocr-empty',
-    };
-  }
-
-  return { status: 'unsupported' as const, text: '', parseMethod: 'unsupported' };
-}
-
-function inferParseMethod(ext: string, text: string, hintedMethod?: string) {
-  if (hintedMethod) return hintedMethod;
-  if (ext === '.txt') return 'text-utf8';
-  if (ext === '.md') return 'markdown-utf8';
-  if (ext === '.csv') return 'csv-utf8';
-  if (ext === '.json') return 'json-utf8';
-  if (ext === '.html' || ext === '.htm' || ext === '.xml') return 'html-utf8';
-  if (ext === '.docx') return 'mammoth';
-  if (ext === '.pptx' || ext === '.pptm') return 'pptx-ooxml';
-  if (ext === '.ppt') return 'presentation-pdf-convert';
-  if (ext === '.xlsx' || ext === '.xls') return 'xlsx-sheet-reader';
-  if (IMAGE_EXTENSIONS.has(ext)) return text.includes('OCR text:') ? 'image-ocr' : 'image-metadata';
-  if (AUDIO_EXTENSIONS.has(ext)) return 'audio-pending';
-  if (ext === '.pdf') {
-    return text.includes('OCR fallback') || text.includes('[瑙ｆ瀽閾捐矾]')
-      ? 'ocr-fallback'
-      : 'pdf-auto';
-  }
-  return 'unsupported';
-}
-
-function shouldAttemptDetailedMarkdownResolution(ext: string, parseStage: 'quick' | 'detailed') {
-  return parseStage === 'detailed' && (ext === '.md' || supportsMarkItDownExtension(ext));
-}
-
-function shouldPreserveLegacyAuxiliaryExtraction(ext: string) {
-  return ext === '.csv' || ext === '.xlsx' || ext === '.xls';
-}
-
-function shouldTreatLegacyExtractionAsCanonical(ext: string) {
-  return ext === '.txt'
-    || ext === '.json'
-    || ext === '.html'
-    || ext === '.htm'
-    || ext === '.xml'
-    || ext === '.csv';
+  const result = await extractTextForDocument(filePath, ext, {
+    readTextWithBestEffortEncoding,
+    extractPdfText,
+    extractPptxTextFromArchive,
+    extractPresentationTextViaPdf,
+    extractImageTextWithTesseract,
+    buildWorkbookTableSummary,
+    flattenSpreadsheetRows,
+    stripHtmlTags,
+    normalizeText,
+    imageExtensions: IMAGE_EXTENSIONS,
+  });
+  return result as {
+    status: 'parsed' | 'error' | 'unsupported';
+    text: string;
+    parseMethod?: string;
+    tableSummary?: TableSummary;
+  };
 }
 
 export async function parseDocument(
@@ -3677,7 +565,10 @@ export async function parseDocument(
     let tableSummary: TableSummary | undefined;
     let parseStatus: 'parsed' | 'unsupported' | 'error' = 'unsupported';
     let activeText = '';
-    let parseMethod = inferParseMethod(ext, '', undefined);
+    let parseMethod = inferParseMethod(ext, '', undefined, {
+      imageExtensions: IMAGE_EXTENSIONS,
+      audioExtensions: AUDIO_EXTENSIONS,
+    });
     let markdownText = '';
     let markdownMethod: ParsedDocument['markdownMethod'];
     let markdownGeneratedAt: string | undefined;
@@ -3688,7 +579,7 @@ export async function parseDocument(
         ? 'failed'
         : 'fallback_full_text';
 
-    if (shouldAttemptDetailedMarkdownResolution(ext, parseStage)) {
+    if (shouldAttemptDetailedMarkdownResolution(ext, parseStage, { supportsMarkItDownExtension })) {
       if (ext === '.md') {
         const extracted = await extractText(filePath, ext);
         status = extracted.status;
@@ -3730,10 +621,16 @@ export async function parseDocument(
         text = extracted.text;
         hintedMethod = extracted.parseMethod;
         tableSummary = extracted.tableSummary;
+        if (markdownText && shouldPreserveLegacyAuxiliaryExtraction(ext) && hintedMethod) {
+          parseMethod = hintedMethod;
+        }
         if (!markdownText) {
           parseStatus = status;
           activeText = text;
-          parseMethod = inferParseMethod(ext, text, hintedMethod);
+          parseMethod = inferParseMethod(ext, text, hintedMethod, {
+            imageExtensions: IMAGE_EXTENSIONS,
+            audioExtensions: AUDIO_EXTENSIONS,
+          });
           canonicalParseStatus = status === 'unsupported'
             ? 'unsupported'
             : status === 'error'
@@ -3750,14 +647,17 @@ export async function parseDocument(
     if (
       parseStage === 'detailed'
       && parseStatus === 'unsupported'
-      && shouldAttemptDetailedMarkdownResolution(ext, parseStage)
+      && shouldAttemptDetailedMarkdownResolution(ext, parseStage, { supportsMarkItDownExtension })
       && !markdownText
     ) {
       parseStatus = 'error';
       canonicalParseStatus = 'failed';
     }
 
-    const normalizedText = normalizeText(activeText);
+    const semanticText = markdownText && shouldPreserveLegacyAuxiliaryExtraction(ext) && text
+      ? text
+      : activeText;
+    const normalizedText = normalizeText(semanticText);
     const category = detectCategory(filePath, normalizedText);
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
     const unsupportedSummary = UNSUPPORTED_PARSE_SUMMARY;
@@ -3771,30 +671,21 @@ export async function parseDocument(
         inferSchemaType(category, bizCategory, undefined, topicTags),
         extractionProfile,
       );
-      return {
-        path: filePath,
+      return buildUnsupportedParsedDocument({
+        filePath,
         name,
         ext,
         title: path.parse(name).name,
         category,
         bizCategory,
-        parseStatus: 'unsupported',
         parseMethod,
-        summary: unsupportedSummary,
-        excerpt: unsupportedSummary,
         fullText: activeText || '',
-        markdownText: markdownText || undefined,
+        markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
         canonicalParseStatus: 'unsupported',
-        extractedChars: 0,
-        evidenceChunks: [],
-        entities: [],
-        claims: [],
-        intentSlots: {},
         topicTags,
-        groups: [],
         parseStage,
         detailParseStatus: defaultDetailParseStatus,
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3810,7 +701,8 @@ export async function parseDocument(
           tableSummary,
           extractionProfile: structuredExtractionProfile,
         }),
-      };
+        unsupportedSummary,
+      });
     }
 
     if (parseStatus === 'error') {
@@ -3832,30 +724,22 @@ export async function parseDocument(
           ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
           : '文档解析失败，后续可补充依赖后手动重新解析。');
 
-      return {
-        path: filePath,
+      return buildParseErrorParsedDocument({
+        filePath,
         name,
         ext,
         title: path.parse(name).name,
         category,
         bizCategory,
-        parseStatus: 'error',
         parseMethod,
-        summary: fallbackSummary,
-        excerpt: fallbackSummary,
+        fallbackSummary,
         fullText: activeText || text,
-        markdownText: markdownText || undefined,
+        markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
         canonicalParseStatus: 'failed',
-        extractedChars: 0,
-        evidenceChunks: [],
-        entities: [],
-        claims: [],
-        intentSlots: {},
         topicTags,
-        groups: [],
         parseStage,
         detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3878,7 +762,7 @@ export async function parseDocument(
           tableSummary,
           extractionProfile: structuredExtractionProfile,
         }),
-      };
+      });
     }
 
     const topicTags = mergeGovernedTopicTags(
@@ -3890,7 +774,7 @@ export async function parseDocument(
       : [];
     const summary = summarize(normalizedText, '文档内容为空或暂未提取到文本。');
     const excerptText = excerpt(normalizedText, '文档内容为空或暂未提取到文本。');
-    const inferredTitle = inferTitle(activeText || text, name);
+    const inferredTitle = inferTitle(semanticText || text, name);
 
     if (parseStage === 'quick') {
       const quickText = activeText.slice(0, 2400);
@@ -3944,19 +828,18 @@ export async function parseDocument(
         extractionProfile,
         enterpriseGuidanceFields,
       );
-      return {
-        path: filePath,
+      return buildQuickParsedDocument({
+        filePath,
         name,
         ext,
         title: inferredTitle,
         category,
         bizCategory,
-        parseStatus: 'parsed',
         parseMethod,
         summary,
         excerpt: excerptText,
         fullText: activeText,
-        markdownText: markdownText || undefined,
+        markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
@@ -3973,7 +856,6 @@ export async function parseDocument(
         footfallFields,
         riskLevel: detectRiskLevel(normalizedText, category),
         topicTags,
-        groups: [],
         parseStage,
         detailParseStatus: defaultDetailParseStatus,
         detailParseQueuedAt: defaultDetailQueuedAt,
@@ -3994,7 +876,7 @@ export async function parseDocument(
           tableSummary,
           extractionProfile: structuredExtractionProfile,
         }),
-      };
+      });
     }
 
     const evidenceChunks = splitEvidenceChunks(activeText);
@@ -4050,19 +932,18 @@ export async function parseDocument(
       enterpriseGuidanceFields,
     );
 
-    return {
-      path: filePath,
+    return buildDetailedParsedDocument({
+      filePath,
       name,
       ext,
       title: inferredTitle,
       category,
       bizCategory,
-      parseStatus: 'parsed',
       parseMethod,
       summary: summarize(normalizedText, '文档内容为空或暂未提取到文本。'),
       excerpt: excerpt(normalizedText, '文档内容为空或暂未提取到文本。'),
       fullText: activeText,
-      markdownText: markdownText || undefined,
+      markdownText,
       markdownMethod,
       markdownGeneratedAt,
       markdownError,
@@ -4078,7 +959,6 @@ export async function parseDocument(
       footfallFields,
       riskLevel: detectRiskLevel(normalizedText, category),
       topicTags,
-      groups: [],
       contractFields,
       parseStage,
       detailParseStatus: defaultDetailParseStatus,
@@ -4100,7 +980,7 @@ export async function parseDocument(
         tableSummary,
         extractionProfile: structuredExtractionProfile,
       }),
-    };
+    });
   } catch {
     const category = detectCategory(filePath);
     const bizCategory = detectBizCategory(filePath, category, '', config);
@@ -4116,26 +996,21 @@ export async function parseDocument(
       ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
       : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';
 
-    return {
-      path: filePath,
+    return buildCatchErrorParsedDocument({
+      filePath,
       name,
       ext,
       title: path.parse(name).name,
       category,
       bizCategory,
-      parseStatus: 'error',
       parseMethod: 'error',
-      summary: fallbackSummary,
-      excerpt: fallbackSummary,
-      fullText: '',
+      fallbackSummary,
+      markdownText: undefined,
+      markdownMethod: undefined,
+      markdownGeneratedAt: undefined,
+      markdownError: undefined,
       canonicalParseStatus: 'failed',
-      extractedChars: 0,
-      evidenceChunks: [],
-      entities: [],
-      claims: [],
-      intentSlots: {},
       topicTags,
-      groups: [],
       parseStage,
       detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
       detailParseQueuedAt: defaultDetailQueuedAt,
@@ -4152,6 +1027,6 @@ export async function parseDocument(
         tableSummary: undefined,
         extractionProfile: structuredExtractionProfile,
       }),
-    };
+    });
   }
 }

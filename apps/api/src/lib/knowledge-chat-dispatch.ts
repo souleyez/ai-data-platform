@@ -13,10 +13,15 @@ import type { ParsedDocument } from './document-parser.js';
 import { documentMatchesLibrary, loadDocumentLibraries } from './document-libraries.js';
 import { buildDocumentId, loadParsedDocuments } from './document-store.js';
 import {
-  buildOpenClawMemorySelectionContextBlock,
   loadOpenClawMemorySelectionState,
   selectOpenClawMemoryDocumentCandidatesFromState,
 } from './openclaw-memory-selection.js';
+import { loadOpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js';
+import {
+  buildOpenClawLongTermMemoryContextBlock,
+  buildOpenClawLongTermMemoryDirectAnswer,
+  shouldAnswerFromOpenClawLongTermMemoryDirectory,
+} from './openclaw-memory-directory.js';
 import { getParsedDocumentCanonicalText } from './document-canonical-text.js';
 import { runOpenClawChat, tryRunOpenClawNativeWebSearchChat } from './openclaw-adapter.js';
 import { buildWebSearchContextBlock, shouldUseWebSearchForPrompt } from './web-search.js';
@@ -24,13 +29,13 @@ import type { ChatOutput } from './knowledge-output.js';
 import type { ResolvedChannelAccess } from './channel-access-resolver.js';
 import {
   parseGeneralKnowledgeConversationState,
-  type GeneralKnowledgeUploadSummary,
 } from './knowledge-request-state.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
 
 const UPLOADED_DOCUMENT_CHAT_CONTEXT_CHAR_LIMIT = 5000;
-const RECENT_UPLOAD_SUMMARY_CHAR_LIMIT = 240;
+const MATCHED_DOCUMENT_SUPPLY_CHAR_LIMIT = 5000;
+const MATCHED_DOCUMENT_SUPPLY_DOC_LIMIT = 3;
 const UPLOADED_DOCUMENT_FULL_TEXT_HINT_PATTERNS = [
   /这份(?:文档|文件|材料)?/,
   /这个(?:文档|文件|材料)?/,
@@ -69,41 +74,6 @@ function trimUploadedDocumentContextText(text: string, maxChars = UPLOADED_DOCUM
   if (!normalized) return '';
   if (normalized.length <= maxChars) return normalized;
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-function trimRecentUploadSummaryText(text: string, maxChars = RECENT_UPLOAD_SUMMARY_CHAR_LIMIT) {
-  const normalized = String(text || '').trim().replace(/\s+/g, ' ');
-  if (!normalized) return '';
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-export function buildRecentUploadSummaryContextBlock(summary?: GeneralKnowledgeUploadSummary | null) {
-  const items = Array.isArray(summary?.items) ? summary.items : [];
-  if (!items.length) return '';
-
-  const lines = ['Recent uploaded documents summary:'];
-  const uploadedAt = String(summary?.uploadedAt || '').trim();
-  if (uploadedAt) lines.push(`Uploaded at: ${uploadedAt}`);
-
-  for (const [index, item] of items.slice(0, 5).entries()) {
-    const label = String(item?.name || path.basename(String(item?.path || '')) || `文档 ${index + 1}`).trim();
-    const docType = String(item?.docType || '').trim();
-    const summaryText = trimRecentUploadSummaryText(item?.summary || '');
-    const libraries = Array.isArray(item?.libraries)
-      ? item.libraries
-          .map((entry) => String(entry?.label || entry?.key || '').trim())
-          .filter(Boolean)
-      : [];
-    lines.push([
-      `${index + 1}. ${label}`,
-      docType ? `类型：${docType}` : '',
-      summaryText ? `摘要：${summaryText}` : '',
-      libraries.length ? `分组：${libraries.join('、')}` : '',
-    ].filter(Boolean).join('；'));
-  }
-
-  return lines.join('\n');
 }
 
 async function runCloudChatWithSearchFallback(input: {
@@ -246,6 +216,32 @@ export function buildLatestParsedDocumentFullTextContextBlock(document?: Pick<
   ].join('\n\n');
 }
 
+function buildMatchedDocumentFullTextContextBlocks(input: {
+  documents: ParsedDocument[];
+  preferredDocumentPath?: string;
+}) {
+  const normalizedPreferredPath = String(input.preferredDocumentPath || '').trim().toLowerCase();
+  const matchedDocuments = [...(input.documents || [])]
+    .filter((item) => Boolean(getParsedDocumentCanonicalText(item)))
+    .sort((left, right) => {
+      const leftPreferred = normalizedPreferredPath && String(left.path || '').trim().toLowerCase() === normalizedPreferredPath ? 1 : 0;
+      const rightPreferred = normalizedPreferredPath && String(right.path || '').trim().toLowerCase() === normalizedPreferredPath ? 1 : 0;
+      if (rightPreferred !== leftPreferred) return rightPreferred - leftPreferred;
+      return extractDocumentTimestamp(right) - extractDocumentTimestamp(left);
+    })
+    .slice(0, MATCHED_DOCUMENT_SUPPLY_DOC_LIMIT);
+
+  return matchedDocuments.map((document, index) => [
+    `Matched document full text ${index + 1}:`,
+    `Title: ${String(document.title || document.name || 'Untitled document').trim()}`,
+    `Path: ${String(document.path || '').trim()}`,
+    `Type: ${String(document.schemaType || '').trim() || 'generic'}`,
+    `Parse stage: ${String(document.parseStage || '').trim() || '-'}`,
+    `Detail parse status: ${String(document.detailParseStatus || '').trim() || '-'}`,
+    `Full text:\n${trimUploadedDocumentContextText(getParsedDocumentCanonicalText(document), MATCHED_DOCUMENT_SUPPLY_CHAR_LIMIT)}`,
+  ].join('\n\n'));
+}
+
 function requestExplicitlyTargetsUploadedDocument(requestText?: string | null) {
   const source = String(requestText || '').trim();
   if (!source) return false;
@@ -347,8 +343,8 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const systemContextBlocks = [...(input.systemContextBlocks || [])];
   const generalState = parseGeneralKnowledgeConversationState(input.existingState);
   const preferredDocumentPath = String(input.preferredDocumentPath || generalState?.preferredDocumentPath || '').trim();
-  const recentUploadSummary = generalState?.recentUploadSummary || null;
   const useExternalScopedMemory = input.accessContext?.source === 'external-directory';
+  const catalogSnapshot = await loadOpenClawMemoryCatalogSnapshot();
   const memoryState = await loadOpenClawMemorySelectionState({
     botId: input.botDefinition?.id,
     forceGlobalState: useExternalScopedMemory,
@@ -366,6 +362,54 @@ export async function runGeneralKnowledgeAwareChat(input: {
     botDefinition: input.botDefinition,
     effectiveVisibleLibraryKeys: input.effectiveVisibleLibraryKeys,
   });
+  const directDirectoryAnswer = shouldAnswerFromOpenClawLongTermMemoryDirectory(requestText)
+    ? buildOpenClawLongTermMemoryDirectAnswer({
+      snapshot: catalogSnapshot,
+      requestText,
+      libraries: scopeState.libraries,
+      effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
+    })
+    : '';
+
+  if (directDirectoryAnswer) {
+    return {
+      libraries: scopeState.libraries,
+      content: directDirectoryAnswer,
+      output: { type: 'answer', content: directDirectoryAnswer },
+      references: [],
+      intent: 'general',
+      mode: 'openclaw',
+      debug: {
+        memorySelectedDocuments: memorySelection.documentIds.length,
+        catalogMemoryLibraries: scopeState.libraries.length || catalogSnapshot?.libraryCount || 0,
+        catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
+        catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
+        matchedSupplyDocuments: 0,
+        matchedSupplyEvidence: 0,
+        matchedFullTextDocuments: 0,
+        latestDetailedDocument: '',
+        preferredDocumentPath,
+        latestDocumentFullTextIncluded: false,
+        preferredDocumentStatus: preferredDocumentPath ? 'skipped' : 'none',
+        botId: input.botDefinition?.id || '',
+        botName: input.botDefinition?.name || '',
+        visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
+          ? input.effectiveVisibleLibraryKeys
+          : (input.botDefinition?.visibleLibraryKeys || []),
+        accessContext: input.accessContext || null,
+        longTermDirectoryAnswerUsed: true,
+      },
+      conversationState: generalState,
+      routeKind: 'general',
+      evidenceMode: 'supply_only',
+      guard: {
+        requiresConfirmation: false,
+        reason: '',
+        confirmation: null,
+      },
+    };
+  }
+
   const supply = await prepareKnowledgeRetrieval({
     requestText,
     docLimit: 5,
@@ -387,14 +431,20 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const latestDetailedDocument = latestDetailedDocumentContext.document;
   const conversationState = generalState;
   const latestDocumentFullTextIncluded = Boolean(latestDetailedDocument && shouldIncludeLatestDocumentFullText);
+  const matchedDocumentFullTextBlocks = buildMatchedDocumentFullTextContextBlocks({
+    documents: supply.effectiveRetrieval.documents,
+    preferredDocumentPath,
+  });
   const preferredDocumentStatus = !preferredDocumentPath
     ? 'none'
     : latestDetailedDocumentContext.preferredDocumentReady
       ? 'ready'
       : (latestDetailedDocumentContext.preferredDocument ? 'not_ready' : 'missing');
-  const recentUploadSummaryBlock = buildRecentUploadSummaryContextBlock(recentUploadSummary);
-  const recentUploadSummaryIncluded = Boolean(recentUploadSummaryBlock);
-  const recentUploadSummaryItemCount = Array.isArray(recentUploadSummary?.items) ? recentUploadSummary.items.length : 0;
+  const longTermMemoryContextBlock = buildOpenClawLongTermMemoryContextBlock({
+    snapshot: catalogSnapshot,
+    libraries: supply.libraries,
+    effectiveVisibleLibraryKeys: useExternalScopedMemory ? input.effectiveVisibleLibraryKeys : undefined,
+  });
 
   const templateKnowledgeContext = supply.effectiveRetrieval.documents.length || supply.effectiveRetrieval.evidenceMatches.length
     ? buildKnowledgeContext(
@@ -417,7 +467,7 @@ export async function runGeneralKnowledgeAwareChat(input: {
   const libraryKnowledgePagesContext = await buildLibraryKnowledgePagesContextBlock(supply.libraries);
   const templateContextBlocks = [
     ...systemContextBlocks,
-    buildOpenClawMemorySelectionContextBlock(memorySelection),
+    longTermMemoryContextBlock,
     libraryKnowledgePagesContext,
     templateKnowledgeContext,
   ].filter(Boolean);
@@ -426,7 +476,8 @@ export async function runGeneralKnowledgeAwareChat(input: {
     : '';
   const chatContextBlocks = [
     ...systemContextBlocks,
-    recentUploadSummaryBlock,
+    longTermMemoryContextBlock,
+    ...matchedDocumentFullTextBlocks,
     latestDocumentFullTextBlock,
   ].filter(Boolean);
   const references = appendReference(buildAnswerReferences(supply.effectiveRetrieval.documents), latestDetailedDocument);
@@ -442,14 +493,16 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: 'openclaw',
       debug: {
         memorySelectedDocuments: memorySelection.documentIds.length,
-        supplyDocuments: supply.effectiveRetrieval.documents.length,
-        supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+        catalogMemoryLibraries: supply.libraries.length,
+        catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
+        catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
+        matchedSupplyDocuments: supply.effectiveRetrieval.documents.length,
+        matchedSupplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+        matchedFullTextDocuments: matchedDocumentFullTextBlocks.length,
         latestDetailedDocument: '',
         preferredDocumentPath,
         latestDocumentFullTextIncluded: false,
         preferredDocumentStatus,
-        recentUploadSummaryIncluded,
-        recentUploadSummaryItemCount,
         botId: input.botDefinition?.id || '',
         botName: input.botDefinition?.name || '',
         visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -494,14 +547,16 @@ export async function runGeneralKnowledgeAwareChat(input: {
       mode: 'openclaw',
       debug: {
       memorySelectedDocuments: memorySelection.documentIds.length,
-      supplyDocuments: supply.effectiveRetrieval.documents.length,
-      supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      catalogMemoryLibraries: supply.libraries.length,
+      catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
+      catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
+      matchedSupplyDocuments: supply.effectiveRetrieval.documents.length,
+      matchedSupplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      matchedFullTextDocuments: matchedDocumentFullTextBlocks.length,
       latestDetailedDocument: latestDetailedDocument?.path || '',
       preferredDocumentPath,
       latestDocumentFullTextIncluded,
       preferredDocumentStatus,
-      recentUploadSummaryIncluded,
-      recentUploadSummaryItemCount,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)
@@ -537,16 +592,18 @@ export async function runGeneralKnowledgeAwareChat(input: {
     mode: 'openclaw',
     debug: {
       memorySelectedDocuments: memorySelection.documentIds.length,
-      supplyDocuments: supply.effectiveRetrieval.documents.length,
-      supplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      catalogMemoryLibraries: supply.libraries.length,
+      catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
+      catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
+      matchedSupplyDocuments: supply.effectiveRetrieval.documents.length,
+      matchedSupplyEvidence: supply.effectiveRetrieval.evidenceMatches.length,
+      matchedFullTextDocuments: matchedDocumentFullTextBlocks.length,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,
       latestDetailedDocument: latestDetailedDocument?.path || '',
       preferredDocumentPath,
       latestDocumentFullTextIncluded,
       preferredDocumentStatus,
-      recentUploadSummaryIncluded,
-      recentUploadSummaryItemCount,
       botId: input.botDefinition?.id || '',
       botName: input.botDefinition?.name || '',
       visibleLibraries: Array.isArray(input.effectiveVisibleLibraryKeys)

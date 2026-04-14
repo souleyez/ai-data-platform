@@ -431,19 +431,37 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
       )
         ? debug.preferredDocumentStatus
         : (effectivePreferredDocumentPath ? 'unknown' : 'none'),
-      recentUploadSummaryIncluded: Boolean(
+      catalogMemoryLibraries: (
         debug
         && typeof debug === 'object'
-        && 'recentUploadSummaryIncluded' in debug
-        && debug.recentUploadSummaryIncluded === true,
-      ),
-      recentUploadSummaryItemCount: (
-        debug
-        && typeof debug === 'object'
-        && 'recentUploadSummaryItemCount' in debug
-        && Number.isFinite(Number(debug.recentUploadSummaryItemCount))
+        && 'catalogMemoryLibraries' in debug
+        && Number.isFinite(Number(debug.catalogMemoryLibraries))
       )
-        ? Number(debug.recentUploadSummaryItemCount)
+        ? Number(debug.catalogMemoryLibraries)
+        : 0,
+      catalogMemoryDocuments: (
+        debug
+        && typeof debug === 'object'
+        && 'catalogMemoryDocuments' in debug
+        && Number.isFinite(Number(debug.catalogMemoryDocuments))
+      )
+        ? Number(debug.catalogMemoryDocuments)
+        : 0,
+      catalogMemoryOutputs: (
+        debug
+        && typeof debug === 'object'
+        && 'catalogMemoryOutputs' in debug
+        && Number.isFinite(Number(debug.catalogMemoryOutputs))
+      )
+        ? Number(debug.catalogMemoryOutputs)
+        : 0,
+      matchedFullTextDocuments: (
+        debug
+        && typeof debug === 'object'
+        && 'matchedFullTextDocuments' in debug
+        && Number.isFinite(Number(debug.matchedFullTextDocuments))
+      )
+        ? Number(debug.matchedFullTextDocuments)
         : 0,
       botId: botDefinition?.id || '',
       botName: botDefinition?.name || '',

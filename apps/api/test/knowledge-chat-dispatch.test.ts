@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import {
   buildLatestParsedDocumentFullTextContextBlock,
-  buildRecentUploadSummaryContextBlock,
   shouldIncludeUploadedDocumentFullText,
   selectLatestDetailedFullTextDocument,
 } from '../src/lib/knowledge-chat-dispatch.js';
@@ -174,27 +173,6 @@ test('buildLatestParsedDocumentFullTextContextBlock should use markdown text whe
 
   assert.match(block, /页面正文/);
   assert.match(block, /Markdown 供料/);
-});
-
-test('buildRecentUploadSummaryContextBlock should include uploaded summary items and trim long text', () => {
-  const block = buildRecentUploadSummaryContextBlock({
-    uploadedAt: '2026-04-13T12:00:00.000Z',
-    items: [
-      {
-        path: 'C:/docs/order-analysis.xlsx',
-        name: '订单分析',
-        docType: 'spreadsheet',
-        summary: `这是上传摘要 ${'内容'.repeat(180)}`,
-        libraries: [{ key: 'orders', label: '订单分析数据集' }],
-      },
-    ],
-  });
-
-  assert.match(block, /Recent uploaded documents summary:/);
-  assert.match(block, /订单分析/);
-  assert.match(block, /订单分析数据集/);
-  assert.match(block, /…/);
-  assert.ok(block.length < 500);
 });
 
 test('shouldIncludeUploadedDocumentFullText should only accept explicit uploaded-document questions with a preferred path', () => {

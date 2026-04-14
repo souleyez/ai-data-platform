@@ -202,57 +202,18 @@ function buildChatOptions(context, overrides = {}) {
   };
 }
 
-function truncateUploadSummaryText(value, maxLength = 180) {
-  const text = String(value || '').trim().replace(/\s+/g, ' ');
-  if (!text) return '';
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function buildRecentUploadSummary(ingestItems) {
-  const items = [...(Array.isArray(ingestItems) ? ingestItems : [])]
-    .filter((item) => item?.status === 'success')
-    .slice(0, 5)
-    .map((item) => {
-      const suggestedGroups = Array.isArray(item?.groupSuggestion?.suggestedGroups)
-        ? item.groupSuggestion.suggestedGroups
-        : [];
-      return {
-        path: String(item?.path || '').trim(),
-        name: String(item?.preview?.title || item?.sourceName || item?.name || '').trim(),
-        docType: String(item?.preview?.docType || '').trim(),
-        summary: truncateUploadSummaryText(item?.preview?.summary || ''),
-        libraries: suggestedGroups
-          .map((entry) => ({
-            key: String(entry?.key || '').trim(),
-            label: String(entry?.label || '').trim(),
-          }))
-          .filter((entry) => entry.key || entry.label),
-      };
-    })
-    .filter((item) => item.path || item.name || item.summary);
-
-  if (!items.length) return null;
-  return {
-    uploadedAt: new Date().toISOString(),
-    items,
-  };
-}
-
 function buildOneTimePreferredDocumentConversationState(ingestItems) {
   const preferredDocumentPath = [...(Array.isArray(ingestItems) ? ingestItems : [])]
     .reverse()
     .find((item) => item?.status === 'success' && typeof item?.path === 'string' && item.path.trim())
     ?.path
     ?.trim();
-  const recentUploadSummary = buildRecentUploadSummary(ingestItems);
 
-  return (preferredDocumentPath || recentUploadSummary)
+  return preferredDocumentPath
     ? {
       kind: 'general',
-      preferredDocumentPath: preferredDocumentPath || '',
+      preferredDocumentPath,
       expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-      recentUploadSummary,
     }
     : null;
 }

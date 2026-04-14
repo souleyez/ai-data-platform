@@ -44,24 +44,11 @@ test('parseGeneralKnowledgeConversationState should accept a persisted preferred
   const state = parseGeneralKnowledgeConversationState({
     kind: 'general',
     preferredDocumentPath: 'C:/storage/files/uploads/1775000000000-bid.pdf',
-    recentUploadSummary: {
-      uploadedAt: new Date().toISOString(),
-      items: [
-        {
-          path: 'C:/storage/files/uploads/1775000000000-bid.pdf',
-          name: 'bid.pdf',
-          docType: 'contract',
-          summary: '招标文件摘要',
-          libraries: [{ key: 'bid', label: '投标资料' }],
-        },
-      ],
-    },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(state?.kind, 'general');
   assert.equal(state?.preferredDocumentPath, 'C:/storage/files/uploads/1775000000000-bid.pdf');
-  assert.equal(state?.recentUploadSummary?.items[0]?.summary, '招标文件摘要');
   assert.ok(state?.expiresAt);
 });
 
@@ -73,24 +60,6 @@ test('buildGeneralKnowledgeConversationState should normalize and reject empty p
   assert.ok(Date.parse(String(state?.expiresAt || '')) > Date.now());
 });
 
-test('buildGeneralKnowledgeConversationState should accept upload summary without preferred document path', () => {
-  const state = buildGeneralKnowledgeConversationState('', {
-    uploadedAt: new Date().toISOString(),
-    items: [
-      {
-        path: 'C:/docs/summary-only.pdf',
-        name: 'summary-only.pdf',
-        docType: 'technical',
-        summary: '上传摘要',
-        libraries: [{ key: 'tech', label: '技术资料' }],
-      },
-    ],
-  });
-
-  assert.equal(state?.preferredDocumentPath, '');
-  assert.equal(state?.recentUploadSummary?.items.length, 1);
-});
-
 test('parseGeneralKnowledgeConversationState should reject expired preferred document state', () => {
   const state = parseGeneralKnowledgeConversationState({
     kind: 'general',
@@ -99,28 +68,6 @@ test('parseGeneralKnowledgeConversationState should reject expired preferred doc
   });
 
   assert.equal(state, null);
-});
-
-test('parseGeneralKnowledgeConversationState should accept summary-only state before expiry', () => {
-  const state = parseGeneralKnowledgeConversationState({
-    kind: 'general',
-    preferredDocumentPath: '',
-    recentUploadSummary: {
-      uploadedAt: new Date().toISOString(),
-      items: [
-        {
-          path: 'C:/docs/uploaded.txt',
-          name: 'uploaded.txt',
-          docType: 'generic',
-          summary: '这是上传摘要',
-          libraries: [],
-        },
-      ],
-    },
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
-  });
-
-  assert.equal(state?.recentUploadSummary?.items[0]?.name, 'uploaded.txt');
 });
 
 test('extractNormalizedTimeRange should normalize all-time and recent-upload phrases', () => {

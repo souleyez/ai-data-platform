@@ -28,7 +28,8 @@ import {
 import { refreshBotMemoryCatalogs } from './bot-memory-catalog.js';
 
 const LEGACY_CATALOG_ROOT = path.join(MEMORY_ROOT, 'catalog');
-const STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
+export const OPENCLAW_MEMORY_STATE_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog.json');
+export const OPENCLAW_MEMORY_CATALOG_SNAPSHOT_FILE = path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog-snapshot.json');
 const CATALOG_DOCUMENT_LIMIT = Math.max(1000, Number(process.env.OPENCLAW_MEMORY_CATALOG_DOCUMENT_LIMIT || 20000));
 const SMALL_LIBRARY_DETAIL_LIMIT = Math.max(3, Number(process.env.OPENCLAW_MEMORY_SMALL_LIBRARY_DETAIL_LIMIT || 20));
 const MEDIUM_LIBRARY_DETAIL_LIMIT = Math.max(SMALL_LIBRARY_DETAIL_LIMIT + 1, Number(process.env.OPENCLAW_MEMORY_MEDIUM_LIBRARY_DETAIL_LIMIT || 80));
@@ -58,12 +59,12 @@ export type OpenClawMemoryCatalogSnapshot = {
   templateCount: number;
   outputCount: number;
   libraries: OpenClawMemoryLibrarySnapshot[];
-  documents: CatalogDocumentCard[];
+  documents: OpenClawMemoryDocumentCard[];
   templates: OpenClawMemoryTemplateSnapshot[];
   outputs: OpenClawMemoryReportOutputSnapshot[];
 };
 
-type CatalogDocumentCard = OpenClawMemoryDocumentState & {
+export type OpenClawMemoryDocumentCard = OpenClawMemoryDocumentState & {
   path: string;
   title: string;
   name: string;
@@ -101,6 +102,7 @@ export type OpenClawMemoryReportOutputSnapshot = {
   kind: string;
   templateLabel: string;
   summary: string;
+  libraryKeys: string[];
   libraryLabels: string[];
   triggerSource: 'report-center' | 'chat';
   createdAt: string;
@@ -422,7 +424,7 @@ function buildDocumentCard(
   item: ParsedDocument,
   libraryKeys: string[],
   libraryDocumentCounts: Map<string, number>,
-): CatalogDocumentCard {
+): OpenClawMemoryDocumentCard {
   const title = selectCatalogMemoryTitle(item);
   const summary = sanitizeText(item.summary || item.excerpt || '', 280);
   const availability = resolveAvailability(item);
@@ -467,14 +469,14 @@ function buildDocumentCard(
   };
 }
 
-function sortDocumentCards(cards: CatalogDocumentCard[]) {
+function sortDocumentCards(cards: OpenClawMemoryDocumentCard[]) {
   return [...cards].sort((left, right) => (
     Date.parse(right.updatedAt || '') - Date.parse(left.updatedAt || '')
     || left.title.localeCompare(right.title, 'zh-CN')
   ));
 }
 
-function buildLibrarySnapshot(library: DocumentLibrary, cards: CatalogDocumentCard[]): OpenClawMemoryLibrarySnapshot {
+function buildLibrarySnapshot(library: DocumentLibrary, cards: OpenClawMemoryDocumentCard[]): OpenClawMemoryLibrarySnapshot {
   const availableCount = cards.filter((item) => item.availability === 'available').length;
   const auditExcludedCount = cards.filter((item) => item.availability === 'audit-excluded').length;
   const structuredOnlyCount = cards.filter((item) => item.availability === 'structured-only').length;
@@ -574,6 +576,11 @@ export function buildReportOutputMemorySnapshots(outputs: ReportOutputRecord[]) 
       kind: sanitizeText(item.kind || item.outputType, 32) || 'page',
       templateLabel: sanitizeText(item.templateLabel, 80),
       summary: sanitizeText(item.summary || item.content || item.page?.summary || '', 220),
+      libraryKeys: sanitizeList(
+        (item.libraries || []).map((entry) => entry.key),
+        80,
+        8,
+      ),
       libraryLabels: sanitizeList(
         (item.libraries || []).map((entry) => entry.label || entry.key),
         60,
@@ -641,7 +648,7 @@ async function ensureStateDir() {
 
 async function readPreviousState(): Promise<OpenClawMemoryState | null> {
   const { data } = await readRuntimeStateJson<OpenClawMemoryState | null>({
-    filePath: STATE_FILE,
+    filePath: OPENCLAW_MEMORY_STATE_FILE,
     fallback: null,
     normalize: (parsed) => (
       parsed && typeof parsed === 'object'
@@ -654,8 +661,32 @@ async function readPreviousState(): Promise<OpenClawMemoryState | null> {
 
 async function writeState(state: OpenClawMemoryState) {
   await writeRuntimeStateJson({
-    filePath: STATE_FILE,
+    filePath: OPENCLAW_MEMORY_STATE_FILE,
     payload: state,
+  });
+}
+
+export async function loadOpenClawMemoryCatalogSnapshot(): Promise<OpenClawMemoryCatalogSnapshot | null> {
+  const { data } = await readRuntimeStateJson<OpenClawMemoryCatalogSnapshot | null>({
+    filePath: OPENCLAW_MEMORY_CATALOG_SNAPSHOT_FILE,
+    fallback: null,
+    normalize: (parsed) => (
+      parsed && typeof parsed === 'object'
+        ? parsed as OpenClawMemoryCatalogSnapshot
+      : null
+    ),
+  });
+  if (data) return data;
+
+  const snapshot = await buildOpenClawMemoryCatalogSnapshot();
+  await writeCatalogSnapshot(snapshot);
+  return snapshot;
+}
+
+async function writeCatalogSnapshot(snapshot: OpenClawMemoryCatalogSnapshot) {
+  await writeRuntimeStateJson({
+    filePath: OPENCLAW_MEMORY_CATALOG_SNAPSHOT_FILE,
+    payload: snapshot,
   });
 }
 
@@ -684,6 +715,7 @@ export async function refreshOpenClawMemoryCatalog() {
     generatedAt: snapshot.generatedAt,
   });
   await removeLegacyCatalogFiles();
+  await writeCatalogSnapshot(snapshot);
   await writeState(nextState);
   const botRefresh = await refreshBotMemoryCatalogs(nextState);
   return {

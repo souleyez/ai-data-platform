@@ -13,20 +13,6 @@ export type GeneralKnowledgeConversationState = {
   kind: 'general';
   preferredDocumentPath: string;
   expiresAt: string;
-  recentUploadSummary: GeneralKnowledgeUploadSummary | null;
-};
-
-export type GeneralKnowledgeUploadSummaryItem = {
-  path: string;
-  name: string;
-  docType: string;
-  summary: string;
-  libraries: Array<{ key: string; label: string }>;
-};
-
-export type GeneralKnowledgeUploadSummary = {
-  uploadedAt: string;
-  items: GeneralKnowledgeUploadSummaryItem[];
 };
 
 const GENERAL_KNOWLEDGE_PREFERRED_DOCUMENT_TTL_MS = 10 * 60 * 1000;
@@ -52,72 +38,16 @@ function normalizeText(text: string) {
   return String(text || '').trim();
 }
 
-function normalizeGeneralKnowledgeSummaryLibraries(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const entry = item as { key?: unknown; label?: unknown };
-      const key = normalizeText(String(entry?.key || ''));
-      const label = normalizeText(String(entry?.label || ''));
-      return {
-        key,
-        label,
-      };
-    })
-    .filter((item) => item.key || item.label)
-    .slice(0, 4);
-}
-
-function normalizeGeneralKnowledgeUploadSummary(value: unknown): GeneralKnowledgeUploadSummary | null {
-  if (!value || typeof value !== 'object') return null;
-  const raw = value as Record<string, unknown>;
-  const uploadedAt = normalizeText(String(raw.uploadedAt || ''));
-  const items = Array.isArray(raw.items)
-    ? raw.items
-        .map((item) => {
-          const entry = item as {
-            path?: unknown;
-            name?: unknown;
-            docType?: unknown;
-            summary?: unknown;
-            libraries?: unknown;
-          };
-          const path = normalizeText(String(entry?.path || ''));
-          const name = normalizeText(String(entry?.name || ''));
-          const docType = normalizeText(String(entry?.docType || ''));
-          const summary = normalizeText(String(entry?.summary || ''));
-          const libraries = normalizeGeneralKnowledgeSummaryLibraries(entry?.libraries);
-          if (!path && !name && !summary) return null;
-          return {
-            path,
-            name,
-            docType,
-            summary,
-            libraries,
-          };
-        })
-        .filter(Boolean) as GeneralKnowledgeUploadSummaryItem[]
-    : [];
-  if (!items.length) return null;
-  return {
-    uploadedAt: uploadedAt && Number.isFinite(Date.parse(uploadedAt)) ? uploadedAt : new Date().toISOString(),
-    items: items.slice(0, 5),
-  };
-}
-
 export function buildGeneralKnowledgeConversationState(
   preferredDocumentPath?: string,
-  recentUploadSummary?: GeneralKnowledgeUploadSummary | null,
 ) {
   const normalizedPath = normalizeText(preferredDocumentPath || '');
-  const normalizedSummary = normalizeGeneralKnowledgeUploadSummary(recentUploadSummary);
-  if (!normalizedPath && !normalizedSummary) return null;
+  if (!normalizedPath) return null;
   const expiresAt = new Date(Date.now() + GENERAL_KNOWLEDGE_PREFERRED_DOCUMENT_TTL_MS).toISOString();
   return {
     kind: 'general' as const,
     preferredDocumentPath: normalizedPath,
     expiresAt,
-    recentUploadSummary: normalizedSummary,
   };
 }
 
@@ -127,15 +57,13 @@ export function parseGeneralKnowledgeConversationState(value: unknown): GeneralK
   if (raw.kind !== 'general') return null;
   const preferredDocumentPath = normalizeText(String(raw.preferredDocumentPath || ''));
   const expiresAt = normalizeText(String(raw.expiresAt || ''));
-  const recentUploadSummary = normalizeGeneralKnowledgeUploadSummary(raw.recentUploadSummary);
   const expiresAtMs = Date.parse(expiresAt);
-  if ((!preferredDocumentPath && !recentUploadSummary) || !expiresAt || !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) return null;
+  if (!preferredDocumentPath || !expiresAt || !Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) return null;
 
   return {
     kind: 'general',
     preferredDocumentPath,
     expiresAt,
-    recentUploadSummary,
   };
 }
 

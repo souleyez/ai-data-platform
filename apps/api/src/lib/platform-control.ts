@@ -61,11 +61,11 @@ import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { prepareKnowledgeSupply } from './knowledge-supply.js';
 import {
-  buildRecentUploadSummaryContextBlock,
   loadLatestVisibleDetailedDocumentContext,
   shouldIncludeUploadedDocumentFullText,
 } from './knowledge-chat-dispatch.js';
 import { parseGeneralKnowledgeConversationState } from './knowledge-request-state.js';
+import { loadOpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js';
 import {
   installLatestOpenClaw,
   launchProviderLogin,
@@ -813,41 +813,27 @@ async function runSupplyCommand(subcommand: string, flags: CommandFlags): Promis
   if (!subcommand || subcommand === 'preview') {
     const prompt = String(flags.prompt || flags.request || '').trim();
     if (!prompt) throw new Error('Missing --prompt for supply preview.');
-
-    let rawRecentUploadSummary: unknown = null;
-    if (flags['recent-upload-summary-json'] !== undefined) {
-      try {
-        rawRecentUploadSummary = flags['recent-upload-summary-json']
-          ? JSON.parse(String(flags['recent-upload-summary-json'] || ''))
-          : null;
-      } catch {
-        throw new Error('Invalid --recent-upload-summary-json for supply preview.');
-      }
-    }
     const generalState = parseGeneralKnowledgeConversationState({
       kind: 'general',
       preferredDocumentPath: String(flags['preferred-document'] || '').trim(),
-      recentUploadSummary: rawRecentUploadSummary,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     const preferredDocumentPath = String(generalState?.preferredDocumentPath || '').trim();
-    const latestDocumentFullTextIncluded = shouldIncludeUploadedDocumentFullText(prompt, preferredDocumentPath);
-    const recentUploadSummaryIncluded = Boolean(
-      buildRecentUploadSummaryContextBlock(generalState?.recentUploadSummary || null),
-    );
-    const recentUploadSummaryItemCount = Array.isArray(generalState?.recentUploadSummary?.items)
-      ? generalState.recentUploadSummary.items.length
-      : 0;
-    const latestDetailedDocumentContext = latestDocumentFullTextIncluded
+    const shouldAttachLatestDocumentFullText = shouldIncludeUploadedDocumentFullText(prompt, preferredDocumentPath);
+    const latestDetailedDocumentContext = shouldAttachLatestDocumentFullText
       ? await loadLatestVisibleDetailedDocumentContext({
           preferredDocumentPath,
         })
       : { document: null, preferredDocument: null, preferredDocumentReady: false };
+    const catalogSnapshot = await loadOpenClawMemoryCatalogSnapshot();
     const preferredDocumentStatus = !preferredDocumentPath
       ? 'none'
       : latestDetailedDocumentContext.preferredDocumentReady
         ? 'ready'
         : (latestDetailedDocumentContext.preferredDocument ? 'not_ready' : 'missing');
+    const latestDocumentFullTextIncluded = Boolean(
+      shouldAttachLatestDocumentFullText && latestDetailedDocumentContext.document,
+    );
 
     const library = flags.library ? await resolveLibraryReference(flags.library) : null;
     const supply = await prepareKnowledgeSupply({
@@ -884,11 +870,12 @@ async function runSupplyCommand(subcommand: string, flags: CommandFlags): Promis
         })),
         meta: supply.effectiveRetrieval.meta,
         supplyContext: {
+          catalogMemoryLibraries: catalogSnapshot?.libraryCount || 0,
+          catalogMemoryDocuments: catalogSnapshot?.documentCount || 0,
+          catalogMemoryOutputs: catalogSnapshot?.outputCount || 0,
           preferredDocumentPath,
           preferredDocumentStatus,
           latestDocumentFullTextIncluded,
-          recentUploadSummaryIncluded,
-          recentUploadSummaryItemCount,
         },
       },
     };

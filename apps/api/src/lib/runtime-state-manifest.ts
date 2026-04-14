@@ -194,6 +194,16 @@ export const RUNTIME_STATE_MANIFEST: RuntimeStateManifestEntry[] = [
     notes: 'Derived cross-library memory catalog snapshot used for memory-first selection.',
   },
   {
+    key: 'openclaw-memory-catalog-snapshot',
+    filePath: path.join(STORAGE_CONFIG_DIR, 'openclaw-memory-catalog-snapshot.json'),
+    owner: 'openclaw-memory-catalog',
+    stateKind: 'cache',
+    readProfile: 'mixed',
+    phase2Target: 'shared-cache',
+    backupStrategy: 'write-before-overwrite',
+    notes: 'Full long-term memory directory of libraries, document summaries, and generated report summaries.',
+  },
+  {
     key: 'bot-memory-catalogs',
     filePath: path.join(STORAGE_CONFIG_DIR, 'bots', '*', 'memory-catalog.json'),
     owner: 'bot-memory-catalog',
