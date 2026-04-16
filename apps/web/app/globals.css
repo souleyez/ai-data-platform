@@ -5278,8 +5278,8 @@ tbody tr:hover {
 
   .mobile-home-shell {
     position: relative;
-    min-height: 100dvh;
-    height: 100dvh;
+    min-height: var(--mobile-home-viewport-height, 100dvh);
+    height: var(--mobile-home-viewport-height, 100dvh);
     overflow: hidden;
     overscroll-behavior: none;
     background:
@@ -5332,7 +5332,7 @@ tbody tr:hover {
 
   .mobile-home-stage {
     position: relative;
-    height: calc(100dvh - 52px);
+    height: calc(var(--mobile-home-viewport-height, 100dvh) - 52px);
     min-height: 0;
     overflow: hidden;
     overscroll-behavior: none;
@@ -5344,6 +5344,7 @@ tbody tr:hover {
   }
 
   .chat-panel-mobile-home {
+    position: relative;
     height: 100% !important;
     min-height: 0;
     padding: 0 0 calc(172px + env(safe-area-inset-bottom));
@@ -5399,7 +5400,7 @@ tbody tr:hover {
   }
 
   .chat-panel-mobile-home .chat-composer-wrap {
-    position: fixed;
+    position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
@@ -5437,13 +5438,17 @@ tbody tr:hover {
   }
 
   .chat-panel-mobile-home .chat-input-row textarea {
+    height: 44px;
     min-height: 44px;
-    max-height: 116px;
+    max-height: 44px;
     resize: none;
     padding: 0;
     line-height: 1.6;
+    font-size: 16px;
     color: #f6f9fd;
     background: transparent;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     touch-action: auto;
   }
 

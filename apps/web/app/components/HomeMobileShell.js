@@ -69,6 +69,7 @@ export default function HomeMobileShell({
   onSelectReport,
   onPrepareReportPreview,
 }) {
+  const shellRef = useRef(null);
   const [surface, setSurface] = useState(SURFACE_MAIN);
   const [drawerPreview, setDrawerPreview] = useState(null);
   const gestureRef = useRef({
@@ -157,6 +158,32 @@ export default function HomeMobileShell({
       documentElement.style.overscrollBehavior = prevHtmlOverscroll;
       body.style.overflow = prevBodyOverflow;
       body.style.overscrollBehavior = prevBodyOverscroll;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const shell = shellRef.current;
+    if (!(shell instanceof HTMLElement)) return undefined;
+
+    function syncViewportHeight() {
+      const viewportHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
+      if (!viewportHeight) return;
+      shell.style.setProperty('--mobile-home-viewport-height', `${viewportHeight}px`);
+    }
+
+    syncViewportHeight();
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', syncViewportHeight);
+    visualViewport?.addEventListener('scroll', syncViewportHeight);
+    window.addEventListener('resize', syncViewportHeight);
+    window.addEventListener('orientationchange', syncViewportHeight);
+
+    return () => {
+      visualViewport?.removeEventListener('resize', syncViewportHeight);
+      visualViewport?.removeEventListener('scroll', syncViewportHeight);
+      window.removeEventListener('resize', syncViewportHeight);
+      window.removeEventListener('orientationchange', syncViewportHeight);
     };
   }, []);
 
@@ -288,7 +315,7 @@ export default function HomeMobileShell({
   }
 
   return (
-    <div className={`mobile-home-shell mobile-home-shell-surface-${surface}`.trim()}>
+    <div ref={shellRef} className={`mobile-home-shell mobile-home-shell-surface-${surface}`.trim()}>
       <header className="mobile-home-topbar" data-mobile-home-no-swipe="true">
         <strong className="mobile-home-topbar-brand">AI智能助手</strong>
         {datasetSecretSlot ? (

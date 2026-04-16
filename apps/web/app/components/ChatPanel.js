@@ -420,6 +420,7 @@ export default function ChatPanel({
         <div className="chat-input-row">
           <textarea
             ref={textareaRef}
+            rows={1}
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={(event) => {
