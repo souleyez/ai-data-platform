@@ -169,9 +169,9 @@ export function buildTemplateConfirmationResult(input: {
   confirmation: Record<string, unknown>;
 }): GeneralKnowledgeDispatchResult {
   const content = [
-    '这次命中了库内资料模板输出。',
-    '我不直接推进，先给你两个确认选项：一个按智能助手自己的理解执行，一个按命中资料和模板输出。',
-    '请直接点选其中一个继续。',
+    '这次命中了按数据集/库输出的请求。',
+    '我先给你两个确认选项：一个按模型理解输出，一个按数据集/库固定生成静态页。',
+    '如果选择按数据集/库输出，会直接进入静态页编辑页面。',
   ].join('\n\n');
 
   return {

@@ -50,7 +50,11 @@ export async function registerChatRoutes(app: FastifyInstance) {
       botId: String(body.botId || '').trim() || undefined,
       confirmedAction: String(body.confirmedAction || '').trim() === 'openclaw_action'
         ? 'openclaw_action'
-        : (String(body.confirmedAction || '').trim() === 'template_output' ? 'template_output' : undefined),
+        : (
+          ['template_output', 'dataset_static_page'].includes(String(body.confirmedAction || '').trim())
+            ? 'dataset_static_page'
+            : undefined
+        ),
       chatHistory: Array.isArray(body.chatHistory)
         ? body.chatHistory
           .map((item) => ({

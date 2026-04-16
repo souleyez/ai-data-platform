@@ -421,7 +421,7 @@ export default function ChatPanel({
                 if (!isLoading) onSubmit(input);
               }
             }}
-            placeholder="直接提问。普通对话默认只做资料供给；只有命中库内资料模板输出时，系统才会先让你确认两种执行方式。"
+            placeholder="直接提问。普通对话默认只做资料供给；只有命中按数据集/库输出时，系统才会先让你确认按模型理解输出还是按数据集/库进入静态页编辑。"
           />
           <div className="chat-input-side-actions">
             <button

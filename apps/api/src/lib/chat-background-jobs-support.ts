@@ -50,7 +50,9 @@ export function normalizeBackgroundJobRequest(value: unknown): ChatBackgroundJob
       ? record.effectiveVisibleLibraryKeys.map((item) => normalizeChatBackgroundText(item)).filter(Boolean)
       : [],
     accessContext: (record.accessContext && typeof record.accessContext === 'object') ? record.accessContext as ResolvedChannelAccess : null,
-    confirmedAction: normalizeChatBackgroundText(record.confirmedAction) === 'template_output' ? 'template_output' : 'openclaw_action',
+    confirmedAction: ['template_output', 'dataset_static_page'].includes(normalizeChatBackgroundText(record.confirmedAction))
+      ? 'dataset_static_page'
+      : 'openclaw_action',
   };
 }
 

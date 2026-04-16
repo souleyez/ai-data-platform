@@ -52,6 +52,12 @@ test('template confirmation should only trigger for library-backed output reques
     supply: buildSupply({ libraries: [] }),
   });
   assert.equal(noLibraries, null);
+
+  const noExplicitDatasetScope = shouldRequireTemplateConfirmation({
+    prompt: '请输出一个合同风险 PPT',
+    supply: buildSupply(),
+  });
+  assert.equal(noExplicitDatasetScope, null);
 });
 
 test('template confirmation should also recognize doc and markdown output requests', () => {
@@ -66,6 +72,12 @@ test('template confirmation should also recognize doc and markdown output reques
     supply: buildSupply(),
   });
   assert.equal(documentHit, 'doc');
+
+  const datasetHit = shouldRequireTemplateConfirmation({
+    prompt: '请基于合同数据集最近一个月资料输出一份 Markdown 文档',
+    supply: buildSupply(),
+  });
+  assert.equal(datasetHit, 'md');
 });
 
 test('system capability context should always mention default web search', () => {

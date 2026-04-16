@@ -13,14 +13,15 @@ import { runOpenClawChat } from './openclaw-adapter.js';
 import type { KnowledgeLibraryRef, KnowledgeSupply } from './knowledge-supply.js';
 
 type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
+type TemplateConfirmationAction = 'openclaw_action' | 'dataset_static_page';
 
 export type TemplateConfirmationOption = {
-  key: 'openclaw_action' | 'template_output';
+  key: TemplateConfirmationAction;
   title: string;
   description: string;
   executeMode: 'general' | 'knowledge_output';
   executePrompt: string;
-  confirmedAction?: 'openclaw_action' | 'template_output';
+  confirmedAction?: TemplateConfirmationAction;
   confirmedRequest?: string;
   preferredLibraries: KnowledgeLibraryRef[];
 };
@@ -59,18 +60,30 @@ function summarizeFocus(prompt: string) {
   return String(prompt || '').trim().replace(/\s+/g, ' ');
 }
 
-function buildTemplateOutputRequestText(input: {
-  outputKind: KnowledgeOutputKind;
+function normalizeDatasetScopePrompt(prompt: string) {
+  return String(prompt || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[，。、“”‘’；;!?！？]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isExplicitDatasetScopedOutputRequest(prompt: string) {
+  const normalized = normalizeDatasetScopePrompt(prompt);
+  if (!normalized) return false;
+  return /(?:数据集|dataset|knowledge base|知识库|资料库|文档库|库内|库中|按库|按数据集|基于[\p{L}\p{N}\u4e00-\u9fff()（）·_-]{2,24}库|使用[\p{L}\p{N}\u4e00-\u9fff()（）·_-]{2,24}库|围绕[\p{L}\p{N}\u4e00-\u9fff()（）·_-]{2,24}库|针对[\p{L}\p{N}\u4e00-\u9fff()（）·_-]{2,24}库|从[\p{L}\p{N}\u4e00-\u9fff()（）·_-]{2,24}库)/u.test(normalized);
+}
+
+function buildDatasetStaticPageRequestText(input: {
   libraries: KnowledgeLibraryRef[];
   timeRange: string;
-  templateLabel: string;
   focus: string;
 }) {
   const librariesText = formatLibrariesText(input.libraries);
-  const outputLabel = mapOutputKindLabel(input.outputKind);
   const timeText = input.timeRange || '未限定时间范围';
-  const templateText = input.templateLabel || `默认${outputLabel}模板`;
-  return `请按 ${librariesText} 库中 ${timeText} 内的资料，使用 ${templateText} 输出 ${input.focus} 的${outputLabel}。`;
+  const taskFocus = input.focus || '当前任务重点';
+  return `请基于 ${librariesText} 数据集/库中 ${timeText} 内的资料，固定生成一页可继续编辑的数据可视化静态页，并围绕「${taskFocus}」组织内容。`;
 }
 
 function buildOpenClawActionFallback(input: {
@@ -120,6 +133,7 @@ export function shouldRequireTemplateConfirmation(input: {
 }) {
   const outputKind = detectOutputKind(input.prompt);
   if (!outputKind) return null;
+  if (!isExplicitDatasetScopedOutputRequest(input.prompt)) return null;
   if (!input.supply.libraries.length) return null;
   if (!input.supply.effectiveRetrieval.documents.length) return null;
   return outputKind;
@@ -151,11 +165,9 @@ export async function buildTemplateConfirmationPayload(input: {
     : (catalogOptions[0]?.templateLabel || `默认${mapOutputKindLabel(outputKind)}模板`);
   const timeRange = extractNormalizedTimeRange(requestText) || '全部时间';
   const focus = summarizeFocus(requestText);
-  const templateRequest = buildTemplateOutputRequestText({
-    outputKind,
+  const datasetStaticPageRequest = buildDatasetStaticPageRequestText({
     libraries: input.supply.libraries,
     timeRange,
-    templateLabel,
     focus,
   });
   const openClawFallback = buildOpenClawActionFallback({
@@ -194,8 +206,8 @@ export async function buildTemplateConfirmationPayload(input: {
 
   return {
     kind: 'template_output',
-    title: '检测到这是库内资料模板输出请求',
-    description: '这类请求不会直接推进，而是先给你两个确认选项。即使两种动作正好一致，也会同时展示。',
+    title: '检测到这是按数据集/库输出的请求',
+    description: '这类请求会先弹出两个确认选项：按模型理解输出，或按数据集/库固定进入静态页编辑。',
     originalPrompt: requestText,
     outputKind,
     libraries: input.supply.libraries,
@@ -204,7 +216,7 @@ export async function buildTemplateConfirmationPayload(input: {
     options: [
       {
         key: 'openclaw_action',
-        title: '按智能助手理解执行',
+        title: '按模型理解输出',
         description: openClawAction,
         executeMode: 'general',
         executePrompt: requestText,
@@ -212,13 +224,13 @@ export async function buildTemplateConfirmationPayload(input: {
         preferredLibraries: input.supply.libraries,
       },
       {
-        key: 'template_output',
-        title: '按库资料 + 模板输出',
-        description: templateRequest,
+        key: 'dataset_static_page',
+        title: '按数据集/库输出',
+        description: `${datasetStaticPageRequest} 选择后会直接进入静态页编辑页面。`,
         executeMode: 'knowledge_output',
-        executePrompt: requestText,
-        confirmedAction: 'template_output',
-        confirmedRequest: templateRequest,
+        executePrompt: datasetStaticPageRequest,
+        confirmedAction: 'dataset_static_page',
+        confirmedRequest: datasetStaticPageRequest,
         preferredLibraries: input.supply.libraries,
       },
     ],

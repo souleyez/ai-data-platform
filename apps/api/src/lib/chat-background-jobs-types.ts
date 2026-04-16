@@ -14,7 +14,7 @@ export type ChatBackgroundJobRequest = {
   botId?: string;
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
-  confirmedAction?: 'openclaw_action' | 'template_output';
+  confirmedAction?: 'openclaw_action' | 'dataset_static_page';
 };
 
 export type ChatBackgroundJob = {

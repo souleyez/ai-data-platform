@@ -12,7 +12,7 @@ export type ChatRequestInput = {
   preferredLibraries?: Array<{ key: string; label: string }>;
   conversationState?: unknown;
   systemConstraints?: string;
-  confirmedAction?: 'openclaw_action' | 'template_output';
+  confirmedAction?: 'openclaw_action' | 'dataset_static_page';
   botId?: string;
   effectiveVisibleLibraryKeys?: string[];
   accessContext?: ResolvedChannelAccess | null;
