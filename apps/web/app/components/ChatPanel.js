@@ -221,6 +221,8 @@ function TemplateConfirmationCard({ confirmation, disabled, onConfirm }) {
 
 export default function ChatPanel({
   compact = false,
+  panelClassName = '',
+  singlePageMode = false,
   scopeLabel = '',
   scopeMeta = '',
   messages,
@@ -265,7 +267,7 @@ export default function ChatPanel({
   }, []);
 
   return (
-    <div className={`chat-panel card ${compact ? 'chat-panel-compact' : ''}`.trim()}>
+    <div className={`chat-panel card ${compact ? 'chat-panel-compact' : ''} ${panelClassName}`.trim()}>
       {chatDebugAvailable ? (
         <div className="chat-debug-toolbar">
           <button
@@ -318,7 +320,7 @@ export default function ChatPanel({
                   onAcceptGroupSuggestion={onAcceptGroupSuggestion}
                   onAssignLibrary={onAssignLibrary}
                   groupSaving={groupSaving}
-                  fallbackLink
+                  fallbackLink={!singlePageMode}
                 />
               ) : null}
 
@@ -366,7 +368,11 @@ export default function ChatPanel({
                   <div className="message-ref-title">引用文档</div>
                   <div className="message-refs">
                     {message.references.map((ref) => (
-                      <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
+                      singlePageMode ? (
+                        <span key={ref.id} className="ref-chip">{ref.name}</span>
+                      ) : (
+                        <a key={ref.id} href={`/documents/${ref.id}`} className="ref-chip">{ref.name}</a>
+                      )
                     ))}
                   </div>
                 </div>

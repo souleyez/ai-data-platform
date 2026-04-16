@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchModelConfig, fetchOperationsOverview, updateModelConfig } from '../home-api';
 import { CLOUD_MODEL_STATUS_EVENT, loadCloudModelStatus } from '../lib/cloud-model-status';
-import ThemeToggleButton from './ThemeToggleButton';
 
 const DESKTOP_NAV_LINKS = [
   { label: '智能会话', href: '/' },
@@ -262,8 +261,6 @@ export default function HomeWorkspaceToolbar({
       </div>
 
       <div className="home-toolbar-right">
-        <ThemeToggleButton compact />
-
         <div className="home-toolbar-flyout">
           <button type="button" className="ghost-btn home-toolbar-flyout-trigger">
             系统健康

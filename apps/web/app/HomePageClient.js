@@ -5,8 +5,8 @@ import { createDocumentLibrary } from './documents/api';
 import InsightPanel from './components/InsightPanel';
 import ChatPanel from './components/ChatPanel';
 import FullIntelligenceModeButton from './components/FullIntelligenceModeButton';
-import Sidebar from './components/Sidebar';
 import HomeDatasetRail from './components/HomeDatasetRail';
+import HomeMobileShell from './components/HomeMobileShell';
 import HomeWorkspaceToolbar from './components/HomeWorkspaceToolbar';
 import { useHomePageController } from './use-home-page-controller';
 
@@ -83,7 +83,7 @@ export default function HomePageClient({ initialModelState }) {
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    window.localStorage.setItem('aidp_theme_mode_v1', 'dark');
+    window.localStorage.removeItem('aidp_theme_mode_v1');
     document.documentElement.dataset.theme = 'dark';
     document.documentElement.style.colorScheme = 'dark';
   }, []);
@@ -138,63 +138,39 @@ export default function HomePageClient({ initialModelState }) {
 
   if (mobileViewport) {
     return (
-      <div className={`app-shell ${mobileViewport ? 'app-shell-mobile-home' : ''}`}>
-        <Sidebar sourceItems={sidebarSources} currentPath="/" initialModelState={initialModelState} />
-
-        <main className="main-panel main-panel-home">
-          <header className="topbar">
-            <div className="topbar-title-row">
-              <h2>智能助手</h2>
-            </div>
-            <div className="topbar-actions topbar-actions-bots">
-              <FullIntelligenceModeButton
-                systemConstraints={systemConstraints}
-                onSystemConstraintsChange={setSystemConstraints}
-              />
-            </div>
-          </header>
-
-          <section className="homepage-grid homepage-grid-tight">
-            <section className={`workspace-grid homepage-workspace ${reportCollapsed ? 'workspace-grid-compact' : 'workspace-grid-expanded'}`}>
-              <ChatPanel
-                messages={messages}
-                input={input}
-                isLoading={isLoading}
-                onInputChange={setInput}
-                onSubmit={submitQuestion}
-                uploadInputRef={uploadInputRef}
-                uploadLoading={uploadLoading}
-                onUploadFilesSelected={runDocumentUpload}
-                availableLibraries={documentLibraries}
-                selectedManualLibraries={selectedManualLibraries}
-                onChangeManualLibrary={(itemId, value) =>
-                  setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: value }))
-                }
-                onAcceptGroupSuggestion={acceptIngestGroupSuggestion}
-                onAssignLibrary={assignIngestToSelectedLibrary}
-                groupSaving={groupSaving}
-                onSubmitCredential={submitCredentialForMessage}
-                onConfirmTemplateOption={confirmTemplateOption}
-                chatDebugAvailable={chatDebugAvailable}
-                chatDebugDetailsEnabled={chatDebugDetailsEnabled}
-                onToggleChatDebugDetails={() => setChatDebugDetailsEnabled((prev) => !prev)}
-              />
-              <InsightPanel
-                mobileViewport={mobileViewport}
-                collapsed={reportCollapsed}
-                onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
-                reportItems={reportItems}
-                activeReportItem={selectedReportItem}
-                reportDetailLoading={reportDetailLoading}
-                selectedReportId={selectedReportId}
-                onSelectReport={setSelectedReportId}
-                onDeleteReport={deleteReport}
-                onItemChange={updateReportItem}
-              />
-            </section>
-          </section>
-        </main>
-      </div>
+      <HomeMobileShell
+        documentLibraries={documentLibraries}
+        documentTotal={documentTotal}
+        preferredLibraries={preferredLibraries}
+        onToggleLibrary={handleTogglePreferredLibrary}
+        onClearLibraries={() => setPreferredLibraries([])}
+        onCreateLibrary={handleCreateLibrary}
+        creatingLibrary={libraryCreateBusy}
+        messages={messages}
+        input={input}
+        isLoading={isLoading}
+        onInputChange={setInput}
+        onSubmit={submitQuestion}
+        uploadInputRef={uploadInputRef}
+        uploadLoading={uploadLoading}
+        onUploadFilesSelected={runDocumentUpload}
+        availableLibraries={documentLibraries}
+        selectedManualLibraries={selectedManualLibraries}
+        onChangeManualLibrary={(itemId, value) =>
+          setSelectedManualLibraries((prev) => ({ ...prev, [itemId]: value }))
+        }
+        onAcceptGroupSuggestion={acceptIngestGroupSuggestion}
+        onAssignLibrary={assignIngestToSelectedLibrary}
+        groupSaving={groupSaving}
+        onSubmitCredential={submitCredentialForMessage}
+        onConfirmTemplateOption={confirmTemplateOption}
+        reportItems={reportItems}
+        selectedReportId={selectedReportId}
+        selectedReportItem={selectedReportItem}
+        reportDetailLoading={reportDetailLoading}
+        onSelectReport={setSelectedReportId}
+        onPrepareReportPreview={() => setReportCollapsed(false)}
+      />
     );
   }
 
