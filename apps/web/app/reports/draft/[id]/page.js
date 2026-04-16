@@ -4,8 +4,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import DesktopRequiredNotice from '../../../components/DesktopRequiredNotice';
 import HomeWorkspaceToolbar from '../../../components/HomeWorkspaceToolbar';
-import Sidebar from '../../../components/Sidebar';
 import { fetchDatasources, fetchReportOutput } from '../../../home-api';
 import { normalizeDatasourceResponse } from '../../../lib/types';
 import {
@@ -53,6 +53,11 @@ export default function ReportDraftPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (mobileViewport) {
+      setLoading(false);
+      return undefined;
+    }
+
     let cancelled = false;
 
     async function loadPageData() {
@@ -91,7 +96,7 @@ export default function ReportDraftPage() {
     return () => {
       cancelled = true;
     };
-  }, [reportId]);
+  }, [mobileViewport, reportId]);
 
   const readinessMeta = useMemo(
     () => getReadinessMeta(reportItem?.draft?.readiness),
@@ -164,10 +169,14 @@ export default function ReportDraftPage() {
 
   if (mobileViewport) {
     return (
-      <div className="app-shell app-shell-reports-simple">
-        <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
-        {content}
-      </div>
+      <DesktopRequiredNotice
+        title="静态页编辑请在 PC 端继续"
+        description="移动端当前只保留对话交流。静态页草稿已经保存在系统中，请切换到 PC 端继续结构调整、文案审改和终稿确认。"
+        primaryHref="/"
+        primaryLabel="返回首页继续对话"
+        secondaryHref="/reports/draft"
+        secondaryLabel="回到静态页工作台"
+      />
     );
   }
 

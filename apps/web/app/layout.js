@@ -1,5 +1,4 @@
 import './globals.css';
-import MobileHomeOnlyGuard from './components/MobileHomeOnlyGuard';
 
 export const metadata = {
   title: 'AI智能助手',
@@ -26,7 +25,7 @@ export default function RootLayout({ children }) {
             `,
           }}
         />
-        <MobileHomeOnlyGuard>{children}</MobileHomeOnlyGuard>
+        {children}
       </body>
     </html>
   );

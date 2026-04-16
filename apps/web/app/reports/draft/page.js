@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import Sidebar from '../../components/Sidebar';
+import DesktopRequiredNotice from '../../components/DesktopRequiredNotice';
 import WorkspaceDesktopShell from '../../components/WorkspaceDesktopShell';
 import { fetchDatasources, fetchReportBenchmark, fetchReportsSnapshot } from '../../home-api';
 import { buildApiUrl } from '../../lib/config';
@@ -180,8 +180,10 @@ export default function ReportsDraftWorkspacePage() {
   }
 
   useEffect(() => {
+    if (mobileViewport) return undefined;
     void loadWorkspace();
-  }, []);
+    return undefined;
+  }, [mobileViewport]);
 
   const staticPageItems = useMemo(() => {
     const records = Array.isArray(data?.outputRecords) ? data.outputRecords : [];
@@ -425,11 +427,13 @@ export default function ReportsDraftWorkspacePage() {
   }
 
   return (
-    <div className="app-shell app-shell-reports-simple">
-      <Sidebar sourceItems={sidebarSources} currentPath="/reports" />
-      <main className="main-panel">
-        {content}
-      </main>
-    </div>
+    <DesktopRequiredNotice
+      title="静态页工作台请在 PC 端打开"
+      description="移动端当前只保留对话交流。静态页工作台的生成、预览和编辑确认，请切换到 PC 端继续操作。"
+      primaryHref="/"
+      primaryLabel="返回首页继续对话"
+      secondaryHref="/reports"
+      secondaryLabel="返回报表中心"
+    />
   );
 }

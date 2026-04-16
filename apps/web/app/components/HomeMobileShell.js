@@ -1,69 +1,16 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { formatGeneratedReportTime } from '../lib/generated-reports';
 import { orderLibrariesWithSelectedFirst } from '../lib/home-dataset-rail-order.mjs';
 import { buildMobileDatasetSummary } from '../lib/home-mobile-shell-support.mjs';
 import ChatPanel from './ChatPanel';
-import GeneratedReportDetail from './GeneratedReportDetail';
 import HomeDatasetRail from './HomeDatasetRail';
-
-function formatReportStatus(status) {
-  if (status === 'processing') return '生成中';
-  if (status === 'failed') return '失败';
-  return '已完成';
-}
-
-function hasRenderableReportContent(item) {
-  return Boolean(
-    item?.draft?.modules?.length
-      || item?.page?.summary
-      || item?.page?.cards?.length
-      || item?.page?.sections?.length
-      || item?.page?.charts?.length
-      || item?.content,
-  );
-}
 
 function shouldIgnoreSwipeTarget(target) {
   return target instanceof HTMLElement
     && Boolean(target.closest('button, input, textarea, select, a, label, [data-mobile-home-no-swipe="true"]'));
 }
 
-function MobileReportList({
-  items = [],
-  onOpenReport,
-}) {
-  if (!items.length) {
-    return (
-      <div className="mobile-home-empty-state">
-        <strong>还没有已出报表</strong>
-        <p>先在聊天区生成表格、静态页或文档，右侧才会出现可查看结果。</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mobile-home-report-list">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className="mobile-home-report-item"
-          onClick={() => onOpenReport?.(item.id)}
-        >
-          <span className="mobile-home-report-item-title">{item.title || '未命名报表'}</span>
-          <span className="mobile-home-report-item-meta">
-            {formatGeneratedReportTime(item.createdAt)} · {formatReportStatus(item.status)}
-          </span>
-          <span className="mobile-home-report-item-subtitle">
-            {item.templateLabel || item.outputType || item.kind || '报表'}
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function HomeMobileShell({
   documentLibraries = [],
@@ -89,16 +36,9 @@ export default function HomeMobileShell({
   groupSaving,
   onSubmitCredential,
   onConfirmTemplateOption,
-  reportItems = [],
-  selectedReportId = '',
-  selectedReportItem = null,
-  reportDetailLoading = false,
-  onSelectReport,
-  onPrepareReportPreview,
 }) {
   const [drawerSide, setDrawerSide] = useState(null);
   const [drawerPreview, setDrawerPreview] = useState(null);
-  const [reportPreviewOpen, setReportPreviewOpen] = useState(false);
   const gestureRef = useRef({
     active: false,
     startX: 0,
@@ -122,26 +62,19 @@ export default function HomeMobileShell({
     }),
     [documentTotal, orderedLibraries.length, selectedLibraries],
   );
-  const activeReport = selectedReportItem
-    || reportItems.find((item) => item.id === selectedReportId)
-    || null;
 
   const leftDrawerProgress = drawerSide === 'libraries'
     ? 1
     : (drawerPreview?.side === 'libraries' ? drawerPreview.progress : 0);
-  const rightDrawerProgress = drawerSide === 'reports'
-    ? 1
-    : (drawerPreview?.side === 'reports' ? drawerPreview.progress : 0);
-  const backdropOpacity = Math.max(leftDrawerProgress, rightDrawerProgress, reportPreviewOpen ? 1 : 0);
+  const backdropOpacity = leftDrawerProgress;
 
   function closeTransientPanels() {
     setDrawerSide(null);
     setDrawerPreview(null);
-    setReportPreviewOpen(false);
   }
 
   function handleTouchStart(event) {
-    if (drawerSide || reportPreviewOpen) return;
+    if (drawerSide) return;
     const touch = event.touches?.[0];
     if (!touch || shouldIgnoreSwipeTarget(event.target)) return;
     gestureRef.current = {
@@ -152,16 +85,15 @@ export default function HomeMobileShell({
   }
 
   function handleTouchMove(event) {
-    if (!gestureRef.current.active || drawerSide || reportPreviewOpen) return;
+    if (!gestureRef.current.active || drawerSide) return;
     const touch = event.touches?.[0];
     if (!touch) return;
     const deltaX = touch.clientX - gestureRef.current.startX;
     const deltaY = touch.clientY - gestureRef.current.startY;
-    if (Math.abs(deltaX) < 18 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
+    if (deltaX <= 0 || Math.abs(deltaX) < 18 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
 
-    const side = deltaX > 0 ? 'libraries' : 'reports';
     const progress = Math.max(0, Math.min(1, Math.abs(deltaX) / Math.max(window.innerWidth || 1, 1)));
-    setDrawerPreview({ side, progress });
+    setDrawerPreview({ side: 'libraries', progress });
     event.preventDefault();
   }
 
@@ -172,15 +104,6 @@ export default function HomeMobileShell({
       setDrawerSide(drawerPreview.side);
     }
     setDrawerPreview(null);
-  }
-
-  function handleOpenReport(reportId) {
-    if (!reportId) return;
-    onSelectReport?.(reportId);
-    onPrepareReportPreview?.();
-    setDrawerSide(null);
-    setDrawerPreview(null);
-    setReportPreviewOpen(true);
   }
 
   return (
@@ -259,64 +182,6 @@ export default function HomeMobileShell({
           createButtonLabel="新增"
         />
       </aside>
-
-      <aside
-        className="mobile-home-drawer mobile-home-drawer-right"
-        data-mobile-home-no-swipe="true"
-        style={{ transform: `translate3d(${(100 - rightDrawerProgress * 100).toFixed(3)}%, 0, 0)` }}
-      >
-        <div className="mobile-home-drawer-head">
-          <div>
-            <strong>已出报表</strong>
-            <span>{reportItems.length} 份</span>
-          </div>
-          <button type="button" className="ghost-btn compact-inline-btn" onClick={() => setDrawerSide(null)}>
-            收起
-          </button>
-        </div>
-        <MobileReportList items={reportItems} onOpenReport={handleOpenReport} />
-      </aside>
-
-      {reportPreviewOpen ? (
-        <section className="mobile-home-report-preview" data-mobile-home-no-swipe="true">
-          <header className="mobile-home-report-preview-head">
-            <div className="mobile-home-report-preview-copy">
-              <span className="mobile-home-topbar-label">报表预览</span>
-              <strong>{activeReport?.title || '加载中'}</strong>
-              <span>
-                {activeReport
-                  ? `${formatGeneratedReportTime(activeReport.createdAt)} · ${formatReportStatus(activeReport.status)}`
-                  : '正在准备报表内容'}
-              </span>
-            </div>
-            <div className="mobile-home-report-preview-actions">
-              <button
-                type="button"
-                className="ghost-btn compact-inline-btn"
-                onClick={() => setReportPreviewOpen(false)}
-              >
-                关闭
-              </button>
-            </div>
-          </header>
-
-          <div className="mobile-home-report-preview-body">
-            {reportDetailLoading || !hasRenderableReportContent(activeReport) ? (
-              <div className="mobile-home-empty-state">
-                <strong>正在加载报表详情</strong>
-                <p>报表正文已经开始读取，稍后会在这里显示完整内容。</p>
-              </div>
-            ) : activeReport ? (
-              <GeneratedReportDetail item={activeReport} />
-            ) : (
-              <div className="mobile-home-empty-state">
-                <strong>暂时没有可预览的报表</strong>
-                <p>先从右侧报表抽屉选择一份结果，再展开全屏查看。</p>
-              </div>
-            )}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }

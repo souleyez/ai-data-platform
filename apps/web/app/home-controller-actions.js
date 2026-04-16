@@ -71,6 +71,28 @@ function appendAssistantMessage(setMessages, message) {
   setMessages((prev) => appendChatMessageKeepingLatestFailure(prev, message));
 }
 
+function shouldKeepMobileInChat() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 900px)').matches;
+}
+
+function maybeOpenDraftEditor(item, context) {
+  if (!isDraftGeneratedReport(item) || typeof window === 'undefined') return false;
+  if (shouldKeepMobileInChat()) {
+    appendAssistantMessage(context.setMessages, {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      title: '静态页草稿已生成',
+      content: '移动端当前只保留对话交流。草稿已经保存，请到 PC 端进入静态工作台继续编辑确认。',
+      meta: item?.title || '请到 PC 端继续处理',
+    });
+    return true;
+  }
+  window.location.href = buildDraftEditorPath(item);
+  return true;
+}
+
 async function applyActionResult(normalized, context) {
   const actionResult = normalized?.actionResult;
   if (!actionResult) return;
@@ -133,18 +155,12 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
     try {
       await loadReports?.();
       setSelectedReportId?.(savedItem.id);
-      if (typeof window !== 'undefined' && isDraftGeneratedReport(savedItem)) {
-        window.location.href = buildDraftEditorPath(savedItem);
-        return;
-      }
+      maybeOpenDraftEditor(savedItem, context);
       return;
     } catch {
       setReportItems?.((prev) => [savedItem, ...prev.filter((item) => item.id !== savedItem.id)]);
       setSelectedReportId?.(savedItem.id);
-      if (typeof window !== 'undefined' && isDraftGeneratedReport(savedItem)) {
-        window.location.href = buildDraftEditorPath(savedItem);
-        return;
-      }
+      maybeOpenDraftEditor(savedItem, context);
       return;
     }
   }
@@ -177,9 +193,7 @@ async function persistGeneratedReport(normalized, message, context, requestPromp
 
   setReportItems?.((prev) => [generatedReport, ...prev]);
   setSelectedReportId?.(generatedReport.id);
-  if (typeof window !== 'undefined' && isDraftGeneratedReport(generatedReport)) {
-    window.location.href = buildDraftEditorPath(generatedReport);
-  }
+  maybeOpenDraftEditor(generatedReport, context);
 }
 
 function buildChatOptions(context, overrides = {}) {
