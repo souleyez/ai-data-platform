@@ -3,6 +3,7 @@ import HomePageClient from './HomePageClient';
 import { buildBackendApiUrl } from './lib/config';
 
 const MOBILE_VIEWPORT_PATTERN = /android|blackberry|iemobile|iphone|ipod|ipad|mobile|opera mini|webos/i;
+const INITIAL_DOCUMENTS_SNAPSHOT_TIMEOUT_MS = 1200;
 
 function resolveInitialViewportMode(headerStore) {
   const clientHint = String(headerStore.get('sec-ch-ua-mobile') || '').trim();
@@ -16,8 +17,12 @@ function resolveInitialViewportMode(headerStore) {
 
 async function getInitialDocumentsSnapshot() {
   try {
+    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(INITIAL_DOCUMENTS_SNAPSHOT_TIMEOUT_MS)
+      : undefined;
     const response = await fetch(buildBackendApiUrl('/api/documents-overview'), {
       cache: 'no-store',
+      signal,
     });
 
     if (!response.ok) {
