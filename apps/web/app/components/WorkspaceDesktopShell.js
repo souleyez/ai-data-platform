@@ -36,6 +36,7 @@ export default function WorkspaceDesktopShell({
   totalDocuments = 0,
   selectedKeys = [],
   unlockedKeys = [],
+  datasetSecretState = null,
   onToggleLibrary,
   onRequestUnlock,
   onClearSelection,
@@ -70,6 +71,7 @@ export default function WorkspaceDesktopShell({
             totalDocuments={totalDocuments}
             selectedKeys={selectedKeys}
             unlockedKeys={unlockedKeys}
+            datasetSecretState={datasetSecretState}
             onToggleLibrary={onToggleLibrary}
             onRequestUnlock={onRequestUnlock}
             onClearSelection={onClearSelection}

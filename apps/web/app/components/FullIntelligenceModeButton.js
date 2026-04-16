@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   clearStoredDatasetSecretState,
   createEmptyDatasetSecretState,
@@ -61,7 +61,7 @@ export default function FullIntelligenceModeButton({
     if (!promptTargetLibrary) return;
     setModalOpen(true);
     setError('');
-    setNotice(`数据集“${promptTargetLibrary.label || promptTargetLibrary.name || promptTargetLibrary.key}”需要输入密钥后才能进入。`);
+    setNotice('');
   }, [promptTargetLibrary]);
 
   function syncState(nextState) {
@@ -83,7 +83,8 @@ export default function FullIntelligenceModeButton({
         : await verifyDatasetSecretText(secret, normalizedState);
       syncState(nextState);
       setSecretInput('');
-      setNotice(`已解锁 ${nextState?.activeLibraryKeys?.length || nextState?.unlockedLibraryKeys?.length || 0} 个数据集。`);
+      setNotice('');
+      setModalOpen(false);
       onPromptHandled?.();
     } catch (verifyError) {
       setError(verifyError instanceof Error ? verifyError.message : '密钥校验失败');
@@ -109,35 +110,34 @@ export default function FullIntelligenceModeButton({
     onPromptHandled?.();
   }
 
-  const buttonLabel = useMemo(() => {
-    if (activeGrant) {
-      return compact ? `输入密钥 · ${activeGrant.libraryKeys.length}` : `输入密钥 · 已解锁 ${unlockedCount} 个数据集`;
-    }
-    return '输入密钥';
-  }, [activeGrant, compact, unlockedCount]);
-
   return (
     <>
       <button
         type="button"
-        className={`ghost-btn ${compact ? 'ghost-btn-compact' : ''}`.trim()}
+        className={`ghost-btn mode-entry-btn dataset-secret-trigger ${compact ? 'mode-entry-btn-compact' : ''}`.trim()}
         onClick={() => {
           setModalOpen(true);
           setError('');
           setNotice('');
         }}
       >
-        {buttonLabel}
+        输入密钥
       </button>
 
       {modalOpen ? (
-        <div className="modal-backdrop" onClick={() => {
+        <div className="mode-modal-backdrop" onClick={() => {
           setModalOpen(false);
           onPromptHandled?.();
         }}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <strong>输入数据集密钥</strong>
+          <div className="mode-modal card dataset-secret-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="mode-modal-head">
+              <div>
+                <strong>输入数据集密钥</strong>
+                <div className="dataset-secret-modal-subtitle">
+                  用途：解锁受保护的数据集，并让当前浏览器后续新建分组、上传文档默认沿用当前活动密钥。
+                  未输入密钥时，新建分组默认为公共分组。
+                </div>
+              </div>
               <button type="button" className="ghost-btn compact-inline-btn" onClick={() => {
                 setModalOpen(false);
                 onPromptHandled?.();
@@ -146,10 +146,17 @@ export default function FullIntelligenceModeButton({
               </button>
             </div>
 
-            <form className="stack-sm" onSubmit={(event) => { void handleVerify(event); }}>
-              <label className="field-label">
+            {promptTargetLibrary ? (
+              <div className="dataset-secret-modal-banner">
+                数据集“{promptTargetLibrary.label || promptTargetLibrary.name || promptTargetLibrary.key}”需要先输入密钥后才能进入。
+              </div>
+            ) : null}
+
+            <form className="mode-modal-body dataset-secret-form" onSubmit={(event) => { void handleVerify(event); }}>
+              <label className="mode-modal-label">
                 <span>文本密钥</span>
                 <input
+                  className="filter-input mode-modal-input"
                   type="password"
                   value={secretInput}
                   onChange={(event) => setSecretInput(event.target.value)}
@@ -157,7 +164,7 @@ export default function FullIntelligenceModeButton({
                   autoFocus
                 />
               </label>
-              <div className="row gap-sm">
+              <div className="mode-modal-actions dataset-secret-form-actions">
                 <button type="submit" className="primary-btn" disabled={loading || !secretInput.trim()}>
                   {loading ? '校验中...' : '校验并启用'}
                 </button>
@@ -167,17 +174,29 @@ export default function FullIntelligenceModeButton({
               </div>
             </form>
 
-            {error ? <p className="field-error">{error}</p> : null}
-            {notice ? <p className="field-hint">{notice}</p> : null}
+            {error ? <div className="mode-modal-error">{error}</div> : null}
+            {notice ? <div className="dataset-secret-inline-note">{notice}</div> : null}
 
-            <div className="stack-sm">
-              <strong>本地已缓存的密钥授权</strong>
+            <div className="dataset-secret-current-card">
+              <strong>当前活动密钥</strong>
+              <span>
+                {activeGrant
+                  ? `${summarizeGrant(activeGrant)} · 已解锁 ${unlockedCount} 个数据集`
+                  : '当前未启用密钥，新建分组将保持公共可见。'}
+              </span>
+            </div>
+
+            <div className="dataset-secret-cache-list">
+              <strong>已缓存密钥</strong>
               {grants.length ? grants.map((grant) => {
                 const active = activeGrant?.bindingId === grant.bindingId;
                 return (
-                  <div key={grant.bindingId} className="workspace-status-card">
-                    <div className="workspace-status-row">
+                  <div key={grant.bindingId} className="dataset-secret-cache-item">
+                    <div className="dataset-secret-cache-copy">
                       <span>{summarizeGrant(grant)}</span>
+                      <small>关联 {grant.libraryKeys.length} 个数据集</small>
+                    </div>
+                    <div className="dataset-secret-cache-actions">
                       <button
                         type="button"
                         className={`ghost-btn compact-inline-btn ${active ? 'active' : ''}`.trim()}
@@ -189,7 +208,7 @@ export default function FullIntelligenceModeButton({
                   </div>
                 );
               }) : (
-                <p className="field-hint">当前还没有缓存的密钥授权。</p>
+                <div className="dataset-secret-inline-note">当前还没有缓存的密钥授权。</div>
               )}
             </div>
           </div>

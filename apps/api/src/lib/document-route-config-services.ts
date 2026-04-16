@@ -1,5 +1,6 @@
 import {
   bindDatasetLibrarySecret,
+  bindDatasetLibraryToSecretBindingId,
   clearDatasetLibrarySecretBinding,
 } from './dataset-secrets.js';
 import {
@@ -21,6 +22,7 @@ export async function createManagedDocumentLibrary(input: {
   permissionLevel?: number;
   secret?: string;
   clearSecret?: boolean;
+  activeSecretBindingId?: string;
 }) {
   const library = await createDocumentLibrary(input);
   const secret = String(input.secret || '').trim();
@@ -28,6 +30,11 @@ export async function createManagedDocumentLibrary(input: {
     await bindDatasetLibrarySecret({
       libraryKey: library.key,
       secret,
+    });
+  } else if (input.activeSecretBindingId) {
+    await bindDatasetLibraryToSecretBindingId({
+      libraryKey: library.key,
+      bindingId: input.activeSecretBindingId,
     });
   } else if (input.clearSecret === true) {
     await clearDatasetLibrarySecretBinding(library.key);
@@ -57,6 +64,7 @@ export async function updateManagedDocumentLibrary(
     extractionFieldConflictStrategies?: Record<string, string>;
     secret?: string;
     clearSecret?: boolean;
+    activeSecretBindingId?: string;
   },
 ) {
   const library = await updateDocumentLibrary(key, input);
@@ -65,6 +73,11 @@ export async function updateManagedDocumentLibrary(
     await bindDatasetLibrarySecret({
       libraryKey: library.key,
       secret,
+    });
+  } else if (input.activeSecretBindingId) {
+    await bindDatasetLibraryToSecretBindingId({
+      libraryKey: library.key,
+      bindingId: input.activeSecretBindingId,
     });
   } else if (input.clearSecret === true) {
     await clearDatasetLibrarySecretBinding(library.key);

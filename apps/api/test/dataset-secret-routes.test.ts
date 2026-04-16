@@ -67,6 +67,18 @@ test('dataset secret routes should bind, verify, resolve, and shrink grants afte
     createdB.json().item.key,
   ].sort());
 
+  const createdC = await app.inject({
+    method: 'POST',
+    url: '/api/documents/libraries',
+    payload: {
+      name: '归档密库',
+      datasetSecretGrants: [verified.json().grant],
+      activeDatasetSecretGrant: verified.json().grant,
+    },
+  });
+  assert.equal(createdC.statusCode, 200);
+  assert.equal(createdC.json().item.secretProtected, true);
+
   const resolved = await app.inject({
     method: 'POST',
     url: '/api/dataset-secrets/resolve',
@@ -79,6 +91,7 @@ test('dataset secret routes should bind, verify, resolve, and shrink grants afte
   assert.deepEqual(resolved.json().unlockedLibraryKeys.sort(), [
     createdA.json().item.key,
     createdB.json().item.key,
+    createdC.json().item.key,
   ].sort());
 
   const cleared = await app.inject({
@@ -103,6 +116,12 @@ test('dataset secret routes should bind, verify, resolve, and shrink grants afte
     },
   });
   assert.equal(resolvedAfterClear.statusCode, 200);
-  assert.deepEqual(resolvedAfterClear.json().unlockedLibraryKeys, [createdB.json().item.key]);
-  assert.deepEqual(resolvedAfterClear.json().activeLibraryKeys, [createdB.json().item.key]);
+  assert.deepEqual(resolvedAfterClear.json().unlockedLibraryKeys.sort(), [
+    createdB.json().item.key,
+    createdC.json().item.key,
+  ].sort());
+  assert.deepEqual(resolvedAfterClear.json().activeLibraryKeys.sort(), [
+    createdB.json().item.key,
+    createdC.json().item.key,
+  ].sort());
 });

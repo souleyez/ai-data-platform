@@ -253,16 +253,14 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleCreateLibrary = async (draftValue = libraryCreateDraft, secret = '') => {
+  const handleCreateLibrary = async (draftValue = libraryCreateDraft) => {
     const name = String(draftValue || '').trim();
     const permissionLevel = 0;
     if (!name || libraryCreateSubmitting) return;
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
-      const created = await createDocumentLibrary(name, '', permissionLevel, {
-        secret: String(secret || '').trim(),
-      });
+      const created = await createDocumentLibrary(name, '', permissionLevel, { datasetSecretState });
       setLibraryCreateDraft('');
       await loadDocuments();
       if (created?.item?.key) {
@@ -363,6 +361,9 @@ export default function DocumentsPage() {
     () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
     [datasetSecretState],
   );
+  const datasetCreateHint = datasetSecretState?.activeGrant
+    ? '当前活动密钥已启用，新建数据集会自动绑定这把密钥。'
+    : '当前未输入密钥，新建数据集将是公共的，打开网页的用户都能查看和使用。';
 
   const selectedLibraryRecords = useMemo(
     () => allLibraries.filter((item) => selectedLibraries.includes(item.key)),
@@ -509,6 +510,7 @@ export default function DocumentsPage() {
         totalDocuments={totalFiles}
         selectedKeys={selectedLibraries}
         unlockedKeys={unlockedLibraryKeys}
+        datasetSecretState={datasetSecretState}
         onToggleLibrary={handleToggleDesktopLibrary}
         onRequestUnlock={setLockedLibraryPrompt}
         onClearSelection={() => setSelectedLibraries([])}
@@ -683,6 +685,7 @@ export default function DocumentsPage() {
                   {libraryCreateSubmitting ? '创建中...' : '新建数据集'}
                 </button>
               </div>
+              <div className="home-dataset-create-hint">{datasetCreateHint}</div>
             </section>
 
             <DocumentsTable

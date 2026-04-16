@@ -297,6 +297,52 @@ export async function bindDatasetLibrarySecret(input: {
   return binding.id;
 }
 
+export async function bindDatasetLibraryToSecretBindingId(input: {
+  libraryKey: string;
+  bindingId: string;
+}) {
+  const libraryKey = normalizeLibraryKey(input.libraryKey);
+  const bindingId = normalizeSecretText(input.bindingId);
+  if (!libraryKey) throw new Error('library key is required');
+  if (!bindingId) throw new Error('dataset secret binding id is required');
+
+  const binding = await getDatasetSecretBindingById(bindingId);
+  if (!binding) {
+    throw new Error('dataset secret binding not found');
+  }
+
+  const now = new Date().toISOString();
+  await withPlatformDuckDbConnection(async (connection) => {
+    await connection.run(
+      `
+        INSERT INTO dataset_library_secret_map (library_key, secret_binding_id, updated_at)
+        VALUES ($libraryKey, $bindingId, $updatedAt)
+        ON CONFLICT (library_key) DO UPDATE SET
+          secret_binding_id = EXCLUDED.secret_binding_id,
+          updated_at = EXCLUDED.updated_at
+      `,
+      {
+        libraryKey,
+        bindingId,
+        updatedAt: now,
+      },
+    );
+    await connection.run(
+      `
+        UPDATE dataset_secret_bindings
+        SET updated_at = $updatedAt
+        WHERE id = $bindingId
+      `,
+      {
+        bindingId,
+        updatedAt: now,
+      },
+    );
+  });
+
+  return binding.id;
+}
+
 export async function clearDatasetLibrarySecretBinding(libraryKey: string) {
   const normalizedLibraryKey = normalizeLibraryKey(libraryKey);
   if (!normalizedLibraryKey) return;

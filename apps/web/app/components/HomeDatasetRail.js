@@ -9,11 +9,18 @@ function normalizePermissionLevel(value) {
   return Math.max(0, Math.floor(numeric));
 }
 
+function summarizeActiveGrant(grant) {
+  const libraryKeys = Array.isArray(grant?.libraryKeys) ? grant.libraryKeys : [];
+  if (!libraryKeys.length) return '当前活动密钥已启用';
+  return `当前活动密钥已启用，已解锁 ${libraryKeys.length} 个数据集`;
+}
+
 export default function HomeDatasetRail({
   libraries = [],
   totalDocuments = 0,
   selectedKeys = [],
   unlockedKeys = [],
+  datasetSecretState = null,
   onToggleLibrary,
   onClearSelection,
   onCreateLibrary,
@@ -25,11 +32,17 @@ export default function HomeDatasetRail({
   createPlaceholder = '新建数据集',
   createButtonLabel = '增加分组',
   selectionSummaryLabel,
+  createHintText = '',
 }) {
   const [draft, setDraft] = useState('');
-  const [secretDraft, setSecretDraft] = useState('');
   const selectedSet = new Set(selectedKeys);
   const unlockedSet = new Set(unlockedKeys);
+  const activeGrant = datasetSecretState?.activeGrant || null;
+  const resolvedCreateHint = String(createHintText || '').trim() || (
+    activeGrant
+      ? `${summarizeActiveGrant(activeGrant)}，后续新建分组会自动沿用这把密钥。`
+      : '当前未输入密钥，新建分组将是公共的，打开网页的用户都能查看和使用。'
+  );
   const orderedLibraries = useMemo(
     () => orderLibrariesWithSelectedFirst(libraries, selectedKeys),
     [libraries, selectedKeys],
@@ -39,10 +52,9 @@ export default function HomeDatasetRail({
     event.preventDefault();
     const name = draft.trim();
     if (!name || creating) return;
-    const created = await onCreateLibrary?.(name, secretDraft.trim());
+    const created = await onCreateLibrary?.(name);
     if (created !== false) {
       setDraft('');
-      setSecretDraft('');
     }
   }
 
@@ -56,17 +68,11 @@ export default function HomeDatasetRail({
           placeholder={createPlaceholder}
           disabled={creating}
         />
-        <input
-          className="filter-input home-dataset-create-input"
-          value={secretDraft}
-          onChange={(event) => setSecretDraft(event.target.value)}
-          placeholder="可选密钥"
-          disabled={creating}
-        />
         <button className="ghost-btn compact-inline-btn" type="submit" disabled={creating || !draft.trim()}>
           {creating ? '创建中...' : createButtonLabel}
         </button>
       </form>
+      <div className="home-dataset-create-hint">{resolvedCreateHint}</div>
 
       <div className="home-dataset-rail-summary">
         {showClearChip ? (

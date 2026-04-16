@@ -35,6 +35,7 @@ export default function HomeMobileShell({
   documentTotal = 0,
   preferredLibraries = [],
   unlockedLibraryKeys = [],
+  datasetSecretState = null,
   onToggleLibrary,
   onRequestUnlockLibrary,
   onClearLibraries,
@@ -344,6 +345,7 @@ export default function HomeMobileShell({
           totalDocuments={documentTotal}
           selectedKeys={preferredLibraries}
           unlockedKeys={unlockedLibraryKeys}
+          datasetSecretState={datasetSecretState}
           onToggleLibrary={onToggleLibrary}
           onRequestUnlock={onRequestUnlockLibrary}
           onClearSelection={onClearLibraries}

@@ -130,27 +130,14 @@ export default function HomePageClient({
     }));
   }, [orderedLibraries, setPreferredLibraries, unlockedLibraryKeys]);
 
-  async function handleCreateLibrary(name, secret = '') {
+  async function handleCreateLibrary(name) {
     const trimmed = String(name || '').trim();
-    const normalizedSecret = String(secret || '').trim();
     if (!trimmed || libraryCreateBusy) return false;
     try {
       setLibraryCreateBusy(true);
-      const created = await createDocumentLibrary(trimmed, '', 0, {
-        secret: normalizedSecret,
-      });
+      const created = await createDocumentLibrary(trimmed, '', 0, { datasetSecretState });
       await refreshHomeData?.();
-      if (normalizedSecret) {
-        try {
-          const nextState = await verifyDatasetSecret(normalizedSecret);
-          if (Array.isArray(nextState?.activeLibraryKeys) && nextState.activeLibraryKeys.length) {
-            setPreferredLibraries(nextState.activeLibraryKeys);
-          }
-        } catch {
-          // Keep the new dataset visible even if local grant caching fails.
-        }
-      }
-      if (!normalizedSecret && created?.item?.key) {
+      if (created?.item?.key) {
         setPreferredLibraries((current) => {
           if (current.includes(created.item.key)) return current;
           return [...current, created.item.key];
@@ -193,6 +180,7 @@ export default function HomePageClient({
         documentTotal={documentTotal}
         preferredLibraries={preferredLibraries}
         unlockedLibraryKeys={unlockedLibraryKeys}
+        datasetSecretState={datasetSecretState}
         onToggleLibrary={handleTogglePreferredLibrary}
         onRequestUnlockLibrary={setSecretPromptTarget}
         onClearLibraries={() => setPreferredLibraries([])}
@@ -262,6 +250,7 @@ export default function HomePageClient({
             totalDocuments={documentTotal}
             selectedKeys={preferredLibraries}
             unlockedKeys={unlockedLibraryKeys}
+            datasetSecretState={datasetSecretState}
             onToggleLibrary={handleTogglePreferredLibrary}
             onRequestUnlock={setSecretPromptTarget}
             onClearSelection={() => setPreferredLibraries([])}

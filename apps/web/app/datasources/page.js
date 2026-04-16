@@ -238,13 +238,11 @@ export default function DatasourcesPage() {
     setMessage('');
   }
 
-  async function handleCreateLibrary(name, secret = '') {
+  async function handleCreateLibrary(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed || saving) return false;
     try {
-      const created = await createDocumentLibrary(trimmed, '', 0, {
-        secret: String(secret || '').trim(),
-      });
+      const created = await createDocumentLibrary(trimmed, '', 0, { datasetSecretState });
       await load();
       const createdKey = String(created?.item?.key || '').trim();
       if (createdKey) {
@@ -552,6 +550,7 @@ export default function DatasourcesPage() {
         totalDocuments={libraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
         selectedKeys={form.targetKeys}
         unlockedKeys={unlockedLibraryKeys}
+        datasetSecretState={datasetSecretState}
         onToggleLibrary={toggleTargetLibrary}
         onRequestUnlock={setLockedLibraryPrompt}
         onClearSelection={() => updateForm({ targetKeys: [] })}

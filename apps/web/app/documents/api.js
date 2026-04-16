@@ -1,6 +1,7 @@
 'use client';
 
 import { buildApiUrl } from '../lib/config';
+import { loadStoredDatasetSecretState } from '../lib/dataset-secrets';
 import { normalizeDatasourceResponse, normalizeDocumentsResponse } from '../lib/types';
 
 async function requestJson(path, options) {
@@ -37,6 +38,7 @@ export async function fetchDatasources() {
 }
 
 export async function createDocumentLibrary(name, description = '', permissionLevel = 0, options = {}) {
+  const datasetSecretState = options.datasetSecretState || loadStoredDatasetSecretState();
   return requestJson('/api/documents/libraries', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -46,6 +48,8 @@ export async function createDocumentLibrary(name, description = '', permissionLe
       permissionLevel,
       secret: typeof options.secret === 'string' ? options.secret : '',
       clearSecret: options.clearSecret === true,
+      datasetSecretGrants: Array.isArray(datasetSecretState?.grants) ? datasetSecretState.grants : [],
+      activeDatasetSecretGrant: datasetSecretState?.activeGrant || null,
     }),
   });
 }

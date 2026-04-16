@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
+import { resolveDatasetSecretGrants } from '../lib/dataset-secrets.js';
 import { loadDocumentVectorIndexMeta } from '../lib/document-vector-index.js';
 import {
   acceptDocumentSuggestions,
@@ -140,6 +141,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       permissionLevel?: number;
       secret?: string;
       clearSecret?: boolean;
+      datasetSecretGrants?: unknown[];
+      activeDatasetSecretGrant?: unknown;
     };
     const name = String(body.name || '').trim();
 
@@ -150,12 +153,17 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
     let library;
     let libraries;
     try {
+      const resolvedDatasetSecrets = await resolveDatasetSecretGrants({
+        grants: body.datasetSecretGrants,
+        activeGrant: body.activeDatasetSecretGrant,
+      });
       ({ library, libraries } = await createManagedDocumentLibrary({
         name,
         description: body.description,
         permissionLevel: body.permissionLevel,
         secret: body.secret,
         clearSecret: body.clearSecret,
+        activeSecretBindingId: String(resolvedDatasetSecrets.activeGrant?.bindingId || '').trim() || undefined,
       }));
     } catch (error) {
       if (error instanceof Error && error.message === 'library already exists') {
@@ -190,9 +198,15 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       extractionFieldConflictStrategies?: Record<string, string>;
       secret?: string;
       clearSecret?: boolean;
+      datasetSecretGrants?: unknown[];
+      activeDatasetSecretGrant?: unknown;
     };
 
     try {
+      const resolvedDatasetSecrets = await resolveDatasetSecretGrants({
+        grants: body.datasetSecretGrants,
+        activeGrant: body.activeDatasetSecretGrant,
+      });
       const { library, libraries } = await updateManagedDocumentLibrary(key, {
         label: body.label,
         description: body.description,
@@ -209,6 +223,7 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         extractionFieldConflictStrategies: body.extractionFieldConflictStrategies,
         secret: body.secret,
         clearSecret: body.clearSecret,
+        activeSecretBindingId: String(resolvedDatasetSecrets.activeGrant?.bindingId || '').trim() || undefined,
       });
       return {
         status: 'updated',
