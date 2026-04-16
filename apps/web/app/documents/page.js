@@ -257,19 +257,39 @@ export default function DocumentsPage() {
     const name = String(draftValue || '').trim();
     const permissionLevel = 0;
     if (!name || libraryCreateSubmitting) return;
+    const localSecret = !datasetSecretState?.activeGrant && typeof datasetSecretState?.localSecret === 'string'
+      ? String(datasetSecretState.localSecret || '').trim()
+      : '';
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
       const created = await createDocumentLibrary(name, '', permissionLevel, { datasetSecretState });
+      let activeLibraryKeys = [];
+      let autoVerified = false;
+      if (localSecret) {
+        try {
+          const nextState = await verifyDatasetSecretText(localSecret, datasetSecretState);
+          setDatasetSecretState(nextState);
+          activeLibraryKeys = Array.isArray(nextState?.activeLibraryKeys) ? nextState.activeLibraryKeys : [];
+          autoVerified = true;
+        } catch {
+          autoVerified = false;
+        }
+      }
       setLibraryCreateDraft('');
       await loadDocuments();
       if (created?.item?.key) {
         setActiveLibrary(created.item.key);
-        setSelectedLibraries((current) => (
-          current.includes(created.item.key) ? current : [...current, created.item.key]
-        ));
+        setSelectedLibraries((current) => {
+          const nextKeys = new Set(current);
+          nextKeys.add(created.item.key);
+          activeLibraryKeys.forEach((key) => nextKeys.add(key));
+          return [...nextKeys];
+        });
       }
-      setScanMessage(`已新建数据集“${name}”`);
+      setScanMessage(localSecret && !autoVerified
+        ? `已新建数据集“${name}”，但本地新密钥未能自动转成正式授权，请重新输入一次密钥。`
+        : `已新建数据集“${name}”`);
     } catch {
       setScanMessage('新建数据集失败，请稍后重试');
     } finally {
@@ -361,9 +381,12 @@ export default function DocumentsPage() {
     () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
     [datasetSecretState],
   );
+  const localSecretPending = !datasetSecretState?.activeGrant && Boolean(String(datasetSecretState?.localSecret || '').trim());
   const datasetCreateHint = datasetSecretState?.activeGrant
     ? '当前活动密钥已启用，新建数据集会自动绑定这把密钥。'
-    : '当前未输入密钥，新建数据集将是公共的，打开网页的用户都能查看和使用。';
+    : (localSecretPending
+      ? '当前已启用本地新密钥，新建数据集会先绑定这把密钥，并在创建后自动转成正式授权。'
+      : '当前未输入密钥，新建数据集将是公共的，打开网页的用户都能查看和使用。');
 
   const selectedLibraryRecords = useMemo(
     () => allLibraries.filter((item) => selectedLibraries.includes(item.key)),

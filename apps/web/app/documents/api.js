@@ -39,6 +39,9 @@ export async function fetchDatasources() {
 
 export async function createDocumentLibrary(name, description = '', permissionLevel = 0, options = {}) {
   const datasetSecretState = options.datasetSecretState || loadStoredDatasetSecretState();
+  const localSecret = !datasetSecretState?.activeGrant && typeof datasetSecretState?.localSecret === 'string'
+    ? String(datasetSecretState.localSecret || '').trim()
+    : '';
   return requestJson('/api/documents/libraries', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -46,7 +49,7 @@ export async function createDocumentLibrary(name, description = '', permissionLe
       name,
       description,
       permissionLevel,
-      secret: typeof options.secret === 'string' ? options.secret : '',
+      secret: typeof options.secret === 'string' ? options.secret : localSecret,
       clearSecret: options.clearSecret === true,
       datasetSecretGrants: Array.isArray(datasetSecretState?.grants) ? datasetSecretState.grants : [],
       activeDatasetSecretGrant: datasetSecretState?.activeGrant || null,

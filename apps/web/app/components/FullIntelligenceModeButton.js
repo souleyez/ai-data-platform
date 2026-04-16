@@ -41,6 +41,12 @@ export default function FullIntelligenceModeButton({
   const grants = Array.isArray(normalizedState.grants) ? normalizedState.grants : [];
   const activeGrant = normalizedState.activeGrant || null;
   const unlockedCount = Array.isArray(normalizedState.unlockedLibraryKeys) ? normalizedState.unlockedLibraryKeys.length : 0;
+  const localSecretPending = !activeGrant && Boolean(String(normalizedState.localSecret || '').trim());
+  const promptTargetLabel = promptTargetLibrary?.label || promptTargetLibrary?.name || promptTargetLibrary?.key || '';
+  const inputPlaceholder = promptTargetLabel
+    ? '输入该数据集已绑定的密钥'
+    : '输入新密钥，或输入已绑定密钥继续使用';
+  const submitLabel = promptTargetLabel ? '校验并解锁' : '保存并继续';
 
   useEffect(() => {
     if (externalState) return undefined;
@@ -83,6 +89,28 @@ export default function FullIntelligenceModeButton({
         : await verifyDatasetSecretText(secret, normalizedState);
       syncState(nextState);
       setSecretInput('');
+      const activeLibraryKeys = Array.isArray(nextState?.activeLibraryKeys) ? nextState.activeLibraryKeys : [];
+      const promptUnlocked = !promptTargetLibrary?.key || activeLibraryKeys.includes(promptTargetLibrary.key);
+
+      if (nextState?.activeGrant && promptUnlocked) {
+        setNotice('');
+        setModalOpen(false);
+        onPromptHandled?.();
+        return;
+      }
+
+      if (nextState?.activeGrant && promptTargetLabel && !promptUnlocked) {
+        setNotice(`当前密钥已启用，但它不包含数据集“${promptTargetLabel}”。`);
+        return;
+      }
+
+      if (String(nextState?.localSecret || '').trim()) {
+        setNotice(promptTargetLabel
+          ? `当前输入已保存为本地新密钥，但它还没有绑定到数据集“${promptTargetLabel}”，暂时不能解锁。后续新建数据集会自动绑定这把密钥。`
+          : '当前输入已保存为本地新密钥。后续新建数据集会自动绑定这把密钥，创建后会自动转为正式授权。');
+        return;
+      }
+
       setNotice('');
       setModalOpen(false);
       onPromptHandled?.();
@@ -134,8 +162,8 @@ export default function FullIntelligenceModeButton({
               <div>
                 <strong>输入数据集密钥</strong>
                 <div className="dataset-secret-modal-subtitle">
-                  用途：解锁受保护的数据集，并让当前浏览器后续新建分组、上传文档默认沿用当前活动密钥。
-                  未输入密钥时，新建分组默认为公共分组。
+                  用途：如果这把密钥已经绑定过数据集，会立即解锁并复用；如果还没有绑定，它会先作为当前浏览器里的本地新密钥保存，
+                  后续新建数据集、上传文档会自动沿用，首次建库后再自动转成正式授权。未输入密钥时，新建分组默认为公共分组。
                 </div>
               </div>
               <button type="button" className="ghost-btn compact-inline-btn" onClick={() => {
@@ -148,7 +176,7 @@ export default function FullIntelligenceModeButton({
 
             {promptTargetLibrary ? (
               <div className="dataset-secret-modal-banner">
-                数据集“{promptTargetLibrary.label || promptTargetLibrary.name || promptTargetLibrary.key}”需要先输入密钥后才能进入。
+                数据集“{promptTargetLabel}”需要先输入已绑定密钥后才能进入。
               </div>
             ) : null}
 
@@ -160,13 +188,13 @@ export default function FullIntelligenceModeButton({
                   type="password"
                   value={secretInput}
                   onChange={(event) => setSecretInput(event.target.value)}
-                  placeholder="输入已绑定的数据集密钥"
+                  placeholder={inputPlaceholder}
                   autoFocus
                 />
               </label>
               <div className="mode-modal-actions dataset-secret-form-actions">
                 <button type="submit" className="primary-btn" disabled={loading || !secretInput.trim()}>
-                  {loading ? '校验中...' : '校验并启用'}
+                  {loading ? '处理中...' : submitLabel}
                 </button>
                 <button type="button" className="ghost-btn" onClick={handleClearCache}>
                   清空本地缓存
@@ -177,17 +205,24 @@ export default function FullIntelligenceModeButton({
             {error ? <div className="mode-modal-error">{error}</div> : null}
             {notice ? <div className="dataset-secret-inline-note">{notice}</div> : null}
 
-            <div className="dataset-secret-current-card">
-              <strong>当前活动密钥</strong>
+            <div className={`dataset-secret-current-card ${activeGrant ? 'is-grant' : (localSecretPending ? 'is-local' : 'is-empty')}`.trim()}>
+              <strong>{activeGrant ? '当前活动密钥' : (localSecretPending ? '当前本地新密钥' : '当前密钥状态')}</strong>
               <span>
                 {activeGrant
                   ? `${summarizeGrant(activeGrant)} · 已解锁 ${unlockedCount} 个数据集`
-                  : '当前未启用密钥，新建分组将保持公共可见。'}
+                  : (localSecretPending
+                    ? '已保存 1 把本地新密钥，尚未绑定任何数据集。后续新建数据集会自动绑定这把密钥，并在创建后转成正式授权。'
+                    : '当前未启用密钥，新建分组将保持公共可见。')}
               </span>
             </div>
 
             <div className="dataset-secret-cache-list">
-              <strong>已缓存密钥</strong>
+              <strong>已缓存的已绑定密钥</strong>
+              {localSecretPending ? (
+                <div className="dataset-secret-inline-note">
+                  当前浏览器里还有 1 把本地新密钥，等待首次绑定到新建数据集。
+                </div>
+              ) : null}
               {grants.length ? grants.map((grant) => {
                 const active = activeGrant?.bindingId === grant.bindingId;
                 return (
@@ -208,7 +243,7 @@ export default function FullIntelligenceModeButton({
                   </div>
                 );
               }) : (
-                <div className="dataset-secret-inline-note">当前还没有缓存的密钥授权。</div>
+                <div className="dataset-secret-inline-note">当前还没有缓存的已绑定密钥。</div>
               )}
             </div>
           </div>

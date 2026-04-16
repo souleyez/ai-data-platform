@@ -13,6 +13,10 @@ const DRAWER_GESTURE_TRIGGER_PX = 12;
 const DRAWER_GESTURE_DIRECTION_RATIO = 1.05;
 const DRAWER_OPEN_COMMIT_PROGRESS = 0.34;
 const DRAWER_CLOSE_COMMIT_PROGRESS = 0.76;
+const SURFACE_MAIN = 'main';
+const SURFACE_LIBRARIES = 'libraries';
+const SURFACE_REPORTS = 'reports';
+const SURFACE_REPORT_PREVIEW = 'report-preview';
 
 function shouldIgnoreSwipeTarget(target) {
   return target instanceof HTMLElement
@@ -65,9 +69,8 @@ export default function HomeMobileShell({
   onSelectReport,
   onPrepareReportPreview,
 }) {
-  const [drawerSide, setDrawerSide] = useState(null);
+  const [surface, setSurface] = useState(SURFACE_MAIN);
   const [drawerPreview, setDrawerPreview] = useState(null);
-  const [reportPreviewOpen, setReportPreviewOpen] = useState(false);
   const gestureRef = useRef({
     active: false,
     startX: 0,
@@ -102,6 +105,10 @@ export default function HomeMobileShell({
       || reportItems[0]
       || null
   ), [reportItems, selectedReportId, selectedReportItem]);
+  const drawerSide = surface === SURFACE_LIBRARIES
+    ? SURFACE_LIBRARIES
+    : (surface === SURFACE_REPORTS ? SURFACE_REPORTS : null);
+  const reportPreviewOpen = surface === SURFACE_REPORT_PREVIEW;
 
   const leftDrawerProgress = drawerSide === 'libraries'
     ? (drawerPreview?.side === 'libraries' ? drawerPreview.progress : 1)
@@ -110,12 +117,26 @@ export default function HomeMobileShell({
     ? (drawerPreview?.side === 'reports' ? drawerPreview.progress : 1)
     : (drawerPreview?.side === 'reports' ? drawerPreview.progress : 0);
   const backdropOpacity = Math.max(leftDrawerProgress, rightDrawerProgress);
+  const leftDrawerVisible = leftDrawerProgress > 0.001;
+  const rightDrawerVisible = rightDrawerProgress > 0.001;
+
+  function resetGestureState() {
+    gestureRef.current = {
+      active: false,
+      startX: 0,
+      startY: 0,
+    };
+  }
+
+  function closeAllSurfaces(nextSurface = SURFACE_MAIN) {
+    resetGestureState();
+    setDrawerPreview(null);
+    setSurface(nextSurface);
+  }
 
   useEffect(() => {
     if (reportItems.length) return;
-    setReportPreviewOpen(false);
-    setDrawerSide((current) => (current === 'reports' ? null : current));
-    setDrawerPreview((current) => (current?.side === 'reports' ? null : current));
+    closeAllSurfaces();
   }, [reportItems.length]);
 
   useEffect(() => {
@@ -182,8 +203,7 @@ export default function HomeMobileShell({
   }, []);
 
   function closeTransientPanels() {
-    setDrawerSide(null);
-    setDrawerPreview(null);
+    closeAllSurfaces();
   }
 
   function openReportPreview(reportId) {
@@ -191,9 +211,7 @@ export default function HomeMobileShell({
       onSelectReport?.(reportId);
     }
     onPrepareReportPreview?.();
-    setDrawerSide(null);
-    setDrawerPreview(null);
-    setReportPreviewOpen(true);
+    closeAllSurfaces(SURFACE_REPORT_PREVIEW);
   }
 
   function startGesture(event) {
@@ -208,13 +226,13 @@ export default function HomeMobileShell({
   }
 
   function handleTouchStart(event) {
-    if (drawerSide) return;
+    if (surface !== SURFACE_MAIN) return;
     if (shouldIgnoreSwipeTarget(event.target)) return;
     startGesture(event);
   }
 
   function handleTouchMove(event) {
-    if (!gestureRef.current.active || drawerSide) return;
+    if (!gestureRef.current.active || surface !== SURFACE_MAIN) return;
     const touch = event.touches?.[0];
     if (!touch) return;
     const deltaX = touch.clientX - gestureRef.current.startX;
@@ -233,18 +251,18 @@ export default function HomeMobileShell({
     if (!gestureRef.current.active) return;
     gestureRef.current.active = false;
     if (drawerPreview?.progress >= DRAWER_OPEN_COMMIT_PROGRESS && drawerPreview?.side) {
-      setDrawerSide(drawerPreview.side);
+      setSurface(drawerPreview.side === SURFACE_LIBRARIES ? SURFACE_LIBRARIES : SURFACE_REPORTS);
     }
     setDrawerPreview(null);
   }
 
   function handleDrawerTouchStart(side, event) {
-    if (drawerSide !== side || shouldIgnoreDrawerSwipeTarget(event.target)) return;
+    if (surface !== side || shouldIgnoreDrawerSwipeTarget(event.target)) return;
     startGesture(event);
   }
 
   function handleDrawerTouchMove(side, event) {
-    if (!gestureRef.current.active || drawerSide !== side) return;
+    if (!gestureRef.current.active || surface !== side) return;
     const touch = event.touches?.[0];
     if (!touch) return;
     const deltaX = touch.clientX - gestureRef.current.startX;
@@ -260,18 +278,17 @@ export default function HomeMobileShell({
   }
 
   function handleDrawerTouchEnd(side) {
-    if (!gestureRef.current.active || drawerSide !== side) return;
+    if (!gestureRef.current.active || surface !== side) return;
     gestureRef.current.active = false;
     if (drawerPreview?.side === side && drawerPreview.progress <= DRAWER_CLOSE_COMMIT_PROGRESS) {
-      setDrawerSide(null);
-      setDrawerPreview(null);
+      closeAllSurfaces();
       return;
     }
     setDrawerPreview(null);
   }
 
   return (
-    <div className="mobile-home-shell">
+    <div className={`mobile-home-shell mobile-home-shell-surface-${surface}`.trim()}>
       <header className="mobile-home-topbar" data-mobile-home-no-swipe="true">
         <strong className="mobile-home-topbar-brand">AI智能助手</strong>
         {datasetSecretSlot ? (
@@ -282,7 +299,7 @@ export default function HomeMobileShell({
       </header>
 
       <div
-        className="mobile-home-stage"
+        className={`mobile-home-stage ${surface !== SURFACE_MAIN ? 'is-obscured' : ''}`.trim()}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -322,8 +339,9 @@ export default function HomeMobileShell({
       />
 
       <aside
-        className="mobile-home-drawer mobile-home-drawer-left"
+        className={`mobile-home-drawer mobile-home-drawer-left ${leftDrawerVisible ? 'is-visible' : ''} ${drawerSide === SURFACE_LIBRARIES ? 'is-open' : ''}`.trim()}
         data-mobile-home-no-swipe="true"
+        aria-hidden={!leftDrawerVisible}
         style={{ transform: `translate3d(${(-100 + leftDrawerProgress * 100).toFixed(3)}%, 0, 0)` }}
         onTouchStart={(event) => handleDrawerTouchStart('libraries', event)}
         onTouchMove={(event) => handleDrawerTouchMove('libraries', event)}
@@ -336,7 +354,7 @@ export default function HomeMobileShell({
             <strong>数据集</strong>
             <span>{selectionSummary.meta}</span>
           </div>
-          <button type="button" className="ghost-btn compact-inline-btn" onClick={() => setDrawerSide(null)}>
+          <button type="button" className="ghost-btn compact-inline-btn" onClick={() => closeAllSurfaces()}>
             收起
           </button>
         </div>
@@ -360,8 +378,9 @@ export default function HomeMobileShell({
       </aside>
 
       <aside
-        className="mobile-home-drawer mobile-home-drawer-right"
+        className={`mobile-home-drawer mobile-home-drawer-right ${rightDrawerVisible ? 'is-visible' : ''} ${drawerSide === SURFACE_REPORTS ? 'is-open' : ''}`.trim()}
         data-mobile-home-no-swipe="true"
+        aria-hidden={!rightDrawerVisible}
         style={{ transform: `translate3d(${(100 - rightDrawerProgress * 100).toFixed(3)}%, 0, 0)` }}
         onTouchStart={(event) => handleDrawerTouchStart('reports', event)}
         onTouchMove={(event) => handleDrawerTouchMove('reports', event)}
@@ -374,7 +393,7 @@ export default function HomeMobileShell({
             <strong>已出报表</strong>
             <span>{reportItems.length ? `${reportItems.length} 份结果` : '暂无已出报表'}</span>
           </div>
-          <button type="button" className="ghost-btn compact-inline-btn" onClick={() => setDrawerSide(null)}>
+          <button type="button" className="ghost-btn compact-inline-btn" onClick={() => closeAllSurfaces()}>
             收起
           </button>
         </div>
@@ -417,7 +436,7 @@ export default function HomeMobileShell({
               </span>
             </div>
             <div className="mobile-home-report-preview-actions">
-              <button type="button" className="ghost-btn compact-inline-btn" onClick={() => setReportPreviewOpen(false)}>
+              <button type="button" className="ghost-btn compact-inline-btn" onClick={() => closeAllSurfaces()}>
                 关闭
               </button>
             </div>

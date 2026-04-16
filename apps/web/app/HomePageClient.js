@@ -133,14 +133,28 @@ export default function HomePageClient({
   async function handleCreateLibrary(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed || libraryCreateBusy) return false;
+    const localSecret = !datasetSecretState?.activeGrant && typeof datasetSecretState?.localSecret === 'string'
+      ? String(datasetSecretState.localSecret || '').trim()
+      : '';
     try {
       setLibraryCreateBusy(true);
       const created = await createDocumentLibrary(trimmed, '', 0, { datasetSecretState });
       await refreshHomeData?.();
+      let activeLibraryKeys = [];
+      if (localSecret) {
+        try {
+          const nextState = await verifyDatasetSecret(localSecret);
+          activeLibraryKeys = Array.isArray(nextState?.activeLibraryKeys) ? nextState.activeLibraryKeys : [];
+        } catch {
+          activeLibraryKeys = [];
+        }
+      }
       if (created?.item?.key) {
         setPreferredLibraries((current) => {
-          if (current.includes(created.item.key)) return current;
-          return [...current, created.item.key];
+          const nextKeys = new Set(current);
+          nextKeys.add(created.item.key);
+          activeLibraryKeys.forEach((key) => nextKeys.add(key));
+          return [...nextKeys];
         });
       }
       return true;

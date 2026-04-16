@@ -241,17 +241,38 @@ export default function DatasourcesPage() {
   async function handleCreateLibrary(name) {
     const trimmed = String(name || '').trim();
     if (!trimmed || saving) return false;
+    const localSecret = !datasetSecretState?.activeGrant && typeof datasetSecretState?.localSecret === 'string'
+      ? String(datasetSecretState.localSecret || '').trim()
+      : '';
     try {
       const created = await createDocumentLibrary(trimmed, '', 0, { datasetSecretState });
+      let activeLibraryKeys = [];
+      let autoVerified = false;
+      if (localSecret) {
+        try {
+          const nextState = await verifyDatasetSecretText(localSecret, datasetSecretState);
+          setDatasetSecretState(nextState);
+          activeLibraryKeys = Array.isArray(nextState?.activeLibraryKeys) ? nextState.activeLibraryKeys : [];
+          autoVerified = true;
+        } catch {
+          autoVerified = false;
+        }
+      }
       await load();
       const createdKey = String(created?.item?.key || '').trim();
       if (createdKey) {
         setForm((current) => ({
           ...current,
-          targetKeys: current.targetKeys.includes(createdKey) ? current.targetKeys : [...current.targetKeys, createdKey],
+          targetKeys: [...new Set([
+            ...current.targetKeys,
+            createdKey,
+            ...activeLibraryKeys,
+          ])],
         }));
       }
-      setMessage(`已新建数据集：${trimmed}`);
+      setMessage(localSecret && !autoVerified
+        ? `已新建数据集：${trimmed}，但本地新密钥未能自动转成正式授权，请重新输入一次密钥。`
+        : `已新建数据集：${trimmed}`);
       return true;
     } catch {
       setError('新建数据集失败');

@@ -247,8 +247,8 @@ button, textarea { font: inherit; }
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(8px);
+  background: rgba(2, 6, 11, 0.72);
+  backdrop-filter: blur(18px);
 }
 .mode-modal {
   width: min(560px, 100%);
@@ -293,9 +293,13 @@ button, textarea { font: inherit; }
   width: 100%;
 }
 .mode-modal-error {
-  color: var(--danger);
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.26);
+  color: #fecaca;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 .mode-modal-actions {
   display: flex;
@@ -314,10 +318,39 @@ button, textarea { font: inherit; }
 }
 .dataset-secret-modal {
   width: min(560px, 100%);
+  border: 1px solid rgba(122, 141, 176, 0.22);
+  background:
+    radial-gradient(circle at top, rgba(88, 108, 147, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(8, 11, 17, 0.98), rgba(5, 8, 13, 0.99));
+  color: #edf3fb;
+  box-shadow: 0 32px 72px rgba(1, 4, 9, 0.6);
+}
+.dataset-secret-modal .mode-modal-head strong {
+  color: #f5f8fc;
+  font-size: 18px;
+}
+.dataset-secret-modal .mode-modal-label {
+  color: #dce5f1;
+}
+.dataset-secret-modal .mode-modal-input {
+  border: 1px solid rgba(118, 136, 168, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f6f9fd;
+}
+.dataset-secret-modal .mode-modal-input::placeholder {
+  color: #7f90aa;
+}
+.dataset-secret-modal .ghost-btn {
+  border: 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef4fb;
+}
+.dataset-secret-modal .ghost-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
 }
 .dataset-secret-modal-subtitle {
   margin-top: 6px;
-  color: var(--subtle);
+  color: #97aac6;
   font-size: 13px;
   line-height: 1.7;
 }
@@ -329,16 +362,16 @@ button, textarea { font: inherit; }
   border-radius: 14px;
 }
 .dataset-secret-modal-banner {
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  background: rgba(37, 99, 235, 0.08);
-  color: #1d4ed8;
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  background: rgba(40, 74, 128, 0.24);
+  color: #d9e8ff;
   font-size: 13px;
   line-height: 1.6;
 }
 .dataset-secret-inline-note {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(148, 163, 184, 0.08);
-  color: #475569;
+  border: 1px solid rgba(126, 143, 171, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: #c7d4e5;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -351,15 +384,22 @@ button, textarea { font: inherit; }
 .dataset-secret-current-card {
   display: grid;
   gap: 6px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(248, 250, 252, 0.88);
+  border: 1px solid rgba(126, 143, 171, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+}
+.dataset-secret-current-card.is-local {
+  border-color: rgba(96, 165, 250, 0.22);
+  background: rgba(40, 74, 128, 0.2);
+}
+.dataset-secret-current-card.is-empty {
+  background: rgba(255, 255, 255, 0.04);
 }
 .dataset-secret-current-card strong {
-  color: #0f172a;
+  color: #f4f7fb;
   font-size: 13px;
 }
 .dataset-secret-current-card span {
-  color: #475569;
+  color: #c4d0e1;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -368,7 +408,7 @@ button, textarea { font: inherit; }
   gap: 10px;
 }
 .dataset-secret-cache-list > strong {
-  color: #0f172a;
+  color: #dde7f4;
   font-size: 13px;
 }
 .dataset-secret-cache-item {
@@ -376,8 +416,8 @@ button, textarea { font: inherit; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(126, 143, 171, 0.16);
+  background: rgba(255, 255, 255, 0.05);
 }
 .dataset-secret-cache-copy {
   display: grid;
@@ -385,16 +425,20 @@ button, textarea { font: inherit; }
   min-width: 0;
 }
 .dataset-secret-cache-copy span {
-  color: #0f172a;
+  color: #f3f7fc;
   font-size: 13px;
   font-weight: 600;
 }
 .dataset-secret-cache-copy small {
-  color: #64748b;
+  color: #8ea0ba;
   font-size: 12px;
 }
 .dataset-secret-cache-actions {
   flex: 0 0 auto;
+}
+.dataset-secret-cache-actions .ghost-btn.active {
+  background: rgba(102, 132, 186, 0.28);
+  color: #ffffff;
 }
 .mode-modal-constraints {
   margin: 0;
@@ -5295,6 +5339,10 @@ tbody tr:hover {
     touch-action: pan-y;
   }
 
+  .mobile-home-stage.is-obscured {
+    pointer-events: none;
+  }
+
   .chat-panel-mobile-home {
     height: 100% !important;
     min-height: 0;
@@ -5458,6 +5506,21 @@ tbody tr:hover {
     background: rgba(7, 10, 16, 0.98);
     box-shadow: 0 28px 72px rgba(1, 4, 9, 0.58);
     overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform 180ms ease,
+      visibility 0ms linear 180ms;
+    will-change: transform;
+  }
+
+  .mobile-home-drawer.is-visible {
+    visibility: visible;
+    transition-delay: 0ms;
+  }
+
+  .mobile-home-drawer.is-open {
+    pointer-events: auto;
   }
 
   .mobile-home-drawer-swipe-hint {
@@ -5649,6 +5712,7 @@ tbody tr:hover {
     background:
       radial-gradient(circle at top, rgba(87, 107, 146, 0.18), transparent 30%),
       #05080d;
+    touch-action: pan-y;
   }
 
   .mobile-home-report-preview-head {
@@ -5689,6 +5753,7 @@ tbody tr:hover {
     min-height: 0;
     overflow-y: auto;
     padding: 0 14px calc(24px + env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
   }
 
   .mobile-home-report-preview .generated-report-detail,

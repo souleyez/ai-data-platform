@@ -38,10 +38,13 @@ export default function HomeDatasetRail({
   const selectedSet = new Set(selectedKeys);
   const unlockedSet = new Set(unlockedKeys);
   const activeGrant = datasetSecretState?.activeGrant || null;
+  const localSecretPending = !activeGrant && Boolean(String(datasetSecretState?.localSecret || '').trim());
   const resolvedCreateHint = String(createHintText || '').trim() || (
     activeGrant
       ? `${summarizeActiveGrant(activeGrant)}，后续新建分组会自动沿用这把密钥。`
-      : '当前未输入密钥，新建分组将是公共的，打开网页的用户都能查看和使用。'
+      : (localSecretPending
+        ? '当前已启用本地新密钥，后续新建分组会先绑定这把密钥，创建后再自动转成正式授权。'
+        : '当前未输入密钥，新建分组将是公共的，打开网页的用户都能查看和使用。')
   );
   const orderedLibraries = useMemo(
     () => orderLibrariesWithSelectedFirst(libraries, selectedKeys),
