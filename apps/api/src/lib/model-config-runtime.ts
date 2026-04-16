@@ -262,8 +262,10 @@ async function loadPersistedAndRuntime() {
   return { persisted, runtime };
 }
 
-export async function getActiveOpenClawModel() {
-  const { persisted, runtime } = await loadPersistedAndRuntime();
+function resolveActiveOpenClawModelId(
+  persisted: PersistedModelConfig,
+  runtime: OpenClawRuntimeInfo,
+) {
   const selectedModelId = persisted.selectedModelId;
   const availableIds = new Set(runtime.availableModels.map((item) => item.id));
 
@@ -274,11 +276,16 @@ export async function getActiveOpenClawModel() {
   return runtime.defaultModelId || env('OPENCLAW_MODEL') || `openclaw:${env('OPENCLAW_AGENT_ID', 'main') || 'main'}`;
 }
 
+export async function getActiveOpenClawModel() {
+  const { persisted, runtime } = await loadPersistedAndRuntime();
+  return resolveActiveOpenClawModelId(persisted, runtime);
+}
+
 export async function loadModelConfigState() {
   const [persisted, runtime] = await Promise.all([readPersistedModelConfig(), loadOpenClawRuntimeInfo()]);
   const gatewayUrl = runtime.gatewayUrl || buildGatewayUrl();
   const gatewayReachable = await isGatewayReachable(gatewayUrl);
-  const activeModelId = await getActiveOpenClawModel();
+  const activeModelId = resolveActiveOpenClawModelId(persisted, runtime);
   const currentModel = runtime.availableModels.find((item) => item.id === activeModelId) || runtime.availableModels[0] || null;
 
   return {

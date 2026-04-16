@@ -33,7 +33,6 @@ function sortLibrariesForRail(libraries = []) {
 
 export default function HomePageClient({
   initialDocumentsSnapshot = null,
-  initialModelState,
   initialViewportMode = 'desktop',
 }) {
   const [mobileViewport, setMobileViewport] = useState(initialViewportMode === 'mobile');
@@ -186,8 +185,6 @@ export default function HomePageClient({
         <HomeWorkspaceToolbar
           currentPath="/"
           sourceItems={sidebarSources}
-          initialModelState={initialModelState}
-          skipInitialModelRefresh
           fullIntelligenceSlot={(
             <FullIntelligenceModeButton
               compact

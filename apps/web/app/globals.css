@@ -5142,6 +5142,7 @@ tbody tr:hover {
     min-height: 100dvh;
     height: 100dvh;
     overflow: hidden;
+    overscroll-behavior: none;
     background:
       radial-gradient(circle at top, rgba(94, 120, 169, 0.14), transparent 34%),
       linear-gradient(180deg, #04070c 0%, #070b11 100%);
@@ -5150,48 +5151,29 @@ tbody tr:hover {
   .mobile-home-topbar {
     position: relative;
     z-index: 58;
-    height: 46px;
-    padding: 0 14px;
+    height: 52px;
+    padding: 0 16px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: flex-start;
     color: #dbe4f0;
-    background: rgba(5, 8, 12, 0.88);
+    background: rgba(5, 8, 12, 0.92);
     backdrop-filter: blur(14px);
   }
 
-  .mobile-home-topbar-label {
-    flex: 0 0 auto;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #7f90aa;
-  }
-
-  .mobile-home-topbar-title {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 13px;
-    font-weight: 700;
+  .mobile-home-topbar-brand {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
     color: #f5f8fc;
-  }
-
-  .mobile-home-topbar-meta {
-    flex: 0 0 auto;
-    font-size: 11px;
-    color: #8ea0ba;
-    white-space: nowrap;
   }
 
   .mobile-home-stage {
     position: relative;
-    height: calc(100dvh - 46px);
+    height: calc(100dvh - 52px);
     min-height: 0;
     overflow: hidden;
+    overscroll-behavior: none;
     touch-action: pan-y;
   }
 
@@ -5257,34 +5239,44 @@ tbody tr:hover {
     bottom: 0;
     z-index: 58;
     margin: 0;
-    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     border-radius: 0;
     background:
-      linear-gradient(180deg, rgba(4, 7, 12, 0) 0%, rgba(4, 7, 12, 0.8) 26%, rgba(6, 9, 14, 0.98) 48%);
+      linear-gradient(180deg, rgba(4, 7, 12, 0) 0%, rgba(4, 7, 12, 0.36) 22%, rgba(6, 9, 14, 0.9) 62%, rgba(6, 9, 14, 0.98) 100%);
     box-shadow: none;
+    transform: translateZ(0);
+    overscroll-behavior: none;
+    touch-action: manipulation;
   }
 
   .chat-panel-mobile-home .chat-input-row {
-    grid-template-columns: minmax(0, 1fr) 88px;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 8px;
-    padding: 10px 10px 10px 12px;
-    border-radius: 20px;
-    background: rgba(15, 19, 27, 0.96);
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgba(92, 98, 111, 0.94), rgba(63, 69, 80, 0.97));
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(18px);
+    touch-action: manipulation;
   }
 
   .chat-panel-mobile-home .chat-input-side-actions {
-    grid-template-rows: repeat(2, minmax(0, auto));
+    display: flex;
+    align-items: center;
     gap: 8px;
+    align-self: flex-end;
   }
 
   .chat-panel-mobile-home .chat-input-row textarea {
-    min-height: 74px;
-    max-height: 132px;
+    min-height: 44px;
+    max-height: 116px;
     resize: none;
-    padding: 4px 0;
+    padding: 0;
+    line-height: 1.6;
     color: #f6f9fd;
     background: transparent;
+    touch-action: auto;
   }
 
   .chat-panel-mobile-home .chat-input-row textarea::placeholder {
@@ -5293,9 +5285,22 @@ tbody tr:hover {
 
   .chat-panel-mobile-home .upload-inline-btn,
   .chat-panel-mobile-home .send-btn {
-    min-height: 36px;
-    height: 36px;
+    min-width: 62px;
+    min-height: 40px;
+    height: 40px;
     border-radius: 14px;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .chat-panel-mobile-home .upload-inline-btn {
+    background: rgba(255, 255, 255, 0.12);
+    color: #f2f6fb;
+  }
+
+  .chat-panel-mobile-home .send-btn {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
   }
 
   .mobile-home-backdrop {
@@ -5362,6 +5367,9 @@ tbody tr:hover {
   }
 
   .mobile-home-drawer .home-dataset-rail {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
     padding: 0;
     gap: 14px;
     background: transparent;
@@ -5391,6 +5399,7 @@ tbody tr:hover {
   }
 
   .mobile-home-drawer .home-dataset-rail-list {
+    min-height: 0;
     gap: 10px;
     padding-right: 2px;
     overflow-y: auto;
@@ -5398,6 +5407,8 @@ tbody tr:hover {
 
   .mobile-home-drawer .home-dataset-rail-item {
     min-height: 52px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     border: 0;
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.04);
@@ -5433,6 +5444,10 @@ tbody tr:hover {
     background: rgba(255, 255, 255, 0.045);
     color: #edf3fb;
     border: 0;
+  }
+
+  .mobile-home-report-item.active {
+    background: rgba(255, 255, 255, 0.1);
   }
 
   .mobile-home-report-item-title,
