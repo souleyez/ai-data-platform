@@ -134,7 +134,13 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
   });
 
   app.post('/documents/libraries', async (request, reply) => {
-    const body = (request.body || {}) as { name?: string; description?: string; permissionLevel?: number };
+    const body = (request.body || {}) as {
+      name?: string;
+      description?: string;
+      permissionLevel?: number;
+      secret?: string;
+      clearSecret?: boolean;
+    };
     const name = String(body.name || '').trim();
 
     if (!name) {
@@ -148,6 +154,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         name,
         description: body.description,
         permissionLevel: body.permissionLevel,
+        secret: body.secret,
+        clearSecret: body.clearSecret,
       }));
     } catch (error) {
       if (error instanceof Error && error.message === 'library already exists') {
@@ -180,6 +188,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
       extractionFieldPrompts?: Record<string, string>;
       extractionFieldNormalizationRules?: Record<string, string[] | string>;
       extractionFieldConflictStrategies?: Record<string, string>;
+      secret?: string;
+      clearSecret?: boolean;
     };
 
     try {
@@ -197,6 +207,8 @@ export async function registerDocumentRoutes(app: FastifyInstance) {
         extractionFieldPrompts: body.extractionFieldPrompts,
         extractionFieldNormalizationRules: body.extractionFieldNormalizationRules,
         extractionFieldConflictStrategies: body.extractionFieldConflictStrategies,
+        secret: body.secret,
+        clearSecret: body.clearSecret,
       });
       return {
         status: 'updated',

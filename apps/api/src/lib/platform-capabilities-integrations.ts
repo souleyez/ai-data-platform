@@ -93,7 +93,7 @@ export const PLATFORM_INTEGRATIONS: PlatformIntegration[] = [
 export const PLATFORM_BASE_RULES = [
   'Treat the CLI command domains as the canonical execution surface for platform actions.',
   'Chat orchestration should stay minimal: supply context, enforce template confirmation, and otherwise let OpenClaw decide.',
-  'In full mode, keep host-side restrictions light and let OpenClaw decide most platform actions.',
+  'Keep host-side restrictions light and let OpenClaw decide most platform actions.',
   'Never claim an action completed unless the host returns an execution result.',
   'Default web search is available for realtime questions.',
 ];

@@ -20,11 +20,7 @@ import {
   parseKnowledgeConversationState,
 } from './knowledge-request-state.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
-import {
-  getIntelligenceModeStatus,
-  resolveEffectiveIntelligenceMode,
-  resolveIntelligenceCapabilities,
-} from './intelligence-mode.js';
+import { FULL_PLATFORM_RUNTIME_CAPABILITIES } from './platform-runtime-capabilities.js';
 import {
   buildBackgroundContinuationAnswer,
   buildCloudUnavailableAnswer,
@@ -43,16 +39,12 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const gatewayReachable = await isOpenClawGatewayReachable();
   const gatewayConfigured = gatewayReachable || isOpenClawGatewayConfigured();
   const [intelligence, botDefinition, configuredBots, documentLibraries] = await Promise.all([
-    getIntelligenceModeStatus(),
+    Promise.resolve({ capabilities: FULL_PLATFORM_RUNTIME_CAPABILITIES }),
     resolveBotDefinition(input.botId),
     listBotDefinitionsForManage(),
     loadDocumentLibraries(),
   ]);
-  const effectiveIntelligenceMode = resolveEffectiveIntelligenceMode(
-    intelligence.mode,
-    botDefinition?.intelligenceMode,
-  );
-  const effectiveIntelligenceCapabilities = resolveIntelligenceCapabilities(effectiveIntelligenceMode);
+  const effectiveIntelligenceCapabilities = intelligence.capabilities;
   const traceId = `trace_${Date.now()}`;
   const requestMode = input.mode || 'general';
   const existingKnowledgeState = requestMode === 'knowledge_output'
@@ -65,16 +57,12 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     input.preferredDocumentPath || existingGeneralState?.preferredDocumentPath || '',
   ).trim();
   const systemContextBlocks = [
-    buildSystemCapabilityContextBlock({
-      mode: effectiveIntelligenceMode,
-      capabilities: effectiveIntelligenceCapabilities,
-    }),
+    buildSystemCapabilityContextBlock({ capabilities: effectiveIntelligenceCapabilities }),
     buildBotIdentityContextBlock({
       bot: botDefinition,
       channel: 'web',
     }),
     buildBotConfigurationMemoryContextBlock({
-      mode: intelligence.mode,
       bots: configuredBots,
       libraries: documentLibraries,
     }),
@@ -280,7 +268,6 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     content,
     references,
     confirmation,
-    effectiveIntelligenceMode,
     effectiveIntelligenceCapabilities,
     routeKind,
     evidenceMode,

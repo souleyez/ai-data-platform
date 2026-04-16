@@ -35,7 +35,9 @@ export default function WorkspaceDesktopShell({
   libraries = [],
   totalDocuments = 0,
   selectedKeys = [],
+  unlockedKeys = [],
   onToggleLibrary,
+  onRequestUnlock,
   onClearSelection,
   onCreateLibrary,
   creating = false,
@@ -67,7 +69,9 @@ export default function WorkspaceDesktopShell({
             libraries={orderedLibraries}
             totalDocuments={totalDocuments}
             selectedKeys={selectedKeys}
+            unlockedKeys={unlockedKeys}
             onToggleLibrary={onToggleLibrary}
+            onRequestUnlock={onRequestUnlock}
             onClearSelection={onClearSelection}
             onCreateLibrary={onCreateLibrary}
             creating={creating}

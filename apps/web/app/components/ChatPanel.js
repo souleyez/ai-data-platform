@@ -223,6 +223,7 @@ export default function ChatPanel({
   compact = false,
   panelClassName = '',
   singlePageMode = false,
+  showVoiceAction = false,
   scopeLabel = '',
   scopeMeta = '',
   messages,
@@ -443,6 +444,15 @@ export default function ChatPanel({
             >
               {uploadLoading ? '上传解析中...' : '上传文件'}
             </button>
+            {showVoiceAction ? (
+              <button
+                type="button"
+                className="ghost-btn voice-inline-btn"
+                aria-label="语音输入"
+              >
+                语音
+              </button>
+            ) : null}
             <button className="primary-btn send-btn" onClick={() => onSubmit(input)} disabled={isLoading}>
               {isLoading ? '思考中...' : '发送'}
             </button>

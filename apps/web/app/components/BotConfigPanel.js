@@ -33,7 +33,6 @@ function createEmptyDraft() {
   return {
     name: '',
     description: '',
-    intelligenceMode: 'service',
     systemPrompt: '',
     enabled: true,
     isDefault: false,
@@ -68,7 +67,6 @@ function createDraftFromBot(bot) {
     ...draft,
     name: String(bot?.name || ''),
     description: String(bot?.description || ''),
-    intelligenceMode: String(bot?.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: String(bot?.systemPrompt || ''),
     enabled: bot?.enabled !== false,
     isDefault: bot?.isDefault === true,
@@ -85,7 +83,6 @@ function serializeDraft(draft) {
   return {
     name: String(draft?.name || '').trim(),
     description: String(draft?.description || '').trim(),
-    intelligenceMode: String(draft?.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: String(draft?.systemPrompt || '').trim(),
     enabled: draft?.enabled !== false,
     isDefault: draft?.isDefault === true,
@@ -214,16 +211,6 @@ function BotEditorCard({
           <input value={draft.description} onChange={(event) => onChange({ ...draft, description: event.target.value })} />
         </label>
         <label className="bot-field">
-          <span>智能模式</span>
-          <select
-            value={draft.intelligenceMode}
-            onChange={(event) => onChange({ ...draft, intelligenceMode: event.target.value === 'full' ? 'full' : 'service' })}
-          >
-            <option value="service">普通一问一答</option>
-            <option value="full">全智能</option>
-          </select>
-        </label>
-        <label className="bot-field">
           <span>知识库权限等级</span>
           <input
             type="number"
@@ -237,11 +224,9 @@ function BotEditorCard({
           />
         </label>
         <div className="bot-field bot-field-readonly">
-          <span>模式说明</span>
+          <span>执行态</span>
           <div className="bot-config-subtle">
-            {draft.intelligenceMode === 'full'
-              ? '该机器人会按全智能方式执行更多系统动作，但文档权限仍只按下方知识库规则生效。'
-              : '该机器人保持普通一问一答模式，不会默认进入全智能执行态。'}
+            当前固定为全智能执行态，文档权限仍只按下方知识库规则生效。
           </div>
         </div>
         <div className="bot-field bot-field-readonly">
@@ -528,7 +513,7 @@ export default function BotConfigPanel({
         <div className="bot-config-empty">正在读取机器人配置...</div>
       ) : !manageEnabled ? (
         <div className="bot-config-empty">
-          当前还没有全智能模式管理权限。请先用全智能模式密钥解锁后再配置机器人。
+          当前没有机器人管理权限，请先确认当前账号可管理机器人配置。
         </div>
       ) : (
         <>

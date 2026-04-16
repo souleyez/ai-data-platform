@@ -203,10 +203,18 @@ export async function sendChatPrompt(prompt, chatHistory = [], options = {}) {
       mode: options.mode || 'general',
       confirmedRequest: options.confirmedRequest || '',
       confirmedAction: options.confirmedAction || '',
-      preferredLibraries: Array.isArray(options.preferredLibraries) ? options.preferredLibraries : [],
+      preferredLibraries: Array.isArray(options.preferredLibraries)
+        ? options.preferredLibraries.map((item) => (
+          typeof item === 'string'
+            ? { key: item, label: '' }
+            : item
+        ))
+        : [],
       conversationState: options.conversationState || null,
       systemConstraints: options.systemConstraints || '',
       botId: options.botId || '',
+      datasetSecretGrants: Array.isArray(options.datasetSecretGrants) ? options.datasetSecretGrants : [],
+      activeDatasetSecretGrant: options.activeDatasetSecretGrant || null,
     }),
   });
   return parseApiResponse(response, 'chat api failed');

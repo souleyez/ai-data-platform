@@ -36,10 +36,14 @@ export default function HomePageClient({
   initialViewportMode = 'desktop',
 }) {
   const [mobileViewport, setMobileViewport] = useState(initialViewportMode === 'mobile');
+  const [secretPromptTarget, setSecretPromptTarget] = useState(null);
   const {
     acceptIngestGroupSuggestion,
+    activateDatasetSecret,
     assignIngestToSelectedLibrary,
+    clearDatasetSecretCache,
     confirmTemplateOption,
+    datasetSecretState,
     documentLibraries,
     documentTotal,
     groupSaving,
@@ -72,6 +76,7 @@ export default function HomePageClient({
     uploadInputRef,
     uploadLoading,
     setChatDebugDetailsEnabled,
+    verifyDatasetSecret,
   } = useHomePageController({
     initialDocumentsSnapshot,
   });
@@ -101,6 +106,10 @@ export default function HomePageClient({
     () => orderedLibraries.map((item) => item?.key).filter(Boolean),
     [orderedLibraries],
   );
+  const unlockedLibraryKeys = useMemo(
+    () => (Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : []),
+    [datasetSecretState],
+  );
   const selectedLibraries = useMemo(() => {
     if (!preferredLibraries.length) return [];
     const selectedSet = new Set(preferredLibraries);
@@ -112,14 +121,36 @@ export default function HomePageClient({
       ? `当前范围 ${selectedLibraries[0]?.label || selectedLibraries[0]?.name || selectedLibraries[0]?.key || '数据集'}`
       : `当前范围 ${selectedLibraries.length} 个数据集`)
     : `当前范围 全部数据集`;
-  async function handleCreateLibrary(name) {
+
+  useEffect(() => {
+    const unlockedSet = new Set(unlockedLibraryKeys);
+    setPreferredLibraries((current) => current.filter((key) => {
+      const library = orderedLibraries.find((item) => item?.key === key);
+      return library && (!library.secretProtected || unlockedSet.has(key));
+    }));
+  }, [orderedLibraries, setPreferredLibraries, unlockedLibraryKeys]);
+
+  async function handleCreateLibrary(name, secret = '') {
     const trimmed = String(name || '').trim();
+    const normalizedSecret = String(secret || '').trim();
     if (!trimmed || libraryCreateBusy) return false;
     try {
       setLibraryCreateBusy(true);
-      const created = await createDocumentLibrary(trimmed, '');
+      const created = await createDocumentLibrary(trimmed, '', 0, {
+        secret: normalizedSecret,
+      });
       await refreshHomeData?.();
-      if (created?.item?.key) {
+      if (normalizedSecret) {
+        try {
+          const nextState = await verifyDatasetSecret(normalizedSecret);
+          if (Array.isArray(nextState?.activeLibraryKeys) && nextState.activeLibraryKeys.length) {
+            setPreferredLibraries(nextState.activeLibraryKeys);
+          }
+        } catch {
+          // Keep the new dataset visible even if local grant caching fails.
+        }
+      }
+      if (!normalizedSecret && created?.item?.key) {
         setPreferredLibraries((current) => {
           if (current.includes(created.item.key)) return current;
           return [...current, created.item.key];
@@ -133,7 +164,21 @@ export default function HomePageClient({
     }
   }
 
+  async function handleVerifyDatasetSecret(secret) {
+    const nextState = await verifyDatasetSecret(secret);
+    if (secretPromptTarget?.key && nextState?.activeLibraryKeys?.includes(secretPromptTarget.key)) {
+      setPreferredLibraries(nextState.activeLibraryKeys);
+    }
+    setSecretPromptTarget(null);
+    return nextState;
+  }
+
   function handleTogglePreferredLibrary(libraryKey) {
+    const library = orderedLibraries.find((item) => item?.key === libraryKey) || null;
+    if (library?.secretProtected && !unlockedLibraryKeys.includes(library.key)) {
+      setSecretPromptTarget(library);
+      return;
+    }
     setPreferredLibraries((current) => (
       current.includes(libraryKey)
         ? current.filter((item) => item !== libraryKey)
@@ -147,10 +192,23 @@ export default function HomePageClient({
         documentLibraries={documentLibraries}
         documentTotal={documentTotal}
         preferredLibraries={preferredLibraries}
+        unlockedLibraryKeys={unlockedLibraryKeys}
         onToggleLibrary={handleTogglePreferredLibrary}
+        onRequestUnlockLibrary={setSecretPromptTarget}
         onClearLibraries={() => setPreferredLibraries([])}
         onCreateLibrary={handleCreateLibrary}
         creatingLibrary={libraryCreateBusy}
+        datasetSecretSlot={(
+          <FullIntelligenceModeButton
+            compact
+            datasetSecretState={datasetSecretState}
+            onVerifySecret={handleVerifyDatasetSecret}
+            onActivateGrant={activateDatasetSecret}
+            onClearCache={clearDatasetSecretCache}
+            promptTargetLibrary={secretPromptTarget}
+            onPromptHandled={() => setSecretPromptTarget(null)}
+          />
+        )}
         messages={messages}
         input={input}
         isLoading={isLoading}
@@ -188,8 +246,12 @@ export default function HomePageClient({
           fullIntelligenceSlot={(
             <FullIntelligenceModeButton
               compact
-              systemConstraints={systemConstraints}
-              onSystemConstraintsChange={setSystemConstraints}
+              datasetSecretState={datasetSecretState}
+              onVerifySecret={handleVerifyDatasetSecret}
+              onActivateGrant={activateDatasetSecret}
+              onClearCache={clearDatasetSecretCache}
+              promptTargetLibrary={secretPromptTarget}
+              onPromptHandled={() => setSecretPromptTarget(null)}
             />
           )}
         />
@@ -199,7 +261,9 @@ export default function HomePageClient({
             libraries={orderedLibraries}
             totalDocuments={documentTotal}
             selectedKeys={preferredLibraries}
+            unlockedKeys={unlockedLibraryKeys}
             onToggleLibrary={handleTogglePreferredLibrary}
+            onRequestUnlock={setSecretPromptTarget}
             onClearSelection={() => setPreferredLibraries([])}
             onCreateLibrary={handleCreateLibrary}
             creating={libraryCreateBusy}

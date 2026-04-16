@@ -1,5 +1,3 @@
-import type { IntelligenceMode } from './intelligence-mode.js';
-
 export type BotChannel = 'web' | 'wecom' | 'teams' | 'qq' | 'feishu';
 
 export type BotChannelBinding = {
@@ -18,7 +16,6 @@ export type BotDefinition = {
   description: string;
   enabled: boolean;
   isDefault: boolean;
-  intelligenceMode?: IntelligenceMode;
   systemPrompt: string;
   libraryAccessLevel: number;
   visibleLibraryKeys: string[];
@@ -40,7 +37,6 @@ export type PublicBotSummary = {
   description: string;
   enabled: boolean;
   isDefault: boolean;
-  intelligenceMode?: IntelligenceMode;
   libraryAccessLevel: number;
   systemPromptSummary: string;
   channelBindings: Array<{ channel: BotChannel; enabled: boolean; configured: boolean }>;

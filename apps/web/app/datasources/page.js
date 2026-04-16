@@ -1,10 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import Sidebar from '../components/Sidebar';
 import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
 import { buildApiUrl } from '../lib/config';
 import { appendSystemMemoryEntry } from '../lib/chat-memory';
+import {
+  clearStoredDatasetSecretState,
+  loadStoredDatasetSecretState,
+  resolveStoredDatasetSecretState,
+  setActiveDatasetSecretGrant,
+  verifyDatasetSecretText,
+} from '../lib/dataset-secrets';
 import useMobileViewport from '../lib/use-mobile-viewport';
 import { createDocumentLibrary } from '../documents/api';
 import DatasourceComposerCard from './datasource-composer-card';
@@ -59,6 +67,8 @@ export default function DatasourcesPage() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
+  const [datasetSecretState, setDatasetSecretState] = useState(() => loadStoredDatasetSecretState());
+  const [lockedLibraryPrompt, setLockedLibraryPrompt] = useState(null);
   const syncedMessageRef = useRef('');
   const syncedErrorRef = useRef('');
 
@@ -121,6 +131,20 @@ export default function DatasourcesPage() {
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    resolveStoredDatasetSecretState()
+      .then((nextState) => {
+        if (alive) setDatasetSecretState(nextState);
+      })
+      .catch(() => {
+        if (alive) setDatasetSecretState(loadStoredDatasetSecretState());
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const text = String(message || '').trim();
     if (!text || syncedMessageRef.current === text) return;
     syncedMessageRef.current = text;
@@ -155,6 +179,17 @@ export default function DatasourcesPage() {
     return scopedRuns.slice(0, 10);
   }, [runs, selectedLibraryKeySet]);
 
+  useEffect(() => {
+    const unlockedSet = new Set(unlockedLibraryKeys);
+    setForm((current) => ({
+      ...current,
+      targetKeys: current.targetKeys.filter((key) => {
+        const library = libraries.find((item) => item.key === key);
+        return library && (!library.secretProtected || unlockedSet.has(key));
+      }),
+    }));
+  }, [libraries, unlockedLibraryKeys]);
+
   function updateForm(patch) {
     setForm((current) => ({ ...current, ...patch }));
   }
@@ -178,7 +213,17 @@ export default function DatasourcesPage() {
     }
   }
 
+  const unlockedLibraryKeys = useMemo(
+    () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
+    [datasetSecretState],
+  );
+
   function toggleTargetLibrary(key) {
+    const library = libraries.find((item) => item.key === key);
+    if (library?.secretProtected && !unlockedLibraryKeys.includes(key)) {
+      setLockedLibraryPrompt(library);
+      return;
+    }
     setForm((current) => ({
       ...current,
       targetKeys: current.targetKeys.includes(key)
@@ -193,11 +238,13 @@ export default function DatasourcesPage() {
     setMessage('');
   }
 
-  async function handleCreateLibrary(name) {
+  async function handleCreateLibrary(name, secret = '') {
     const trimmed = String(name || '').trim();
     if (!trimmed || saving) return false;
     try {
-      const created = await createDocumentLibrary(trimmed, '');
+      const created = await createDocumentLibrary(trimmed, '', 0, {
+        secret: String(secret || '').trim(),
+      });
       await load();
       const createdKey = String(created?.item?.key || '').trim();
       if (createdKey) {
@@ -212,6 +259,16 @@ export default function DatasourcesPage() {
       setError('新建数据集失败');
       return false;
     }
+  }
+
+  async function handleVerifyDatasetSecret(secret) {
+    const nextState = await verifyDatasetSecretText(secret, datasetSecretState);
+    setDatasetSecretState(nextState);
+    if (lockedLibraryPrompt?.key && nextState?.activeLibraryKeys?.includes(lockedLibraryPrompt.key)) {
+      updateForm({ targetKeys: nextState.activeLibraryKeys });
+    }
+    setLockedLibraryPrompt(null);
+    return nextState;
   }
 
   async function createOrReuseCredential(currentForm) {
@@ -494,12 +551,33 @@ export default function DatasourcesPage() {
         libraries={libraries}
         totalDocuments={libraries.reduce((total, item) => total + Number(item?.documentCount || 0), 0)}
         selectedKeys={form.targetKeys}
+        unlockedKeys={unlockedLibraryKeys}
         onToggleLibrary={toggleTargetLibrary}
+        onRequestUnlock={setLockedLibraryPrompt}
         onClearSelection={() => updateForm({ targetKeys: [] })}
         onCreateLibrary={handleCreateLibrary}
         creating={saving}
         railShowClearChip={false}
         railSelectionSummaryLabel={`已选 ${form.targetKeys.length}`}
+        fullIntelligenceSlot={(
+          <FullIntelligenceModeButton
+            compact
+            datasetSecretState={datasetSecretState}
+            onVerifySecret={handleVerifyDatasetSecret}
+            onActivateGrant={(bindingId) => {
+              const nextState = setActiveDatasetSecretGrant(datasetSecretState, bindingId);
+              setDatasetSecretState(nextState);
+              return nextState;
+            }}
+            onClearCache={() => {
+              const nextState = clearStoredDatasetSecretState();
+              setDatasetSecretState(nextState);
+              return nextState;
+            }}
+            promptTargetLibrary={lockedLibraryPrompt}
+            onPromptHandled={() => setLockedLibraryPrompt(null)}
+          />
+        )}
       >
         {content}
       </WorkspaceDesktopShell>

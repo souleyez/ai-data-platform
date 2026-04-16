@@ -1,4 +1,8 @@
 import {
+  bindDatasetLibrarySecret,
+  clearDatasetLibrarySecretBinding,
+} from './dataset-secrets.js';
+import {
   createDocumentLibrary,
   deleteDocumentLibrary,
   loadDocumentLibraries,
@@ -11,10 +15,28 @@ import {
 } from './document-extraction-governance.js';
 import { syncLibraryKnowledgePagesForLibraryKeys } from './library-knowledge-pages.js';
 
-export async function createManagedDocumentLibrary(input: { name: string; description?: string; permissionLevel?: number }) {
+export async function createManagedDocumentLibrary(input: {
+  name: string;
+  description?: string;
+  permissionLevel?: number;
+  secret?: string;
+  clearSecret?: boolean;
+}) {
   const library = await createDocumentLibrary(input);
+  const secret = String(input.secret || '').trim();
+  if (secret) {
+    await bindDatasetLibrarySecret({
+      libraryKey: library.key,
+      secret,
+    });
+  } else if (input.clearSecret === true) {
+    await clearDatasetLibrarySecretBinding(library.key);
+  }
   const libraries = await loadDocumentLibraries();
-  return { library, libraries };
+  return {
+    library: libraries.find((item) => item.key === library.key) || library,
+    libraries,
+  };
 }
 
 export async function updateManagedDocumentLibrary(
@@ -33,9 +55,20 @@ export async function updateManagedDocumentLibrary(
     extractionFieldPrompts?: Record<string, string>;
     extractionFieldNormalizationRules?: Record<string, string[] | string>;
     extractionFieldConflictStrategies?: Record<string, string>;
+    secret?: string;
+    clearSecret?: boolean;
   },
 ) {
   const library = await updateDocumentLibrary(key, input);
+  const secret = String(input.secret || '').trim();
+  if (secret) {
+    await bindDatasetLibrarySecret({
+      libraryKey: library.key,
+      secret,
+    });
+  } else if (input.clearSecret === true) {
+    await clearDatasetLibrarySecretBinding(library.key);
+  }
   await updateLibraryDocumentExtractionSettings({
     key: library.key,
     label: library.label,
@@ -50,7 +83,10 @@ export async function updateManagedDocumentLibrary(
   });
   await syncLibraryKnowledgePagesForLibraryKeys([library.key], 'library-settings-update').catch(() => undefined);
   const libraries = await loadDocumentLibraries();
-  return { library, libraries };
+  return {
+    library: libraries.find((item) => item.key === library.key) || library,
+    libraries,
+  };
 }
 
 export async function deleteManagedDocumentLibrary(key: string) {

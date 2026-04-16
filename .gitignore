@@ -32,6 +32,8 @@ storage/config/openclaw-memory-sync-status.json
 storage/config/bots.json
 storage/config/bots/
 storage/config/datasources/
+storage/platform.duckdb
+storage/platform.duckdb.wal
 memory/catalog/
 tmp/
 

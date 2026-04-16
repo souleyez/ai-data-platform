@@ -92,11 +92,10 @@ function buildDeniedOrchestrationResponse(accessContext: ResolvedChannelAccess) 
     },
     sources: [],
     permissions: {
-      mode: 'limited',
       readOnly: true,
       capabilities: {
         canReadLocalFiles: true,
-        canModifyLocalFiles: false,
+        canImportLocalFiles: false,
         canModifyLocalSystemFiles: false,
       },
     },
@@ -106,7 +105,6 @@ function buildDeniedOrchestrationResponse(accessContext: ResolvedChannelAccess) 
       docMatches: 0,
       evidenceMode: null,
       gatewayConfigured: false,
-      intelligenceMode: 'limited',
       fallbackReason: accessContext.denyReason,
       searchEnabledByDefault: true,
       nativeSearchPreferred: true,

@@ -1,4 +1,3 @@
-import { verifyAccessKey } from './access-keys.js';
 import {
   normalizeBotDefinition,
   normalizeBotItemsForWrite,
@@ -8,7 +7,6 @@ import {
 import { loadMergedBotConfig, writeBotConfigFile } from './bot-definitions-storage.js';
 import type { BotDefinition, PersistedBotConfig } from './bot-definitions-types.js';
 import { BOT_CONFIG_VERSION } from './bot-definitions-types.js';
-import { getIntelligenceModeStatus } from './intelligence-mode.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 
 export async function createBotDefinition(input: Partial<BotDefinition>) {
@@ -61,12 +59,6 @@ export async function updateBotDefinition(botId: string, patch: Partial<BotDefin
   return items.find((item) => item.id === botId) || nextTarget;
 }
 
-export async function assertBotManageAccess(accessKeyCode: string) {
-  const key = normalizeText(accessKeyCode);
-  if (!key) throw new Error('full mode access key is required');
-  const intelligence = await getIntelligenceModeStatus();
-  if (intelligence.mode !== 'full') throw new Error('full mode is required');
-  const verified = await verifyAccessKey(key);
-  if (!verified) throw new Error('invalid access key');
-  return verified;
+export async function assertBotManageAccess() {
+  return true;
 }

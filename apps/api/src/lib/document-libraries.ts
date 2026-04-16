@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { loadDatasetSecretProtectedLibraryKeys } from './dataset-secrets.js';
 import { loadDocumentOverrides, saveDocumentOverrides, type DocumentOverride } from './document-overrides.js';
 import { scheduleOpenClawMemoryCatalogSync } from './openclaw-memory-sync.js';
 import { STORAGE_CONFIG_DIR } from './paths.js';
@@ -11,6 +12,7 @@ export type DocumentLibrary = {
   label: string;
   description?: string;
   permissionLevel: number;
+  secretProtected: boolean;
   knowledgePagesEnabled?: boolean;
   knowledgePagesMode?: 'none' | 'overview' | 'topics';
   createdAt: string;
@@ -72,6 +74,7 @@ function normalizeLibrary(input: Partial<DocumentLibrary> & Pick<DocumentLibrary
     label: String(input.label || '').trim(),
     description: String(input.description || '').trim() || undefined,
     permissionLevel: normalizePermissionLevel(input.permissionLevel),
+    secretProtected: input.secretProtected === true,
     knowledgePagesEnabled: knowledgePagesMode !== 'none',
     knowledgePagesMode,
     createdAt: String(input.createdAt || '').trim() || new Date().toISOString(),
@@ -84,6 +87,7 @@ function buildRequiredLibraries(createdAt: string) {
       key: UNGROUPED_LIBRARY_KEY,
       label: UNGROUPED_LIBRARY_LABEL,
       permissionLevel: 0,
+      secretProtected: false,
       createdAt,
     } satisfies DocumentLibrary,
   ];
@@ -95,10 +99,13 @@ async function writeLibrariesFile(items: DocumentLibrary[]) {
     filePath: LIBRARIES_FILE,
     payload: {
       items: items.map((rest) => ({
-        ...rest,
+        key: rest.key,
+        label: rest.label,
+        description: rest.description,
         permissionLevel: normalizePermissionLevel(rest.permissionLevel),
         knowledgePagesEnabled: Boolean(rest.knowledgePagesEnabled),
         knowledgePagesMode: normalizeKnowledgePagesMode(rest.knowledgePagesMode, rest.knowledgePagesEnabled),
+        createdAt: rest.createdAt,
       })),
     },
   });
@@ -132,7 +139,10 @@ export function documentMatchesLibrary(item: ParsedDocument, library: DocumentLi
 }
 
 export async function loadDocumentLibraries() {
-  const stored = await readLibrariesFile();
+  const [stored, protectedLibraryKeys] = await Promise.all([
+    readLibrariesFile(),
+    loadDatasetSecretProtectedLibraryKeys(),
+  ]);
   const overrides = await loadDocumentOverrides();
   const derived = Object.values(overrides)
     .flatMap((item) => item.groups || [])
@@ -142,13 +152,19 @@ export async function loadDocumentLibraries() {
         key,
         label: key,
         permissionLevel: 0,
+        secretProtected: false,
         createdAt: new Date().toISOString(),
       });
       return acc;
     }, []);
 
   const requiredLibraries = buildRequiredLibraries(new Date().toISOString());
-  const merged = mergeLibraries(requiredLibraries, derived, stored);
+  const protectedSet = new Set(protectedLibraryKeys);
+  const merged = mergeLibraries(requiredLibraries, derived, stored)
+    .map((item) => ({
+      ...item,
+      secretProtected: protectedSet.has(item.key),
+    }));
   return merged.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
 }
 
@@ -167,6 +183,7 @@ export async function createDocumentLibrary(input: { name: string; description?:
     label,
     description: String(input.description || '').trim() || undefined,
     permissionLevel: normalizePermissionLevel(input.permissionLevel),
+    secretProtected: false,
     knowledgePagesEnabled: false,
     knowledgePagesMode: 'none',
     createdAt: new Date().toISOString(),

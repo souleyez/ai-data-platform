@@ -67,7 +67,6 @@ export function normalizeBotDefinition(value: unknown, fallbackId = ''): BotDefi
     description: normalizeText(source.description),
     enabled: source.enabled !== false,
     isDefault: source.isDefault === true,
-    intelligenceMode: String(source.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: normalizeText(source.systemPrompt),
     libraryAccessLevel: normalizeBotLibraryAccessLevel(source.libraryAccessLevel),
     visibleLibraryKeys: uniqueBotList(Array.isArray(source.visibleLibraryKeys) ? source.visibleLibraryKeys : []),

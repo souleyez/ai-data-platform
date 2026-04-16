@@ -63,7 +63,6 @@ function formatBotChannels(item) {
 
 function buildDraft(item) {
   return {
-    intelligenceMode: String(item?.intelligenceMode || '').trim().toLowerCase() === 'full' ? 'full' : 'service',
     systemPrompt: String(item?.systemPrompt || item?.systemPromptSummary || '').trim(),
     libraryAccessLevel: Number.isFinite(Number(item?.libraryAccessLevel))
       ? Math.max(0, Math.floor(Number(item.libraryAccessLevel)))
@@ -158,7 +157,6 @@ export default function ConnectedBotAccessEditor({
   const [createDraft, setCreateDraft] = useState({
     name: '',
     description: '',
-    intelligenceMode: 'service',
     systemPrompt: '',
     libraryAccessLevel: 0,
     visibleLibraryKeys: [],
@@ -236,7 +234,6 @@ export default function ConnectedBotAccessEditor({
     setError('');
     try {
       await onSave(item.id, {
-        intelligenceMode: draft.intelligenceMode === 'full' ? 'full' : 'service',
         systemPrompt: String(draft.systemPrompt || '').trim(),
         libraryAccessLevel: Math.max(0, Math.floor(Number(draft.libraryAccessLevel || 0))),
         visibleLibraryKeys: Array.isArray(draft.visibleLibraryKeys) ? draft.visibleLibraryKeys : [],
@@ -272,10 +269,9 @@ export default function ConnectedBotAccessEditor({
       });
       setNotice(`已创建机器人：${created?.item?.name || created?.name || name}`);
       setShowCreateForm(false);
-        setCreateDraft({
+      setCreateDraft({
         name: '',
         description: '',
-        intelligenceMode: 'service',
         systemPrompt: '',
         libraryAccessLevel: 0,
         visibleLibraryKeys: [],
@@ -371,20 +367,6 @@ export default function ConnectedBotAccessEditor({
                   description: event.target.value,
                 }))}
               />
-            </label>
-            <label className="bot-field">
-              <span>智能模式</span>
-              <select
-                disabled={!manageEnabled}
-                value={createDraft.intelligenceMode}
-                onChange={(event) => setCreateDraft((prev) => ({
-                  ...prev,
-                  intelligenceMode: event.target.value === 'full' ? 'full' : 'service',
-                }))}
-              >
-                <option value="service">普通一问一答</option>
-                <option value="full">全智能</option>
-              </select>
             </label>
             <label className="bot-field">
               <span>文档权限等级</span>
@@ -542,21 +524,8 @@ export default function ConnectedBotAccessEditor({
                 <>
               <div className="connected-bot-editor-grid">
                 <label className="bot-field">
-                  <span>智能模式</span>
-                  <select
-                    disabled={!manageEnabled}
-                    value={draft.intelligenceMode}
-                    onChange={(event) => setDrafts((prev) => ({
-                      ...prev,
-                      [item.id]: {
-                        ...draft,
-                        intelligenceMode: event.target.value === 'full' ? 'full' : 'service',
-                      },
-                    }))}
-                  >
-                    <option value="service">普通一问一答</option>
-                    <option value="full">全智能</option>
-                  </select>
+                  <span>执行态</span>
+                  <div className="bot-config-subtle">当前固定为全智能执行态。</div>
                 </label>
                 <label className="bot-field">
                   <span>文档权限等级</span>
@@ -593,11 +562,9 @@ export default function ConnectedBotAccessEditor({
                 </label>
 
                 <div className="bot-field bot-field-readonly">
-                  <span>模式说明</span>
+                  <span>执行说明</span>
                   <div className="bot-config-subtle">
-                    {draft.intelligenceMode === 'full'
-                      ? '已开启全智能。机器人会优先按全智能方式处理任务，但文档库仍只按当前权限规则可见。'
-                      : '保持普通一问一答模式，只按常规聊天方式工作。'}
+                    机器人默认按全智能方式处理任务，但文档库仍只按当前权限规则可见。
                   </div>
                 </div>
 

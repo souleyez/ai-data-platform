@@ -1,8 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import FullIntelligenceModeButton from '../components/FullIntelligenceModeButton';
 import Sidebar from '../components/Sidebar';
 import WorkspaceDesktopShell from '../components/WorkspaceDesktopShell';
+import {
+  clearStoredDatasetSecretState,
+  loadStoredDatasetSecretState,
+  resolveStoredDatasetSecretState,
+  setActiveDatasetSecretGrant,
+  verifyDatasetSecretText,
+} from '../lib/dataset-secrets';
 import {
   getDocumentLibraryKeys,
   getLibraryDocumentCount,
@@ -144,6 +152,8 @@ export default function DocumentsPage() {
   const [librarySettingsDrafts, setLibrarySettingsDrafts] = useState({});
   const [librarySettingsSubmittingId, setLibrarySettingsSubmittingId] = useState('');
   const [librarySettingsExpanded, setLibrarySettingsExpanded] = useState(false);
+  const [datasetSecretState, setDatasetSecretState] = useState(() => loadStoredDatasetSecretState());
+  const [lockedLibraryPrompt, setLockedLibraryPrompt] = useState(null);
 
   const loadDocuments = async () => {
     try {
@@ -174,6 +184,20 @@ export default function DocumentsPage() {
   useEffect(() => {
     void loadDocuments();
     void loadDatasources();
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    resolveStoredDatasetSecretState()
+      .then((nextState) => {
+        if (alive) setDatasetSecretState(nextState);
+      })
+      .catch(() => {
+        if (alive) setDatasetSecretState(loadStoredDatasetSecretState());
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const ignoreDocument = async (itemId) => {
@@ -229,14 +253,16 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleCreateLibrary = async (draftValue = libraryCreateDraft) => {
+  const handleCreateLibrary = async (draftValue = libraryCreateDraft, secret = '') => {
     const name = String(draftValue || '').trim();
     const permissionLevel = 0;
     if (!name || libraryCreateSubmitting) return;
     try {
       setLibraryCreateSubmitting(true);
       setScanMessage('');
-      const created = await createDocumentLibrary(name, '', permissionLevel);
+      const created = await createDocumentLibrary(name, '', permissionLevel, {
+        secret: String(secret || '').trim(),
+      });
       setLibraryCreateDraft('');
       await loadDocuments();
       if (created?.item?.key) {
@@ -252,6 +278,17 @@ export default function DocumentsPage() {
       setLibraryCreateSubmitting(false);
     }
   };
+
+  async function handleVerifyDatasetSecret(secret) {
+    const nextState = await verifyDatasetSecretText(secret, datasetSecretState);
+    setDatasetSecretState(nextState);
+    if (lockedLibraryPrompt?.key && nextState?.activeLibraryKeys?.includes(lockedLibraryPrompt.key)) {
+      setSelectedLibraries(nextState.activeLibraryKeys);
+      setActiveLibrary(lockedLibraryPrompt.key);
+    }
+    setLockedLibraryPrompt(null);
+    return nextState;
+  }
 
   const handleLibrarySettingChange = (libraryKey, patch) => {
     setLibrarySettingsDrafts((current) => ({
@@ -322,6 +359,10 @@ export default function DocumentsPage() {
   );
 
   const libraries = allLibraries;
+  const unlockedLibraryKeys = useMemo(
+    () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
+    [datasetSecretState],
+  );
 
   const selectedLibraryRecords = useMemo(
     () => allLibraries.filter((item) => selectedLibraries.includes(item.key)),
@@ -345,6 +386,33 @@ export default function DocumentsPage() {
   useEffect(() => {
     setLibrarySettingsExpanded(false);
   }, [activeLibrary, mobileViewport, selectedLibraries]);
+
+  useEffect(() => {
+    const unlockedSet = new Set(unlockedLibraryKeys);
+    setSelectedLibraries((current) => current.filter((key) => {
+      const library = allLibraries.find((item) => item.key === key);
+      return library && (!library.secretProtected || unlockedSet.has(key));
+    }));
+    if (activeLibrary !== 'all' && activeLibrary !== 'ungrouped') {
+      const activeLibraryItem = allLibraries.find((item) => item.key === activeLibrary);
+      if (activeLibraryItem?.secretProtected && !unlockedSet.has(activeLibrary)) {
+        setActiveLibrary('all');
+      }
+    }
+  }, [activeLibrary, allLibraries, unlockedLibraryKeys]);
+
+  function handleToggleDesktopLibrary(libraryKey) {
+    const library = allLibraries.find((item) => item.key === libraryKey);
+    if (library?.secretProtected && !unlockedLibraryKeys.includes(libraryKey)) {
+      setLockedLibraryPrompt(library);
+      return;
+    }
+    setSelectedLibraries((current) => (
+      current.includes(libraryKey)
+        ? current.filter((item) => item !== libraryKey)
+        : [...current, libraryKey]
+    ));
+  }
 
   const libraryLabelMap = useMemo(
     () => new Map(allLibraries.map((item) => [item.key, item.label])),
@@ -440,16 +508,31 @@ export default function DocumentsPage() {
         libraries={allLibraries}
         totalDocuments={totalFiles}
         selectedKeys={selectedLibraries}
-        onToggleLibrary={(libraryKey) => {
-          setSelectedLibraries((current) => (
-            current.includes(libraryKey)
-              ? current.filter((item) => item !== libraryKey)
-              : [...current, libraryKey]
-          ));
-        }}
+        unlockedKeys={unlockedLibraryKeys}
+        onToggleLibrary={handleToggleDesktopLibrary}
+        onRequestUnlock={setLockedLibraryPrompt}
         onClearSelection={() => setSelectedLibraries([])}
         onCreateLibrary={handleCreateLibrary}
         creating={libraryCreateSubmitting}
+        fullIntelligenceSlot={(
+          <FullIntelligenceModeButton
+            compact
+            datasetSecretState={datasetSecretState}
+            onVerifySecret={handleVerifyDatasetSecret}
+            onActivateGrant={(bindingId) => {
+              const nextState = setActiveDatasetSecretGrant(datasetSecretState, bindingId);
+              setDatasetSecretState(nextState);
+              return nextState;
+            }}
+            onClearCache={() => {
+              const nextState = clearStoredDatasetSecretState();
+              setDatasetSecretState(nextState);
+              return nextState;
+            }}
+            promptTargetLibrary={lockedLibraryPrompt}
+            onPromptHandled={() => setLockedLibraryPrompt(null)}
+          />
+        )}
       >
         {loading ? <p>加载中...</p> : null}
         {error ? <p>{error}</p> : null}

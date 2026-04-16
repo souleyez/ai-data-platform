@@ -59,33 +59,10 @@ test.after(async () => {
   await fs.rm(storageRoot, { recursive: true, force: true });
 });
 
-test('channel test route should require access key and resolve a wecom bot by route key', async () => {
-  const setup = await app.inject({
-    method: 'POST',
-    url: '/api/intelligence-mode/setup-full',
-    payload: {
-      code: '4321',
-      label: 'channel-test',
-    },
-  });
-  assert.equal(setup.statusCode, 200);
-
-  const denied = await app.inject({
-    method: 'POST',
-    url: '/api/channels/wecom/messages/test',
-    payload: {
-      prompt: '合同协议里最近有什么文档',
-      routeKey: 'corp-default',
-    },
-  });
-  assert.equal(denied.statusCode, 401);
-
+test('channel test route should resolve a wecom bot by route key', async () => {
   const createBot = await app.inject({
     method: 'POST',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       id: 'wecom-assistant',
       name: '企业微信助手',
@@ -101,9 +78,6 @@ test('channel test route should require access key and resolve a wecom bot by ro
   const response = await app.inject({
     method: 'POST',
     url: '/api/channels/wecom/messages/test',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       prompt: '合同协议里最近有什么文档',
       routeKey: 'corp-default',
@@ -125,9 +99,6 @@ test('channel test route should resolve a teams bot by explicit botId and reject
   const createBot = await app.inject({
     method: 'POST',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       id: 'teams-assistant',
       name: 'Teams 助手',
@@ -143,9 +114,6 @@ test('channel test route should resolve a teams bot by explicit botId and reject
   const response = await app.inject({
     method: 'POST',
     url: '/api/channels/teams/messages/test',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       prompt: '合同协议里最近有什么文档',
       botId: 'teams-assistant',
@@ -162,9 +130,6 @@ test('channel test route should resolve a teams bot by explicit botId and reject
   const unsupported = await app.inject({
     method: 'POST',
     url: '/api/channels/slack/messages/test',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       prompt: 'hello',
     },
@@ -178,9 +143,6 @@ test('wecom callback should verify url and route encrypted text message by route
   const createBot = await app.inject({
     method: 'POST',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '4321',
-    },
     payload: {
       id: 'wecom-callback-assistant',
       name: 'WeCom Callback Assistant',

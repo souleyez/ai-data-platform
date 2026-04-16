@@ -41,7 +41,6 @@ export function buildChatOrchestrationResult(input: {
   content: string;
   references: Array<{ id: string; name: string; path?: string }>;
   confirmation: Record<string, unknown> | null;
-  effectiveIntelligenceMode: string;
   effectiveIntelligenceCapabilities: unknown;
   routeKind: string;
   evidenceMode: string | null;
@@ -83,7 +82,6 @@ export function buildChatOrchestrationResult(input: {
     },
     sources: [],
     permissions: {
-      mode: input.effectiveIntelligenceMode,
       readOnly: !(input.effectiveIntelligenceCapabilities as { canModifyLocalSystemFiles?: boolean } | null)?.canModifyLocalSystemFiles,
       capabilities: input.effectiveIntelligenceCapabilities,
     },
@@ -93,7 +91,6 @@ export function buildChatOrchestrationResult(input: {
       docMatches: input.libraries.length,
       evidenceMode: input.evidenceMode,
       gatewayConfigured: input.gatewayConfigured,
-      intelligenceMode: input.effectiveIntelligenceMode,
       fallbackReason: input.mode === 'fallback' ? input.fallbackReason : '',
       backgroundContinuation: input.backgroundHandoff,
       searchEnabledByDefault: true,

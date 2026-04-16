@@ -83,7 +83,6 @@ export function buildPublicBotSummary(bot: BotDefinition): PublicBotSummary {
     description: bot.description,
     enabled: bot.enabled,
     isDefault: bot.isDefault,
-    intelligenceMode: bot.intelligenceMode === 'full' ? 'full' : 'service',
     libraryAccessLevel: bot.libraryAccessLevel,
     systemPromptSummary: bot.systemPrompt,
     channelBindings: bot.channelBindings.map((item) => ({

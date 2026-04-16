@@ -57,22 +57,10 @@ test.after(async () => {
 
 test('channel directory routes should manage sources, subjects, policies, and access preview', async () => {
   await seedLibraries();
-  const setup = await app.inject({
-    method: 'POST',
-    url: '/api/intelligence-mode/setup-full',
-    payload: {
-      code: '123456',
-      label: 'channel-directory-manage',
-    },
-  });
-  assert.equal(setup.statusCode, 200);
 
   const createBot = await app.inject({
     method: 'POST',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '123456',
-    },
     payload: {
       id: 'wecom-directory-bot',
       name: 'WeCom Directory Bot',
@@ -92,13 +80,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
   });
   assert.equal(createBot.statusCode, 200);
 
-  const deniedCreate = await app.inject({
-    method: 'POST',
-    url: '/api/bots/wecom-directory-bot/channel-directory-sources',
-    payload: { id: 'corp-directory', channel: 'wecom', request: { url: 'https://example.com', method: 'GET', headers: [] } },
-  });
-  assert.equal(deniedCreate.statusCode, 401);
-
   const server = await startJsonServer({
     users: [{ id: 'u-zhang', name: '张三' }],
     groups: [{ id: 'g-risk', name: '风控组' }],
@@ -109,9 +90,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const createdSource = await app.inject({
       method: 'POST',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources',
-      headers: {
-        'x-access-key': '123456',
-      },
       payload: {
         id: 'corp-directory',
         channel: 'wecom',
@@ -145,9 +123,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const synced = await app.inject({
       method: 'POST',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources/corp-directory/sync',
-      headers: {
-        'x-access-key': '123456',
-      },
     });
     assert.equal(synced.statusCode, 200);
     assert.equal(synced.json().status.status, 'success');
@@ -156,9 +131,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const subjectSearch = await app.inject({
       method: 'GET',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources/corp-directory/subjects?q=张',
-      headers: {
-        'x-access-key': '123456',
-      },
     });
     assert.equal(subjectSearch.statusCode, 200);
     assert.equal(subjectSearch.json().items[0].subjectId, 'u-zhang');
@@ -166,9 +138,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const patchedPolicies = await app.inject({
       method: 'PATCH',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources/corp-directory/access-policies',
-      headers: {
-        'x-access-key': '123456',
-      },
       payload: {
         updatedBy: 'tester',
         items: [
@@ -183,9 +152,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const subjectDetail = await app.inject({
       method: 'GET',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources/corp-directory/subjects/user/u-zhang',
-      headers: {
-        'x-access-key': '123456',
-      },
     });
     assert.equal(subjectDetail.statusCode, 200);
     assert.deepEqual(subjectDetail.json().item.assignedLibraryKeys, ['contract', 'ioa', 'bid']);
@@ -193,9 +159,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const preview = await app.inject({
       method: 'POST',
       url: '/api/bots/wecom-directory-bot/channel-directory-sources/corp-directory/access-preview',
-      headers: {
-        'x-access-key': '123456',
-      },
       payload: {
         senderId: 'u-zhang',
         senderName: '张三',
@@ -207,9 +170,6 @@ test('channel directory routes should manage sources, subjects, policies, and ac
     const botList = await app.inject({
       method: 'GET',
       url: '/api/bots',
-      headers: {
-        'x-access-key': '123456',
-      },
     });
     assert.equal(botList.statusCode, 200);
     const managedBot = botList.json().items.find((item: { id: string }) => item.id === 'wecom-directory-bot');

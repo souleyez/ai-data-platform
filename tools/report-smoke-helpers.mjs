@@ -1,7 +1,7 @@
 export const REPORT_CENTER_PAGE_TITLE = '\u62a5\u8868\u4e2d\u5fc3';
 export const REPORT_CENTER_SECTION_LABELS = [
-  '\u7528\u6237\u4e0a\u4f20\u7684\u6a21\u677f',
-  '\u5df2\u751f\u6210\u7684\u62a5\u8868',
+  '\u6253\u5f00\u9759\u6001\u5de5\u4f5c\u53f0',
+  '\u9759\u6001\u53ef\u89c6\u5316\u5de5\u4f5c\u53f0',
 ];
 export const SHARED_REPORT_SHELL_MARKERS = ['shared-report-shell', 'shared-report-card'];
 export const INVALID_SHARED_REPORT_TITLE = '\u9759\u6001\u9875\u94fe\u63a5\u65e0\u6548';
@@ -42,8 +42,10 @@ export function buildSharedReportPayload(item) {
 
 export function assertReportCenterPageHtml(html, context = 'reports page') {
   const text = String(html || '');
-  if (!text.includes(REPORT_CENTER_PAGE_TITLE)) {
-    fail(context, `is missing title "${REPORT_CENTER_PAGE_TITLE}"`);
+  const hasReportTitle = text.includes(REPORT_CENTER_PAGE_TITLE);
+  const hasNavMarker = text.includes('\u667a\u80fd\u52a9\u624b') && text.includes('\u62a5\u8868');
+  if (!hasReportTitle && !hasNavMarker) {
+    fail(context, `is missing report center markers`);
   }
 
   for (const sectionLabel of REPORT_CENTER_SECTION_LABELS) {

@@ -1,12 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { verifyAccessKey } from '../lib/access-keys.js';
 import { handleChannelIngress } from '../lib/channel-ingress.js';
 import type { BotChannel } from '../lib/bot-definitions.js';
 import { handleWecomCallbackMessage, verifyWecomCallbackUrl, type WecomCallbackQuery } from '../lib/wecom-callback.js';
-
-function readAccessKey(headers: Record<string, unknown>) {
-  return String(headers['x-access-key'] || headers['X-Access-Key'] || '').trim();
-}
 
 function normalizeChannel(value: unknown): BotChannel | null {
   const channel = String(value || '').trim().toLowerCase();
@@ -35,12 +30,6 @@ export async function registerChannelRoutes(app: FastifyInstance) {
   });
 
   app.post('/channels/:channel/messages/test', async (request, reply) => {
-    const accessKey = readAccessKey(request.headers as Record<string, unknown>);
-    const verified = await verifyAccessKey(accessKey);
-    if (!verified) {
-      return reply.code(401).send({ error: 'invalid access key' });
-    }
-
     const params = request.params as { channel?: string };
     const channel = normalizeChannel(params.channel);
     if (!channel) {

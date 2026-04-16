@@ -14,6 +14,7 @@
     "platform:control": "tsx src/scripts/platform-control.ts"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.5.2-r.1",
     "@fastify/multipart": "^9.4.0",
     "@wecom/aibot-node-sdk": "^1.0.6",
     "dotenv": "16.4.7",

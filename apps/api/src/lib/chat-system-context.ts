@@ -1,8 +1,5 @@
-import type {
-  IntelligenceCapabilities,
-  IntelligenceMode,
-} from './intelligence-mode.js';
 import type { BotDefinition, BotChannel } from './bot-definitions.js';
+import type { PlatformRuntimeCapabilities } from './platform-runtime-capabilities.js';
 import { buildPlatformCapabilityContextLines } from './platform-capabilities.js';
 
 function normalizeConstraintText(value: string) {
@@ -31,36 +28,25 @@ function summarizeBotPrompt(prompt: string) {
 }
 
 export function buildSystemCapabilityContextBlock(input: {
-  mode: IntelligenceMode;
-  capabilities: IntelligenceCapabilities;
+  capabilities: PlatformRuntimeCapabilities;
 }) {
-  const modeLabel = input.mode === 'full' ? 'full' : 'service';
   const writeLabel = input.capabilities.canModifyLocalSystemFiles
-    ? 'You are in full intelligence mode. Keep host-side restrictions light and let OpenClaw decide when to inspect, search, capture, generate, or continue multi-step work through the platform surface.'
-    : 'You are in read-first mode and must not pretend that writable system actions were executed.';
-  const actionStyleLabel = input.mode === 'full'
-    ? 'In full mode, avoid leaking raw tool-call markup or internal command tags, but otherwise prefer completing the task end-to-end instead of narrowing it to plain Q&A.'
-    : 'Capability awareness is descriptive. In ordinary service chat, do not emit raw tool-call markup, invoke tags, Bash plans, or CLI command blocks unless the user explicitly asks for command text.';
-  const executionBoundaryLabel = input.mode === 'full'
-    ? 'If the host has not yet supplied an execution result, continue from the available context and choose the next useful platform-aware step, but never claim a system action has already completed without a real result.'
-    : 'If the host has not supplied an execution result, answer directly from the available context instead of planning commands.';
+    ? 'Writable platform actions are available. Keep host-side restrictions light and let the platform decide when to inspect, search, capture, generate, or continue multi-step work.'
+    : 'Writable platform actions are not available. Do not pretend that system changes were executed.';
 
   return [
     'You are operating inside the AI data platform itself, not a generic standalone chat box.',
-    `Current platform mode: ${modeLabel}.`,
-    'Both normal chat mode and full mode should understand the same platform surface. The difference is permission boundary, not product awareness.',
     ...buildPlatformCapabilityContextLines(),
     writeLabel,
     'When users ask what the system can do, or ask for an action that matches the platform surface, answer as someone who already understands these features and can choose the next appropriate action.',
-    actionStyleLabel,
-    executionBoundaryLabel,
+    'Avoid leaking raw tool-call markup or internal command tags, but otherwise prefer completing the task end-to-end instead of narrowing it to plain Q&A.',
+    'If the host has not yet supplied an execution result, continue from the available context and choose the next useful platform-aware step, but never claim a system action has already completed without a real result.',
     'Do not describe internal routing or orchestration. Answer naturally and act as if you understand the platform surface already.',
     'If no execution result is supplied by the host, never claim a system action has already been completed.',
   ].join('\n');
 }
 
 export function buildBotConfigurationMemoryContextBlock(input: {
-  mode: IntelligenceMode;
   bots: BotDefinition[];
   libraries: Array<{ key: string; label?: string; name?: string; permissionLevel?: number }>;
 }) {
@@ -71,8 +57,7 @@ export function buildBotConfigurationMemoryContextBlock(input: {
       const visibleLibraries = bot.visibleLibraryKeys.length
         ? bot.visibleLibraryKeys.join(' | ')
         : 'access-level only';
-      const intelligenceMode = bot.intelligenceMode === 'full' ? 'full' : 'service';
-      return `- ${bot.name} [${bot.id}] | mode: ${intelligenceMode} | channels: ${summarizeBotChannels(bot)} | access level: L${bot.libraryAccessLevel}+ | visible libraries: ${visibleLibraries} | guidance: ${summarizeBotPrompt(bot.systemPrompt)}`;
+      return `- ${bot.name} [${bot.id}] | channels: ${summarizeBotChannels(bot)} | access level: L${bot.libraryAccessLevel}+ | visible libraries: ${visibleLibraries} | guidance: ${summarizeBotPrompt(bot.systemPrompt)}`;
     })
     : ['- No bots are configured yet.'];
   const libraryLines = libraries.length
@@ -91,17 +76,12 @@ export function buildBotConfigurationMemoryContextBlock(input: {
     'Platform bot configuration memory:',
     ...botLines,
     `Knowledge library permission levels: ${libraryLines}`,
+    'Bot onboarding and permission changes should be handled conversationally instead of sending the user to a form.',
+    'If the user wants to connect or modify a bot, guide them step by step to collect: bot name, target channel, channel-specific identifiers or credentials, library access level, and natural-language constraints.',
+    'A bot with access level N may view knowledge libraries whose permissionLevel is greater than or equal to N. Level 0 can view all libraries.',
+    'After collecting the configuration, summarize it clearly for confirmation before assuming it will be persisted by the host.',
+    'Do not ask the user to fill a manual configuration form unless they explicitly request manual editing.',
   ];
-
-  if (input.mode === 'full') {
-    lines.push(
-      'In full mode, robot onboarding and permission changes should be handled conversationally instead of sending the user to a form.',
-      'If the user wants to connect or modify a bot, guide them step by step to collect: bot name, target channel, channel-specific identifiers or credentials, library access level, and natural-language constraints.',
-      'A bot with access level N may view knowledge libraries whose permissionLevel is greater than or equal to N. Level 0 can view all libraries.',
-      'After collecting the configuration, summarize it clearly for confirmation before assuming it will be persisted by the host.',
-      'Do not ask the user to fill a manual configuration form unless they explicitly request manual editing.',
-    );
-  }
 
   return lines.join('\n');
 }
@@ -132,7 +112,6 @@ export function buildBotIdentityContextBlock(input: {
     `Bot name: ${input.bot.name}`,
     `Bot id: ${input.bot.id}`,
     `Current channel: ${input.channel}`,
-    `Bot intelligence mode: ${input.bot.intelligenceMode === 'full' ? 'full' : 'service'}`,
     `Library access level: ${input.bot.libraryAccessLevel}`,
     `Additional library filter: ${additionalLibraryFilter}`,
     `Include ungrouped: ${input.bot.includeUngrouped ? 'yes' : 'no'}`,

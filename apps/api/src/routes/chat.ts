@@ -1,4 +1,6 @@
 import type { FastifyInstance } from 'fastify';
+import { resolveDatasetSecretGrants } from '../lib/dataset-secrets.js';
+import { loadDocumentLibraries } from '../lib/document-libraries.js';
 import { runChatOrchestrationV2 } from '../lib/orchestrator.js';
 
 export async function registerChatRoutes(app: FastifyInstance) {
@@ -16,6 +18,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
       systemConstraints?: string;
       confirmedAction?: string;
       botId?: string;
+      datasetSecretGrants?: unknown[];
+      activeDatasetSecretGrant?: unknown;
     };
     let prompt = String(body.prompt || '').trim();
 
@@ -31,6 +35,18 @@ export async function registerChatRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'prompt is required' });
     }
 
+    const [libraries, resolvedDatasetSecrets] = await Promise.all([
+      loadDocumentLibraries(),
+      resolveDatasetSecretGrants({
+        grants: body.datasetSecretGrants,
+        activeGrant: body.activeDatasetSecretGrant,
+      }),
+    ]);
+    const unlockedLibraryKeySet = new Set(resolvedDatasetSecrets.unlockedLibraryKeys);
+    const accessibleLibraryKeys = libraries
+      .filter((library) => !library.secretProtected || unlockedLibraryKeySet.has(library.key))
+      .map((library) => library.key);
+
     return runChatOrchestrationV2({
       prompt,
       mode: body.mode || 'general',
@@ -38,8 +54,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
       preferredLibraries: Array.isArray(body.preferredLibraries)
         ? body.preferredLibraries
             .map((item) => ({
-              key: String(item?.key || '').trim(),
-              label: String(item?.label || '').trim(),
+              key: typeof item === 'string' ? String(item).trim() : String(item?.key || '').trim(),
+              label: typeof item === 'string' ? '' : String(item?.label || '').trim(),
             }))
             .filter((item) => item.key || item.label)
         : [],
@@ -48,6 +64,7 @@ export async function registerChatRoutes(app: FastifyInstance) {
       conversationState: body.conversationState ?? null,
       systemConstraints: String(body.systemConstraints || '').trim(),
       botId: String(body.botId || '').trim() || undefined,
+      effectiveVisibleLibraryKeys: accessibleLibraryKeys,
       confirmedAction: String(body.confirmedAction || '').trim() === 'openclaw_action'
         ? 'openclaw_action'
         : (

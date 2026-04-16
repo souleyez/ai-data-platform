@@ -24,49 +24,24 @@ test.after(async () => {
   await fs.rm(storageRoot, { recursive: true, force: true });
 });
 
-test('bot routes should expose public list and require full-mode access for writes', async () => {
+test('bot routes should expose managed list and allow writes without access-key gating', async () => {
   const initialList = await app.inject({
     method: 'GET',
     url: '/api/bots',
   });
 
   assert.equal(initialList.statusCode, 200);
-  assert.equal(initialList.json().manageEnabled, false);
+  assert.equal(initialList.json().manageEnabled, true);
   assert.equal(Array.isArray(initialList.json().items), true);
   assert.equal(initialList.json().items.length >= 1, true);
-
-  const setup = await app.inject({
-    method: 'POST',
-    url: '/api/intelligence-mode/setup-full',
-    payload: {
-      code: '123456',
-      label: 'bot-manage',
-    },
-  });
-  assert.equal(setup.statusCode, 200);
-
-  const deniedCreate = await app.inject({
-    method: 'POST',
-    url: '/api/bots',
-    payload: {
-      name: '企业微信助理',
-      libraryAccessLevel: 1,
-      visibleLibraryKeys: ['contract'],
-    },
-  });
-  assert.equal(deniedCreate.statusCode, 401);
 
   const created = await app.inject({
     method: 'POST',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '123456',
-    },
     payload: {
       id: 'wecom-assistant',
       name: '企业微信助理',
       description: '企业微信渠道机器人',
-      intelligenceMode: 'full',
       libraryAccessLevel: 1,
       visibleLibraryKeys: ['contract'],
       channelBindings: [
@@ -77,7 +52,6 @@ test('bot routes should expose public list and require full-mode access for writ
   });
   assert.equal(created.statusCode, 200);
   assert.equal(created.json().item.id, 'wecom-assistant');
-  assert.equal(created.json().item.intelligenceMode, 'full');
   assert.equal(created.json().item.libraryAccessLevel, 1);
 
   const resolvedByExternalBot = await botModule.resolveBotForChannel('wecom', {
@@ -88,9 +62,6 @@ test('bot routes should expose public list and require full-mode access for writ
   const managedList = await app.inject({
     method: 'GET',
     url: '/api/bots',
-    headers: {
-      'x-access-key': '123456',
-    },
   });
 
   assert.equal(managedList.statusCode, 200);
@@ -106,21 +77,11 @@ test('bot routes should expose public list and require full-mode access for writ
       ?.libraryAccessLevel,
     1,
   );
-  assert.equal(
-    managedList.json().items.find((item: { id: string; intelligenceMode?: string }) => item.id === 'wecom-assistant')
-      ?.intelligenceMode,
-    'full',
-  );
-
   const updated = await app.inject({
     method: 'PATCH',
     url: '/api/bots/wecom-assistant',
-    headers: {
-      'x-access-key': '123456',
-    },
     payload: {
       isDefault: true,
-      intelligenceMode: 'service',
       includeFailedParseDocuments: true,
       libraryAccessLevel: 2,
     },
@@ -128,7 +89,6 @@ test('bot routes should expose public list and require full-mode access for writ
 
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().item.isDefault, true);
-  assert.equal(updated.json().item.intelligenceMode, 'service');
   assert.equal(updated.json().item.includeFailedParseDocuments, true);
   assert.equal(updated.json().item.libraryAccessLevel, 2);
 });

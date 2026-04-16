@@ -1,8 +1,5 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { buildBackendApiUrl } from '../lib/config';
-
-export const FULL_ACCESS_COOKIE_NAME = 'aidp_full_access_key_v1';
 
 export async function proxyJson(path, init = {}, options = {}) {
   try {
@@ -10,13 +7,6 @@ export async function proxyJson(path, init = {}, options = {}) {
       ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(init.headers || {}),
     };
-    if (options.forwardFullAccessKey) {
-      const cookieStore = await cookies();
-      const accessKey = String(cookieStore.get(FULL_ACCESS_COOKIE_NAME)?.value || '').trim();
-      if (accessKey) {
-        headers['X-Access-Key'] = accessKey;
-      }
-    }
 
     const response = await fetch(buildBackendApiUrl(path), {
       ...init,

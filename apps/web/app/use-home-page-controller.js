@@ -10,6 +10,13 @@ import {
 } from './home-api';
 import { DEFAULT_UPLOAD_NOTE } from './home-message-helpers';
 import {
+  clearStoredDatasetSecretState,
+  loadStoredDatasetSecretState,
+  resolveStoredDatasetSecretState,
+  setActiveDatasetSecretGrant,
+  verifyDatasetSecretText,
+} from './lib/dataset-secrets';
+import {
   clearStoredChatMessages,
   loadStoredChatMessages,
   persistChatMessages,
@@ -144,6 +151,7 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
   const [chatDebugDetailsEnabled, setChatDebugDetailsEnabled] = useState(() => (
     resolveChatDebugAvailability() && loadStoredChatDebugDetailsEnabled()
   ));
+  const [datasetSecretState, setDatasetSecretState] = useState(() => loadStoredDatasetSecretState());
 
   async function loadDatasources() {
     try {
@@ -186,6 +194,20 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
   async function refreshHomeData() {
     await Promise.all([loadDatasources(), loadDocumentSnapshot(), loadReports()]);
   }
+
+  useEffect(() => {
+    let alive = true;
+    resolveStoredDatasetSecretState()
+      .then((nextState) => {
+        if (alive) setDatasetSecretState(nextState);
+      })
+      .catch(() => {
+        if (alive) setDatasetSecretState(loadStoredDatasetSecretState());
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasInitialDocumentsSnapshot) {
@@ -339,6 +361,24 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
     setConversationState(null);
   }
 
+  async function verifyDatasetSecret(secret) {
+    const nextState = await verifyDatasetSecretText(secret, datasetSecretState);
+    setDatasetSecretState(nextState);
+    return nextState;
+  }
+
+  function activateDatasetSecret(bindingId) {
+    const nextState = setActiveDatasetSecretGrant(datasetSecretState, bindingId);
+    setDatasetSecretState(nextState);
+    return nextState;
+  }
+
+  function clearDatasetSecretCache() {
+    const nextState = clearStoredDatasetSecretState();
+    setDatasetSecretState(nextState);
+    return nextState;
+  }
+
   async function deleteReport(reportId) {
     if (!reportId) return;
     try {
@@ -380,6 +420,7 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
     setConversationState,
     systemConstraints,
     conversationState,
+    datasetSecretState,
     setUploadLoading,
     uploadInputRef,
   };
@@ -398,6 +439,7 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
     reportDetailLoading,
     selectedManualLibraries,
     preferredLibraries,
+    datasetSecretState,
     conversationState,
     systemConstraints,
     sidebarSources,
@@ -415,6 +457,10 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
     setSystemConstraints,
     deleteReport,
     updateReportItem,
+    verifyDatasetSecret,
+    activateDatasetSecret,
+    clearDatasetSecretCache,
+    setDatasetSecretState,
     resetConversation,
     refreshHomeData,
     submitQuestion: (value) => submitQuestion(value, {

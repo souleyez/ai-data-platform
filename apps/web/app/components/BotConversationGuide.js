@@ -21,7 +21,7 @@ export default function BotConversationGuide({
       <div className="bot-conversation-guide-card">
         <strong>机器人接入改为对话式配置</strong>
         <p>
-          在全智能模式下，直接通过对话告诉智能助手你要接入哪个渠道、机器人名称、文档权限等级和约束要求。
+          直接通过对话告诉智能助手你要接入哪个渠道、机器人名称、文档权限等级和约束要求。
           不再要求你手动填表。
         </p>
       </div>

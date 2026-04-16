@@ -22,10 +22,6 @@ function normalizeText(value: unknown) {
   return String(value || '').trim();
 }
 
-function readAccessKey(headers: Record<string, unknown>) {
-  return String(headers['x-access-key'] || headers['X-Access-Key'] || '').trim();
-}
-
 function normalizeSubjectType(value: unknown) {
   return normalizeText(value).toLowerCase() === 'group' ? 'group' : 'user';
 }
@@ -40,9 +36,8 @@ function subjectMatchesQuery(input: {
   return input.subjectId.toLowerCase().includes(query) || input.name.toLowerCase().includes(query);
 }
 
-async function assertChannelDirectoryManageAccess(headers: Record<string, unknown>) {
-  const accessKey = readAccessKey(headers);
-  await assertBotManageAccess(accessKey);
+async function assertChannelDirectoryManageAccess() {
+  await assertBotManageAccess();
 }
 
 async function resolveManagedDirectoryContext(botId: string, sourceId?: string) {
@@ -155,7 +150,7 @@ async function buildSubjectDetail(sourceId: string, subjectType: 'user' | 'group
 export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
   app.get('/bots/:id/channel-directory-sources', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string };
       const { bot } = await resolveManagedDirectoryContext(normalizeText(params.id));
       const sources = await listChannelDirectorySourcesForBot(bot.id);
@@ -170,7 +165,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.post('/bots/:id/channel-directory-sources', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string };
       const { bot } = await resolveManagedDirectoryContext(normalizeText(params.id));
       const item = await createChannelDirectorySource({
@@ -187,7 +182,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.patch('/bots/:id/channel-directory-sources/:sourceId', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const item = await updateChannelDirectorySource(normalizeText(params.sourceId), (request.body || {}) as Record<string, unknown>);
@@ -201,7 +196,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.post('/bots/:id/channel-directory-sources/:sourceId/sync', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const result = await runChannelDirectorySync(normalizeText(params.sourceId));
@@ -223,7 +218,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.get('/bots/:id/channel-directory-sources/:sourceId/subjects', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       const query = (request.query || {}) as { q?: string; type?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
@@ -242,7 +237,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.get('/bots/:id/channel-directory-sources/:sourceId/subjects/:subjectType/:subjectId', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string; subjectType?: string; subjectId?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const item = await buildSubjectDetail(
@@ -263,7 +258,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.get('/bots/:id/channel-directory-sources/:sourceId/access-policies', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const items = await listChannelUserAccessPolicies(normalizeText(params.sourceId));
@@ -277,7 +272,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.patch('/bots/:id/channel-directory-sources/:sourceId/access-policies', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const body = (request.body || {}) as {
@@ -305,7 +300,7 @@ export async function registerChannelDirectoryRoutes(app: FastifyInstance) {
 
   app.post('/bots/:id/channel-directory-sources/:sourceId/access-preview', async (request, reply) => {
     try {
-      await assertChannelDirectoryManageAccess(request.headers as Record<string, unknown>);
+      await assertChannelDirectoryManageAccess();
       const params = request.params as { id?: string; sourceId?: string };
       const { bot, source } = await resolveManagedDirectoryContext(normalizeText(params.id), normalizeText(params.sourceId));
       const body = (request.body || {}) as { senderId?: string; senderName?: string };

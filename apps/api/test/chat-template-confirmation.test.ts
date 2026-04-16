@@ -80,9 +80,8 @@ test('template confirmation should also recognize doc and markdown output reques
   assert.equal(datasetHit, 'md');
 });
 
-test('system capability context should always mention default web search', () => {
+test('system capability context should always mention platform-aware web search guidance', () => {
   const text = buildSystemCapabilityContextBlock({
-    mode: 'service',
     capabilities: {
       canReadLocalFiles: true,
       canImportLocalFiles: true,
@@ -91,14 +90,12 @@ test('system capability context should always mention default web search', () =>
   });
 
   assert.match(text, /Web search/i);
-  assert.match(text, /service/i);
-  assert.match(text, /do not emit raw tool-call markup/i);
+  assert.match(text, /avoid leaking raw tool-call markup/i);
   assert.doesNotMatch(text, /Command:\s+pnpm system:control/i);
 });
 
-test('system capability context should keep full mode permissive while still hiding raw tool markup', () => {
+test('system capability context should describe writable platform actions without exposing raw tool markup', () => {
   const text = buildSystemCapabilityContextBlock({
-    mode: 'full',
     capabilities: {
       canReadLocalFiles: true,
       canImportLocalFiles: true,
@@ -106,13 +103,13 @@ test('system capability context should keep full mode permissive while still hid
     },
   });
 
-  assert.match(text, /full/i);
+  assert.match(text, /Writable platform actions are available/i);
   assert.match(text, /keep host-side restrictions light/i);
   assert.match(text, /avoid leaking raw tool-call markup/i);
   assert.doesNotMatch(text, /answer directly from the available context instead of planning commands/i);
 });
 
-test('bot identity context should include bot intelligence mode while keeping library boundaries', () => {
+test('bot identity context should describe bot constraints while keeping library boundaries', () => {
   const text = buildBotIdentityContextBlock({
     channel: 'web',
     bot: {
@@ -122,7 +119,6 @@ test('bot identity context should include bot intelligence mode while keeping li
       description: '',
       enabled: true,
       isDefault: false,
-      intelligenceMode: 'full',
       systemPrompt: '只处理合同问题',
       libraryAccessLevel: 1,
       visibleLibraryKeys: ['contract'],
@@ -133,7 +129,7 @@ test('bot identity context should include bot intelligence mode while keeping li
     },
   });
 
-  assert.match(text, /Bot intelligence mode: full/);
+  assert.match(text, /Bot-specific guidance: 只处理合同问题/);
   assert.match(text, /Library access level: 1/);
   assert.match(text, /must not imply access to knowledge outside the visible libraries/i);
 });

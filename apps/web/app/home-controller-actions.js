@@ -213,6 +213,13 @@ function buildChatOptions(context, overrides = {}) {
         : conversationState,
     systemConstraints: overrides.systemConstraints ?? context.systemConstraints ?? '',
     botId: overrides.botId ?? context.selectedBotId ?? '',
+    datasetSecretGrants: Array.isArray(overrides.datasetSecretGrants)
+      ? overrides.datasetSecretGrants
+      : (Array.isArray(context.datasetSecretState?.grants) ? context.datasetSecretState.grants : []),
+    activeDatasetSecretGrant:
+      overrides.activeDatasetSecretGrant
+      ?? context.datasetSecretState?.activeGrant
+      ?? null,
   };
 }
 
@@ -250,6 +257,9 @@ export async function runDocumentUpload(files, context) {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
     formData.append('note', defaultUploadNote);
+    formData.append('preferredLibraryKeys', JSON.stringify(Array.isArray(context.preferredLibraries) ? context.preferredLibraries : []));
+    formData.append('datasetSecretGrants', JSON.stringify(Array.isArray(context.datasetSecretState?.grants) ? context.datasetSecretState.grants : []));
+    formData.append('activeDatasetSecretGrant', JSON.stringify(context.datasetSecretState?.activeGrant || null));
 
     const json = await uploadDocuments(formData);
     await refreshHomeData();

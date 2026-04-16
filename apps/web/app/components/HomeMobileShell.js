@@ -9,6 +9,10 @@ import ChatPanel from './ChatPanel';
 import HomeDatasetRail from './HomeDatasetRail';
 
 const GeneratedReportDetail = dynamic(() => import('./GeneratedReportDetail'));
+const DRAWER_GESTURE_TRIGGER_PX = 12;
+const DRAWER_GESTURE_DIRECTION_RATIO = 1.05;
+const DRAWER_OPEN_COMMIT_PROGRESS = 0.34;
+const DRAWER_CLOSE_COMMIT_PROGRESS = 0.76;
 
 function shouldIgnoreSwipeTarget(target) {
   return target instanceof HTMLElement
@@ -30,10 +34,13 @@ export default function HomeMobileShell({
   documentLibraries = [],
   documentTotal = 0,
   preferredLibraries = [],
+  unlockedLibraryKeys = [],
   onToggleLibrary,
+  onRequestUnlockLibrary,
   onClearLibraries,
   onCreateLibrary,
   creatingLibrary = false,
+  datasetSecretSlot = null,
   messages,
   input,
   isLoading,
@@ -211,7 +218,7 @@ export default function HomeMobileShell({
     if (!touch) return;
     const deltaX = touch.clientX - gestureRef.current.startX;
     const deltaY = touch.clientY - gestureRef.current.startY;
-    if (Math.abs(deltaX) < 18 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
+    if (Math.abs(deltaX) < DRAWER_GESTURE_TRIGGER_PX || Math.abs(deltaX) <= Math.abs(deltaY) * DRAWER_GESTURE_DIRECTION_RATIO) return;
 
     const side = deltaX > 0 ? 'libraries' : 'reports';
     if (side === 'reports' && !reportItems.length) return;
@@ -224,7 +231,7 @@ export default function HomeMobileShell({
   function handleTouchEnd() {
     if (!gestureRef.current.active) return;
     gestureRef.current.active = false;
-    if (drawerPreview?.progress >= 0.5 && drawerPreview?.side) {
+    if (drawerPreview?.progress >= DRAWER_OPEN_COMMIT_PROGRESS && drawerPreview?.side) {
       setDrawerSide(drawerPreview.side);
     }
     setDrawerPreview(null);
@@ -241,7 +248,7 @@ export default function HomeMobileShell({
     if (!touch) return;
     const deltaX = touch.clientX - gestureRef.current.startX;
     const deltaY = touch.clientY - gestureRef.current.startY;
-    if (Math.abs(deltaX) < 18 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
+    if (Math.abs(deltaX) < DRAWER_GESTURE_TRIGGER_PX || Math.abs(deltaX) <= Math.abs(deltaY) * DRAWER_GESTURE_DIRECTION_RATIO) return;
 
     if (side === 'libraries' && deltaX >= 0) return;
     if (side === 'reports' && deltaX <= 0) return;
@@ -254,7 +261,7 @@ export default function HomeMobileShell({
   function handleDrawerTouchEnd(side) {
     if (!gestureRef.current.active || drawerSide !== side) return;
     gestureRef.current.active = false;
-    if (drawerPreview?.side === side && drawerPreview.progress <= 0.5) {
+    if (drawerPreview?.side === side && drawerPreview.progress <= DRAWER_CLOSE_COMMIT_PROGRESS) {
       setDrawerSide(null);
       setDrawerPreview(null);
       return;
@@ -266,6 +273,11 @@ export default function HomeMobileShell({
     <div className="mobile-home-shell">
       <header className="mobile-home-topbar" data-mobile-home-no-swipe="true">
         <strong className="mobile-home-topbar-brand">AI智能助手</strong>
+        {datasetSecretSlot ? (
+          <div className="mobile-home-topbar-actions">
+            {datasetSecretSlot}
+          </div>
+        ) : null}
       </header>
 
       <div
@@ -295,6 +307,7 @@ export default function HomeMobileShell({
           onSubmitCredential={onSubmitCredential}
           onConfirmTemplateOption={onConfirmTemplateOption}
           singlePageMode
+          showVoiceAction
           chatDebugAvailable={false}
           chatDebugDetailsEnabled={false}
           onToggleChatDebugDetails={() => {}}
@@ -316,6 +329,7 @@ export default function HomeMobileShell({
         onTouchEnd={() => handleDrawerTouchEnd('libraries')}
         onTouchCancel={() => handleDrawerTouchEnd('libraries')}
       >
+        <div className="mobile-home-drawer-swipe-hint mobile-home-drawer-swipe-hint-left" aria-hidden="true" />
         <div className="mobile-home-drawer-head">
           <div>
             <strong>数据集</strong>
@@ -329,7 +343,9 @@ export default function HomeMobileShell({
           libraries={orderedLibraries}
           totalDocuments={documentTotal}
           selectedKeys={preferredLibraries}
+          unlockedKeys={unlockedLibraryKeys}
           onToggleLibrary={onToggleLibrary}
+          onRequestUnlock={onRequestUnlockLibrary}
           onClearSelection={onClearLibraries}
           onCreateLibrary={onCreateLibrary}
           creating={creatingLibrary}
@@ -350,6 +366,7 @@ export default function HomeMobileShell({
         onTouchEnd={() => handleDrawerTouchEnd('reports')}
         onTouchCancel={() => handleDrawerTouchEnd('reports')}
       >
+        <div className="mobile-home-drawer-swipe-hint mobile-home-drawer-swipe-hint-right" aria-hidden="true" />
         <div className="mobile-home-drawer-head">
           <div>
             <strong>已出报表</strong>
