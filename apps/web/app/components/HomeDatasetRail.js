@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { orderLibrariesWithSelectedFirst } from '../lib/home-dataset-rail-order.mjs';
 
 function normalizePermissionLevel(value) {
   const numeric = Number(value);
@@ -25,6 +26,10 @@ export default function HomeDatasetRail({
 }) {
   const [draft, setDraft] = useState('');
   const selectedSet = new Set(selectedKeys);
+  const orderedLibraries = useMemo(
+    () => orderLibrariesWithSelectedFirst(libraries, selectedKeys),
+    [libraries, selectedKeys],
+  );
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -65,7 +70,7 @@ export default function HomeDatasetRail({
       </div>
 
       <div className="home-dataset-rail-list">
-        {libraries.map((library) => {
+        {orderedLibraries.map((library) => {
           const active = selectedSet.has(library.key);
           return (
             <button
