@@ -3,7 +3,7 @@ import {
   isChatTimeoutBackgroundCandidate,
 } from './chat-background-jobs.js';
 import { persistChatOutputIfNeeded } from './chat-output-persistence.js';
-import { tryExecutePlatformChatAction, type ChatActionResult } from './platform-chat-actions.js';
+import type { ChatActionResult } from './platform-chat-actions.js';
 import {
   buildBotConfigurationMemoryContextBlock,
   buildBotIdentityContextBlock,
@@ -15,11 +15,9 @@ import { recordDocumentAnswerUsage } from './document-answer-usage.js';
 import { loadDocumentLibraries } from './document-libraries.js';
 import { executeKnowledgeOutput } from './knowledge-execution.js';
 import { runGeneralKnowledgeAwareChat } from './knowledge-chat-dispatch.js';
-import type { KnowledgePlan } from './knowledge-plan.js';
 import {
   parseGeneralKnowledgeConversationState,
   parseKnowledgeConversationState,
-  type KnowledgeConversationState,
 } from './knowledge-request-state.js';
 import { isOpenClawGatewayConfigured, isOpenClawGatewayReachable } from './openclaw-adapter.js';
 import {
@@ -27,104 +25,17 @@ import {
   resolveEffectiveIntelligenceMode,
   resolveIntelligenceCapabilities,
 } from './intelligence-mode.js';
-import type { ChatOutput } from './knowledge-output.js';
-import type { ResolvedChannelAccess } from './channel-access-resolver.js';
-
-type ChatHistoryItem = { role: 'user' | 'assistant'; content: string };
-
-export type ChatRequestInput = {
-  prompt: string;
-  sessionUser?: string;
-  chatHistory?: ChatHistoryItem[];
-  mode?: 'general' | 'knowledge_output';
-  debugResumePage?: boolean;
-  confirmedRequest?: string;
-  preferredLibraries?: Array<{ key: string; label: string }>;
-  conversationState?: unknown;
-  systemConstraints?: string;
-  confirmedAction?: 'openclaw_action' | 'template_output';
-  botId?: string;
-  effectiveVisibleLibraryKeys?: string[];
-  accessContext?: ResolvedChannelAccess | null;
-  cloudTimeoutMs?: number;
-  backgroundContinuation?: boolean;
-  preferredDocumentPath?: string;
-};
-
-function normalizeHistory(chatHistory?: ChatHistoryItem[]) {
-  if (!Array.isArray(chatHistory)) return [];
-  return chatHistory
-    .filter((item): item is ChatHistoryItem => item?.role === 'user' || item?.role === 'assistant')
-    .map((item) => ({
-      role: item.role,
-      content: String(item.content || '').trim(),
-    }))
-    .filter((item) => Boolean(item.content))
-    .slice(-12);
-}
-
-function buildCloudUnavailableAnswer() {
-  return '当前云端模型暂时不可用，请稍后再试。';
-}
-
-function buildBackgroundContinuationAnswer() {
-  return '这次内容较长，已转入报表中心继续生成。生成完成后会出现在“已出报表”里。';
-}
-
-function getBackgroundHandoffTimeoutMs() {
-  const parsed = Number(process.env.CHAT_BACKGROUND_HANDOFF_TIMEOUT_MS || '45000');
-  if (!Number.isFinite(parsed) || parsed < 5000) return 45000;
-  return Math.floor(parsed);
-}
-
-async function withBackgroundHandoffTimeout<T>(promise: Promise<T>) {
-  const timeoutMs = getBackgroundHandoffTimeoutMs();
-  let timer: NodeJS.Timeout | null = null;
-
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`Chat background handoff timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function summarizeError(error: unknown) {
-  if (error instanceof Error) return error.message || error.name || 'unknown-error';
-  return String(error || 'unknown-error');
-}
-
-function buildFallbackResponse(
-  gatewayConfigured: boolean,
-  requestMode: ChatRequestInput['mode'],
-): {
-  mode: 'openclaw' | 'fallback' | 'host';
-  intent: 'general' | 'report';
-  content: string;
-  output: ChatOutput;
-  libraries: Array<{ key: string; label: string }>;
-  knowledgePlan: KnowledgePlan | null;
-  conversationState: unknown;
-  fallbackReason: string;
-} {
-  const content = buildCloudUnavailableAnswer();
-  return {
-    mode: 'fallback',
-    intent: requestMode === 'general' ? 'general' : 'report',
-    content,
-    output: { type: 'answer', content },
-    libraries: [],
-    knowledgePlan: null,
-    conversationState: null,
-    fallbackReason: gatewayConfigured ? '' : 'cloud-gateway-not-configured',
-  };
-}
+import {
+  buildBackgroundContinuationAnswer,
+  buildCloudUnavailableAnswer,
+  buildFallbackResponse,
+  normalizeHistory,
+  summarizeError,
+  withBackgroundHandoffTimeout,
+} from './orchestrator-support.js';
+import { tryRunHostPlatformAction } from './orchestrator-host.js';
+import { buildChatOrchestrationResult } from './orchestrator-result.js';
+import type { ChatRequestInput } from './orchestrator-types.js';
 
 export async function runChatOrchestrationV2(input: ChatRequestInput) {
   const prompt = String(input.prompt || '').trim();
@@ -194,37 +105,23 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
   };
   let confirmation: Record<string, unknown> | null = null;
 
-  if (requestMode === 'general' && !input.backgroundContinuation) {
-    try {
-      const hostAction = await tryExecutePlatformChatAction({
-        prompt,
-      });
-      if (hostAction) {
-        mode = 'host';
-        intent = 'general';
-        content = hostAction.content;
-        output = { type: 'answer', content };
-        libraries = hostAction.libraries;
-        conversationState = null;
-        routeKind = hostAction.actionResult.status === 'failed'
-          ? 'platform_action_failed'
-          : 'platform_action';
-        evidenceMode = null;
-        actionResult = hostAction.actionResult;
-        guard = {
-          requiresConfirmation: false,
-          reason: '',
-        };
-      }
-    } catch (error) {
-      fallbackReason = summarizeError(error);
-      content = error instanceof Error ? error.message : '系统操作执行失败，请稍后再试。';
-      output = { type: 'answer', content };
-      mode = 'host';
-      intent = 'general';
-      routeKind = 'platform_action_failed';
-      actionResult = null;
-    }
+  const hostAction = await tryRunHostPlatformAction({
+    prompt,
+    requestMode,
+    backgroundContinuation: input.backgroundContinuation,
+  });
+  if (hostAction?.handled) {
+    mode = hostAction.mode;
+    intent = hostAction.intent;
+    content = hostAction.content;
+    output = hostAction.output;
+    libraries = hostAction.libraries;
+    conversationState = hostAction.conversationState;
+    routeKind = hostAction.routeKind;
+    evidenceMode = hostAction.evidenceMode;
+    actionResult = hostAction.actionResult;
+    fallbackReason = hostAction.fallbackReason || fallbackReason;
+    guard = hostAction.guard;
   }
 
   if (mode !== 'host' && gatewayConfigured) {
@@ -369,105 +266,30 @@ export async function runChatOrchestrationV2(input: ChatRequestInput) {
     }
   }
 
-  return {
+  return buildChatOrchestrationResult({
     mode,
     intent,
-    needsKnowledge: intent === 'report' || libraries.length > 0,
     libraries,
     output,
     reportTemplate,
     savedReport,
     actionResult,
     knowledgePlan,
-    guard: {
-      requiresConfirmation: guard.requiresConfirmation,
-      reason: guard.reason,
-    },
+    guard,
     traceId,
-    message: {
-      role: 'assistant' as const,
-      content,
-      output,
-      meta: backgroundHandoff
-        ? '已转报表中心后台生成'
-        : (mode === 'openclaw'
-          ? '云端智能回复'
-          : (mode === 'host'
-            ? (actionResult?.status === 'failed' ? '系统操作失败' : '系统操作已执行')
-            : '云端回复暂不可用')),
-      references,
-      confirmation,
-      actionResult,
-    },
-    sources: [],
-    permissions: {
-      mode: effectiveIntelligenceMode,
-      readOnly: !effectiveIntelligenceCapabilities.canModifyLocalSystemFiles,
-      capabilities: effectiveIntelligenceCapabilities,
-    },
-    orchestration: {
-      mode,
-      routeKind,
-      docMatches: libraries.length,
-      evidenceMode,
-      gatewayConfigured,
-      intelligenceMode: effectiveIntelligenceMode,
-      fallbackReason: mode === 'fallback' ? fallbackReason : '',
-      backgroundContinuation: backgroundHandoff,
-      searchEnabledByDefault: true,
-      nativeSearchPreferred: true,
-      preferredDocumentPath: effectivePreferredDocumentPath,
-      latestDocumentFullTextIncluded: Boolean(
-        debug
-        && typeof debug === 'object'
-        && 'latestDocumentFullTextIncluded' in debug
-        && debug.latestDocumentFullTextIncluded === true,
-      ),
-      preferredDocumentStatus: (
-        debug
-        && typeof debug === 'object'
-        && 'preferredDocumentStatus' in debug
-        && typeof debug.preferredDocumentStatus === 'string'
-      )
-        ? debug.preferredDocumentStatus
-        : (effectivePreferredDocumentPath ? 'unknown' : 'none'),
-      catalogMemoryLibraries: (
-        debug
-        && typeof debug === 'object'
-        && 'catalogMemoryLibraries' in debug
-        && Number.isFinite(Number(debug.catalogMemoryLibraries))
-      )
-        ? Number(debug.catalogMemoryLibraries)
-        : 0,
-      catalogMemoryDocuments: (
-        debug
-        && typeof debug === 'object'
-        && 'catalogMemoryDocuments' in debug
-        && Number.isFinite(Number(debug.catalogMemoryDocuments))
-      )
-        ? Number(debug.catalogMemoryDocuments)
-        : 0,
-      catalogMemoryOutputs: (
-        debug
-        && typeof debug === 'object'
-        && 'catalogMemoryOutputs' in debug
-        && Number.isFinite(Number(debug.catalogMemoryOutputs))
-      )
-        ? Number(debug.catalogMemoryOutputs)
-        : 0,
-      matchedFullTextDocuments: (
-        debug
-        && typeof debug === 'object'
-        && 'matchedFullTextDocuments' in debug
-        && Number.isFinite(Number(debug.matchedFullTextDocuments))
-      )
-        ? Number(debug.matchedFullTextDocuments)
-        : 0,
-      botId: botDefinition?.id || '',
-      botName: botDefinition?.name || '',
-    },
+    content,
+    references,
+    confirmation,
+    effectiveIntelligenceMode,
+    effectiveIntelligenceCapabilities,
+    routeKind,
+    evidenceMode,
+    gatewayConfigured,
+    fallbackReason,
+    backgroundHandoff,
+    preferredDocumentPath: effectivePreferredDocumentPath,
     debug,
+    botDefinition,
     conversationState,
-    latencyMs: 120,
-  };
+  });
 }

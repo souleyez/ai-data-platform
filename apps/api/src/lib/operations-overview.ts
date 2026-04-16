@@ -11,116 +11,17 @@ import { loadDocumentsIndexRoutePayload } from './document-route-read-operations
 import { DOCUMENT_AUDIO_EXTENSIONS } from './document-parser.js';
 import { loadParsedDocuments } from './document-store.js';
 import { readOpenClawMemorySyncStatus } from './openclaw-memory-sync.js';
+import { buildPhase1StabilityBlock } from './operations-overview-stability.js';
+import { countByStatus, findTask, toDurationMs } from './operations-overview-support.js';
+import type { Phase1StabilityBlock } from './operations-overview-types.js';
 import { summarizeReportDraftBenchmarks } from './report-draft-quality.js';
 import { loadReportCenterReadState } from './report-center.js';
-import { readTaskRuntimeMetrics, type TaskRuntimeMetricsRecord } from './task-runtime-metrics.js';
+import { readTaskRuntimeMetrics } from './task-runtime-metrics.js';
 import { listWebCaptureTasks } from './web-capture.js';
 
-const DEEP_PARSE_BACKLOG_WARNING = 20;
-const DEEP_PARSE_BACKLOG_CRITICAL = 80;
-const DATASOURCE_FAILED_RUNS_WARNING = 3;
-const DATASOURCE_FAILED_RUNS_CRITICAL = 6;
-const CAPTURE_ERROR_TASKS_WARNING = 1;
-const MEMORY_SYNC_STALE_WARNING_MS = 6 * 60 * 60 * 1000;
-const MEMORY_SYNC_STALE_CRITICAL_MS = 24 * 60 * 60 * 1000;
-const DYNAMIC_OUTPUT_STALE_WARNING_MS = 12 * 60 * 60 * 1000;
 const AUDIO_EXTENSIONS = new Set<string>(DOCUMENT_AUDIO_EXTENSIONS);
 
-type StabilityWarning = {
-  key: string;
-  level: 'warning' | 'critical';
-  area: 'parse' | 'datasource' | 'capture' | 'memory-sync' | 'dataviz' | 'report';
-  title: string;
-  detail: string;
-};
-
-export type Phase1StabilityBlock = {
-  generatedAt: string;
-  summary: {
-    warningCount: number;
-    criticalCount: number;
-    deepParseBacklog: number;
-    datasourceFailedRuns: number;
-    captureErrorTasks: number;
-    dynamicOutputCount: number;
-    draftBlockedCount: number;
-    draftNeedsAttentionCount: number;
-  };
-  backlog: {
-    deepParseQueued: number;
-    deepParseProcessing: number;
-    datasourceRunning: number;
-    captureScheduled: number;
-    dynamicOutputs: number;
-  };
-  durations: {
-    datasourceAvgDurationMs: number;
-    deepParseAvgDurationMs: number;
-    memorySyncAvgDurationMs: number;
-    datavizAvgDurationMs: number;
-  };
-  failures: {
-    datasourceFailedRuns: number;
-    datasourcePartialRuns: number;
-    captureErrorTasks: number;
-    datavizStatus: string;
-    datavizLastError: string;
-    memorySyncStatus: string;
-    memorySyncLastError: string;
-  };
-  tasks: {
-    deepParse: TaskRuntimeMetricsRecord | null;
-    memorySync: TaskRuntimeMetricsRecord | null;
-    dataviz: TaskRuntimeMetricsRecord | null;
-  };
-  warnings: StabilityWarning[];
-};
-
-function countByStatus(items: Array<Record<string, unknown>>, field: string) {
-  return items.reduce<Record<string, number>>((acc, item) => {
-    const key = String(item?.[field] || 'unknown');
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-}
-
-function toTimestamp(value: unknown) {
-  const parsed = Date.parse(String(value || ''));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function toDurationMs(startedAt: unknown, finishedAt: unknown) {
-  const started = toTimestamp(startedAt);
-  const finished = toTimestamp(finishedAt);
-  if (!started || !finished || finished < started) return 0;
-  return finished - started;
-}
-
-function averageDurationMs(values: number[]) {
-  const normalized = values.filter((value) => Number.isFinite(value) && value > 0);
-  if (!normalized.length) return 0;
-  return Math.round(normalized.reduce((acc, value) => acc + value, 0) / normalized.length);
-}
-
-function buildWarning(
-  key: string,
-  level: StabilityWarning['level'],
-  area: StabilityWarning['area'],
-  title: string,
-  detail: string,
-): StabilityWarning {
-  return {
-    key,
-    level,
-    area,
-    title,
-    detail,
-  };
-}
-
-function findTask(items: TaskRuntimeMetricsRecord[], family: TaskRuntimeMetricsRecord['family']) {
-  return items.find((item) => item.family === family) || null;
-}
+export type { Phase1StabilityBlock } from './operations-overview-types.js';
 
 export async function loadOperationsOverviewPayload() {
   const [
@@ -183,13 +84,8 @@ export async function loadOperationsOverviewPayload() {
   const draftBlockedCount = draftBenchmark.totals.blocked;
   const draftNeedsAttentionCount = draftBenchmark.totals.needsAttention;
   const draftReadyCount = draftBenchmark.totals.ready;
-  const dynamicOutputStaleCount = dynamicOutputs.filter((item) => {
-    const lastRenderedAt = toTimestamp(item.dynamicSource?.lastRenderedAt || item.dynamicSource?.updatedAt || item.createdAt);
-    return Boolean(lastRenderedAt) && Date.now() - lastRenderedAt >= DYNAMIC_OUTPUT_STALE_WARNING_MS;
-  }).length;
   const deepParseQueued = deepParseQueueState.items.filter((item) => item.status === 'queued').length;
   const deepParseProcessing = deepParseQueueState.items.filter((item) => item.status === 'processing').length;
-  const deepParseBacklog = deepParseQueued + deepParseProcessing;
   const canonicalCoverageCount = rawDocuments.items.filter(
     (item) => getParsedDocumentCanonicalParseStatus(item) === 'ready',
   ).length;
@@ -211,150 +107,21 @@ export async function loadOperationsOverviewPayload() {
   const deepParseTask = findTask(taskRuntimeMetrics.items, 'deep-parse');
   const memorySyncTask = findTask(taskRuntimeMetrics.items, 'memory-sync');
   const datavizTask = findTask(taskRuntimeMetrics.items, 'dataviz');
-  const memorySyncAgeMs = memorySyncStatus.lastSuccessAt ? Math.max(0, Date.now() - toTimestamp(memorySyncStatus.lastSuccessAt)) : 0;
-
-  const warnings: StabilityWarning[] = [];
-  if (deepParseBacklog >= DEEP_PARSE_BACKLOG_CRITICAL) {
-    warnings.push(buildWarning(
-      'deep-parse-backlog-critical',
-      'critical',
-      'parse',
-      '深解析积压过大',
-      `当前待处理 ${deepParseBacklog}，已经超过阶段一 critical 阈值 ${DEEP_PARSE_BACKLOG_CRITICAL}。`,
-    ));
-  } else if (deepParseBacklog >= DEEP_PARSE_BACKLOG_WARNING) {
-    warnings.push(buildWarning(
-      'deep-parse-backlog-warning',
-      'warning',
-      'parse',
-      '深解析出现积压',
-      `当前待处理 ${deepParseBacklog}，已经超过阶段一 warning 阈值 ${DEEP_PARSE_BACKLOG_WARNING}。`,
-    ));
-  }
-
-  if ((runStatusCounts.failed || 0) >= DATASOURCE_FAILED_RUNS_CRITICAL) {
-    warnings.push(buildWarning(
-      'datasource-failed-runs-critical',
-      'critical',
-      'datasource',
-      '数据源失败运行过多',
-      `最近失败运行 ${runStatusCounts.failed || 0} 次，已经超过阶段一 critical 阈值 ${DATASOURCE_FAILED_RUNS_CRITICAL}。`,
-    ));
-  } else if ((runStatusCounts.failed || 0) >= DATASOURCE_FAILED_RUNS_WARNING) {
-    warnings.push(buildWarning(
-      'datasource-failed-runs-warning',
-      'warning',
-      'datasource',
-      '数据源失败运行偏多',
-      `最近失败运行 ${runStatusCounts.failed || 0} 次，已经超过阶段一 warning 阈值 ${DATASOURCE_FAILED_RUNS_WARNING}。`,
-    ));
-  }
-
-  if (captureErrorTasks.length >= CAPTURE_ERROR_TASKS_WARNING) {
-    warnings.push(buildWarning(
-      'capture-error-tasks-warning',
-      'warning',
-      'capture',
-      '采集任务存在错误',
-      `最近有 ${captureErrorTasks.length} 个采集任务处于 error 状态。`,
-    ));
-  }
-
-  if (memorySyncAgeMs >= MEMORY_SYNC_STALE_CRITICAL_MS) {
-    warnings.push(buildWarning(
-      'memory-sync-stale-critical',
-      'critical',
-      'memory-sync',
-      'memory sync 严重滞后',
-      `距离上次成功同步已超过 ${Math.round(MEMORY_SYNC_STALE_CRITICAL_MS / 3600000)} 小时。`,
-    ));
-  } else if (memorySyncAgeMs >= MEMORY_SYNC_STALE_WARNING_MS) {
-    warnings.push(buildWarning(
-      'memory-sync-stale-warning',
-      'warning',
-      'memory-sync',
-      'memory sync 已滞后',
-      `距离上次成功同步已超过 ${Math.round(MEMORY_SYNC_STALE_WARNING_MS / 3600000)} 小时。`,
-    ));
-  }
-
-  if (datavizTask?.status === 'failed' || datavizTask?.status === 'skipped') {
-    const datavizDetail = datavizTask.lastErrorMessage
-      || datavizTask.lastMessage
-      || 'dataviz runtime unavailable';
-    const datavizLevel = /renderer-unavailable/i.test(datavizDetail) ? 'warning' : 'critical';
-    warnings.push(buildWarning(
-      'dataviz-runtime-warning',
-      datavizLevel,
-      'dataviz',
-      '图表渲染链异常',
-      datavizDetail,
-    ));
-  }
-
-  if (dynamicOutputStaleCount > 0) {
-    warnings.push(buildWarning(
-      'dynamic-output-stale-warning',
-      'warning',
-      'report',
-      '动态报表输出存在陈旧结果',
-      `当前有 ${dynamicOutputStaleCount} 个动态输出超过 ${Math.round(DYNAMIC_OUTPUT_STALE_WARNING_MS / 3600000)} 小时未刷新。`,
-    ));
-  }
-
-  if (draftBlockedCount > 0) {
-    warnings.push(buildWarning(
-      'draft-output-blocked-warning',
-      'warning',
-      'report',
-      '静态页草稿存在终稿阻塞',
-      `当前有 ${draftBlockedCount} 份静态页草稿缺少关键模块或内容，无法直接进入终稿。`,
-    ));
-  }
-
-  const warningCount = warnings.filter((item) => item.level === 'warning').length;
-  const criticalCount = warnings.filter((item) => item.level === 'critical').length;
-  const stability: Phase1StabilityBlock = {
-    generatedAt: new Date().toISOString(),
-    summary: {
-      warningCount,
-      criticalCount,
-      deepParseBacklog,
-      datasourceFailedRuns: runStatusCounts.failed || 0,
-      captureErrorTasks: captureErrorTasks.length,
-      dynamicOutputCount: dynamicOutputs.length,
-      draftBlockedCount,
-      draftNeedsAttentionCount,
-    },
-    backlog: {
-      deepParseQueued,
-      deepParseProcessing,
-      datasourceRunning: runStatusCounts.running || 0,
-      captureScheduled: captureScheduledCount,
-      dynamicOutputs: dynamicOutputs.length,
-    },
-    durations: {
-      datasourceAvgDurationMs: averageDurationMs(runDurationsMs),
-      deepParseAvgDurationMs: deepParseTask?.avgDurationMs || 0,
-      memorySyncAvgDurationMs: memorySyncTask?.avgDurationMs || 0,
-      datavizAvgDurationMs: datavizTask?.avgDurationMs || 0,
-    },
-    failures: {
-      datasourceFailedRuns: runStatusCounts.failed || 0,
-      datasourcePartialRuns: runStatusCounts.partial || 0,
-      captureErrorTasks: captureErrorTasks.length,
-      datavizStatus: datavizTask?.status || 'idle',
-      datavizLastError: datavizTask?.lastErrorMessage || datavizTask?.lastMessage || '',
-      memorySyncStatus: memorySyncStatus.status,
-      memorySyncLastError: memorySyncStatus.lastErrorMessage || '',
-    },
-    tasks: {
-      deepParse: deepParseTask,
-      memorySync: memorySyncTask,
-      dataviz: datavizTask,
-    },
-    warnings,
-  };
+  const { stability, dynamicOutputStaleCount }: { stability: Phase1StabilityBlock; dynamicOutputStaleCount: number } = buildPhase1StabilityBlock({
+    runStatusCounts,
+    captureErrorTasksCount: captureErrorTasks.length,
+    captureScheduledCount,
+    dynamicOutputs,
+    draftBlockedCount,
+    draftNeedsAttentionCount,
+    deepParseQueued,
+    deepParseProcessing,
+    runDurationsMs,
+    deepParseTask,
+    memorySyncTask,
+    datavizTask,
+    memorySyncStatus,
+  });
 
   const recentRuns = [...runModels]
     .sort((a, b) => String(b.finishedAt || b.startedAt || '').localeCompare(String(a.finishedAt || a.startedAt || '')))

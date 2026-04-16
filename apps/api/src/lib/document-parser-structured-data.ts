@@ -1,199 +1,33 @@
-import { extractWithUIEWorker } from './uie-process-client.js';
 import { normalizeText } from './document-parser-text-normalization.js';
+import type {
+  EvidenceChunk,
+  IntentSlots,
+  StructuredClaim,
+  StructuredEntity,
+} from './document-parser-types.js';
+import {
+  buildBenefitClaims,
+  collectRegexMatches,
+  filterSlotValues,
+  findChunkIdForText,
+  mergeStringArrays,
+  uniqEntities,
+  uniqStrings,
+  isValidStrainCandidate,
+} from './document-parser-structured-data-support.js';
+import { extractStructuredDataWithUIE } from './document-parser-structured-data-uie.js';
 
-export type EvidenceChunk = {
-  id: string;
-  order: number;
-  text: string;
-  charLength: number;
-  page?: number;
-  sectionTitle?: string;
-  regionHint?: string;
-  title?: string;
-};
-
-export type StructuredEntity = {
-  text: string;
-  type: 'ingredient' | 'strain' | 'audience' | 'benefit' | 'dose' | 'organization' | 'metric' | 'identifier' | 'term';
-  source: 'rule' | 'uie';
-  confidence: number;
-  evidenceChunkId?: string;
-};
-
-export type StructuredClaim = {
-  subject: string;
-  predicate: string;
-  object: string;
-  confidence: number;
-  evidenceChunkId?: string;
-};
-
-export type IntentSlots = {
-  audiences?: string[];
-  ingredients?: string[];
-  strains?: string[];
-  benefits?: string[];
-  doses?: string[];
-  organizations?: string[];
-  metrics?: string[];
-};
+export type {
+  EvidenceChunk,
+  IntentSlots,
+  StructuredClaim,
+  StructuredEntity,
+} from './document-parser-types.js';
 
 type ContractFields = {
   contractNo?: string;
   amount?: string;
 };
-
-const ENABLE_PADDLE_UIE = process.env.ENABLE_PADDLE_UIE === '1' || process.env.ENABLE_PADDLE_UIE_SERVICE === '1';
-const UIE_SCHEMA_BASE = ['人群', '成分', '菌株', '功效', '剂量', '机构', '指标'] as const;
-const UIE_SCHEMA_TECHNICAL = ['功效', '机构', '指标'] as const;
-const UIE_SCHEMA_CONTRACT = ['机构', '指标'] as const;
-
-function getUIESchemaForCategory(category: string) {
-  if (category === 'technical') return UIE_SCHEMA_TECHNICAL;
-  if (category === 'contract') return UIE_SCHEMA_CONTRACT;
-  return UIE_SCHEMA_BASE;
-}
-
-function mergeUIESlotMaps(slotMaps: Array<Record<string, string[]>>) {
-  const merged = new Map<string, string[]>();
-
-  for (const slotMap of slotMaps) {
-    for (const [key, values] of Object.entries(slotMap || {})) {
-      const existing = merged.get(key) || [];
-      for (const value of values || []) {
-        const normalized = String(value || '').trim();
-        if (normalized && !existing.includes(normalized)) {
-          existing.push(normalized);
-        }
-      }
-      merged.set(key, existing);
-    }
-  }
-
-  return Object.fromEntries(merged.entries());
-}
-
-function isValidStrainCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^IL-\d+$/i.test(text)) return false;
-  if (/^(IFN|TNF|TGF)-?[A-Z0-9]+$/i.test(text)) return false;
-  if (/\b(?:interleukin|cytokine|transforming growth factor|interferon)\b/i.test(text)) return false;
-  if (/\b(?:and|in|on|of|for)\b/i.test(text) && !/\b(?:Lactobacillus|Bifidobacterium|Bacillus|Streptococcus)\b/i.test(text)) return false;
-  return true;
-}
-
-function isValidDoseCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^\d+(?:\.\d+)?\s?(?:mg|g|kg|ml|ug|IU|CFU)$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?\s?(?:x|×)\s?10\^?\d+\s?(?:CFU)?$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?e[+-]?\d{1,2}$/i.test(text)) return true;
-  return false;
-}
-
-function isStrictDoseCandidate(value: string) {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (/^\d+(?:\.\d+)?\s?(?:mg|g|kg|ml|ug|μg|IU)$/i.test(text)) return true;
-  if (/^\d+(?:\.\d+)?\s?(?:x|×|脳)\s?10\^?\d+\s?(?:CFU)?$/i.test(text)) return true;
-  const scientificMatch = text.match(/^(\d+(?:\.\d+)?)e([+-]?\d{1,2})$/i);
-  if (!scientificMatch) return false;
-  const mantissa = Number(scientificMatch[1]);
-  const exponent = Number(scientificMatch[2]);
-  return mantissa > 0 && mantissa <= 20 && exponent >= 6 && exponent <= 12;
-}
-
-function uniqStrings(values: Array<string | undefined>) {
-  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
-}
-
-function filterSlotValues(values: string[] | undefined, type: StructuredEntity['type']) {
-  const normalized = uniqStrings(values || []);
-  if (type === 'strain') return normalized.filter(isValidStrainCandidate);
-  if (type === 'dose') return normalized.filter(isStrictDoseCandidate);
-  return normalized;
-}
-
-function mergeStringArrays(...groups: Array<string[] | undefined>) {
-  return uniqStrings(groups.flatMap((group) => group || []));
-}
-
-function uniqEntities(items: StructuredEntity[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = `${item.type}:${item.text.toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function findChunkIdForText(evidenceChunks: EvidenceChunk[] | undefined, text: string) {
-  if (!text || !evidenceChunks?.length) return undefined;
-  const lowered = text.toLowerCase();
-  return evidenceChunks.find((chunk) => chunk.text.toLowerCase().includes(lowered))?.id;
-}
-
-function collectRegexMatches(text: string, patterns: RegExp[]) {
-  const found = new Set<string>();
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = String(match[0] || '').trim();
-      if (value) found.add(value);
-    }
-  }
-  return [...found];
-}
-
-async function extractStructuredDataWithUIE(
-  text: string,
-  category: string,
-  evidenceChunks: EvidenceChunk[],
-): Promise<Partial<IntentSlots>> {
-  if (!ENABLE_PADDLE_UIE) {
-    return {};
-  }
-
-  try {
-    const schema = getUIESchemaForCategory(category);
-    const segments = [
-      text.slice(0, 1200),
-      ...evidenceChunks
-        .slice(0, 6)
-        .map((chunk) => chunk.text)
-        .filter(Boolean),
-    ]
-      .map((item) => normalizeText(item))
-      .filter((item, index, items) => item.length >= 40 && items.indexOf(item) === index);
-
-    if (!segments.length) {
-      return {};
-    }
-
-    const slotMaps = await Promise.all(
-      segments.map((segment) => extractWithUIEWorker({
-        text: segment.slice(0, 2000),
-        model: process.env.PADDLE_UIE_MODEL || 'uie-base',
-        schema,
-      })),
-    );
-
-    const slots = mergeUIESlotMaps(slotMaps);
-
-    return {
-      audiences: slots['人群'] || [],
-      ingredients: slots['成分'] || [],
-      strains: slots['菌株'] || [],
-      benefits: slots['功效'] || [],
-      doses: slots['剂量'] || [],
-      organizations: slots['机构'] || [],
-      metrics: slots['指标'] || [],
-    };
-  } catch {
-    return {};
-  }
-}
 
 export async function extractStructuredData(
   text: string,
@@ -304,30 +138,12 @@ export async function extractStructuredData(
     }] : []),
   ];
 
-  const claims: StructuredClaim[] = [];
-  for (const benefit of benefitMatches.slice(0, 6)) {
-    if (strainMatches.length) {
-      for (const strain of strainMatches.slice(0, 3)) {
-        claims.push({
-          subject: strain,
-          predicate: 'supports',
-          object: benefit,
-          confidence: 0.66,
-          evidenceChunkId: findChunkIdForText(evidenceChunks, strain) || findChunkIdForText(evidenceChunks, benefit),
-        });
-      }
-    } else if (ingredientMatches.length) {
-      for (const ingredient of ingredientMatches.slice(0, 3)) {
-        claims.push({
-          subject: ingredient,
-          predicate: 'related_to',
-          object: benefit,
-          confidence: 0.6,
-          evidenceChunkId: findChunkIdForText(evidenceChunks, ingredient) || findChunkIdForText(evidenceChunks, benefit),
-        });
-      }
-    }
-  }
+  const claims: StructuredClaim[] = buildBenefitClaims(
+    benefitMatches,
+    strainMatches,
+    ingredientMatches,
+    evidenceChunks,
+  );
 
   if (contractFields?.contractNo) {
     claims.push({

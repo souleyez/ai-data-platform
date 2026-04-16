@@ -3,25 +3,13 @@ import { type DocumentCategoryConfig } from './document-config.js';
 import {
   loadDocumentExtractionGovernance,
   resolveDocumentExtractionProfile,
-  type DocumentExtractionProfile,
   type DocumentLibraryContext,
 } from './document-extraction-governance.js';
-import { applyDocumentParseFeedback } from './document-parse-feedback.js';
-import { buildStructuredProfile, deriveSchemaProfile, inferSchemaType, refreshDerivedSchemaProfile } from './document-schema.js';
+import { deriveSchemaProfile, refreshDerivedSchemaProfile } from './document-schema.js';
 import { resolveDocumentMarkdownForFile, supportsMarkItDownExtension } from './document-markdown-provider.js';
 import { normalizeText } from './document-parser-text-normalization.js';
-import {
-  buildCatchErrorParsedDocument,
-  buildDetailedParsedDocument,
-  buildParseErrorParsedDocument,
-  buildQuickParsedDocument,
-  buildUnsupportedParsedDocument,
-} from './document-parser-result-builders.js';
-import { buildEvidence, inferTitle } from './document-parser-metadata.js';
-import { extractStructuredData } from './document-parser-structured-data.js';
-import { excerpt, splitEvidenceChunks, summarize } from './document-parser-evidence.js';
-import { shouldForceExtraction } from './document-parser-classification.js';
-import { extractDocumentDomainState } from './document-parser-domain-extraction.js';
+import { inferTitle } from './document-parser-metadata.js';
+import { excerpt, summarize } from './document-parser-evidence.js';
 import {
   buildDocumentParserExtensionSets,
   extractTextForParse as extractText,
@@ -35,19 +23,18 @@ import {
   shouldTreatLegacyExtractionAsCanonical,
 } from './document-parser-runtime.js';
 import {
-  applyGovernedSchemaType,
   detectBizCategory as detectBizCategoryForDocument,
   detectCategory as detectCategoryForDocument,
-  detectRiskLevel,
   detectTopicTags,
-  extractContractFields,
   mergeGovernedTopicTags,
 } from './document-parser-domain-fields.js';
 import {
-  buildCatchStageParsedDocument,
-  buildDetailedStageParsedDocument,
-  buildQuickStageParsedDocument,
-} from './document-parser-stage-builders.js';
+  buildCatchParseResult,
+  buildDetailedParseResult,
+  buildParseErrorResult,
+  buildQuickParseResult,
+  buildUnsupportedParseResult,
+} from './document-parser-parse-branches.js';
 import {
   DOCUMENT_AUDIO_EXTENSIONS,
   DOCUMENT_IMAGE_EXTENSIONS,
@@ -98,14 +85,11 @@ export type ParseDocumentOptions = {
   libraryContext?: DocumentLibraryContext;
   resolveMarkdown?: typeof resolveDocumentMarkdownForFile;
 };
-const IMAGE_EXTENSIONS = new Set<string>(DOCUMENT_IMAGE_EXTENSIONS);
-const PRESENTATION_EXTENSIONS = new Set<string>(DOCUMENT_PRESENTATION_EXTENSIONS);
-const AUDIO_EXTENSIONS = new Set<string>(DOCUMENT_AUDIO_EXTENSIONS);
+
 const UNSUPPORTED_PARSE_SUMMARY = '当前版本暂未支持该文件类型的正文提取。已支持 pdf、txt、md、docx、csv、json、html、xml、xlsx、xls、epub、wav、mp3、ppt、pptx、pptm、png、jpg、jpeg、webp、gif、bmp。';
 
 export const renderPresentationDocumentToImages = renderPresentationDocumentToImagesForParse;
 export const renderPdfDocumentToImages = renderPdfDocumentToImagesForParse;
-
 
 export function detectCategory(filePath: string, text = '') {
   return detectCategoryForDocument(filePath, text);
@@ -131,7 +115,7 @@ export async function parseDocument(
   const extractionGovernance = loadDocumentExtractionGovernance();
   const extractionProfile = resolveDocumentExtractionProfile(extractionGovernance, options?.libraryContext);
   const structuredExtractionProfile = extractionProfile ?? undefined;
-  const { imageExtensions, presentationExtensions, audioExtensions } = buildDocumentParserExtensionSets();
+  const { imageExtensions, audioExtensions } = buildDocumentParserExtensionSets();
 
   try {
     let status: 'parsed' | 'unsupported' | 'error' = 'unsupported';
@@ -235,108 +219,54 @@ export async function parseDocument(
     const normalizedText = normalizeText(semanticText);
     const category = detectCategory(filePath, normalizedText);
     const bizCategory = detectBizCategory(filePath, category, normalizedText, config);
-    const unsupportedSummary = UNSUPPORTED_PARSE_SUMMARY;
 
     if (parseStatus === 'unsupported') {
-      const topicTags = mergeGovernedTopicTags(
-        detectTopicTags(buildEvidence(filePath), category, bizCategory),
-        extractionProfile,
-      );
-      const schemaType = applyGovernedSchemaType(
-        inferSchemaType(category, bizCategory, undefined, topicTags),
-        extractionProfile,
-      );
-      return buildUnsupportedParsedDocument({
+      return buildUnsupportedParseResult({
         filePath,
         name,
         ext,
-        title: path.parse(name).name,
         category,
         bizCategory,
         parseMethod,
-        fullText: activeText || '',
+        activeText,
         markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
-        canonicalParseStatus: 'unsupported',
-        topicTags,
         parseStage,
-        detailParseStatus: defaultDetailParseStatus,
-        detailParseQueuedAt: defaultDetailQueuedAt,
-        detailParsedAt: defaultDetailParsedAt,
-        detailParseAttempts: defaultDetailAttempts,
-        schemaType,
-        structuredProfile: buildStructuredProfile({
-          schemaType,
-          title: path.parse(name).name,
-          topicTags,
-          summary: unsupportedSummary,
-          evidenceChunks: [],
-          tableSummary,
-          extractionProfile: structuredExtractionProfile,
-        }),
-        unsupportedSummary,
+        defaultDetailParseStatus,
+        defaultDetailQueuedAt,
+        defaultDetailParsedAt,
+        defaultDetailAttempts,
+        extractionProfile,
+        structuredExtractionProfile,
+        tableSummary,
+        unsupportedSummary: UNSUPPORTED_PARSE_SUMMARY,
       });
     }
 
     if (parseStatus === 'error') {
-      const topicTags = mergeGovernedTopicTags(
-        detectTopicTags(buildEvidence(filePath), category, bizCategory),
-        extractionProfile,
-      );
-      const schemaType = applyGovernedSchemaType(
-        inferSchemaType(category, bizCategory, undefined, topicTags),
-        extractionProfile,
-      );
-      const fallbackSummary = AUDIO_EXTENSIONS.has(ext)
-        ? '音频详细解析失败，当前未转写出可用正文；当前版本尚未接入音频 VLM 兜底。'
-        : IMAGE_EXTENSIONS.has(ext)
-        ? '图片 OCR 解析失败，当前未提取到可用文本；修复 OCR 环境或调整图片后可手动重新解析。'
-        : PRESENTATION_EXTENSIONS.has(ext)
-          ? 'PPT 解析失败，当前未提取到可用正文；可安装 LibreOffice 后重新解析，详细解析阶段会优先尝试 VLM。'
-        : (topicTags.length
-          ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
-          : '文档解析失败，后续可补充依赖后手动重新解析。');
-
-      return buildParseErrorParsedDocument({
+      return buildParseErrorResult({
         filePath,
         name,
         ext,
-        title: path.parse(name).name,
         category,
         bizCategory,
         parseMethod,
-        fallbackSummary,
-        fullText: activeText || text,
+        activeText,
+        text,
         markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
-        canonicalParseStatus: 'failed',
-        topicTags,
         parseStage,
-        detailParseStatus: parseStage === 'quick' ? 'queued' : 'failed',
-        detailParseQueuedAt: defaultDetailQueuedAt,
-        detailParsedAt: defaultDetailParsedAt,
-        detailParseAttempts: defaultDetailAttempts,
-        detailParseError: IMAGE_EXTENSIONS.has(ext)
-          ? 'ocr-text-not-extracted'
-          : PRESENTATION_EXTENSIONS.has(ext)
-            ? 'presentation-text-not-extracted'
-            : AUDIO_EXTENSIONS.has(ext)
-              ? (markdownError || 'audio-markdown-not-extracted')
-              : (markdownError || 'parse-error'),
-        schemaType,
-        structuredProfile: buildStructuredProfile({
-          schemaType,
-          title: path.parse(name).name,
-          topicTags,
-          summary: fallbackSummary,
-          evidenceChunks: [],
-          tableSummary,
-          extractionProfile: structuredExtractionProfile,
-        }),
+        defaultDetailParseStatus,
+        defaultDetailQueuedAt,
+        defaultDetailParsedAt,
+        defaultDetailAttempts,
+        extractionProfile,
+        structuredExtractionProfile,
+        tableSummary,
       });
     }
 
@@ -352,157 +282,79 @@ export async function parseDocument(
     const inferredTitle = inferTitle(semanticText || text, name);
 
     if (parseStage === 'quick') {
-      const quickText = activeText.slice(0, 2400);
-      const {
-        contractFields,
-        resumeFields,
-        enterpriseGuidanceFields,
-        orderFields,
-        footfallFields,
-        schemaType,
-      } = extractDocumentDomainState({
-        libraryKeys: feedbackLibraryKeys,
-        text: quickText,
-        normalizedText: quickText,
-        inferredTitle,
-        category,
-        bizCategory,
-        topicTags,
-        extractionProfile,
-        tableSummary,
-        summary,
-      });
-      return buildQuickStageParsedDocument({
+      return buildQuickParseResult({
         filePath,
         name,
         ext,
-        title: inferredTitle,
         category,
         bizCategory,
         parseMethod,
+        activeText,
+        normalizedText,
         summary,
-        excerpt: excerptText,
-        fullText: activeText,
+        excerptText,
+        inferredTitle,
+        canonicalParseStatus,
+        topicTags,
+        feedbackLibraryKeys,
         markdownText,
         markdownMethod,
         markdownGeneratedAt,
         markdownError,
-        canonicalParseStatus,
-        extractedChars: normalizedText.length,
-        resumeFields,
-        contractFields,
-        enterpriseGuidanceFields,
-        orderFields,
-        footfallFields,
-        riskLevel: detectRiskLevel(normalizedText, category),
-        topicTags,
         parseStage,
-        detailParseStatus: defaultDetailParseStatus,
-        detailParseQueuedAt: defaultDetailQueuedAt,
-        detailParsedAt: defaultDetailParsedAt,
-        detailParseAttempts: defaultDetailAttempts,
-        schemaType,
-        extractionProfile: structuredExtractionProfile,
+        defaultDetailParseStatus,
+        defaultDetailQueuedAt,
+        defaultDetailParsedAt,
+        defaultDetailAttempts,
+        extractionProfile,
+        structuredExtractionProfile,
         tableSummary,
       });
     }
 
-    const evidenceChunks = splitEvidenceChunks(activeText);
-    const contractFields = applyDocumentParseFeedback({
-      libraryKeys: feedbackLibraryKeys,
-      schemaType: 'contract',
-      text: activeText,
-      fields: extractContractFields(normalizedText, category, extractionProfile),
-    });
-    const structured = await extractStructuredData(normalizedText, category, evidenceChunks, topicTags, contractFields);
-    const {
-      resumeFields,
-      enterpriseGuidanceFields,
-      orderFields,
-      footfallFields,
-      schemaType,
-    } = extractDocumentDomainState({
-      libraryKeys: feedbackLibraryKeys,
-      text: activeText,
-      normalizedText,
-      inferredTitle,
-      category,
-      bizCategory,
-      topicTags,
-      extractionProfile,
-      tableSummary,
-      summary,
-      precomputedContractFields: contractFields,
-      structuredEntities: structured.entities,
-      structuredClaims: structured.claims,
-    });
-
-    return buildDetailedStageParsedDocument({
+    return buildDetailedParseResult({
       filePath,
       name,
       ext,
-      title: inferredTitle,
       category,
       bizCategory,
       parseMethod,
-      summary: summarize(normalizedText, '文档内容为空或暂未提取到文本。'),
-      excerpt: excerpt(normalizedText, '文档内容为空或暂未提取到文本。'),
-      fullText: activeText,
+      activeText,
+      normalizedText,
+      summary,
+      excerptText,
+      inferredTitle,
+      canonicalParseStatus,
+      topicTags,
+      feedbackLibraryKeys,
       markdownText,
       markdownMethod,
       markdownGeneratedAt,
       markdownError,
-      canonicalParseStatus,
-      extractedChars: normalizedText.length,
-      evidenceChunks,
-      entities: structured.entities,
-      claims: structured.claims,
-      intentSlots: structured.intentSlots || {},
-      resumeFields,
-      enterpriseGuidanceFields,
-      orderFields,
-      footfallFields,
-      riskLevel: detectRiskLevel(normalizedText, category),
-      topicTags,
-      contractFields,
       parseStage,
-      detailParseStatus: defaultDetailParseStatus,
-      detailParseQueuedAt: defaultDetailQueuedAt,
-      detailParsedAt: defaultDetailParsedAt,
-      detailParseAttempts: defaultDetailAttempts,
-      schemaType,
-      extractionProfile: structuredExtractionProfile,
+      defaultDetailParseStatus,
+      defaultDetailQueuedAt,
+      defaultDetailParsedAt,
+      defaultDetailAttempts,
+      extractionProfile,
+      structuredExtractionProfile,
       tableSummary,
     });
   } catch {
     const category = detectCategory(filePath);
     const bizCategory = detectBizCategory(filePath, category, '', config);
-    const topicTags = mergeGovernedTopicTags(
-      detectTopicTags(buildEvidence(filePath), category, bizCategory),
-      extractionProfile,
-    );
-    const schemaType = applyGovernedSchemaType(
-      inferSchemaType(category, bizCategory, undefined, topicTags),
-      extractionProfile,
-    );
-    const fallbackSummary = topicTags.length
-      ? `文档解析失败，但已从文件名识别到主题线索：${topicTags.join('、')}。`
-      : '文档解析失败，后续可增加 OCR、编码识别或更稳定的解析链路。';
-
-    return buildCatchStageParsedDocument({
+    return buildCatchParseResult({
       filePath,
       name,
       ext,
       category,
       bizCategory,
-      fallbackSummary,
-      topicTags,
       parseStage,
-      detailParseQueuedAt: defaultDetailQueuedAt,
-      detailParsedAt: defaultDetailParsedAt,
-      detailParseAttempts: defaultDetailAttempts,
-      schemaType,
-      extractionProfile: structuredExtractionProfile,
+      defaultDetailQueuedAt,
+      defaultDetailParsedAt,
+      defaultDetailAttempts,
+      extractionProfile,
+      structuredExtractionProfile,
     });
   }
 }

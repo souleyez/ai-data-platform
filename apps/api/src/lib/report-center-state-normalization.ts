@@ -1,12 +1,5 @@
-import { normalizeDraftVisualMixTargets, normalizeStoredDraftHistoryEntry } from './report-draft-history.js';
-import { hydrateDraftQuality } from './report-draft-quality.js';
 import type {
   PersistedState,
-  ReportOutputDraft,
-  ReportDraftModule,
-  ReportDraftModuleStatus,
-  ReportDraftModuleType,
-  ReportDraftReviewStatus,
   ReportDynamicSource,
   ReportGroup,
   ReportGroupTemplate,
@@ -17,6 +10,9 @@ import type {
   ReportVisualStylePreset,
   SharedReportTemplate,
 } from './report-center.js';
+import type { ReportDraftModule, ReportOutputDraft } from './report-center.js';
+import { normalizeStoredDraft, normalizeStoredDraftModule } from './report-center-state-normalization-draft.js';
+import { normalizeStoredPage } from './report-center-state-normalization-page.js';
 import type { ReportPlanDatavizSlot, ReportPlanLayoutVariant, ReportPlanPageSpec } from './report-planner.js';
 
 type LegacyPersistedState = Partial<PersistedState> & {
@@ -170,195 +166,6 @@ function normalizeStoredLibraries(value: unknown, deps: StateStoreDeps): StoredL
     .filter(Boolean) as StoredLibraryRef;
 }
 
-function normalizeStoredPageCard(value: unknown, deps: StateStoreDeps) {
-  if (!isRecord(value)) return null;
-  const label = deps.normalizeTextField(value.label);
-  const rawValue = deps.normalizeTextField(value.value);
-  const note = deps.normalizeTextField(value.note);
-  return label || rawValue || note ? { label, value: rawValue, note } : null;
-}
-
-function normalizeStoredPageSection(value: unknown, deps: StateStoreDeps) {
-  if (!isRecord(value)) return null;
-  const title = deps.normalizeTextField(value.title);
-  const body = deps.normalizeTextField(value.body);
-  const bullets = deps.normalizeStringList(value.bullets);
-  const displayMode = deps.normalizeTextField(value.displayMode);
-  return title || body || bullets.length ? { title, body, bullets, displayMode } : null;
-}
-
-function normalizeStoredPageChartRender(value: unknown, deps: StateStoreDeps) {
-  if (!isRecord(value)) return null;
-  const renderer = deps.normalizeTextField(value.renderer);
-  const chartType = deps.normalizeTextField(value.chartType);
-  const svg = deps.normalizeTextField(value.svg);
-  const alt = deps.normalizeTextField(value.alt);
-  const generatedAt = deps.normalizeTextField(value.generatedAt);
-  return renderer || chartType || svg || alt || generatedAt
-    ? { renderer, chartType, svg, alt, generatedAt }
-    : null;
-}
-
-function normalizeStoredPageChart(value: unknown, deps: StateStoreDeps) {
-  if (!isRecord(value)) return null;
-  const title = deps.normalizeTextField(value.title);
-  const items = Array.isArray(value.items)
-    ? value.items
-        .map((item) => {
-          if (!isRecord(item)) return null;
-          const label = deps.normalizeTextField(item.label);
-          const numericValue = Number(item.value);
-          return label
-            ? {
-                label,
-                value: Number.isFinite(numericValue) ? numericValue : 0,
-              }
-            : null;
-        })
-        .filter(Boolean) as Array<{ label?: string; value?: number }>
-    : [];
-  const render = normalizeStoredPageChartRender(value.render, deps);
-  return title || items.length || render ? { title, items, render } : null;
-}
-
-function normalizeStoredPage(value: unknown, deps: StateStoreDeps): ReportOutputRecord['page'] | null {
-  if (!isRecord(value)) return null;
-
-  const summary = deps.normalizeTextField(value.summary);
-  const cards = Array.isArray(value.cards)
-    ? value.cards.map((item) => normalizeStoredPageCard(item, deps)).filter(Boolean) as Array<{ label?: string; value?: string; note?: string }>
-    : [];
-  const sections = Array.isArray(value.sections)
-    ? value.sections.map((item) => normalizeStoredPageSection(item, deps)).filter(Boolean) as Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>
-    : [];
-  const datavizSlots = deps.normalizeStoredDatavizSlots(value.datavizSlots);
-  const pageSpec = deps.normalizeStoredPageSpec(value.pageSpec);
-  const visualStyle = deps.normalizeVisualStylePreset(value.visualStyle);
-  const charts = Array.isArray(value.charts)
-    ? value.charts.map((item) => normalizeStoredPageChart(item, deps)).filter(Boolean) as Array<{
-        title?: string;
-        items?: Array<{ label?: string; value?: number }>;
-        render?: { renderer?: string; chartType?: string; svg?: string; alt?: string; generatedAt?: string } | null;
-      }>
-    : [];
-
-  return summary || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec || visualStyle
-    ? { summary, cards, sections, datavizSlots, pageSpec, visualStyle, charts }
-    : null;
-}
-
-function normalizeStoredDraftModuleType(value: unknown, deps: StateStoreDeps): ReportDraftModuleType {
-  const normalized = deps.normalizeTextField(value);
-  if (
-    normalized === 'hero'
-    || normalized === 'summary'
-    || normalized === 'metric-grid'
-    || normalized === 'insight-list'
-    || normalized === 'table'
-    || normalized === 'chart'
-    || normalized === 'timeline'
-    || normalized === 'comparison'
-    || normalized === 'cta'
-    || normalized === 'appendix'
-  ) {
-    return normalized;
-  }
-  return 'summary';
-}
-
-function normalizeStoredDraftModuleStatus(value: unknown, deps: StateStoreDeps): ReportDraftModuleStatus {
-  const normalized = deps.normalizeTextField(value);
-  if (normalized === 'edited' || normalized === 'disabled') return normalized;
-  return 'generated';
-}
-
-function normalizeStoredDraftReviewStatus(value: unknown, deps: StateStoreDeps): ReportDraftReviewStatus {
-  const normalized = deps.normalizeTextField(value);
-  if (normalized === 'draft_reviewing' || normalized === 'approved') return normalized;
-  return 'draft_generated';
-}
-
-export function normalizeStoredDraftModule(value: unknown, deps: StateStoreDeps, fallbackOrder = 0): ReportDraftModule | null {
-  if (!isRecord(value)) return null;
-
-  const moduleId = deps.normalizeTextField(value.moduleId) || deps.buildId('draftmod');
-  const moduleType = normalizeStoredDraftModuleType(value.moduleType, deps);
-  const title = deps.normalizeTextField(value.title) || '未命名模块';
-  const purpose = deps.normalizeTextField(value.purpose);
-  const contentDraft = deps.normalizeTextField(value.contentDraft);
-  const evidenceRefs = deps.normalizeStringList(value.evidenceRefs);
-  const bullets = deps.normalizeStringList(value.bullets);
-  const cards = Array.isArray(value.cards)
-    ? value.cards.map((item) => normalizeStoredPageCard(item, deps)).filter(Boolean) as Array<{ label?: string; value?: string; note?: string }>
-    : [];
-  const chartIntent = isRecord(value.chartIntent)
-    ? {
-        title: deps.normalizeTextField(value.chartIntent.title),
-        preferredChartType: deps.normalizeDraftChartType(value.chartIntent.preferredChartType),
-        items: Array.isArray(value.chartIntent.items)
-          ? value.chartIntent.items
-              .map((item) => normalizeStoredPageChart({ items: [item] }, deps)?.items?.[0] || null)
-              .filter(Boolean) as Array<{ label?: string; value?: number }>
-          : [],
-      }
-    : null;
-
-  return {
-    moduleId,
-    moduleType,
-    title,
-    purpose,
-    contentDraft,
-    evidenceRefs,
-    chartIntent,
-    cards,
-    bullets,
-    enabled: value.enabled !== false && normalizeStoredDraftModuleStatus(value.status, deps) !== 'disabled',
-    status: normalizeStoredDraftModuleStatus(value.status, deps),
-    order: Number.isFinite(Number(value.order)) ? Number(value.order) : fallbackOrder,
-    layoutType: deps.normalizeTextField(value.layoutType) || moduleType,
-  };
-}
-
-export function normalizeStoredDraft(value: unknown, deps: StateStoreDeps): ReportOutputDraft | null {
-  if (!isRecord(value)) return null;
-
-  const modules = Array.isArray(value.modules)
-    ? value.modules.map((item, index) => normalizeStoredDraftModule(item, deps, index)).filter(Boolean) as ReportDraftModule[]
-    : [];
-  if (!modules.length) return null;
-
-  const normalizeStoredDraftValue = (input: unknown) => normalizeStoredDraft(input, deps);
-  return hydrateDraftQuality({
-    reviewStatus: normalizeStoredDraftReviewStatus(value.reviewStatus, deps),
-    version: Math.max(1, Number(value.version || 1) || 1),
-    modules: modules.sort((left, right) => left.order - right.order),
-    history: Array.isArray(value.history)
-      ? value.history
-          .map((item) => normalizeStoredDraftHistoryEntry(item, {
-            buildId: deps.buildId,
-            normalizeTextField: deps.normalizeTextField,
-            normalizeVisualStylePreset: deps.normalizeVisualStylePreset,
-            normalizeStringList: deps.normalizeStringList,
-            normalizeStoredDraft: normalizeStoredDraftValue,
-          }))
-          .filter(Boolean) as NonNullable<ReportOutputDraft['history']>
-      : [],
-    lastEditedAt: deps.normalizeTextField(value.lastEditedAt),
-    approvedAt: deps.normalizeTextField(value.approvedAt),
-    audience: deps.normalizeTextField(value.audience),
-    objective: deps.normalizeTextField(value.objective),
-    layoutVariant: deps.normalizeTextField(value.layoutVariant) as ReportPlanLayoutVariant,
-    visualStyle: deps.normalizeVisualStylePreset(value.visualStyle),
-    mustHaveModules: deps.normalizeStringList(value.mustHaveModules),
-    optionalModules: deps.normalizeStringList(value.optionalModules),
-    evidencePriority: deps.normalizeStringList(value.evidencePriority),
-    audienceTone: deps.normalizeTextField(value.audienceTone),
-    riskNotes: deps.normalizeStringList(value.riskNotes),
-    visualMixTargets: normalizeDraftVisualMixTargets(value.visualMixTargets, deps.normalizeTextField),
-  });
-}
-
 function normalizeStoredTable(value: unknown, deps: StateStoreDeps): ReportOutputRecord['table'] | null {
   if (!isRecord(value)) return null;
   const columns = deps.normalizeStringList(value.columns);
@@ -461,3 +268,5 @@ export function normalizePersistedReportStateWithDeps(raw: unknown, deps: StateS
       : [],
   };
 }
+
+export { normalizeStoredDraft, normalizeStoredDraftModule } from './report-center-state-normalization-draft.js';

@@ -1,8 +1,6 @@
-import { getDatasourceCredentialSecret } from './datasource-credentials.js';
 import {
   clearWebCaptureSession,
   isWebCaptureSessionFresh,
-  loadWebCaptureCredential,
   saveWebCaptureSession,
 } from './web-capture-credentials.js';
 import {
@@ -29,71 +27,27 @@ import {
 import {
   buildTaskId,
   cleanupExpiredWebCaptureRawFiles,
-  computeNextRunAt,
   isTaskDue,
-  normalizeMaxItems,
-  normalizeStringList,
   normalizeStoredTask,
   normalizeUrl,
   readTasks,
-  resolveSeedUrls,
   writeTasks,
 } from './web-capture-task-store.js';
 import type { WebCaptureTask, WebCaptureTaskCreateInput } from './web-capture-types.js';
-import { resolveTaskCrawlMode } from './web-capture-discovery.js';
+import {
+  buildCaptureErrorResult,
+  buildDownloadCaptureResult,
+  buildPageCaptureResult,
+  createTaskFromInput,
+  prepareTaskForRun,
+  resolveRuntimeAccess,
+} from './web-capture-runner-support.js';
 
 const MAX_FETCH_ATTEMPTS_FACTOR = 3;
 
-type RuntimeAccess = {
-  auth?: RuntimeAuth;
-  headerOverrides?: Record<string, string>;
-  storedCredential?: Awaited<ReturnType<typeof loadWebCaptureCredential>>;
-  sessionCookieHeader?: string;
-};
-
-async function resolveRuntimeAccess(task: WebCaptureTask, auth?: RuntimeAuth): Promise<RuntimeAccess> {
-  if (auth?.username && auth?.password) {
-    return {
-      auth,
-      headerOverrides: undefined,
-      storedCredential: task.credentialRef ? await loadWebCaptureCredential(task.url) : null,
-      sessionCookieHeader: '',
-    };
-  }
-
-  let storedCredential = null;
-  let datasourceSecret = null;
-  if (task.credentialRef) {
-    storedCredential = await loadWebCaptureCredential(task.url);
-    datasourceSecret = await getDatasourceCredentialSecret(task.credentialRef);
-  }
-
-  const resolvedAuth = storedCredential?.username && storedCredential?.password
-    ? { username: storedCredential.username, password: storedCredential.password }
-    : datasourceSecret?.username && datasourceSecret?.password
-      ? { username: datasourceSecret.username, password: datasourceSecret.password }
-      : undefined;
-
-  return {
-    auth: resolvedAuth,
-    storedCredential,
-    sessionCookieHeader: String(datasourceSecret?.cookies || '').trim(),
-    headerOverrides: datasourceSecret?.headers && Object.keys(datasourceSecret.headers).length
-      ? datasourceSecret.headers
-      : undefined,
-  };
-}
-
 export async function runCapture(task: WebCaptureTask, now: string, auth?: RuntimeAuth) {
   try {
-    const normalizedTask = {
-      ...task,
-      maxItems: normalizeMaxItems(task.maxItems),
-      keywords: normalizeStringList(task.keywords),
-      siteHints: normalizeStringList(task.siteHints),
-      seedUrls: resolveSeedUrls(task.seedUrls, task.url),
-      crawlMode: resolveTaskCrawlMode(task),
-    };
+    const normalizedTask = prepareTaskForRun(task);
     const runtime = await resolveRuntimeAccess(normalizedTask, auth);
     const runtimeAuth = runtime.auth;
     const jar: CookieJar = new Map();
@@ -117,26 +71,7 @@ export async function runCapture(task: WebCaptureTask, now: string, auth?: Runti
       const summary = shouldKeepOriginalDownload(normalizedTask, landing.extension)
         ? `本次采集识别为可下载文件，已保留原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
         : `本次采集识别为可下载文件，已清洗为 Markdown 入库，原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
-      return {
-        ...normalizedTask,
-        title: landing.title || normalizedTask.url,
-        documentPath: storedDownload.documentPath,
-        markdownPath: storedDownload.markdownPath,
-        rawDocumentPath: storedDownload.rawDocumentPath,
-        rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
-        lastSummary: summary,
-        lastStatus: 'success' as const,
-        lastRunAt: now,
-        updatedAt: now,
-        nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
-        lastCollectedCount: 1,
-        lastCollectedItems: [{
-          title: landing.title || landing.fileName,
-          url: landing.url,
-          summary,
-          score: 100,
-        }],
-      };
+      return buildDownloadCaptureResult(normalizedTask, landing, storedDownload, summary, now);
     }
 
     if (runtimeAuth && isLikelyLoginPage(landing)) {
@@ -156,26 +91,7 @@ export async function runCapture(task: WebCaptureTask, now: string, auth?: Runti
         const summary = shouldKeepOriginalDownload(normalizedTask, loginResult.extension)
           ? `登录后返回可下载文件，已保留原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
           : `登录后返回可下载文件，已清洗为 Markdown 入库，原始 ${loginResult.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
-        return {
-          ...normalizedTask,
-          title: loginResult.title || normalizedTask.url,
-          documentPath: storedDownload.documentPath,
-          markdownPath: storedDownload.markdownPath,
-          rawDocumentPath: storedDownload.rawDocumentPath,
-          rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
-          lastSummary: summary,
-          lastStatus: 'success' as const,
-          lastRunAt: now,
-          updatedAt: now,
-          nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
-          lastCollectedCount: 1,
-          lastCollectedItems: [{
-            title: loginResult.title || loginResult.fileName,
-            url: loginResult.url,
-            summary,
-            score: 100,
-          }],
-        };
+        return buildDownloadCaptureResult(normalizedTask, loginResult, storedDownload, summary, now);
       }
       landing = isLikelyLoginPage(loginResult)
         ? await fetchWebPage(normalizedTask.url, runtimeAuth, jar, runtime.headerOverrides)
@@ -185,26 +101,7 @@ export async function runCapture(task: WebCaptureTask, now: string, auth?: Runti
         const summary = shouldKeepOriginalDownload(normalizedTask, landing.extension)
           ? `本次采集识别为可下载文件，已保留原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 并进入文档解析。`
           : `本次采集识别为可下载文件，已清洗为 Markdown 入库，原始 ${landing.extension.replace(/^\./, '').toUpperCase()} 将按策略自动回收。`;
-        return {
-          ...normalizedTask,
-          title: landing.title || normalizedTask.url,
-          documentPath: storedDownload.documentPath,
-          markdownPath: storedDownload.markdownPath,
-          rawDocumentPath: storedDownload.rawDocumentPath,
-          rawDeleteAfterAt: storedDownload.rawDeleteAfterAt,
-          lastSummary: summary,
-          lastStatus: 'success' as const,
-          lastRunAt: now,
-          updatedAt: now,
-          nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
-          lastCollectedCount: 1,
-          lastCollectedItems: [{
-            title: landing.title || landing.fileName,
-            url: landing.url,
-            summary,
-            score: 100,
-          }],
-        };
+        return buildDownloadCaptureResult(normalizedTask, landing, storedDownload, summary, now);
       }
     }
 
@@ -239,36 +136,9 @@ export async function runCapture(task: WebCaptureTask, now: string, auth?: Runti
       landing.extractionMethod,
     );
 
-    return {
-      ...normalizedTask,
-      title,
-      documentPath,
-      markdownPath: '',
-      rawDocumentPath: '',
-      rawDeleteAfterAt: '',
-      lastSummary: summary,
-      lastStatus: 'success' as const,
-      lastRunAt: now,
-      updatedAt: now,
-      nextRunAt: computeNextRunAt({ ...normalizedTask, lastRunAt: now }),
-      lastCollectedCount: entries.length,
-      lastCollectedItems: entries,
-    };
+    return buildPageCaptureResult(normalizedTask, title, summary, documentPath, entries, now);
   } catch (error) {
-    return {
-      ...task,
-      maxItems: normalizeMaxItems(task.maxItems),
-      markdownPath: '',
-      rawDocumentPath: '',
-      rawDeleteAfterAt: '',
-      lastRunAt: now,
-      updatedAt: now,
-      lastStatus: 'error' as const,
-      lastSummary: error instanceof Error ? error.message : 'capture failed',
-      nextRunAt: computeNextRunAt({ ...task, lastRunAt: now }),
-      lastCollectedCount: 0,
-      lastCollectedItems: [],
-    };
+    return buildCaptureErrorResult(task, now, error);
   }
 }
 
@@ -277,29 +147,7 @@ export async function createAndRunWebCaptureTask(input: WebCaptureTaskCreateInpu
   const existingItems = await readTasks();
   const normalizedUrl = normalizeUrl(input.url);
   const existing = existingItems.find((item) => normalizeUrl(item.url) === normalizedUrl);
-  const task: WebCaptureTask = {
-    id: existing?.id || buildTaskId(input.url),
-    url: input.url,
-    focus: input.focus?.trim() || '正文、关键信息、技术要点',
-    frequency: input.frequency || 'daily',
-    keywords: normalizeStringList(input.keywords ?? existing?.keywords),
-    siteHints: normalizeStringList(input.siteHints ?? existing?.siteHints),
-    seedUrls: resolveSeedUrls(input.seedUrls ?? existing?.seedUrls, input.url),
-    crawlMode: resolveTaskCrawlMode({
-      url: input.url,
-      crawlMode: input.crawlMode ?? existing?.crawlMode,
-      seedUrls: input.seedUrls ?? existing?.seedUrls,
-    } as { url: string; crawlMode?: DiscoveryCrawlMode; seedUrls?: string[] }),
-    note: input.note?.trim() || '',
-    maxItems: normalizeMaxItems(input.maxItems),
-    keepOriginalFiles: Boolean(input.keepOriginalFiles ?? existing?.keepOriginalFiles),
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    captureStatus: 'active',
-    loginMode: input.loginMode || (input.auth || input.credentialRef ? 'credential' : 'none'),
-    credentialRef: input.credentialRef || '',
-    credentialLabel: input.credentialLabel || '',
-  };
+  const task: WebCaptureTask = createTaskFromInput(input, existing, buildTaskId(input.url), now);
   const executedTask = await runCapture(task, now, input.auth);
   const nextItems = [executedTask, ...existingItems.filter((item) => item.id !== executedTask.id)];
   await writeTasks(nextItems);
