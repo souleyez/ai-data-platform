@@ -22,9 +22,12 @@ import {
   submitCredentialForMessage,
   submitQuestion,
 } from './home-controller-actions';
-import { normalizeDatasourceResponse } from './lib/types';
+import {
+  normalizeDatasourceResponse,
+  normalizeDocumentsResponse,
+} from './lib/types';
 import { normalizeGeneratedReportRecord } from './lib/generated-reports';
-import { initialMessages, sourceItems } from './lib/mock-data';
+import { initialMessages } from './lib/mock-data';
 
 const CHAT_CONSTRAINTS_STORAGE_KEY = 'aidp_home_chat_constraints_v1';
 const CHAT_CONVERSATION_STATE_STORAGE_KEY = 'aidp_home_chat_conversation_state_v1';
@@ -95,7 +98,25 @@ function loadStoredChatDebugDetailsEnabled() {
   }
 }
 
-export function useHomePageController() {
+function normalizeInitialDocumentsSnapshot(snapshot) {
+  const libraries = Array.isArray(snapshot?.libraries) ? snapshot.libraries : [];
+  const totalFromLibraries = libraries.reduce(
+    (sum, library) => sum + Number(library?.documentCount || 0),
+    0,
+  );
+
+  return {
+    libraries,
+    totalDocuments: totalFromLibraries || Number(snapshot?.totalDocuments || 0),
+  };
+}
+
+export function useHomePageController({ initialDocumentsSnapshot = null } = {}) {
+  const normalizedInitialDocumentsSnapshot = normalizeInitialDocumentsSnapshot(initialDocumentsSnapshot);
+  const hasInitialDocumentsSnapshot = (
+    normalizedInitialDocumentsSnapshot.totalDocuments > 0
+    || normalizedInitialDocumentsSnapshot.libraries.length > 0
+  );
   const [messages, setMessages] = useState(() => loadStoredChatMessages(initialMessages));
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
@@ -105,15 +126,18 @@ export function useHomePageController() {
   const [selectedReportItem, setSelectedReportItem] = useState(null);
   const [reportDetailLoading, setReportDetailLoading] = useState(false);
   const hasAutoSelectedReportRef = useRef(false);
-  const [sidebarSources, setSidebarSources] = useState(sourceItems);
+  const [sidebarSources, setSidebarSources] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
-  const [documentLibraries, setDocumentLibraries] = useState([]);
-  const [documentTotal, setDocumentTotal] = useState(0);
+  const [documentLibraries, setDocumentLibraries] = useState(normalizedInitialDocumentsSnapshot.libraries);
+  const [documentTotal, setDocumentTotal] = useState(normalizedInitialDocumentsSnapshot.totalDocuments);
   const [selectedManualLibraries, setSelectedManualLibraries] = useState({});
-  const [preferredLibraries, setPreferredLibraries] = useState(() => loadStoredPreferredLibraries());
-  const preferredLibrariesInitializedRef = useRef(false);
+  const [preferredLibraries, setPreferredLibraries] = useState(() => {
+    const stored = loadStoredPreferredLibraries();
+    if (!normalizedInitialDocumentsSnapshot.libraries.length) return stored;
+    return stored.filter((key) => normalizedInitialDocumentsSnapshot.libraries.some((item) => item.key === key));
+  });
   const [systemConstraints, setSystemConstraints] = useState(() => loadStoredSystemConstraints());
   const [conversationState, setConversationState] = useState(() => loadStoredConversationState());
   const [chatDebugAvailable] = useState(() => resolveChatDebugAvailability());
@@ -127,18 +151,17 @@ export function useHomePageController() {
       const normalized = normalizeDatasourceResponse(json);
       setSidebarSources(Array.isArray(normalized.items) ? normalized.items : []);
     } catch {
-      setSidebarSources(sourceItems);
+      setSidebarSources([]);
     }
   }
 
   async function loadDocumentSnapshot() {
     try {
-      const json = await fetchDocumentsSnapshot();
+      const json = normalizeDocumentsResponse(await fetchDocumentsSnapshot());
       const libraries = Array.isArray(json?.libraries) ? json.libraries : [];
       const total = libraries.reduce((sum, library) => sum + Number(library?.documentCount || 0), 0);
       setDocumentLibraries(libraries);
       setDocumentTotal(total || Number(json?.totalFiles || 0));
-      if (libraries.length) preferredLibrariesInitializedRef.current = true;
       setPreferredLibraries((current) => (
         Array.isArray(current) && current.length
           ? current.filter((key) => libraries.some((item) => item.key === key))
@@ -165,10 +188,22 @@ export function useHomePageController() {
   }
 
   useEffect(() => {
-    loadDatasources();
-    loadDocumentSnapshot();
-    loadReports();
-  }, []);
+    if (!hasInitialDocumentsSnapshot) {
+      void loadDocumentSnapshot();
+    }
+
+    const datasourcesTimer = window.setTimeout(() => {
+      void loadDatasources();
+    }, hasInitialDocumentsSnapshot ? 180 : 260);
+    const reportsTimer = window.setTimeout(() => {
+      void loadReports();
+    }, hasInitialDocumentsSnapshot ? 420 : 520);
+
+    return () => {
+      window.clearTimeout(datasourcesTimer);
+      window.clearTimeout(reportsTimer);
+    };
+  }, [hasInitialDocumentsSnapshot]);
 
   useEffect(() => {
     if (!reportItems.some((item) => item?.status === 'processing')) return undefined;

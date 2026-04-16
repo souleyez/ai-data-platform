@@ -36,6 +36,7 @@ export default function HomeWorkspaceToolbar({
   initialModelState = INITIAL_MODEL_STATE,
   fullIntelligenceSlot = null,
   currentPath = '/',
+  skipInitialModelRefresh = false,
 }) {
   const [modelState, setModelState] = useState(initialModelState);
   const [modelBusy, setModelBusy] = useState(false);
@@ -70,7 +71,9 @@ export default function HomeWorkspaceToolbar({
       }
     }
 
-    void loadModelState();
+    if (!skipInitialModelRefresh) {
+      void loadModelState();
+    }
     if (typeof window !== 'undefined') {
       const refresh = () => {
         void loadModelState();
@@ -84,7 +87,7 @@ export default function HomeWorkspaceToolbar({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [skipInitialModelRefresh]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;

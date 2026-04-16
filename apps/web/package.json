@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3000"
+    "start": "node server.js"
   },
   "dependencies": {
     "echarts": "5.6.0",

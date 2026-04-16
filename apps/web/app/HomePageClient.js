@@ -31,8 +31,12 @@ function sortLibrariesForRail(libraries = []) {
   });
 }
 
-export default function HomePageClient({ initialModelState }) {
-  const [mobileViewport, setMobileViewport] = useState(false);
+export default function HomePageClient({
+  initialDocumentsSnapshot = null,
+  initialModelState,
+  initialViewportMode = 'desktop',
+}) {
+  const [mobileViewport, setMobileViewport] = useState(initialViewportMode === 'mobile');
   const {
     acceptIngestGroupSuggestion,
     assignIngestToSelectedLibrary,
@@ -69,7 +73,9 @@ export default function HomePageClient({ initialModelState }) {
     uploadInputRef,
     uploadLoading,
     setChatDebugDetailsEnabled,
-  } = useHomePageController();
+  } = useHomePageController({
+    initialDocumentsSnapshot,
+  });
   const [libraryCreateBusy, setLibraryCreateBusy] = useState(false);
 
   useEffect(() => {
@@ -181,6 +187,7 @@ export default function HomePageClient({ initialModelState }) {
           currentPath="/"
           sourceItems={sidebarSources}
           initialModelState={initialModelState}
+          skipInitialModelRefresh
           fullIntelligenceSlot={(
             <FullIntelligenceModeButton
               compact
