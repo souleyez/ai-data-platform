@@ -1,5 +1,6 @@
 import type { OpenClawMemoryCatalogSnapshot } from './openclaw-memory-catalog.js';
 import {
+  shouldPreferLibraryDirectorySummary,
   filterOpenClawMemoryCatalogSnapshot,
   formatTimestamp,
   shouldIncludeDocumentDirectorySection,
@@ -10,6 +11,7 @@ import {
 import {
   buildDocumentDirectoryAnswerLines,
   buildDocumentSection,
+  buildLibraryDirectoryAnswerLines,
   buildLibrarySection,
   buildOutputDirectoryAnswerLines,
   buildOutputSection,
@@ -77,6 +79,15 @@ export function buildOpenClawLongTermMemoryDirectAnswer(input: {
   const lines = [
     `当前长期记忆目录覆盖 ${scoped.libraries.length} 个分组、${scoped.documents.length} 份文档、${scoped.outputs.length} 份已出报表。`,
   ];
+
+  if (shouldPreferLibraryDirectorySummary(input.requestText)) {
+    if (scoped.libraries.length) {
+      lines.push('', '分组概览：', ...buildLibraryDirectoryAnswerLines(scoped));
+    } else {
+      lines.push('', '分组概览：当前范围内没有分组。');
+    }
+    return lines.join('\n');
+  }
 
   if (shouldIncludeDocumentDirectorySection(input.requestText)) {
     if (scoped.documents.length) {

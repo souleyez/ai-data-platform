@@ -22,6 +22,18 @@ export function buildLibrarySection(input: {
   return lines.join('\n');
 }
 
+export function buildLibraryDirectoryAnswerLines(input: {
+  libraries: OpenClawMemoryLibrarySnapshot[];
+  outputs: OpenClawMemoryReportOutputSnapshot[];
+}) {
+  return input.libraries.map((library, index) => {
+    const relatedOutputCount = input.outputs.filter((output) => (
+      output.libraryKeys.includes(library.key) || output.libraryLabels.includes(library.label)
+    )).length;
+    return `${index + 1}. ${trimText(library.label, 48)}｜文档：${library.documentCount} 份｜可用：${library.availableCount} 份｜已出报表：${relatedOutputCount} 份｜最近更新：${formatTimestamp(library.latestUpdateAt)}`;
+  });
+}
+
 export function buildDocumentSection(input: {
   documents: OpenClawMemoryDocumentCard[];
   libraries: OpenClawMemoryLibrarySnapshot[];

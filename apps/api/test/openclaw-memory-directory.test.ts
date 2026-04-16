@@ -192,6 +192,21 @@ test('resolveOpenClawLongTermMemoryRequestedLibraries should only scope when the
   assert.deepEqual(explicitScope, [{ key: 'orders', label: '订单分析' }]);
 });
 
+test('buildOpenClawLongTermMemoryDirectAnswer should keep grouped count requests at the library level', () => {
+  const answer = buildOpenClawLongTermMemoryDirectAnswer({
+    snapshot,
+    requestText: '只按库分组列集合和数量',
+  });
+
+  assert.match(answer, /当前长期记忆目录覆盖 2 个分组、3 份文档、2 份已出报表/);
+  assert.match(answer, /分组概览：/);
+  assert.match(answer, /1\. 订单分析｜文档：2 份｜可用：2 份｜已出报表：1 份/);
+  assert.match(answer, /2\. 合同资料｜文档：1 份｜可用：1 份｜已出报表：1 份/);
+  assert.doesNotMatch(answer, /文档清单：/);
+  assert.doesNotMatch(answer, /订单日报/);
+  assert.doesNotMatch(answer, /采购合同/);
+});
+
 test('buildOpenClawLongTermMemoryDirectAnswer should enumerate documents and outputs from long-term memory', () => {
   const answer = buildOpenClawLongTermMemoryDirectAnswer({
     snapshot,

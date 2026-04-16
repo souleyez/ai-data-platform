@@ -216,7 +216,7 @@ test('executeKnowledgeAnswer should expose catalog snapshot details in fallback 
   }
 });
 
-test('executeKnowledgeAnswer should answer platform-wide directory questions without being narrowed by preferred libraries', async () => {
+test('executeKnowledgeAnswer should keep platform-wide grouped count questions at the library level', async () => {
   const previousUrl = process.env.OPENCLAW_GATEWAY_URL;
   const previousToken = process.env.OPENCLAW_GATEWAY_TOKEN;
   delete process.env.OPENCLAW_GATEWAY_URL;
@@ -337,15 +337,18 @@ test('executeKnowledgeAnswer should answer platform-wide directory questions wit
       ],
     }, async () => {
       const result = await executeKnowledgeAnswer({
-        prompt: '按库分组下，先告诉我有哪些集合',
+        prompt: '只按库分组列集合和数量',
         preferredLibraries: [{ key: 'orders', label: '订单分析' }],
         chatHistory: [],
         answerMode: 'catalog_memory',
       });
 
       assert.match(result.content, /当前长期记忆目录覆盖 2 个分组、3 份文档、1 份已出报表/);
-      assert.match(result.content, /订单日报/);
-      assert.match(result.content, /方案说明/);
+      assert.match(result.content, /分组概览：/);
+      assert.match(result.content, /订单分析｜文档：2 份｜可用：2 份｜已出报表：1 份/);
+      assert.match(result.content, /bids｜文档：1 份｜可用：1 份｜已出报表：0 份/);
+      assert.doesNotMatch(result.content, /订单日报/);
+      assert.doesNotMatch(result.content, /方案说明/);
     });
   } finally {
     if (previousUrl === undefined) delete process.env.OPENCLAW_GATEWAY_URL;

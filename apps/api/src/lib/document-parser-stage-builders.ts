@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { buildStructuredProfile } from './document-schema.js';
+import { buildStructuredProfile, isLikelyResumePersonName } from './document-schema.js';
 import {
   buildCatchErrorParsedDocument,
   buildDetailedParsedDocument,
@@ -13,6 +13,33 @@ import type {
   TableSummary,
 } from './document-parser-types.js';
 import type { DocumentExtractionProfile } from './document-extraction-governance.js';
+
+const RESUME_TITLE_FIELD_LABEL_PATTERN = /^(?:技能|技能标签|核心技能|专业技能|技术栈|项目经历|工作经历|教育经历|求职意向|目标岗位|应聘岗位|当前职位|最近公司|现任公司|姓名|name|候选人|年龄|工作经验|学历|专业|期望城市|意向城市|期望薪资|薪资要求)[:：]/i;
+const RESUME_TITLE_SKILL_LIST_PATTERN = /(java|python|react|go|sql|mysql|redis|kafka|spring|vue|node(?:\.js)?|typescript|javascript|微服务|erp|数据平台|axure|xmind|数据分析|项目管理|产品设计)/i;
+
+function formatResumeDocumentTitle(candidateName: string) {
+  return /[A-Za-z]/.test(candidateName) && !/[\u4e00-\u9fff]/.test(candidateName)
+    ? `${candidateName} Resume`
+    : `${candidateName}简历`;
+}
+
+function resolveParsedDocumentTitle(input: Pick<SharedStageInput, 'title' | 'schemaType' | 'resumeFields'>) {
+  const title = String(input.title || '').trim();
+  if (input.schemaType !== 'resume') return title;
+
+  const candidateName = String(input.resumeFields?.candidateName || '').trim();
+  if (!isLikelyResumePersonName(candidateName)) return title;
+
+  const preferredTitle = formatResumeDocumentTitle(candidateName);
+  if (!title) return preferredTitle;
+  if (title === preferredTitle) return title;
+  if (/^(?:个人简历|简历|resume|cv)$/i.test(title)) return preferredTitle;
+  if (RESUME_TITLE_FIELD_LABEL_PATTERN.test(title)) return preferredTitle;
+  if (!title.includes(candidateName) && /[、,，/|]/.test(title) && RESUME_TITLE_SKILL_LIST_PATTERN.test(title)) {
+    return preferredTitle;
+  }
+  return title;
+}
 
 type SharedStageInput = {
   filePath: string;
@@ -51,15 +78,17 @@ type SharedStageInput = {
 export function buildQuickStageParsedDocument(
   input: SharedStageInput,
 ) {
+  const resolvedTitle = resolveParsedDocumentTitle(input);
   return buildQuickParsedDocument({
     ...input,
+    title: resolvedTitle,
     evidenceChunks: [],
     entities: [],
     claims: [],
     intentSlots: {},
     structuredProfile: buildStructuredProfile({
       schemaType: input.schemaType,
-      title: input.title,
+      title: resolvedTitle,
       topicTags: input.topicTags,
       summary: input.summary,
       contractFields: input.contractFields,
@@ -84,11 +113,13 @@ type DetailedStageInput = SharedStageInput & {
 export function buildDetailedStageParsedDocument(
   input: DetailedStageInput,
 ) {
+  const resolvedTitle = resolveParsedDocumentTitle(input);
   return buildDetailedParsedDocument({
     ...input,
+    title: resolvedTitle,
     structuredProfile: buildStructuredProfile({
       schemaType: input.schemaType,
-      title: input.title,
+      title: resolvedTitle,
       topicTags: input.topicTags,
       summary: input.summary,
       contractFields: input.contractFields,

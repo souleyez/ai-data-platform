@@ -126,3 +126,14 @@ export function shouldIncludeDocumentDirectorySection(requestText: string) {
   }
   return true;
 }
+
+export function shouldPreferLibraryDirectorySummary(requestText: string) {
+  const source = normalizeRequestText(requestText).toLowerCase();
+  if (!source) return false;
+
+  const requestsLibraryGrouping = /(只按库|按库分组|按分组|分组下|各库|每个库|哪些集合|有哪些集合|集合和数量|库级|library group|group by library)/i.test(source);
+  if (!requestsLibraryGrouping) return false;
+
+  const requestsDetailLists = /(文档清单|文档列表|文件列表|资料列表|报表列表|文档摘要|文件摘要|报表摘要|详情|细节|具体文档|具体报表|document list|document summary|report summary|details?)/i.test(source);
+  return !requestsDetailLists;
+}
