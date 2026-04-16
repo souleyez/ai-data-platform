@@ -194,27 +194,6 @@ export default function ReportResultsPanel({
   function renderFeaturedExpanded() {
     return (
       <div className="report-results-featured-shell">
-        <aside className="report-results-featured-list">
-          <div className="report-results-featured-list-head">
-            <strong>已出报表</strong>
-            <span>{items.length} 份</span>
-          </div>
-          <section className="report-center-list report-center-list-featured">
-            {items.map((item) => (
-              <ReportResultItem
-                key={item.id}
-                item={item}
-                expanded={item.id === activeId}
-                collapsed
-                onSelect={handleSelect}
-                onDeleteReport={onDeleteReport}
-                onRequestExpand={onRequestExpand}
-                stickySelection
-              />
-            ))}
-          </section>
-        </aside>
-
         <section className="report-results-featured-main">
           <div className="panel-header report-results-featured-header">
             <div className="report-results-featured-copy">
@@ -227,6 +206,12 @@ export default function ReportResultsPanel({
               {activeItemReadiness ? (
                 <div className={`report-list-chip ${activeItemReadiness.className}`.trim()}>{activeItemReadiness.label}</div>
               ) : null}
+              <div className="report-results-featured-summary">
+                <span className="report-list-chip">{items.length} 份已出报表</span>
+                {activeIndex >= 0 ? (
+                  <span className="report-list-chip">当前 {activeIndex + 1} / {items.length}</span>
+                ) : null}
+              </div>
             </div>
             <div className="report-results-toolbar">
               {activeItemCanEditDraft ? (
