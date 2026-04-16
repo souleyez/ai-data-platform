@@ -55,7 +55,7 @@ docker compose -f deploy/docker-compose.host-openclaw.yml up -d --build
 If the target server cannot pull base images, use the prebuilt runtime shape instead:
 
 ```bash
-docker compose -f deploy/docker-compose.host-openclaw-prebuilt.yml up -d
+docker compose -f deploy/docker-compose.host-openclaw-prebuilt.yml up -d --build
 ```
 
 ## Stop
@@ -72,6 +72,7 @@ docker compose -f deploy/docker-compose.host-openclaw.yml down
 - If host `openclaw` runs on a different port or host IP, override `OPENCLAW_GATEWAY_URL`.
 - If you want Nginx in front, point it to host `127.0.0.1:3002` for web and `127.0.0.1:3100` for API.
 - The prebuilt runtime shape expects a `prebuilt-runtime/` directory at the repository root that preserves the repo layout for `apps/api`, `apps/web`, `apps/worker`, `config`, `default-samples`, `skills`, and `tools`.
+- The prebuilt runtime API service now derives a thin local Debian-based compatibility image from `postgres:17` and installs distro `nodejs`, so native DuckDB bindings run against a real glibc userspace even when the server cannot pull `node:*-bookworm-slim`.
 
 ## Host OpenClaw Gateway
 

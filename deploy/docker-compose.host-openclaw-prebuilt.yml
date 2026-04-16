@@ -2,7 +2,10 @@ name: ai-data-platform
 
 services:
   api:
-    image: langfuse/langfuse:3
+    build:
+      context: .
+      dockerfile: docker/langfuse-runtime-compat.Dockerfile
+    image: ai-data-platform/langfuse-runtime-compat:3
     working_dir: /srv/ai-data-platform/apps/api
     entrypoint: ["node", "dist/server.js"]
     env_file:

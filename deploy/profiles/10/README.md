@@ -69,6 +69,9 @@ Template:
 Current update flow after GitHub changes:
 
 1. SSH to 10
-2. run [deploy/server/update-server.sh](/C:/Users/soulzyn/Desktop/codex/ai-data-platform/deploy/server/update-server.sh)
-3. verify `http://127.0.0.1:3100/api/health`
-4. verify the node-specific entrypoint
+2. sync the latest `prebuilt-runtime/` and deployment files to `/home/xigma01/src/ai-data-platform`
+3. run `docker compose -f /home/xigma01/src/ai-data-platform/deploy/docker-compose.host-openclaw-prebuilt.yml up -d --build`
+4. verify `http://127.0.0.1:3100/api/health`
+5. verify the node-specific entrypoint
+
+The 10 server currently does not run the standard git worktree + systemd app-node shape. It runs the prebuilt runtime Docker deployment, and the API service needs the local Debian-based compatibility image build so DuckDB native bindings can load correctly.
