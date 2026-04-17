@@ -238,6 +238,11 @@ export function normalizeDatasourceResponse(data) {
 }
 
 export function normalizeDocumentsResponse(data) {
+  const libraryCounts = (
+    data?.meta?.libraryCounts
+    && typeof data.meta.libraryCounts === 'object'
+    && !Array.isArray(data.meta.libraryCounts)
+  ) ? data.meta.libraryCounts : {};
   const normalizeDocumentItem = (item = {}) => ({
     ...item,
     id: item.id || item.path || `document-${Math.random().toString(36).slice(2)}`,
@@ -272,7 +277,14 @@ export function normalizeDocumentsResponse(data) {
     cacheHit: Boolean(data?.cacheHit),
     lastScanAt: data?.lastScanAt || new Date().toISOString(),
     config: data?.config || null,
-    libraries: Array.isArray(data?.libraries) ? data.libraries : [],
+    libraries: Array.isArray(data?.libraries)
+      ? data.libraries.map((library) => ({
+          ...library,
+          documentCount: Number.isFinite(Number(library?.documentCount))
+            ? Number(library.documentCount)
+            : Number(libraryCounts?.[library?.key] || 0),
+        }))
+      : [],
     meta: data?.meta || null,
   };
 }

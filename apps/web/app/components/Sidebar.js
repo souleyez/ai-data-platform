@@ -239,8 +239,8 @@ export default function Sidebar({
       <section className="side-card">
         <div className="card-title">已连接数据源</div>
         <ul className="source-list">
-          {sourceItems.map((item) => (
-            <li key={item.name}>
+          {sourceItems.map((item, index) => (
+            <li key={`${item.name || 'source'}-${item.status || 'idle'}-${index}`}>
               <span className={`dot ${item.status}`}></span>
               {item.name}
             </li>

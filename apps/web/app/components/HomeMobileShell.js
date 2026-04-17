@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { formatGeneratedReportTime } from '../lib/generated-reports';
 import { orderLibrariesWithSelectedFirst } from '../lib/home-dataset-rail-order.mjs';
 import { buildMobileDatasetSummary } from '../lib/home-mobile-shell-support.mjs';
@@ -140,7 +140,7 @@ export default function HomeMobileShell({
     closeAllSurfaces();
   }, [reportItems.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === 'undefined') return undefined;
     const { documentElement, body } = document;
     const prevHtmlOverflow = documentElement.style.overflow;
@@ -161,7 +161,7 @@ export default function HomeMobileShell({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const shell = shellRef.current;
     if (!(shell instanceof HTMLElement)) return undefined;
@@ -173,15 +173,17 @@ export default function HomeMobileShell({
     }
 
     syncViewportHeight();
+    const rafId = window.requestAnimationFrame(syncViewportHeight);
+    const settleTimeout = window.setTimeout(syncViewportHeight, 120);
     const visualViewport = window.visualViewport;
     visualViewport?.addEventListener('resize', syncViewportHeight);
-    visualViewport?.addEventListener('scroll', syncViewportHeight);
     window.addEventListener('resize', syncViewportHeight);
     window.addEventListener('orientationchange', syncViewportHeight);
 
     return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(settleTimeout);
       visualViewport?.removeEventListener('resize', syncViewportHeight);
-      visualViewport?.removeEventListener('scroll', syncViewportHeight);
       window.removeEventListener('resize', syncViewportHeight);
       window.removeEventListener('orientationchange', syncViewportHeight);
     };

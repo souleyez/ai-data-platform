@@ -108,17 +108,20 @@ button, textarea { font: inherit; }
 }
 .home-shell {
   min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--bg-elevated);
 }
 .home-main-panel {
-  min-height: 100vh;
-  height: 100vh;
-  padding: 0 20px 20px;
+  min-height: 100%;
+  height: 100%;
+  padding: 0 20px 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
   position: relative;
   isolation: isolate;
+  overflow: hidden;
 }
 .home-main-panel::before {
   content: '';
@@ -1613,16 +1616,23 @@ html[data-theme='dark'] .connected-bot-expand-indicator {
   flex-direction: column;
   align-items: stretch;
   gap: 12px;
+  padding-bottom: 0;
+}
+.home-chat-stage .chat-panel.chat-panel-compact {
+  padding: 14px 14px 0;
 }
 .home-chat-stage .chat-messages {
   flex: 1 1 auto;
   min-height: 0;
+  padding-bottom: 12px;
 }
 .home-chat-stage .chat-composer-wrap {
   position: relative;
   bottom: auto;
   flex: 0 0 auto;
   margin-top: auto;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .homepage-grid { display: grid; gap: 20px; }
 .homepage-grid-tight {
@@ -5277,9 +5287,10 @@ tbody tr:hover {
   }
 
   .mobile-home-shell {
-    position: relative;
-    min-height: var(--mobile-home-viewport-height, 100dvh);
-    height: var(--mobile-home-viewport-height, 100dvh);
+    position: fixed;
+    inset: 0;
+    min-height: var(--mobile-home-viewport-height, 100svh);
+    height: var(--mobile-home-viewport-height, 100svh);
     overflow: hidden;
     overscroll-behavior: none;
     background:
@@ -5332,7 +5343,7 @@ tbody tr:hover {
 
   .mobile-home-stage {
     position: relative;
-    height: calc(var(--mobile-home-viewport-height, 100dvh) - 52px);
+    height: calc(var(--mobile-home-viewport-height, 100svh) - 52px);
     min-height: 0;
     overflow: hidden;
     overscroll-behavior: none;
@@ -5347,7 +5358,7 @@ tbody tr:hover {
     position: relative;
     height: 100% !important;
     min-height: 0;
-    padding: 0 0 calc(172px + env(safe-area-inset-bottom));
+    padding: 0;
     gap: 0;
     background: transparent !important;
     border: 0 !important;
@@ -5356,8 +5367,10 @@ tbody tr:hover {
   }
 
   .chat-panel-mobile-home .chat-messages {
-    height: 100%;
-    padding: 12px 14px 236px;
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 12px 14px 16px;
     gap: 14px;
   }
 
@@ -5400,18 +5413,15 @@ tbody tr:hover {
   }
 
   .chat-panel-mobile-home .chat-composer-wrap {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
     z-index: 58;
     margin: 0;
+    margin-top: auto;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     border-radius: 0;
     background:
       linear-gradient(180deg, rgba(4, 7, 12, 0) 0%, rgba(4, 7, 12, 0.36) 22%, rgba(6, 9, 14, 0.9) 62%, rgba(6, 9, 14, 0.98) 100%);
     box-shadow: none;
-    transform: translateZ(0);
     overscroll-behavior: none;
     touch-action: manipulation;
   }

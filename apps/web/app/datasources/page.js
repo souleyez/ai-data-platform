@@ -178,6 +178,10 @@ export default function DatasourcesPage() {
       : runs.filter((run) => (run.libraryKeys || []).some((key) => selectedLibraryKeySet.has(key)));
     return scopedRuns.slice(0, 10);
   }, [runs, selectedLibraryKeySet]);
+  const unlockedLibraryKeys = useMemo(
+    () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
+    [datasetSecretState],
+  );
 
   useEffect(() => {
     const unlockedSet = new Set(unlockedLibraryKeys);
@@ -212,11 +216,6 @@ export default function DatasourcesPage() {
       setError('复制外部上传链接失败，请手动复制。');
     }
   }
-
-  const unlockedLibraryKeys = useMemo(
-    () => Array.isArray(datasetSecretState?.unlockedLibraryKeys) ? datasetSecretState.unlockedLibraryKeys : [],
-    [datasetSecretState],
-  );
 
   function toggleTargetLibrary(key) {
     const library = libraries.find((item) => item.key === key);

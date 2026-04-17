@@ -319,8 +319,8 @@ export default function HomeWorkspaceToolbar({
           <div className="home-toolbar-flyout-panel">
             <div className="home-toolbar-flyout-title">已连接数据源</div>
             <div className="home-toolbar-source-list">
-              {sourceItems.map((item) => (
-                <div key={item.name} className="home-toolbar-source-item">
+              {sourceItems.map((item, index) => (
+                <div key={`${item.name || 'source'}-${item.status || 'idle'}-${index}`} className="home-toolbar-source-item">
                   <span className={`dot ${item.status}`}></span>
                   <span>{item.name}</span>
                 </div>
