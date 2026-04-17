@@ -11,7 +11,50 @@ function findStandaloneServer() {
   return STANDALONE_SERVER_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || '';
 }
 
+function recreatePath(targetPath, sourcePath) {
+  fs.rmSync(targetPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+
+  const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+  try {
+    fs.symlinkSync(sourcePath, targetPath, symlinkType);
+  } catch {
+    fs.cpSync(sourcePath, targetPath, { recursive: true });
+  }
+}
+
+function ensureStandaloneRuntimeAssets(serverPath) {
+  const standaloneAppDir = path.dirname(serverPath);
+  const runtimeAssets = [
+    {
+      sourcePath: path.join(__dirname, '.next', 'static'),
+      targetPath: path.join(standaloneAppDir, '.next', 'static'),
+    },
+    {
+      sourcePath: path.join(__dirname, 'public'),
+      targetPath: path.join(standaloneAppDir, 'public'),
+    },
+  ];
+
+  runtimeAssets.forEach(({ sourcePath, targetPath }) => {
+    if (!fs.existsSync(sourcePath)) return;
+
+    let shouldRefresh = true;
+    if (fs.existsSync(targetPath)) {
+      try {
+        shouldRefresh = fs.realpathSync(targetPath) !== fs.realpathSync(sourcePath);
+      } catch {
+        shouldRefresh = true;
+      }
+    }
+
+    if (!shouldRefresh) return;
+    recreatePath(targetPath, sourcePath);
+  });
+}
+
 function runStandaloneServer(serverPath) {
+  ensureStandaloneRuntimeAssets(serverPath);
   process.chdir(path.dirname(serverPath));
   require(serverPath);
 }
