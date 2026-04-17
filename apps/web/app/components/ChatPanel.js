@@ -107,7 +107,7 @@ function FormulaTable({ table }) {
         {table.subtitle ? <div className="formula-table-subtitle">{table.subtitle}</div> : null}
       </div>
 
-      <div className="formula-table-scroll">
+      <div className="formula-table-scroll" data-mobile-home-no-swipe="true">
         <table className="formula-table">
           <thead>
             <tr>

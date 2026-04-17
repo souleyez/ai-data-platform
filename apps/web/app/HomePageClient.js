@@ -109,27 +109,6 @@ export default function HomePageClient({
     document.documentElement.style.colorScheme = 'dark';
   }, []);
 
-  useEffect(() => {
-    if (mobileViewport || typeof document === 'undefined') return undefined;
-    const { documentElement, body } = document;
-    const prevHtmlOverflow = documentElement.style.overflow;
-    const prevHtmlOverscroll = documentElement.style.overscrollBehavior;
-    const prevBodyOverflow = body.style.overflow;
-    const prevBodyOverscroll = body.style.overscrollBehavior;
-
-    documentElement.style.overflow = 'hidden';
-    documentElement.style.overscrollBehavior = 'none';
-    body.style.overflow = 'hidden';
-    body.style.overscrollBehavior = 'none';
-
-    return () => {
-      documentElement.style.overflow = prevHtmlOverflow;
-      documentElement.style.overscrollBehavior = prevHtmlOverscroll;
-      body.style.overflow = prevBodyOverflow;
-      body.style.overscrollBehavior = prevBodyOverscroll;
-    };
-  }, [mobileViewport]);
-
   const orderedLibraries = useMemo(
     () => sortLibrariesForRail(documentLibraries),
     [documentLibraries],
