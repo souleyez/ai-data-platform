@@ -1,7 +1,8 @@
 import { proxyJson } from '../../../_proxy';
 
 export async function PATCH(request, { params }) {
-  const key = encodeURIComponent(params?.key || '');
+  const resolvedParams = await params;
+  const key = encodeURIComponent(resolvedParams?.key || '');
   const body = await request.text();
   return proxyJson(`/api/reports/template/${key}`, {
     method: 'PATCH',
@@ -10,7 +11,8 @@ export async function PATCH(request, { params }) {
 }
 
 export async function DELETE(_request, { params }) {
-  const key = encodeURIComponent(params?.key || '');
+  const resolvedParams = await params;
+  const key = encodeURIComponent(resolvedParams?.key || '');
   return proxyJson(`/api/reports/template/${key}`, {
     method: 'DELETE',
   });

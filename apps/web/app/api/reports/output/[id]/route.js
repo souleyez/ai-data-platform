@@ -3,7 +3,8 @@ import { buildBackendApiUrl } from '../../../../lib/config';
 
 export async function GET(_request, { params }) {
   try {
-    const id = encodeURIComponent(params?.id || '');
+    const resolvedParams = await params;
+    const id = encodeURIComponent(resolvedParams?.id || '');
     const response = await fetch(buildBackendApiUrl(`/api/reports/output/${id}`), {
       cache: 'no-store',
     });
@@ -18,8 +19,8 @@ export async function GET(_request, { params }) {
     return NextResponse.json(
       {
         error: 'proxy_request_failed',
-        path: `/api/reports/output/${params?.id || ''}`,
-        backendUrl: buildBackendApiUrl(`/api/reports/output/${params?.id || ''}`),
+        path: `/api/reports/output/${id}`,
+        backendUrl: buildBackendApiUrl(`/api/reports/output/${id}`),
         message: error instanceof Error ? error.message : String(error),
       },
       { status: 502 },
@@ -29,7 +30,8 @@ export async function GET(_request, { params }) {
 
 export async function DELETE(_request, { params }) {
   try {
-    const id = encodeURIComponent(params?.id || '');
+    const resolvedParams = await params;
+    const id = encodeURIComponent(resolvedParams?.id || '');
     const response = await fetch(buildBackendApiUrl(`/api/reports/output/${id}`), {
       method: 'DELETE',
       cache: 'no-store',
@@ -45,8 +47,8 @@ export async function DELETE(_request, { params }) {
     return NextResponse.json(
       {
         error: 'proxy_request_failed',
-        path: `/api/reports/output/${params?.id || ''}`,
-        backendUrl: buildBackendApiUrl(`/api/reports/output/${params?.id || ''}`),
+        path: `/api/reports/output/${id}`,
+        backendUrl: buildBackendApiUrl(`/api/reports/output/${id}`),
         message: error instanceof Error ? error.message : String(error),
       },
       { status: 502 },

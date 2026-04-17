@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { buildBackendApiUrl } from '../../../../../lib/config';
 
 export async function GET(request, { params }) {
-  const id = encodeURIComponent(params?.id || '');
+  const resolvedParams = await params;
+  const id = encodeURIComponent(resolvedParams?.id || '');
   const templateKey = encodeURIComponent(request.nextUrl.searchParams.get('templateKey') || '');
 
   try {
