@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/srv/ai-data-platform/apps/web
 EnvironmentFile=/etc/ai-data-platform/ai-data-platform.env
-ExecStart=/bin/sh -lc '/usr/local/bin/node node_modules/next/dist/bin/next start -H ${WEB_HOST:-127.0.0.1} -p ${WEB_PORT:-3000}'
+ExecStart=/bin/sh -lc 'PORT=${WEB_PORT:-3000} HOST=${WEB_HOST:-127.0.0.1} HOSTNAME=${WEB_HOST:-127.0.0.1} /usr/local/bin/node server.js'
 Restart=always
 RestartSec=5
 
