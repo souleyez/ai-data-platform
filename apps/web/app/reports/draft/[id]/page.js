@@ -4,17 +4,11 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import DesktopRequiredNotice from '../../../components/DesktopRequiredNotice';
-import HomeWorkspaceToolbar from '../../../components/HomeWorkspaceToolbar';
-import { fetchDatasources, fetchReportOutput } from '../../../home-api';
-import { normalizeDatasourceResponse } from '../../../lib/types';
+import { fetchReportOutput } from '../../../home-api';
 import {
   formatGeneratedReportTime,
-  isDraftGeneratedReport,
   normalizeGeneratedReportRecord,
 } from '../../../lib/generated-reports';
-import useMobileViewport from '../../../lib/use-mobile-viewport';
-import { sourceItems } from '../../../lib/mock-data';
 
 const ReportDraftEditor = dynamic(() => import('../../../components/ReportDraftEditor'));
 const GeneratedReportDetail = dynamic(() => import('../../../components/GeneratedReportDetail'));
@@ -43,21 +37,18 @@ const DRAFT_STEPS = [
   },
 ];
 
+function hasEditablePageReport(item) {
+  return Boolean(item?.kind === 'page' && item?.draft?.modules?.length);
+}
+
 export default function ReportDraftPage() {
-  const mobileViewport = useMobileViewport();
   const params = useParams();
   const reportId = String(params?.id || '').trim();
-  const [sidebarSources, setSidebarSources] = useState(sourceItems);
   const [reportItem, setReportItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (mobileViewport) {
-      setLoading(false);
-      return undefined;
-    }
-
     let cancelled = false;
 
     async function loadPageData() {
@@ -72,16 +63,8 @@ export default function ReportDraftPage() {
       setError('');
 
       try {
-        const [datasourcePayload, reportPayload] = await Promise.all([
-          fetchDatasources().catch(() => ({ items: sourceItems })),
-          fetchReportOutput(reportId),
-        ]);
+        const reportPayload = await fetchReportOutput(reportId);
         if (cancelled) return;
-
-        const normalizedSources = normalizeDatasourceResponse(datasourcePayload);
-        setSidebarSources(Array.isArray(normalizedSources.items) && normalizedSources.items.length
-          ? normalizedSources.items
-          : sourceItems);
         setReportItem(normalizeGeneratedReportRecord(reportPayload?.item || null));
       } catch (loadError) {
         if (cancelled) return;
@@ -96,7 +79,7 @@ export default function ReportDraftPage() {
     return () => {
       cancelled = true;
     };
-  }, [mobileViewport, reportId]);
+  }, [reportId]);
 
   const readinessMeta = useMemo(
     () => getReadinessMeta(reportItem?.draft?.readiness),
@@ -121,12 +104,12 @@ export default function ReportDraftPage() {
             <p>
               {reportItem
                 ? `${formatGeneratedReportTime(reportItem.createdAt)} · ${scopeLabel}`
-                : '按步骤调整结构、内容和风格，然后再确认终稿。'}
+                : '按步骤调整结构、页面形态、内容和风格，然后再确认终稿。'}
             </p>
           </div>
           <div className="report-draft-page-actions">
             <span className={`report-list-chip ${readinessMeta.className}`.trim()}>{readinessMeta.label}</span>
-            <Link className="ghost-btn" href="/reports/draft">返回静态工作台</Link>
+            <Link className="ghost-btn" href="/reports/draft">返回静态页列表</Link>
             <Link className="ghost-btn" href="/reports">报表中心</Link>
           </div>
         </div>
@@ -151,7 +134,7 @@ export default function ReportDraftPage() {
             <p>{error}</p>
           </section>
         ) : reportItem ? (
-          isDraftGeneratedReport(reportItem) ? (
+          hasEditablePageReport(reportItem) ? (
             <ReportDraftEditor item={reportItem} onItemChange={setReportItem} />
           ) : (
             <section className="report-draft-page-preview">
@@ -167,23 +150,9 @@ export default function ReportDraftPage() {
     </main>
   );
 
-  if (mobileViewport) {
-    return (
-      <DesktopRequiredNotice
-        title="静态页编辑请在 PC 端继续"
-        description="移动端当前只保留对话交流。静态页草稿已经保存在系统中，请切换到 PC 端继续结构调整、文案审改和终稿确认。"
-        primaryHref="/"
-        primaryLabel="返回首页继续对话"
-        secondaryHref="/reports/draft"
-        secondaryLabel="回到静态页工作台"
-      />
-    );
-  }
-
   return (
-    <div className="home-shell">
-      <main className="home-main-panel">
-        <HomeWorkspaceToolbar currentPath="/reports" sourceItems={sidebarSources} />
+    <div className="report-draft-route-shell">
+      <main className="report-draft-route-main">
         {content}
       </main>
     </div>

@@ -8,6 +8,7 @@ import type {
   ReportVisualStylePreset,
 } from './report-center.js';
 import type { ReportPlanDatavizSlot } from './report-planner.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 type ReportPageChart = NonNullable<NonNullable<ReportOutputRecord['page']>['charts']>[number];
 
@@ -141,12 +142,20 @@ function buildPageDraftModules(record: ReportOutputRecord, deps: ReportDraftBuil
 
 export function buildDraftForRecordWithDeps(record: ReportOutputRecord, deps: ReportDraftBuilderDeps): ReportOutputDraft | null {
   if (!deps.isNarrativeReportKind(record.kind) || !record.page) return null;
+  const viewportTarget = normalizeReportViewportTarget(
+    record.page?.viewportTarget || record.dynamicSource?.viewportTarget,
+  );
   const fallbackVisualStyle = record.page?.visualStyle || deps.resolveDefaultReportVisualStyle(
     record.page?.pageSpec?.layoutVariant || record.dynamicSource?.planPageSpec?.layoutVariant,
     record.title,
   );
   const specializedDraft = buildSpecializedDraftForRecord(record, fallbackVisualStyle);
-  if (specializedDraft) return hydrateDraftQuality(specializedDraft);
+  if (specializedDraft) {
+    return hydrateDraftQuality({
+      ...specializedDraft,
+      viewportTarget,
+    });
+  }
 
   const modules = buildPageDraftModules(record, deps);
   if (!modules.length) return null;
@@ -163,6 +172,7 @@ export function buildDraftForRecordWithDeps(record: ReportOutputRecord, deps: Re
     objective: String(record.dynamicSource?.planObjective || '').trim(),
     layoutVariant,
     visualStyle: fallbackVisualStyle,
+    viewportTarget,
     mustHaveModules: (record.dynamicSource?.planMustHaveModules || record.dynamicSource?.planSectionTitles || []).slice(0, 8),
     optionalModules: (record.dynamicSource?.planOptionalModules || []).slice(0, 8),
     evidencePriority: (record.dynamicSource?.planEvidencePriority || record.dynamicSource?.planCardLabels || []).slice(0, 8),

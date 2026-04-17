@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  formatReportViewportTargetLabel,
+  resolveReportViewportTarget,
+} from '../lib/report-viewport-target.js';
+
 function buildSvgDataUrl(svg) {
   const content = String(svg || '').trim();
   if (!content) return '';
@@ -236,58 +241,66 @@ function PageDetail({ page, content, dynamicSource }) {
   if (!page && !content) return null;
   const plannedView = buildPlannedPageView(page, dynamicSource);
   const visualStyleClass = normalizeVisualStyleClass(page?.visualStyle || 'midnight-glass');
+  const viewportTarget = resolveReportViewportTarget({ page, dynamicSource });
 
   return (
-    <div className={`generated-page-detail ${visualStyleClass}`.trim()}>
-      {content ? (
-        <div className="generated-report-section">
-          <p style={{ whiteSpace: 'pre-wrap' }}>{content}</p>
-        </div>
-      ) : null}
-      {page?.summary ? (
-        <div className="generated-report-section">
-          <p>{page.summary}</p>
-        </div>
-      ) : null}
-      {plannedView ? (
-        <div className={`generated-page-plan ${normalizeVariantClass(plannedView.layoutVariant)}`.trim()}>
-          <section className="generated-page-hero">
-            <PageCards cards={plannedView.heroCards} className="generated-page-hero-cards" />
-            <PageCharts charts={plannedView.heroCharts} className="generated-page-hero-charts" />
-          </section>
-          {plannedView.plannedSections.length ? (
-            <div className="generated-page-plan-sections">
-              {plannedView.plannedSections.map((item, index) => (
-                <section className="generated-page-plan-section" key={`${item.key || 'planned-section'}-${index}`}>
-                  <div className="generated-page-plan-section-copy">
-                    {item.title ? <h4>{item.title}</h4> : null}
-                    {item.section?.body ? <p>{item.section.body}</p> : null}
-                    {item.section?.bullets?.length ? (
-                      <ul>
-                        {item.section.bullets.map((bullet, bulletIndex) => (
-                          <li key={`${item.title || 'planned-section'}-bullet-${bulletIndex}`}>{bullet}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                  <PageCharts charts={item.charts} className="generated-page-plan-section-charts" />
-                </section>
-              ))}
-            </div>
-          ) : null}
-          <div className="generated-page-plan-tail">
-            <PageCards cards={plannedView.remainingCards} />
-            <PageSections sections={plannedView.remainingSections} />
-            <PageCharts charts={plannedView.remainingCharts} />
+    <div className={`generated-page-detail ${visualStyleClass} generated-page-target-${viewportTarget}`.trim()}>
+      <div className="generated-page-device-banner">
+        <span className={`generated-page-device-chip generated-page-device-chip-${viewportTarget}`.trim()}>
+          {formatReportViewportTargetLabel(viewportTarget)}
+        </span>
+      </div>
+      <div className="generated-page-detail-surface">
+        {content ? (
+          <div className="generated-report-section">
+            <p style={{ whiteSpace: 'pre-wrap' }}>{content}</p>
           </div>
-        </div>
-      ) : (
-        <>
-          <PageCards cards={page?.cards} />
-          <PageSections sections={page?.sections} />
-          <PageCharts charts={page?.charts} />
-        </>
-      )}
+        ) : null}
+        {page?.summary ? (
+          <div className="generated-report-section">
+            <p>{page.summary}</p>
+          </div>
+        ) : null}
+        {plannedView ? (
+          <div className={`generated-page-plan ${normalizeVariantClass(plannedView.layoutVariant)}`.trim()}>
+            <section className="generated-page-hero">
+              <PageCards cards={plannedView.heroCards} className="generated-page-hero-cards" />
+              <PageCharts charts={plannedView.heroCharts} className="generated-page-hero-charts" />
+            </section>
+            {plannedView.plannedSections.length ? (
+              <div className="generated-page-plan-sections">
+                {plannedView.plannedSections.map((item, index) => (
+                  <section className="generated-page-plan-section" key={`${item.key || 'planned-section'}-${index}`}>
+                    <div className="generated-page-plan-section-copy">
+                      {item.title ? <h4>{item.title}</h4> : null}
+                      {item.section?.body ? <p>{item.section.body}</p> : null}
+                      {item.section?.bullets?.length ? (
+                        <ul>
+                          {item.section.bullets.map((bullet, bulletIndex) => (
+                            <li key={`${item.title || 'planned-section'}-bullet-${bulletIndex}`}>{bullet}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                    <PageCharts charts={item.charts} className="generated-page-plan-section-charts" />
+                  </section>
+                ))}
+              </div>
+            ) : null}
+            <div className="generated-page-plan-tail">
+              <PageCards cards={plannedView.remainingCards} />
+              <PageSections sections={plannedView.remainingSections} />
+              <PageCharts charts={plannedView.remainingCharts} />
+            </div>
+          </div>
+        ) : (
+          <>
+            <PageCards cards={page?.cards} />
+            <PageSections sections={page?.sections} />
+            <PageCharts charts={page?.charts} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

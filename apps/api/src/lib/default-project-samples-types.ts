@@ -17,6 +17,7 @@ export type SampleOutputDefinition = {
   } | null;
   page?: {
     summary?: string;
+    viewportTarget?: 'desktop' | 'mobile';
     cards?: Array<{ label?: string; value?: string; note?: string }>;
     sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
     charts?: Array<{ title?: string; items?: Array<{ label?: string; value?: number }> }>;

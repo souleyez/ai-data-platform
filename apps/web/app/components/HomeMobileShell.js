@@ -5,6 +5,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { formatGeneratedReportTime } from '../lib/generated-reports';
 import { orderLibrariesWithSelectedFirst } from '../lib/home-dataset-rail-order.mjs';
 import { buildMobileDatasetSummary } from '../lib/home-mobile-shell-support.mjs';
+import {
+  formatReportViewportTargetLabel,
+  resolveReportViewportTarget,
+} from '../lib/report-viewport-target.js';
 import ChatPanel from './ChatPanel';
 import HomeDatasetRail from './HomeDatasetRail';
 
@@ -77,11 +81,6 @@ export default function HomeMobileShell({
     startX: 0,
     startY: 0,
   });
-  const composerGestureRef = useRef({
-    active: false,
-    startX: 0,
-    startY: 0,
-  });
 
   const orderedLibraries = useMemo(
     () => orderLibrariesWithSelectedFirst(documentLibraries, preferredLibraries),
@@ -140,6 +139,11 @@ export default function HomeMobileShell({
     closeAllSurfaces();
   }, [reportItems.length]);
 
+  useEffect(() => {
+    resetGestureState();
+    setDrawerPreview(null);
+  }, [surface]);
+
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return undefined;
     const { documentElement, body } = document;
@@ -158,76 +162,6 @@ export default function HomeMobileShell({
       documentElement.style.overscrollBehavior = prevHtmlOverscroll;
       body.style.overflow = prevBodyOverflow;
       body.style.overscrollBehavior = prevBodyOverscroll;
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const shell = shellRef.current;
-    if (!(shell instanceof HTMLElement)) return undefined;
-
-    function syncViewportHeight() {
-      const viewportHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
-      if (!viewportHeight) return;
-      shell.style.setProperty('--mobile-home-viewport-height', `${viewportHeight}px`);
-    }
-
-    syncViewportHeight();
-    const rafId = window.requestAnimationFrame(syncViewportHeight);
-    const settleTimeout = window.setTimeout(syncViewportHeight, 120);
-    const visualViewport = window.visualViewport;
-    visualViewport?.addEventListener('resize', syncViewportHeight);
-    window.addEventListener('resize', syncViewportHeight);
-    window.addEventListener('orientationchange', syncViewportHeight);
-
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.clearTimeout(settleTimeout);
-      visualViewport?.removeEventListener('resize', syncViewportHeight);
-      window.removeEventListener('resize', syncViewportHeight);
-      window.removeEventListener('orientationchange', syncViewportHeight);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const composer = document.querySelector('.chat-panel-mobile-home .chat-composer-wrap');
-    if (!(composer instanceof HTMLElement)) return undefined;
-
-    function handleComposerTouchStart(event) {
-      const touch = event.touches?.[0];
-      if (!touch) return;
-      composerGestureRef.current = {
-        active: true,
-        startX: touch.clientX,
-        startY: touch.clientY,
-      };
-    }
-
-    function handleComposerTouchMove(event) {
-      if (!composerGestureRef.current.active) return;
-      const touch = event.touches?.[0];
-      if (!touch) return;
-      const deltaX = touch.clientX - composerGestureRef.current.startX;
-      const deltaY = touch.clientY - composerGestureRef.current.startY;
-      if (Math.abs(deltaX) < 6 && Math.abs(deltaY) < 6) return;
-      event.preventDefault();
-    }
-
-    function handleComposerTouchEnd() {
-      composerGestureRef.current.active = false;
-    }
-
-    composer.addEventListener('touchstart', handleComposerTouchStart, { passive: true });
-    composer.addEventListener('touchmove', handleComposerTouchMove, { passive: false });
-    composer.addEventListener('touchend', handleComposerTouchEnd, { passive: true });
-    composer.addEventListener('touchcancel', handleComposerTouchEnd, { passive: true });
-
-    return () => {
-      composer.removeEventListener('touchstart', handleComposerTouchStart);
-      composer.removeEventListener('touchmove', handleComposerTouchMove);
-      composer.removeEventListener('touchend', handleComposerTouchEnd);
-      composer.removeEventListener('touchcancel', handleComposerTouchEnd);
     };
   }, []);
 
@@ -440,7 +374,7 @@ export default function HomeMobileShell({
                   {formatGeneratedReportTime(item.createdAt)} · {formatReportStatus(item.status)}
                 </span>
                 <span className="mobile-home-report-item-subtitle">
-                  {item.templateLabel || item.kind || '报表'}
+                  {formatReportViewportTargetLabel(resolveReportViewportTarget(item))} · {item.templateLabel || item.kind || '报表'}
                 </span>
               </button>
             ))}

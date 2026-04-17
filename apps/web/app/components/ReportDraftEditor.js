@@ -6,6 +6,10 @@ import {
   getReportVisualStyleMeta,
   REPORT_VISUAL_STYLE_OPTIONS,
 } from '../lib/report-visual-styles';
+import {
+  formatReportViewportTargetLabel,
+  normalizeReportViewportTarget,
+} from '../lib/report-viewport-target.js';
 import GeneratedReportDetail from './GeneratedReportDetail';
 import { DraftModuleInspector, DraftModuleList } from './report-draft-module-editor';
 import { DraftHistoryPanel, DraftReadinessPanel } from './report-draft-editor-panels';
@@ -30,6 +34,19 @@ import {
   parseLines,
   parseMetricLines,
 } from './report-draft-editor-helpers';
+
+const REPORT_VIEWPORT_TARGET_OPTIONS = [
+  {
+    value: 'desktop',
+    label: 'PC端',
+    description: '更适合经营总览、宽屏图表和多栏模块。',
+  },
+  {
+    value: 'mobile',
+    label: '手机端',
+    description: '更适合单列阅读、窄屏卡片和手机内直接确认。',
+  },
+];
 
 export default function ReportDraftEditor({ item, onItemChange }) {
   const [draft, setDraft] = useState(item?.draft || null);
@@ -62,6 +79,9 @@ export default function ReportDraftEditor({ item, onItemChange }) {
   );
   const previewItem = useMemo(() => buildDraftPreviewItem(item, draft), [item, draft]);
   const selectedVisualStyle = String(draft?.visualStyle || 'midnight-glass').trim() || 'midnight-glass';
+  const selectedViewportTarget = normalizeReportViewportTarget(
+    draft?.viewportTarget || item?.page?.viewportTarget || item?.dynamicSource?.viewportTarget,
+  );
   const selectedVisualStyleMeta = getReportVisualStyleMeta(selectedVisualStyle);
   const readinessMeta = getDraftReadinessMeta(draft?.readiness);
   const visualMixSummary = useMemo(() => buildVisualMixSummary(draft), [draft]);
@@ -378,6 +398,39 @@ export default function ReportDraftEditor({ item, onItemChange }) {
         submittingKey={submittingKey}
         restoreDraftHistory={restoreDraftHistory}
       />
+
+      <div className="report-draft-device-bar">
+        <div className="report-draft-device-picker">
+          <span>终稿页面形态</span>
+          <div className="report-draft-device-toggle">
+            {REPORT_VIEWPORT_TARGET_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`report-draft-device-card ${selectedViewportTarget === option.value ? 'is-selected' : ''}`.trim()}
+                onClick={() => setDraft((current) => (
+                  current
+                    ? {
+                        ...current,
+                        reviewStatus: 'draft_reviewing',
+                        viewportTarget: option.value,
+                      }
+                    : current
+                ))}
+              >
+                <strong>{option.label}</strong>
+                <span>{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="report-draft-device-note">
+          <strong>{formatReportViewportTargetLabel(selectedViewportTarget)}</strong>
+          <span>
+            当前终稿会优先按{formatReportViewportTargetLabel(selectedViewportTarget)}布局生成，已出报表也会在对应端优先展示。
+          </span>
+        </div>
+      </div>
 
       <div className="report-draft-style-bar">
         <div className="report-draft-style-picker">

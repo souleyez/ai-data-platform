@@ -1,6 +1,7 @@
 'use client';
 
 import { createSharedReportPayload } from './shared-report-link.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 function escapeHtml(value) {
   return String(value || '')
@@ -124,6 +125,7 @@ function normalizePage(page) {
   if (!page) return null;
   return {
     summary: page?.summary || '',
+    viewportTarget: normalizeReportViewportTarget(page?.viewportTarget),
     visualStyle: String(page?.visualStyle || '').trim(),
     cards: Array.isArray(page?.cards)
       ? page.cards
@@ -270,6 +272,7 @@ function normalizeDraft(draft) {
     objective: String(draft.objective || '').trim(),
     layoutVariant: String(draft.layoutVariant || '').trim() || 'insight-brief',
     visualStyle: String(draft.visualStyle || '').trim() || 'midnight-glass',
+    viewportTarget: normalizeReportViewportTarget(draft.viewportTarget),
     mustHaveModules: Array.isArray(draft.mustHaveModules)
       ? draft.mustHaveModules.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
@@ -309,6 +312,7 @@ function normalizeDynamicSource(dynamicSource) {
     enabled: true,
     request: String(dynamicSource.request || '').trim(),
     outputType: String(dynamicSource.outputType || '').trim() || 'page',
+    viewportTarget: normalizeReportViewportTarget(dynamicSource.viewportTarget),
     conceptMode: Boolean(dynamicSource.conceptMode),
     templateKey: String(dynamicSource.templateKey || '').trim(),
     templateLabel: String(dynamicSource.templateLabel || '').trim(),
@@ -383,6 +387,15 @@ export function createGeneratedReport({ response, message, requestPrompt = '' })
 }
 
 export function normalizeGeneratedReportRecord(item) {
+  const normalizedPage = normalizePage(item?.page);
+  const normalizedDraft = normalizeDraft(item?.draft);
+  const normalizedDynamicSource = normalizeDynamicSource(item?.dynamicSource);
+  const viewportTarget = normalizeReportViewportTarget(
+    item?.viewportTarget
+      || normalizedDraft?.viewportTarget
+      || normalizedPage?.viewportTarget
+      || normalizedDynamicSource?.viewportTarget,
+  );
   return {
     id: item?.id || createGeneratedReportId(),
     title: item?.title || '生成报表',
@@ -394,7 +407,7 @@ export function normalizeGeneratedReportRecord(item) {
     summary: item?.summary || '',
     content: item?.content || '',
     table: item?.table || null,
-    page: normalizePage(item?.page),
+    page: normalizedPage,
     intent: item?.intent || 'report',
     mode: item?.mode || 'openclaw',
     libraries: normalizeLibraries(item?.libraries),
@@ -403,8 +416,9 @@ export function normalizeGeneratedReportRecord(item) {
     groupLabel: item?.groupLabel || '',
     templateKey: item?.templateKey || '',
     templateLabel: item?.templateLabel || '',
-    dynamicSource: normalizeDynamicSource(item?.dynamicSource),
-    draft: normalizeDraft(item?.draft),
+    dynamicSource: normalizedDynamicSource,
+    draft: normalizedDraft,
+    viewportTarget,
   };
 }
 

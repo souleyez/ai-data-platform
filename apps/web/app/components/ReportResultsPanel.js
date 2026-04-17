@@ -9,16 +9,29 @@ import {
   formatGeneratedReportTime,
   getGeneratedReportShareActions,
 } from '../lib/generated-reports';
+import {
+  formatReportViewportTargetLabel,
+  resolveReportViewportTarget,
+} from '../lib/report-viewport-target.js';
 
 const GeneratedReportDetail = dynamic(() => import('./GeneratedReportDetail'));
 
-function ReportShareActions({ item }) {
-  if (item?.status === 'processing') return null;
-  const actions = getGeneratedReportShareActions(item);
-  if (!actions.length) return null;
+function hasEditableDraft(item) {
+  return Boolean(item?.kind === 'page' && item?.draft?.modules?.length);
+}
+
+function ReportShareActions({ item, includeEditLink = false, editLabel = '编辑静态页' }) {
+  const editable = hasEditableDraft(item);
+  const actions = item?.status === 'processing' ? [] : getGeneratedReportShareActions(item);
+  if (!actions.length && !(includeEditLink && editable)) return null;
 
   return (
     <div className="report-list-actions">
+      {includeEditLink && editable ? (
+        <Link className="ghost-btn" href={buildDraftEditorPath(item)}>
+          {editLabel}
+        </Link>
+      ) : null}
       {actions.map((action) => (
         <button
           key={action.key}
@@ -37,10 +50,6 @@ function formatReportStatus(status) {
   if (status === 'processing') return '生成中';
   if (status === 'failed') return '生成失败';
   return '已完成';
-}
-
-function hasEditableDraft(item) {
-  return Boolean(item?.kind === 'page' && item?.draft?.modules?.length);
 }
 
 function getDraftReadinessMeta(readiness) {
@@ -62,6 +71,7 @@ function ReportResultItem({
   const metaLabel = item.templateLabel || item.outputType || item.kind || '报表';
   const statusLabel = formatReportStatus(item.status);
   const readinessMeta = getDraftReadinessMeta(item?.draft?.readiness);
+  const viewportLabel = formatReportViewportTargetLabel(resolveReportViewportTarget(item));
 
   return (
     <article className={`card report-list-card ${expanded ? 'report-list-card-active' : ''}`}>
@@ -80,6 +90,7 @@ function ReportResultItem({
           <span className="report-list-title">{item.title}</span>
           <span className="report-list-meta">
             {formatGeneratedReportTime(item.createdAt)} · {statusLabel}
+            <span className="report-list-chip">{viewportLabel}</span>
             {readinessMeta ? (
               <span className={`report-list-chip ${readinessMeta.className}`.trim()}>{readinessMeta.label}</span>
             ) : null}
@@ -90,7 +101,7 @@ function ReportResultItem({
 
       {expanded && !collapsed ? (
         <div className="report-list-expanded">
-          <ReportShareActions item={item} />
+          <ReportShareActions item={item} includeEditLink />
 
           <GeneratedReportDetail item={item} />
 
@@ -216,7 +227,7 @@ export default function ReportResultsPanel({
             <div className="report-results-toolbar">
               {activeItemCanEditDraft ? (
                 <Link className="ghost-btn compact-inline-btn is-active" href={buildDraftEditorPath(activeItem)}>
-                  进入编辑
+                  编辑静态页
                 </Link>
               ) : null}
               {canStep ? (
@@ -248,12 +259,7 @@ export default function ReportResultsPanel({
               {!activeItemLoading ? (
                 <>
                   <div className="report-results-featured-actions">
-                    <ReportShareActions item={activeItem} />
-                    {activeItemCanEditDraft ? (
-                      <Link className="ghost-btn" href={buildDraftEditorPath(activeItem)}>
-                        打开独立编辑页
-                      </Link>
-                    ) : null}
+                    <ReportShareActions item={activeItem} includeEditLink />
                     {onDeleteReport ? (
                       <button className="ghost-btn" type="button" onClick={() => onDeleteReport(activeItem.id)}>
                         删除报表

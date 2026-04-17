@@ -144,9 +144,15 @@ export async function registerReportRoutes(app: FastifyInstance) {
               reviewStatus: item.draft.reviewStatus,
               version: item.draft.version,
               visualStyle: item.draft.visualStyle,
+              viewportTarget: item.draft.viewportTarget,
               moduleCount: item.draft.modules.length,
               readiness: item.draft.readiness,
               missingMustHaveModules: item.draft.missingMustHaveModules,
+            }
+          : null,
+        page: item.page
+          ? {
+              viewportTarget: item.page.viewportTarget,
             }
           : null,
       })),
@@ -245,6 +251,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
       } | null;
       page?: {
         summary?: string;
+        viewportTarget?: 'desktop' | 'mobile';
         cards?: Array<{ label?: string; value?: string; note?: string }>;
         sections?: Array<{ title?: string; body?: string; bullets?: string[] }>;
         datavizSlots?: ReportPlanDatavizSlot[];
@@ -267,6 +274,7 @@ export async function registerReportRoutes(app: FastifyInstance) {
         enabled?: boolean;
         request?: string;
         outputType?: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
+        viewportTarget?: 'desktop' | 'mobile';
         templateKey?: string;
         templateLabel?: string;
         timeRange?: string;

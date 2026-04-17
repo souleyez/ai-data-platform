@@ -8,6 +8,7 @@ import FullIntelligenceModeButton from './components/FullIntelligenceModeButton'
 import HomeDatasetRail from './components/HomeDatasetRail';
 import HomeMobileShell from './components/HomeMobileShell';
 import HomeWorkspaceToolbar from './components/HomeWorkspaceToolbar';
+import { sortGeneratedReportsForViewport } from './lib/report-viewport-target';
 import { useHomePageController } from './use-home-page-controller';
 
 function sortLibrariesForRail(libraries = []) {
@@ -136,6 +137,10 @@ export default function HomePageClient({
     const selectedSet = new Set(preferredLibraries);
     return orderedLibraries.filter((item) => selectedSet.has(item.key));
   }, [orderedLibraries, preferredLibraries]);
+  const orderedReportItems = useMemo(
+    () => sortGeneratedReportsForViewport(reportItems, mobileViewport),
+    [mobileViewport, reportItems],
+  );
   const allSelected = !selectedLibraries.length || (Boolean(allLibraryKeys.length) && selectedLibraries.length === allLibraryKeys.length);
   const selectionSummaryLabel = selectedLibraries.length
     ? (selectedLibraries.length === 1
@@ -250,7 +255,7 @@ export default function HomePageClient({
         groupSaving={groupSaving}
         onSubmitCredential={submitCredentialForMessage}
         onConfirmTemplateOption={confirmTemplateOption}
-        reportItems={reportItems}
+        reportItems={orderedReportItems}
         selectedReportId={selectedReportId}
         selectedReportItem={selectedReportItem}
         reportDetailLoading={reportDetailLoading}
@@ -327,7 +332,7 @@ export default function HomePageClient({
             mobileViewport={false}
             collapsed={reportCollapsed}
             onToggleCollapsed={() => setReportCollapsed((prev) => !prev)}
-            reportItems={reportItems}
+            reportItems={orderedReportItems}
             activeReportItem={selectedReportItem}
             reportDetailLoading={reportDetailLoading}
             selectedReportId={selectedReportId}

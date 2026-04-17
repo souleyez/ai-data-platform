@@ -1,5 +1,7 @@
 'use client';
 
+import { normalizeReportViewportTarget } from '../lib/report-viewport-target.js';
+
 function parseLines(value) {
   return String(value || '')
     .split(/\r?\n/)
@@ -51,6 +53,7 @@ function parseChartLines(value) {
 function normalizeDraftForSave(draft) {
   return {
     ...draft,
+    viewportTarget: normalizeReportViewportTarget(draft?.viewportTarget),
     modules: (draft.modules || []).map((module, index) => ({
       ...module,
       order: index,
@@ -105,6 +108,9 @@ function buildDraftPreviewItem(item, draft) {
     page: {
       ...(item.page || {}),
       summary,
+      viewportTarget: normalizeReportViewportTarget(
+        draft?.viewportTarget || item?.page?.viewportTarget || item?.dynamicSource?.viewportTarget,
+      ),
       visualStyle: draft?.visualStyle || item?.page?.visualStyle || 'midnight-glass',
       cards,
       sections,

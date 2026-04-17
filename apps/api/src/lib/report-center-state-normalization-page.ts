@@ -1,5 +1,6 @@
 import type { ReportOutputRecord } from './report-center.js';
 import type { StateStoreDeps } from './report-center-state-normalization.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -60,6 +61,7 @@ export function normalizeStoredPage(value: unknown, deps: StateStoreDeps): Repor
   if (!isRecord(value)) return null;
 
   const summary = deps.normalizeTextField(value.summary);
+  const viewportTarget = normalizeReportViewportTarget(value.viewportTarget);
   const cards = Array.isArray(value.cards)
     ? value.cards.map((item) => normalizeStoredPageCard(item, deps)).filter(Boolean) as Array<{ label?: string; value?: string; note?: string }>
     : [];
@@ -77,7 +79,7 @@ export function normalizeStoredPage(value: unknown, deps: StateStoreDeps): Repor
       }>
     : [];
 
-  return summary || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec || visualStyle
-    ? { summary, cards, sections, datavizSlots, pageSpec, visualStyle, charts }
+  return summary || viewportTarget || cards.length || sections.length || charts.length || datavizSlots.length || pageSpec || visualStyle
+    ? { summary, viewportTarget, cards, sections, datavizSlots, pageSpec, visualStyle, charts }
     : null;
 }

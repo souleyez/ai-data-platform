@@ -22,6 +22,7 @@ import {
   isDraftGeneratedReport,
   normalizeGeneratedReportRecord,
 } from '../lib/generated-reports';
+import { sortGeneratedReportsForViewport } from '../lib/report-viewport-target';
 import {
   buildDefaultTemplateLabel,
   buildUploadedTemplateItems,
@@ -230,9 +231,9 @@ function UploadedTemplateItem({
   );
 }
 
-function SingleReportActions({ item }) {
+function ReportDownloadActionButtons({ item }) {
   return (
-    <div className="report-list-actions">
+    <>
       <button className="ghost-btn" type="button" onClick={() => void copyGeneratedReportLink(item)}>
         复制链接
       </button>
@@ -245,6 +246,31 @@ function SingleReportActions({ item }) {
       <button className="ghost-btn" type="button" onClick={() => void downloadGeneratedReportAs(item, 'text')}>
         按纯文字下载
       </button>
+    </>
+  );
+}
+
+function SingleReportActions({ item }) {
+  return (
+    <div className="report-list-actions">
+      <ReportDownloadActionButtons item={item} />
+    </div>
+  );
+}
+
+function hasEditablePageReport(item) {
+  return Boolean(item?.kind === 'page' && item?.draft?.modules?.length);
+}
+
+function ReportDetailActions({ item }) {
+  return (
+    <div className="report-list-actions">
+      {hasEditablePageReport(item) ? (
+        <Link className="ghost-btn" href={buildDraftEditorPath(item)}>
+          编辑静态页
+        </Link>
+      ) : null}
+      <ReportDownloadActionButtons item={item} />
     </div>
   );
 }
@@ -351,8 +377,11 @@ function ReportsPageContent() {
   }, []);
 
   const outputRecords = useMemo(
-    () => (data?.outputRecords || []).map(normalizeGeneratedReportRecord),
-    [data],
+    () => sortGeneratedReportsForViewport(
+      (data?.outputRecords || []).map(normalizeGeneratedReportRecord),
+      mobileViewport,
+    ),
+    [data, mobileViewport],
   );
 
   const scopedLibraries = useMemo(
@@ -660,10 +689,8 @@ function ReportsPageContent() {
                   <h3>{generatedReport.title}</h3>
                   <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
                 </div>
-                {isDraftGeneratedReport(generatedReport) ? (
-                  <Link className="ghost-btn" href={buildDraftEditorPath(generatedReport)}>
-                    进入独立编辑页
-                  </Link>
+                {hasEditablePageReport(generatedReport) ? (
+                  <ReportDetailActions item={generatedReport} />
                 ) : (
                   <SingleReportActions item={generatedReport} />
                 )}
@@ -698,10 +725,8 @@ function ReportsPageContent() {
                   <h3>{generatedReport.title}</h3>
                   <p>生成时间：{formatGeneratedReportTime(generatedReport.createdAt)}</p>
                 </div>
-                {isDraftGeneratedReport(generatedReport) ? (
-                  <Link className="ghost-btn" href={buildDraftEditorPath(generatedReport)}>
-                    进入独立编辑页
-                  </Link>
+                {hasEditablePageReport(generatedReport) ? (
+                  <ReportDetailActions item={generatedReport} />
                 ) : (
                   <SingleReportActions item={generatedReport} />
                 )}
@@ -718,17 +743,6 @@ function ReportsPageContent() {
     <>
       {error ? <p>{error}</p> : null}
       {message ? <div className="page-note">{message}</div> : null}
-      <section className="card documents-card report-static-workflow-entry">
-        <div className="panel-header">
-          <div>
-            <h3>静态可视化工作台</h3>
-            <p>首页总览、经营页、方案页等静态页面已移到独立工作台，统一完成生成、对比、审改和终稿确认。</p>
-          </div>
-          <Link className="primary-btn" href="/reports/draft">
-            打开静态工作台
-          </Link>
-        </div>
-      </section>
 
       {data ? (
         <>

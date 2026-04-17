@@ -1,6 +1,7 @@
 import type { ReportDynamicSource } from './report-center.js';
 import { normalizeStoredDatavizSlots, normalizeStoredPageSpec, normalizeStoredVisualMixTargets } from './report-center-normalization-plan.js';
 import { normalizeTextField } from './report-center-normalization-support.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 export function normalizeDynamicSource(
   dynamicSource: Partial<ReportDynamicSource> | null | undefined,
@@ -28,6 +29,7 @@ export function normalizeDynamicSource(
     enabled: true,
     request: normalizeTextField(dynamicSource?.request || fallback.request),
     outputType,
+    viewportTarget: normalizeReportViewportTarget(dynamicSource?.viewportTarget),
     conceptMode,
     templateKey: conceptMode ? '' : normalizeTextField(dynamicSource?.templateKey || fallback.templateKey),
     templateLabel: conceptMode ? '' : normalizeTextField(dynamicSource?.templateLabel || fallback.templateLabel),

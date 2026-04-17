@@ -5,6 +5,7 @@ import type {
   ReportOutputDraft,
 } from './report-center.js';
 import type { ReportPlanLayoutVariant, ReportPlanVisualMixTarget } from './report-planner.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 function isHistoryRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -98,6 +99,7 @@ export function buildDraftHistorySnapshot(
     objective: deps.normalizeTextField(draft.objective),
     layoutVariant: deps.normalizeTextField(draft.layoutVariant) as ReportPlanLayoutVariant,
     visualStyle: deps.normalizeVisualStylePreset(draft.visualStyle),
+    viewportTarget: normalizeReportViewportTarget(draft.viewportTarget),
     mustHaveModules: deps.normalizeStringList(draft.mustHaveModules),
     optionalModules: deps.normalizeStringList(draft.optionalModules),
     evidencePriority: deps.normalizeStringList(draft.evidencePriority),

@@ -10,6 +10,7 @@ import type {
 import type { ReportPlanLayoutVariant } from './report-planner.js';
 import { normalizeStoredPageCard, normalizeStoredPageChart } from './report-center-state-normalization-page.js';
 import type { StateStoreDeps } from './report-center-state-normalization.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -118,6 +119,7 @@ export function normalizeStoredDraft(value: unknown, deps: StateStoreDeps): Repo
     objective: deps.normalizeTextField(value.objective),
     layoutVariant: deps.normalizeTextField(value.layoutVariant) as ReportPlanLayoutVariant,
     visualStyle: deps.normalizeVisualStylePreset(value.visualStyle),
+    viewportTarget: normalizeReportViewportTarget(value.viewportTarget),
     mustHaveModules: deps.normalizeStringList(value.mustHaveModules),
     optionalModules: deps.normalizeStringList(value.optionalModules),
     evidencePriority: deps.normalizeStringList(value.evidencePriority),

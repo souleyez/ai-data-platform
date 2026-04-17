@@ -5,6 +5,7 @@ import type {
 } from './report-center.js';
 import type { ReportPlanLayoutVariant, ReportPlanPageSpec } from './report-planner.js';
 import { inferSectionDisplayMode } from './report-visual-intent.js';
+import { normalizeReportViewportTarget } from './report-viewport-target.js';
 
 function normalizeDraftSlotKey(value: string) {
   return String(value || '')
@@ -87,6 +88,9 @@ export function draftModulesToPage(
 
   return {
     summary: summaryModule?.contentDraft || record.page?.summary || '',
+    viewportTarget: normalizeReportViewportTarget(
+      draft.viewportTarget || record.page?.viewportTarget || record.dynamicSource?.viewportTarget,
+    ),
     cards,
     sections,
     charts,

@@ -4,6 +4,7 @@ import type {
   ReportPlanPageSpec,
   ReportPlanVisualMixTarget,
 } from './report-planner.js';
+import type { ReportViewportTarget } from './report-viewport-target.js';
 
 export type ReportTemplateType = 'table' | 'static-page' | 'ppt' | 'document';
 
@@ -66,6 +67,7 @@ export type ReportDynamicSource = {
   enabled: boolean;
   request: string;
   outputType: 'table' | 'page' | 'ppt' | 'pdf' | 'doc' | 'md';
+  viewportTarget?: ReportViewportTarget;
   conceptMode?: boolean;
   templateKey?: string;
   templateLabel?: string;
@@ -152,6 +154,7 @@ export type ReportDraftHistorySnapshot = {
   objective?: string;
   layoutVariant?: ReportPlanLayoutVariant;
   visualStyle?: ReportVisualStylePreset;
+  viewportTarget?: ReportViewportTarget;
   mustHaveModules?: string[];
   optionalModules?: string[];
   evidencePriority?: string[];
@@ -200,6 +203,7 @@ export type ReportOutputDraft = {
   objective?: string;
   layoutVariant?: ReportPlanLayoutVariant;
   visualStyle?: ReportVisualStylePreset;
+  viewportTarget?: ReportViewportTarget;
   mustHaveModules?: string[];
   optionalModules?: string[];
   evidencePriority?: string[];
@@ -234,6 +238,7 @@ export type ReportOutputRecord = {
   } | null;
   page?: {
     summary?: string;
+    viewportTarget?: ReportViewportTarget;
     cards?: Array<{ label?: string; value?: string; note?: string }>;
     sections?: Array<{ title?: string; body?: string; bullets?: string[]; displayMode?: string }>;
     datavizSlots?: ReportPlanDatavizSlot[];
