@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createDocumentLibrary } from './documents/api';
 import InsightPanel from './components/InsightPanel';
 import ChatPanel from './components/ChatPanel';
@@ -38,6 +38,7 @@ export default function HomePageClient({
 }) {
   const [mobileViewport, setMobileViewport] = useState(initialViewportMode === 'mobile');
   const [secretPromptTarget, setSecretPromptTarget] = useState(null);
+  const previousViewportRef = useRef(initialViewportMode === 'mobile');
   const {
     acceptIngestGroupSuggestion,
     activateDatasetSecret,
@@ -80,6 +81,7 @@ export default function HomePageClient({
     verifyDatasetSecret,
   } = useHomePageController({
     initialDocumentsSnapshot,
+    initialReportCollapsed: initialViewportMode === 'mobile',
   });
   const [libraryCreateBusy, setLibraryCreateBusy] = useState(false);
 
@@ -91,6 +93,14 @@ export default function HomePageClient({
     mediaQuery.addEventListener('change', updateViewport);
     return () => mediaQuery.removeEventListener('change', updateViewport);
   }, []);
+
+  useEffect(() => {
+    const wasMobile = previousViewportRef.current;
+    if (mobileViewport && !wasMobile && !reportCollapsed) {
+      setReportCollapsed(true);
+    }
+    previousViewportRef.current = mobileViewport;
+  }, [mobileViewport, reportCollapsed, setReportCollapsed]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -284,7 +294,9 @@ export default function HomePageClient({
           )}
         />
 
-        <section className={`home-desktop-grid ${reportCollapsed ? 'home-desktop-grid-compact' : 'home-desktop-grid-expanded'}`}>
+        <section
+          className={`home-desktop-grid homepage-workspace ${reportCollapsed ? 'home-desktop-grid-compact' : 'home-desktop-grid-expanded'}`}
+        >
           <HomeDatasetRail
             libraries={orderedLibraries}
             totalDocuments={documentTotal}

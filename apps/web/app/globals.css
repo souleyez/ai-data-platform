@@ -5776,6 +5776,13 @@ tbody tr:hover {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
+  .mobile-home-drawer .home-dataset-create-input {
+    font-size: 16px;
+    min-height: 44px;
+    line-height: 1.4;
+    -webkit-appearance: none;
+  }
+
   .mobile-home-drawer .home-dataset-create-hint {
     font-size: 11px;
     color: #8ea0ba;

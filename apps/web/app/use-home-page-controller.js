@@ -118,7 +118,10 @@ function normalizeInitialDocumentsSnapshot(snapshot) {
   };
 }
 
-export function useHomePageController({ initialDocumentsSnapshot = null } = {}) {
+export function useHomePageController({
+  initialDocumentsSnapshot = null,
+  initialReportCollapsed = true,
+} = {}) {
   const normalizedInitialDocumentsSnapshot = normalizeInitialDocumentsSnapshot(initialDocumentsSnapshot);
   const hasInitialDocumentsSnapshot = (
     normalizedInitialDocumentsSnapshot.totalDocuments > 0
@@ -127,7 +130,7 @@ export function useHomePageController({ initialDocumentsSnapshot = null } = {}) 
   const [messages, setMessages] = useState(() => loadStoredChatMessages(initialMessages));
   const uploadInputRef = useRef(null);
   const [input, setInput] = useState('');
-  const [reportCollapsed, setReportCollapsed] = useState(true);
+  const [reportCollapsed, setReportCollapsed] = useState(initialReportCollapsed);
   const [reportItems, setReportItems] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState('');
   const [selectedReportItem, setSelectedReportItem] = useState(null);
