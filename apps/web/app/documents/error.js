@@ -1,16 +1,21 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { getChunkErrorText, isChunkLoadError, reloadOnceForChunkError } from '../lib/chunk-error-recovery';
 
 export default function DocumentsError({ error, reset }) {
   const details = useMemo(() => {
     if (!error) return 'unknown error';
+    const chunkDetails = getChunkErrorText(error);
+    if (chunkDetails) return chunkDetails;
     if (typeof error === 'string') return error;
     return [error.message, error.digest].filter(Boolean).join('\n');
   }, [error]);
+  const chunkError = isChunkLoadError(error);
 
   useEffect(() => {
     console.error('documents page error', error);
+    reloadOnceForChunkError(error);
   }, [error]);
 
   return (
@@ -20,7 +25,7 @@ export default function DocumentsError({ error, reset }) {
           <div className="panel-header">
             <div>
               <h3>数据集加载异常</h3>
-              <p>下面是当前前端异常信息，可以直接复制给我。</p>
+              <p>{chunkError ? '检测到静态资源加载超时，页面会自动重试一次；如果还失败，再复制下面的错误信息。' : '下面是当前前端异常信息，可以直接复制给我。'}</p>
             </div>
           </div>
 
